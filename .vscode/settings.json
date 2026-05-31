@@ -1,88 +1,8 @@
 {
     "editor.formatOnSave": true,
-    "C_Cpp.default.cppStandard": "c++17",
-    "C_Cpp.formatting": "clangFormat",
-    "C_Cpp.default.systemIncludePath": [
-        "${workspaceFolder}/include",
-        "${workspaceFolder}/cpp/include",
-        "${workspaceFolder}/cpp/libsupc++/include",
-        "${workspaceFolder}/drivers/include",
-        "${workspaceFolder}/mm/include",
-    ],
-    "psi-header.config": {
-        "forceToTop": true,
-        "blankLinesAfter": 1,
-    },
-    "psi-header.changes-tracking": {
-        "autoHeader": "autoSave",
-        "exclude": [
-            "json",
-            "markdown",
-            "text",
-            "makefile"
-        ]
-    },
-    "psi-header.variables": [
-        [
-            "copyright",
-            "The BigOS Authors"
-        ],
-        [
-            "author",
-            "osspace"
-        ]
-    ],
-    "psi-header.lang-config": [
-        {
-            "language": "*",
-            "begin": "// ",
-            "end": "// ",
-            "prefix": "// "
-        },
-        {
-            "language": "python",
-            "begin": "#!/usr/bin/env python3",
-            "end": "# ",
-            "prefix": "# "
-        },
-        {
-            "language": ".s",
-            "begin": "# ",
-            "end": "# ",
-            "prefix": "# "
-        },
-        {
-            "language": ".sh",
-            "begin": "# ",
-            "end": "# ",
-            "prefix": "# "
-        },
-        {
-            "language": ".lua",
-            "begin": "-- ",
-            "end": "-- ",
-            "prefix": "-- "
-        }
-    ],
-    "psi-header.templates": [
-        {
-            "language": "*",
-            "template": [
-                "File: <<filename>>",
-                "Created by <<author>> on <<filecreated('YYYY/MM/DD')>>.",
-                "",
-                "Copyright (C) <<year>> <<copyright>>.",
-                "Licensed under the GNU General Public License v3.0 only."
-            ]
-        }
-    ],
     "files.associations": {
         "type_traits": "cpp",
         "algorithm": "cpp",
         "new": "cpp"
-    },
-    "[python]": {
-        "editor.defaultFormatter": "ms-python.black-formatter",
-        "editor.formatOnSave": true
     }
 }

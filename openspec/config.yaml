@@ -1,0 +1,90 @@
+schema: spec-driven
+
+context: |
+  Project: BigOS, an early-stage x86_64 freestanding operating system kernel.
+
+  Domain:
+  - The repository is a toy/research OS kernel, not an application service.
+  - The kernel boots from an x86 disk image, enters long mode, loads an ELF64
+    kernel named "kernel", and jumps to the higher-half kernel address
+    0xffffffff80000000.
+  - The current implementation focuses on bootstrapping, VGA text output,
+    interrupt infrastructure, i8259 PIC support, keyboard scan-code handling,
+    and early kernel memory management.
+
+  Tech stack:
+  - C++17 and C17 in freestanding mode.
+  - x86/x86_64 assembly for boot, interrupt stubs, and runtime startup objects.
+  - xmake is the primary build system.
+  - x86_64-elf-gcc is the expected cross toolchain.
+  - Bochs is used for local emulation.
+  - Python scripts are auxiliary build/install helpers, not the core runtime.
+
+  Major directories:
+  - arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, ELF loader,
+    and disk-image install helper.
+  - kernel: kernel entry, IRQ setup, low-level IO, string functions, console/TTY
+    skeletons.
+  - mm: buddy physical page allocator, slab/kmalloc allocator, and virtual memory
+    area/page-table mapping framework.
+  - drivers: VGA text-mode driver and i8259 PIC driver.
+  - cpp: small kernel C++ support library, KTL containers, new/delete, and minimal
+    libsupc++/ABI support.
+  - include: public kernel headers and small libc-style header subset.
+  - lib/src: startup objects such as crt0, crti, and crtn.
+  - test: Bochs configuration, virtual disk image, and low-level test snippets.
+
+  Current maturity:
+  - The project is in kernel infrastructure bring-up stage.
+  - Boot, VGA output, IRQ descriptors/stubs, PIC, keyboard parsing, and memory
+    allocators have partial implementations.
+  - TTY/console abstractions, user mode, scheduler, system calls, filesystem
+    services, process management, and broad device support are not implemented.
+  - Several helper scripts and initialization paths are placeholders; validate
+    code paths before assuming they are fully wired.
+
+  Conventions:
+  - Prefer small, explicit low-level code over abstractions that hide hardware
+    details.
+  - Keep code freestanding-safe. Do not assume a hosted C/C++ runtime, libc,
+    exceptions, RTTI, dynamic initialization beyond what the project explicitly
+    supports, or OS services.
+  - Preserve the current namespace style: bigos for kernel APIs, bigos::mm for
+    memory management, bigos::irq for interrupts, driver::* for drivers, and ktl
+    for kernel container utilities.
+  - Treat hardware constants, linker addresses, boot protocol addresses, and page
+    table self-mapping addresses as design-critical. Explain changes to them.
+  - Keep public headers minimal and include only what is needed.
+  - Prefer ASCII in source and docs unless there is a clear reason otherwise.
+
+rules:
+  proposal:
+    - State which boot/kernel subsystem is affected.
+    - Include non-goals for any OS feature that is intentionally out of scope.
+    - Call out assumptions about architecture, memory layout, emulator, disk
+      layout, and toolchain.
+  design:
+    - Include control flow or data flow when the change crosses boot, memory, IRQ,
+      or driver boundaries.
+    - Document any address layout, page-table, ABI, linker-script, or interrupt
+      vector changes.
+    - Describe failure behavior for low-level allocation, IO, and interrupt paths.
+  specs:
+    - Requirements must be observable in the kernel, boot image, emulator output,
+      or deterministic low-level behavior.
+    - Avoid specifying hosted OS behavior unless the change explicitly introduces
+      that layer.
+  tasks:
+    - Break work by subsystem and keep each task independently reviewable.
+    - Include validation steps such as build, static checks, emulator smoke test,
+      or targeted low-level test where practical.
+    - Call out manual setup needed for x86_64-elf-gcc, xmake, Bochs, or disk
+      image paths.
+    - For changes that add or modify Python files, include tasks to run
+      `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, and
+      `uv run pytest`.
+    - During implementation, fix newly introduced Python lint errors, type
+      diagnostics, test failures, and formatting inconsistencies before marking
+      Python-related tasks complete.
+    - Do not require Python validation tasks for changes that do not add or
+      modify Python files unless Python tooling is otherwise relevant.

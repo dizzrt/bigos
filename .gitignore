@@ -34,6 +34,8 @@
 # build
 build/
 .xmake/
+.cache/
+compile_commands.json
 
 # Apple Desktop services store
 .DS_Store
@@ -41,3 +43,22 @@ build/
 # vscode
 .vscode/*
 !.vscode/settings.json
+!.vscode/extensions.json
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyd
+*.log
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# coverage
+.coverage
+htmlcov/
+
+# temporary files
+tmp/
+temp/

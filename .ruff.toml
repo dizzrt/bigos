@@ -1,0 +1,50 @@
+target-version = "py314"
+line-length = 120
+indent-width = 4
+src = ["bigos.py", "arch", "tests"]
+
+extend-exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".trae",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "*.ipynb",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "output/routine_tasks",
+    "site-packages",
+    "venv",
+    "openspec/changes/*/.tmp",
+]
+
+[lint]
+fixable = ["ALL"]
+unfixable = []
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[format]
+line-ending = "lf"
+indent-style = "space"
+docstring-code-format = false
+skip-magic-trailing-comma = false

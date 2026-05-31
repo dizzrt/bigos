@@ -1,0 +1,23 @@
+{
+  "include": [
+    "bigos.py",
+    "arch/x86/boot/install.py",
+    "tests"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    ".venv",
+    "build",
+    "openspec/changes/*/.tmp"
+  ],
+  "extraPaths": [
+    "."
+  ],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "standard",
+  "useLibraryCodeForTypes": true,
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none"
+}

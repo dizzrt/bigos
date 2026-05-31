@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "vadimcn.vscode-lldb",
+        "tboox.xmake-vscode",
+        "ms-python.python",
+        "llvm-vs-code-extensions.vscode-clangd"
+    ]
+}
