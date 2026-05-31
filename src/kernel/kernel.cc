@@ -23,8 +23,9 @@ void kernel() {
     bigos::init_mem();
     bigos::irq::initIRQ();
     // bigos::terminal::init_tty();
-    bigos::irq::enableIRQ();
+    // bigos::irq::enableIRQ();
 
+    bigos::kprintf("BigOS kernel reached\n");
     while (true) {
         asm volatile("hlt");
     }

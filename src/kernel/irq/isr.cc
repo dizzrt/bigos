@@ -4,16 +4,16 @@
 
 NAMESPACE_BIGOS_BEG
 namespace irq::isr {
-    irq_handler isr_list[MAX_IRQ_NUM];
+    IRQHandler isr_list[IRQ_COUNT];
 
-    void register_isr(uint64_t __irq_num, irq_handler __isr) {
-        if (__irq_num > MAX_IRQ_NUM)
+    void register_isr(uint64_t __irq_num, IRQHandler __isr) noexcept {
+        if (__irq_num >= IRQ_COUNT)
             return;
 
         isr_list[__irq_num] = __isr;
     }
 
-    void init_isr() {
+    void init_isr() noexcept {
         // __detail::init_isr_keyboard();
     }
 }   // namespace irq::isr

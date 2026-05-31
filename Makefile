@@ -18,3 +18,11 @@ BOCHSRC_PATH = $(ROOT_PATH)/test/bochsrc.bxrc
 .PHONY:run
 run:
 	@$(BOCHS_RUN) -f $(BOCHSRC_PATH) -q
+
+.PHONY:boot-debug
+boot-debug:
+	@python3 tools/boot_debug.py run
+
+.PHONY:boot-debug-gui
+boot-debug-gui:
+	@python3 tools/boot_debug.py run --bochs-extra "display_library: sdl2"

@@ -104,7 +104,64 @@ The primary build system is xmake and the expected compiler is
 xmake
 ```
 
-Run in Bochs:
+One-command local boot debug:
+
+```bash
+make boot-debug
+```
+
+This is a thin wrapper around:
+
+```bash
+python3 tools/boot_debug.py run
+```
+
+The command runs preflight checks, builds the kernel with `xmake`, builds the boot
+artifacts with `make -C src/arch/x86/boot build-mbr build-dbr build-exdbr
+build-boot`, creates a raw disk image entirely in user space, writes the MBR,
+exFAT boot regions, `/boot/boot.bin`, and root `kernel`, then launches Bochs.
+
+Generated boot-debug artifacts are isolated under `build/` by default:
+
+- Raw disk image: `build/test/os.raw`.
+- Generated Bochs config: `build/test/bochsrc.bxrc`.
+- Boot artifacts: `build/bin/x86/boot/`.
+- Kernel ELF: `build/kernel`.
+
+Useful options:
+
+```bash
+python3 tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
+python3 tools/boot_debug.py run --no-launch
+python3 tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
+python3 tools/boot_debug.py validate-image --image build/test/os.raw
+```
+
+The raw image builder uses only Python standard library file writes. It does not
+require macOS `diskutil`, Linux loop devices, mount permissions, `mkfs.exfat`, or
+a hand-prepared exFAT image.
+
+First-stage scope:
+
+- Bochs is the only supported emulator in this workflow.
+- QEMU/headless mode, serial-log auto-detection, and CI smoke-test decisions are
+  intentionally left for later changes.
+- The workflow does not change `boot.s`, `boot.cc`, `BootInfo`, `link.lds`, the
+  higher-half kernel address, or kernel runtime initialization.
+
+Common failures:
+
+- Missing `xmake`, `bochs`, `python3`, or `x86_64-elf-*` tools are reported in
+  the preflight stage before image generation.
+- Kernel or boot build failures stop the workflow instead of continuing with
+  stale artifacts.
+- Bochs installations that require host-specific BIOS or VGA BIOS paths may need
+  `--romimage`, `--vgaromimage`, `--bochsrc`, or `--bochs-extra`.
+- Historical `test/bochsrc.bxrc` files are host-specific references only; the
+  generated `build/test/bochsrc.bxrc` avoids Windows paths, `win32` display
+  settings, and fixed ROM paths by default.
+
+Run an existing Bochs configuration:
 
 ```bash
 xmake run kernel

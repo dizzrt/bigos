@@ -101,7 +101,61 @@ kernel()
 xmake
 ```
 
-在 Bochs 中运行：
+本地一行启动调试：
+
+```bash
+make boot-debug
+```
+
+该命令是下面 Python 主入口的薄包装：
+
+```bash
+python3 tools/boot_debug.py run
+```
+
+命令会依次执行 preflight 检查、`xmake` 内核构建、`make -C
+src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot` boot 产物构建、
+完全用户态 raw 磁盘镜像生成、MBR/exFAT boot region/`/boot/boot.bin`/根目录
+`kernel` 写入，然后启动 Bochs。
+
+默认生成物均位于 `build/` 下：
+
+- raw 磁盘镜像：`build/test/os.raw`。
+- 生成的 Bochs 配置：`build/test/bochsrc.bxrc`。
+- boot 产物：`build/bin/x86/boot/`。
+- 内核 ELF：`build/kernel`。
+
+常用参数示例：
+
+```bash
+python3 tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
+python3 tools/boot_debug.py run --no-launch
+python3 tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
+python3 tools/boot_debug.py validate-image --image build/test/os.raw
+```
+
+raw image 由 Python 标准库直接写入生成，不依赖 macOS `diskutil`、Linux loop
+device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
+
+第一阶段范围：
+
+- 该流程仅支持 Bochs。
+- QEMU/headless、串口日志自动判定和 CI smoke test 留给后续阶段。
+- 该流程不修改 `boot.s`、`boot.cc`、`BootInfo`、`link.lds`、高半区内核地址或
+  内核运行时初始化顺序。
+
+常见失败原因：
+
+- 缺少 `xmake`、`bochs`、`python3` 或 `x86_64-elf-*` 工具时，会在 preflight
+  阶段失败，且不会生成或覆盖镜像。
+- 内核或 boot 构建失败时会停止流程，不会继续使用 stale 产物启动。
+- 如果 Bochs 安装需要宿主机特定 BIOS/VGA BIOS 路径，可以使用 `--romimage`、
+  `--vgaromimage`、`--bochsrc` 或 `--bochs-extra` 指定。
+- 历史 `test/bochsrc.bxrc` 只能作为宿主机配置参考；生成的
+  `build/test/bochsrc.bxrc` 默认不会硬编码 Windows 路径、`win32` display
+  设置或固定 ROM 路径。
+
+使用已有 Bochs 配置运行：
 
 ```bash
 xmake run kernel

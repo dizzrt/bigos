@@ -16,7 +16,7 @@ namespace irq {
         }
     }   // namespace __detail
 
-    void __detail::initIDT() {
+    void __detail::initIDT() noexcept {
         INTRDescriptor *idt = (INTRDescriptor *)IDT_BASE;
 
         for (int i = 0; i < IRQ_COUNT; i++) {
@@ -29,7 +29,7 @@ namespace irq {
         }
     }
 
-    void initIRQ() {
+    void initIRQ() noexcept {
         __detail::initIDT();
     }
 }   // namespace irq

@@ -34,15 +34,17 @@ namespace irq {
         uint32_t offset_high;
         uint32_t reserved;
 
-        void setISR(void *isr) {
+        void setISR(void *isr) noexcept {
             uint64_t isr_address = (uint64_t)isr;
             offset_low = isr_address;
             offset_mid = isr_address >> 16;
             offset_high = isr_address >> 32;
         }
 
-        INTRDescriptor() = default;
-        INTRDescriptor(void *isr) {
+        INTRDescriptor() noexcept
+            : offset_low(0), selector(0), attributes_brief(0), offset_mid(0), offset_high(0), reserved(0) {}
+
+        INTRDescriptor(void *isr) noexcept : INTRDescriptor() {
             this->setISR(isr);
         }
     };
