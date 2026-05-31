@@ -11,6 +11,7 @@
 
 .set STACKSEG,      0x9000
 .set STACKSP,       0xfbff
+.set INT13_RETRY_LIMIT, 3
 
 .macro error msg
     movw $(\msg), %si
@@ -111,12 +112,18 @@ real_dbr:
     incl %eax
     movl %eax, 0x08(%di)
 
+    movw $INT13_RETRY_LIMIT, %bp
+read_exdbr_retry:
     movb $0x42, %ah
     movb (0x802), %dl
     movw $DiskAddressPacket, %si
     int $0x13
+    jc read_exdbr_failed
     test %ah, %ah
     jz jmp_exdbr
+read_exdbr_failed:
+    decw %bp
+    jnz read_exdbr_retry
     error err_read
 
 jmp_exdbr:

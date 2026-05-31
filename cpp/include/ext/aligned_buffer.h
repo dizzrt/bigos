@@ -18,13 +18,21 @@ namespace __gnu_cxx {
         __aligned_membuf() = default;
         __aligned_membuf(nullptr_t) {}
 
-        void *addr() noexcept { return static_cast<void *>(&_storage); }
+        void *addr() noexcept {
+            return static_cast<void *>(&_storage);
+        }
 
-        void *addr() const noexcept { return static_cast<const void *>(&_storage); }
+        const void *addr() const noexcept {
+            return static_cast<const void *>(&_storage);
+        }
 
-        _Tp *ptr() noexcept { return static_cast<_Tp *>(addr()); }
+        _Tp *ptr() noexcept {
+            return static_cast<_Tp *>(addr());
+        }
 
-        const _Tp *ptr() const noexcept { return static_cast<const _Tp *>(addr()); }
+        const _Tp *ptr() const noexcept {
+            return static_cast<const _Tp *>(addr());
+        }
     };
 
     template <typename _Tp>
@@ -34,13 +42,21 @@ namespace __gnu_cxx {
         __aligned_buffer() = default;
         __aligned_buffer(nullptr_t) {}
 
-        void *addr() noexcept { return static_cast<void *>(&_storage); }
+        void *addr() noexcept {
+            return static_cast<void *>(&_storage);
+        }
 
-        const void *addr() const noexcept { return static_cast<const void *>(&_storage); }
+        const void *addr() const noexcept {
+            return static_cast<const void *>(&_storage);
+        }
 
-        _Tp *ptr() noexcept { return static_cast<_Tp *>(addr()); }
+        _Tp *ptr() noexcept {
+            return static_cast<_Tp *>(addr());
+        }
 
-        const _Tp *ptr() const noexcept { return static_cast<const _Tp *>(addr()); }
+        const _Tp *ptr() const noexcept {
+            return static_cast<const _Tp *>(addr());
+        }
     };
 
 }   // namespace __gnu_cxx

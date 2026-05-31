@@ -11,6 +11,60 @@ EXDBR_PATH = ''
 BOOT_PATH = ''
 
 BYTES_PER_SECTOR = 512
+MBR_PARTITION_TABLE_OFFSET = 0x1BE
+MBR_PARTITION_TABLE_SIZE = 64
+PARTITION_ENTRY_SIZE = 16
+EXFAT_PARTITION_TYPE = 0x07
+EXFAT_MAIN_BOOT_SECTORS = 12
+EXFAT_EXTENDED_DBR_SECTORS = 8
+EXFAT_ENTRY_SIZE = 32
+EXFAT_FILE_ENTRY = 0x85
+EXFAT_STREAM_ENTRY = 0xC0
+EXFAT_NAME_ENTRY = 0xC1
+EXFAT_ATTR_DIRECTORY = 0x10
+EXFAT_ATTR_ARCHIVE = 0x20
+EXFAT_STREAM_NO_FAT_CHAIN = 0x02
+BOOT_MAX_LOAD_BYTES = 0x80000
+
+
+class UnsupportedLayoutError(RuntimeError):
+    pass
+
+
+class ExfatPartition:
+    def __init__(self, entry_offset: int, lba: int, sectors: int, active: bool):
+        self.entry_offset = entry_offset
+        self.lba = lba
+        self.sectors = sectors
+        self.active = active
+
+
+class ExfatBootRegion:
+    def __init__(
+        self,
+        partition_lba: int,
+        bytes_per_sector: int,
+        sectors_per_cluster: int,
+        cluster_heap_lba: int,
+        root_cluster: int,
+    ):
+        self.partition_lba = partition_lba
+        self.bytes_per_sector = bytes_per_sector
+        self.sectors_per_cluster = sectors_per_cluster
+        self.cluster_heap_lba = cluster_heap_lba
+        self.root_cluster = root_cluster
+
+    def cluster_lba(self, cluster: int) -> int:
+        if cluster < 2:
+            raise UnsupportedLayoutError('unsupported-layout: invalid exfat cluster number')
+        return self.cluster_heap_lba + (cluster - 2) * self.sectors_per_cluster
+
+
+class ExfatFile:
+    def __init__(self, first_cluster: int, data_length: int, contiguous: bool):
+        self.first_cluster = first_cluster
+        self.data_length = data_length
+        self.contiguous = contiguous
 
 
 def debugSuccess(msg: object):
@@ -19,13 +73,162 @@ def debugSuccess(msg: object):
 
 def debugError(msg: object, abort: bool = True):
     print('\033[31merror:' + str(msg) + '\033[0m')
-    if abort:
-        exit(1)
-    return None
+    exit(1)
 
 
 def debugWarn(msg: object):
     print('\033[93m' + str(msg) + '\033[0m')
+
+
+def read_exact(vhd: BinaryIO, size: int) -> bytes:
+    data = vhd.read(size)
+    if len(data) != size:
+        raise UnsupportedLayoutError('unsupported-layout: unexpected end of disk image')
+    return data
+
+
+def read_partition_table(vhd: BinaryIO) -> bytes:
+    vhd.seek(MBR_PARTITION_TABLE_OFFSET)
+    ptes = read_exact(vhd, MBR_PARTITION_TABLE_SIZE)
+    if len(ptes) != MBR_PARTITION_TABLE_SIZE:
+        raise UnsupportedLayoutError('unsupported-layout: incomplete mbr partition table')
+    return ptes
+
+
+def find_exfat_partition(vhd: BinaryIO, require_active: bool = False) -> ExfatPartition:
+    ptes = read_partition_table(vhd)
+
+    found: ExfatPartition | None = None
+    for index in range(4):
+        pte_offset = index * PARTITION_ENTRY_SIZE
+        pte = ptes[pte_offset : pte_offset + PARTITION_ENTRY_SIZE]
+        active = pte[0] == 0x80
+        partition_type = pte[4]
+        lba = int.from_bytes(pte[8:12], 'little')
+        sectors = int.from_bytes(pte[12:16], 'little')
+
+        if partition_type != EXFAT_PARTITION_TYPE:
+            continue
+        if lba == 0 or sectors == 0:
+            raise UnsupportedLayoutError('unsupported-layout: exfat partition has empty bounds')
+        if require_active and not active:
+            continue
+        if found is not None:
+            raise UnsupportedLayoutError('unsupported-layout: multiple exfat partitions')
+        found = ExfatPartition(MBR_PARTITION_TABLE_OFFSET + pte_offset, lba, sectors, active)
+
+    if found is None:
+        raise UnsupportedLayoutError('unsupported-layout: no supported exfat partition found')
+    return found
+
+
+def read_exfat_boot_region(vhd: BinaryIO, partition_lba: int) -> ExfatBootRegion:
+    vhd.seek(partition_lba * BYTES_PER_SECTOR)
+    sector = read_exact(vhd, BYTES_PER_SECTOR)
+    if sector[3:11] != b'EXFAT   ':
+        raise UnsupportedLayoutError('unsupported-layout: partition is not exfat')
+
+    bytes_per_sector = 1 << sector[0x6C]
+    sectors_per_cluster = 1 << sector[0x6D]
+    if bytes_per_sector != BYTES_PER_SECTOR:
+        raise UnsupportedLayoutError('unsupported-layout: exfat sector size does not match installer sector size')
+    if sectors_per_cluster == 0:
+        raise UnsupportedLayoutError('unsupported-layout: invalid exfat sectors per cluster')
+
+    partition_offset = int.from_bytes(sector[0x40:0x48], 'little')
+    cluster_heap_offset = int.from_bytes(sector[0x58:0x5C], 'little')
+    root_cluster = int.from_bytes(sector[0x60:0x64], 'little')
+    if partition_offset not in (0, partition_lba):
+        raise UnsupportedLayoutError('unsupported-layout: unexpected exfat partition offset')
+
+    return ExfatBootRegion(
+        partition_lba=partition_lba,
+        bytes_per_sector=bytes_per_sector,
+        sectors_per_cluster=sectors_per_cluster,
+        cluster_heap_lba=partition_lba + cluster_heap_offset,
+        root_cluster=root_cluster,
+    )
+
+
+def parse_name(entry: bytes) -> str:
+    chars = []
+    for offset in range(2, EXFAT_ENTRY_SIZE, 2):
+        codepoint = int.from_bytes(entry[offset : offset + 2], 'little')
+        if codepoint == 0:
+            break
+        chars.append(chr(codepoint))
+    return ''.join(chars)
+
+
+def read_directory(vhd: BinaryIO, info: ExfatBootRegion, first_cluster: int) -> bytes:
+    lba = info.cluster_lba(first_cluster)
+    size = info.sectors_per_cluster * info.bytes_per_sector
+    vhd.seek(lba * info.bytes_per_sector)
+    return read_exact(vhd, size)
+
+
+def find_directory_child(directory: bytes, name: str, want_directory: bool) -> ExfatFile:
+    offset = 0
+    while offset + EXFAT_ENTRY_SIZE <= len(directory):
+        entry = directory[offset : offset + EXFAT_ENTRY_SIZE]
+        entry_type = entry[0]
+        if entry_type == 0:
+            break
+        if entry_type != EXFAT_FILE_ENTRY:
+            offset += EXFAT_ENTRY_SIZE
+            continue
+
+        secondary_count = entry[1]
+        set_size = (secondary_count + 1) * EXFAT_ENTRY_SIZE
+        if offset + set_size > len(directory) or secondary_count < 2:
+            raise UnsupportedLayoutError('unsupported-layout: directory entry set spans unsupported buffer')
+
+        stream = directory[offset + EXFAT_ENTRY_SIZE : offset + 2 * EXFAT_ENTRY_SIZE]
+        if stream[0] != EXFAT_STREAM_ENTRY:
+            offset += set_size
+            continue
+
+        actual_name = ''
+        name_entries = secondary_count - 1
+        for index in range(name_entries):
+            name_entry = directory[offset + (2 + index) * EXFAT_ENTRY_SIZE : offset + (3 + index) * EXFAT_ENTRY_SIZE]
+            if name_entry[0] != EXFAT_NAME_ENTRY:
+                raise UnsupportedLayoutError('unsupported-layout: unsupported exfat name entry set')
+            actual_name += parse_name(name_entry)
+
+        name_length = stream[3]
+        actual_name = actual_name[:name_length]
+        if actual_name.lower() != name.lower():
+            offset += set_size
+            continue
+
+        attributes = int.from_bytes(entry[4:6], 'little')
+        is_directory = (attributes & EXFAT_ATTR_DIRECTORY) != 0
+        is_file = (attributes & EXFAT_ATTR_ARCHIVE) != 0
+        if want_directory and not is_directory:
+            raise UnsupportedLayoutError(f'unsupported-layout: {name} is not a directory')
+        if not want_directory and not is_file:
+            raise UnsupportedLayoutError(f'unsupported-layout: {name} is not a file')
+
+        flags = stream[1]
+        first_cluster = int.from_bytes(stream[20:24], 'little')
+        data_length = int.from_bytes(stream[24:32], 'little')
+        return ExfatFile(first_cluster, data_length, (flags & EXFAT_STREAM_NO_FAT_CHAIN) != 0)
+
+    raise UnsupportedLayoutError(f'unsupported-layout: {name} not found')
+
+
+def find_boot_file(vhd: BinaryIO, info: ExfatBootRegion) -> ExfatFile:
+    root = read_directory(vhd, info, info.root_cluster)
+    boot_dir = find_directory_child(root, 'boot', want_directory=True)
+    if not boot_dir.contiguous:
+        raise UnsupportedLayoutError('unsupported-layout: /boot directory is not contiguous')
+
+    boot_directory = read_directory(vhd, info, boot_dir.first_cluster)
+    boot_file = find_directory_child(boot_directory, 'boot.bin', want_directory=False)
+    if not boot_file.contiguous:
+        raise UnsupportedLayoutError('unsupported-layout: /boot/boot.bin is not contiguous')
+    return boot_file
 
 
 def bootChecksum(boot_region_offset: int, vhd: BinaryIO, partition_offset: int) -> int:
@@ -63,21 +266,20 @@ def updateMbr():
     with open(MBR_PATH, 'rb') as f:
         mbr = f.read()
 
-    if len(mbr) > 0x200:
+    if len(mbr) > BYTES_PER_SECTOR:
         debugError('update mbr failed, because mbr exceeds 512 bytes', False)
         return None
 
     with open(VDISK_PATH, 'rb+') as f:
         # save patition table entries
-        f.seek(0x1BE)
-        ptes = f.read(64)
+        ptes = read_partition_table(f)
 
         # write mbr
         f.seek(0)
         f.write(mbr)
 
         # write patition table entries
-        f.seek(0x1BE)
+        f.seek(MBR_PARTITION_TABLE_OFFSET)
         f.write(ptes)
 
     debugSuccess('update mbr successfully')
@@ -89,7 +291,7 @@ def updateDbr():
     with open(DBR_PATH, 'rb') as f:
         dbr = f.read()
 
-    if len(dbr) > 0x200:
+    if len(dbr) > BYTES_PER_SECTOR:
         debugError('update dbr failed, because mbr exceeds 512 bytes', False)
         return None
 
@@ -97,25 +299,13 @@ def updateDbr():
     boot_code = dbr[0x78:]
 
     with open(VDISK_PATH, 'rb+') as f:
-        f.seek(0x1BE)
-        ptes = f.read(16)
-
-        pte_offset = 0
-        for _ in range(4):
-            # search exfat partition
-            type_offset = pte_offset + 0x04
-            partition_type = int.from_bytes(ptes[type_offset : type_offset + 1], 'little')
-            if partition_type == 0x07:
-                break
-            pte_offset = pte_offset + 0x10
-
-        if pte_offset > 0x30:
-            debugError('update dbr failed, because no exfat parition was found', False)
+        try:
+            partition = find_exfat_partition(f)
+        except UnsupportedLayoutError as error:
+            debugError(f'update dbr failed, because {error}', False)
             return None
 
-        # lba of partition start
-        lba_offset = pte_offset + 0x08
-        lba = int.from_bytes(ptes[lba_offset : lba_offset + 4], 'little')
+        lba = partition.lba
 
         # main boot region
         # jmp code
@@ -136,8 +326,8 @@ def updateDbr():
         updateChecksum(f, lba)
 
         # make the parition active
-        f.seek(pte_offset + 0x1BE)
-        attr = ptes[pte_offset] | 0x80
+        f.seek(partition.entry_offset)
+        attr = 0x80
         f.write(attr.to_bytes(1, 'little'))
 
     debugSuccess('update dbr successfully')
@@ -149,29 +339,18 @@ def updateExDbr():
     with open(EXDBR_PATH, 'rb') as f:
         exdbr = f.read()
 
-    if len(exdbr) > 0x200 * 8:
+    if len(exdbr) > BYTES_PER_SECTOR * EXFAT_EXTENDED_DBR_SECTORS:
         debugError('update exdbr failed, because exdbr exceeds 4096 bytes', False)
         return None
 
     with open(VDISK_PATH, 'rb+') as f:
-        f.seek(0x1BE)
-        ptes = f.read(16)
-
-        pte_offset = 0
-        for _ in range(4):
-            is_active = ptes[pte_offset] & 0x80
-            type_offset = pte_offset + 0x04
-            partition_type = int.from_bytes(ptes[type_offset : type_offset + 1], 'little')
-            if partition_type == 0x07 and is_active == 0x80:
-                break
-            pte_offset = pte_offset + 0x10
-
-        if pte_offset > 0x30:
-            debugError('update dbr failed, because no exfat parition was found', False)
+        try:
+            partition = find_exfat_partition(f, require_active=True)
+        except UnsupportedLayoutError as error:
+            debugError(f'update exdbr failed, because {error}', False)
             return None
 
-        lba_offset = pte_offset + 0x08
-        lba = int.from_bytes(ptes[lba_offset : lba_offset + 4], 'little')
+        lba = partition.lba
 
         f.seek((lba + 1) * BYTES_PER_SECTOR)
         f.write(exdbr)
@@ -186,7 +365,29 @@ def updateExDbr():
 
 
 def updateBoot():
-    debugWarn('update bootloader is not supported yet')
+    with open(BOOT_PATH, 'rb') as f:
+        boot = f.read()
+
+    if len(boot) > BOOT_MAX_LOAD_BYTES:
+        debugError('update boot failed, because boot.bin exceeds supported bootloader load range', False)
+        return None
+
+    with open(VDISK_PATH, 'rb+') as f:
+        try:
+            partition = find_exfat_partition(f, require_active=True)
+            info = read_exfat_boot_region(f, partition.lba)
+            boot_file = find_boot_file(f, info)
+            if boot_file.data_length < len(boot):
+                raise UnsupportedLayoutError('unsupported-layout: /boot/boot.bin is too small')
+
+            boot_lba = info.cluster_lba(boot_file.first_cluster)
+        except UnsupportedLayoutError as error:
+            debugError(f'update boot failed, because {error}', False)
+            return None
+
+        f.seek(boot_lba * info.bytes_per_sector)
+        f.write(boot)
+
     return None
 
 
@@ -265,7 +466,7 @@ def main(argv):
     if need_update_boot:
         if not os.path.exists(BOOT_PATH) or not os.path.isfile(BOOT_PATH):
             debugError(
-                'update boot failed, because mbr does not exist or is not a valid file',
+                'update boot failed, because boot.bin does not exist or is not a valid file',
                 False,
             )
         else:

@@ -40,9 +40,15 @@ namespace mm {
         void *alloc_obj(gfm_t __gfm) noexcept _attr_malloc_;
         void free_obj(const void *__p) noexcept;
 
-        inline const uint32_t nr_objs() const noexcept { return size(); }
-        inline const uint32_t nr_used_objs() const noexcept { return set_size(); }
-        inline const uint32_t nr_free_objs() const noexcept { return reset_size(); }
+        inline const uint32_t nr_objs() const noexcept {
+            return size();
+        }
+        inline const uint32_t nr_used_objs() const noexcept {
+            return set_size();
+        }
+        inline const uint32_t nr_free_objs() const noexcept {
+            return reset_size();
+        }
     };
 
     struct SlabHeader {

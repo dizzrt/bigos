@@ -7,7 +7,7 @@
 #include <memdef.h>
 
 // get page block size by order
-#define get_pblk_size(ORDER) (PAGE_SIZE * (1ul << ORDER))
+#define get_pblk_size(ORDER) (PAGE_SIZE * (1ul << (ORDER)))
 // page block struct size
 #define PAGE_BLOCK_SIZE sizeof(bigos::mm::PageBlock)
 
@@ -33,10 +33,16 @@ namespace mm {
         uint32_t nr_free_pages_;
 
     public:
-        inline uint32_t nr_pages() noexcept _attr_pure_ { return nr_pages_; }
-        inline uint32_t nr_free_pages() noexcept _attr_pure_ { return nr_free_pages_; }
+        inline uint32_t nr_pages() noexcept _attr_pure_ {
+            return nr_pages_;
+        }
+        inline uint32_t nr_free_pages() noexcept _attr_pure_ {
+            return nr_free_pages_;
+        }
 
-        inline uint32_t nr_pblk_by_order(uint32_t __order) noexcept _attr_pure_ { return free_area_[__order].size(); }
+        inline uint32_t nr_pblk_by_order(uint32_t __order) noexcept _attr_pure_ {
+            return free_area_[__order].size();
+        }
 
         void __base_free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept;
         void __new_free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept;

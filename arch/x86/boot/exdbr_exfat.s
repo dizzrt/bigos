@@ -9,6 +9,12 @@
 
 # bootloader
 .set BOOTOFFSET32,   0x10000
+.set INT13_RETRY_LIMIT, 3
+.set ATA_POLL_LIMIT, 1000000
+.set ATA_STATUS_BSY, 0x80
+.set ATA_STATUS_DRQ, 0x08
+.set ATA_STATUS_DF,  0x20
+.set ATA_STATUS_ERR, 0x01
 
 .globl _start
 _start:
@@ -41,6 +47,7 @@ data_offset: .long 0
 load_buffer: .long 0x0f00
 
 err_boot_not_found: .asciz "bootloader not found"
+err_read: .asciz "read disk error"
 
 print:
     movb $0x0e, %ah
@@ -66,10 +73,22 @@ err_print:
     jmp .
 
 int13h_extension_read:
+    push %cx
+    mov $INT13_RETRY_LIMIT, %cx
+int13h_retry:
     mov $0x42, %ah
-    mov $0x80, %dl
+    mov (0x802), %dl
     movw $DiskAddressPacket, %si
     int $0x13
+    jc int13h_failed
+    test %ah, %ah
+    jz int13h_ok
+int13h_failed:
+    loop int13h_retry
+    pop %cx
+    error err_read
+int13h_ok:
+    pop %cx
     ret
 
 next_directory_entry:
@@ -321,6 +340,12 @@ no_remainder:
     push %eax
 
     # prepare disk to load boot.bin
+    # The protected-mode loader uses ATA primary-master PIO, so only BIOS
+    # drive 0x80 currently satisfies the boot-drive contract.
+    cmpb $0x80, (0x802)
+    jne unsupported_boot_drive
+
+    # prepare disk to load boot.bin
     # select master disk
     mov $0x40, %al
     mov $0x01f6, %dx
@@ -372,13 +397,21 @@ no_remainder:
     mov $0x01f7, %dx
     outb %al, %dx
 
+    mov $ATA_POLL_LIMIT, %esi
 wait_disk:
     call wait_nops
     mov $0x01f7, %dx
     inb %dx, %al
-    and $0x88, %al
+    test $(ATA_STATUS_ERR | ATA_STATUS_DF), %al
+    jnz ata_controller_error
+    and $(ATA_STATUS_BSY | ATA_STATUS_DRQ), %al
     cmp $0x08, %al
-    jne wait_disk
+    je disk_ready
+    decl %esi
+    jnz wait_disk
+    jmp ata_timeout
+
+disk_ready:
 
     # nr of sectors
     pop %eax
@@ -396,6 +429,21 @@ pio_loop:
 
     # jmp to bootloader
     ljmp $SELECTOR_CODE_32, $BOOTOFFSET32
+
+unsupported_boot_drive:
+    movw $0x4f55, 0xb8000
+    jmp halt32
+
+ata_timeout:
+    movw $0x4f54, 0xb8000
+    jmp halt32
+
+ata_controller_error:
+    movw $0x4f45, 0xb8000
+
+halt32:
+    hlt
+    jmp halt32
 
 wait_nops:
     .rept 8

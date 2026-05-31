@@ -20,7 +20,7 @@ AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: true
 BinPackArguments: true
 BinPackParameters: true
-BitFieldColonSpacing : Both
+BitFieldColonSpacing: Both
 BreakBeforeBinaryOperators: false
 BreakBeforeBraces: Attach
 BreakBeforeTernaryOperators: true
@@ -46,7 +46,7 @@ IndentWidth: 4
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
 NamespaceIndentation: All
-PointerAlignment: Left
+PointerAlignment: Right
 ReflowComments: true
 SortIncludes: false
 SortUsingDeclarations: false

@@ -70,17 +70,21 @@ $(TEMP_PATH)/boot.cc.o: boot.cc
 build-mbr: $(PATH_CHECK) mbr.s
 	$(AS) mbr.s -o $(TEMP_PATH)/mbr.o
 	$(LD) $(LDFLAGS) -e _start -Ttext 0x7c00 $(TEMP_PATH)/mbr.o -o $(BIN_PATH)/mbr.bin
+	@test $$(wc -c < $(BIN_PATH)/mbr.bin) -le 512
 
 build-dbr: $(PATH_CHECK) dbr_exfat.s
 	$(AS) dbr_exfat.s -o $(TEMP_PATH)/dbr_exfat.o
 	$(LD) $(LDFLAGS) -e _start -Ttext 0x7c00 $(TEMP_PATH)/dbr_exfat.o -o $(BIN_PATH)/dbr.bin
+	@test $$(wc -c < $(BIN_PATH)/dbr.bin) -le 512
 
 build-exdbr: $(PATH_CHECK) exdbr_exfat.s
 	$(AS) exdbr_exfat.s -o $(TEMP_PATH)/exdbr_exfat.o
 	$(LD) $(LDFLAGS) -e _start -Ttext 0x1000 $(TEMP_PATH)/exdbr_exfat.o -o $(BIN_PATH)/exdbr.bin
+	@test $$(wc -c < $(BIN_PATH)/exdbr.bin) -le 4096
 
 build-boot: $(PATH_CHECK) $(TEMP_PATH)/boot.s.o $(TEMP_PATH)/boot.cc.o
 	$(LD) $(LDFLAGS) -e _start -Ttext 0x10000 $(TEMP_PATH)/boot.s.o $(TEMP_PATH)/boot.cc.o -o $(BIN_PATH)/boot.bin
+	@test $$(wc -c < $(BIN_PATH)/boot.bin) -le 524288
 
 .PHONY:install-mbr
 install-mbr:

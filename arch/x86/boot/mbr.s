@@ -14,6 +14,7 @@
 
 .set STACKSEG,  0x9000
 .set STACKSP,   0xfbff
+.set INT13_RETRY_LIMIT, 3
 
 .macro error msg
     movw $(\msg + OFFSET), %si
@@ -126,12 +127,18 @@ loop_search:
 active_partition_found:
     movl 0x08(%di), %ebx 
     movl %ebx, (DiskAddressPacket + OFFSET + 0x08) # LBA of partition start
+    movw $INT13_RETRY_LIMIT, %bp
+read_dbr_retry:
     movb $0x42, %ah
     movb (0x802), %dl
     movw $(DiskAddressPacket + OFFSET), %si
     int $0x13
+    jc read_dbr_failed
     test %ah, %ah
     jz jmp_dbr
+read_dbr_failed:
+    decw %bp
+    jnz read_dbr_retry
     error err_read
 
 jmp_dbr:

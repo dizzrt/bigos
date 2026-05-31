@@ -11,10 +11,10 @@
 
 NAMESPACE_BIGOS_BEG
 namespace mm {
-    typedef uint64_t* pt_t;
-    typedef pt_t* pd_t;
-    typedef pd_t* pdpt_t;
-    typedef pdpt_t* pml4_t;
+    typedef uint64_t *pt_t;
+    typedef pt_t *pd_t;
+    typedef pd_t *pdpt_t;
+    typedef pdpt_t *pml4_t;
 
     // class VMem;
     struct MemoryBlock {
@@ -33,21 +33,21 @@ namespace mm {
     class VMem {
     private:
         friend void __detail::init_vmem();
-        void merge(ktl::klist_node<MemoryBlock*>* __mblk_node) noexcept;
+        void merge(ktl::klist_node<MemoryBlock *> *__mblk_node) noexcept;
 
         pml4_t pml4_;
-        ktl::klist<MemoryBlock*> free_area_;
-        ktl::klist<MemoryBlock*> used_area_;
+        ktl::klist<MemoryBlock *> free_area_;
+        ktl::klist<MemoryBlock *> used_area_;
 
         uint32_t nr_pages_;
         uint32_t nr_free_pages_;
 
     public:
-        void set_paging(MemoryBlock* __mblk) noexcept;
+        void set_paging(MemoryBlock *__mblk) noexcept;
 
-        void __free(const void* __p) noexcept;
+        void __free(const void *__p) noexcept;
 
-        _attr_nodiscard_ MemoryBlock* __alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;
+        _attr_nodiscard_ MemoryBlock *__alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;
     };
 
 }   // namespace mm

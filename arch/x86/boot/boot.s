@@ -143,11 +143,10 @@ long_mode:
     mov %ax, %fs
     mov %ax, %gs
 
-    # call boot function to load kernel and setup paging for it
+    # call boot function to load kernel, setup paging, and return a checked ELF entry
     call boot
 
     # jmp to kernel
-    movabsq $0xffffffff80000000, %rax
     jmp *%rax
 
 .globl wait_nops

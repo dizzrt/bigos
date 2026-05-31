@@ -1,0 +1,9 @@
+CompileFlags:
+  Add:
+    - --target=x86_64-elf
+    - -ffreestanding
+    - -mno-red-zone
+    - -fno-rtti
+    - -fno-exceptions
+    - -std=c++17
+    - -Iinclude

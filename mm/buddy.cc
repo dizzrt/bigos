@@ -1,3 +1,4 @@
+#include <arch/x86/boot/boot_info.h>
 #include <bigos/io.h>   // remove later
 
 #include "buddy.h"
@@ -36,15 +37,15 @@ static ktl::klist<bigos::mm::PageBlock *> gPageBlockList;
 
 NAMESPACE_BIGOS_BEG
 namespace mm {
-    uint32_t g_nr_pages() {
+    uint32_t g_nr_pages() noexcept {
         return gNrPages;
     }
 
-    uint32_t g_nr_free_pages() {
+    uint32_t g_nr_free_pages() noexcept {
         return gNrFreePages;
     }
 
-    void Zone::merge(ktl::klist_node<PageBlock *> *__pblk_node) {
+    void Zone::merge(ktl::klist_node<PageBlock *> *__pblk_node) noexcept {
         PageBlock *pblk = **__pblk_node;
         if (pblk->order >= BUDDY_MAX_ORDER)
             return;
@@ -123,7 +124,7 @@ namespace mm {
         merge(__pblk_node);
     }
 
-    void Zone::__new_free(ktl::klist_node<PageBlock *> *__pblk_node) {
+    void Zone::__new_free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept {
         __base_free(__pblk_node);
 
         auto pblk = **__pblk_node;
@@ -136,7 +137,7 @@ namespace mm {
         gNrFreePages += pages;
     }
 
-    void Zone::free(ktl::klist_node<PageBlock *> *__pblk_node) {
+    void Zone::free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept {
         __base_free(__pblk_node);
 
         auto pblk = **__pblk_node;
@@ -147,7 +148,7 @@ namespace mm {
         gNrFreePages += pages;
     }
 
-    ktl::klist_node<PageBlock *> *Zone::alloc(uint32_t __order) {
+    ktl::klist_node<PageBlock *> *Zone::alloc(uint32_t __order) noexcept {
         uint32_t real_order = __order;
         while (real_order <= BUDDY_MAX_ORDER && free_area_[real_order].empty())
             real_order++;
@@ -281,27 +282,42 @@ namespace mm {
             }
         }
 
+        const BootInfo *boot_info() noexcept {
+            const BootInfo *info = (const BootInfo *)BIGOS_BOOT_INFO_ADDRESS;
+            if (info->magic != BIGOS_BOOT_INFO_MAGIC)
+                return nullptr;
+            if (info->version != BIGOS_BOOT_INFO_VERSION)
+                return nullptr;
+            if (info->size < BIGOS_BOOT_INFO_SIZE)
+                return nullptr;
+            return info;
+        }
+
         void init_buddy() {
-            gKernelSize = *((uint32_t *)0x80c);
+            const BootInfo *info = boot_info();
+            if (info != nullptr)
+                gKernelSize = (uint32_t)info->kernel_memory_size;
+            else
+                gKernelSize = *((uint32_t *)0x80c);
             gKernelEndAddr = ((gKernelSize + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE + KERNEL_BASE;
 
-            uint16_t nr_ards = *(uint16_t *)0x800;
-            ARDS *ards_arr = (ARDS *)0x500;
+            uint32_t nr_ards = info != nullptr ? info->e820_entry_count : *(uint16_t *)0x800;
+            ARDS *ards_arr = info != nullptr ? (ARDS *)info->e820_entry_address : (ARDS *)0x500;
 
-            for (int i = 0; i < nr_ards; i++) {
+            for (uint32_t i = 0; i < nr_ards; i++) {
                 if (ards_arr[i].type == ARDS_USABLE)
                     handle_ards(ards_arr[i].base, ards_arr[i].len);
             }
         }
 
-        void *alloc_physical_pages(uint32_t __order, gfm_t __gfm) {
+        void *alloc_physical_pages(uint32_t __order, gfm_t __gfm) noexcept {
             uint32_t nr_pages = 1u << __order;
 
             uint32_t index = ZONE_NORMAL;
-            if (__gfm & _GFM_ZONE_MASK == _GFM_ZONE_DMA)
+            if ((__gfm & _GFM_ZONE_MASK) == _GFM_ZONE_DMA)
                 index = ZONE_DMA;
 
-            if (__gfm & _GFM_ZONE_MASK == _GFM_ZONE_DMA32)
+            if ((__gfm & _GFM_ZONE_MASK) == _GFM_ZONE_DMA32)
                 index = ZONE_DMA32;
 
             while (zone_arr[index]->nr_free_pages() < nr_pages) {
@@ -331,7 +347,7 @@ namespace mm {
             return ret;
         }
 
-        void free_physical_pages(const void *__p) {
+        void free_physical_pages(const void *__p) noexcept {
             uint64_t base = (uint64_t)__p;
 
             auto iter = gPageBlockList.begin();
@@ -355,7 +371,7 @@ namespace mm {
         }
     }   // namespace __detail
 
-    void print_physical_memory_info() {
+    void print_physical_memory_info() noexcept {
         kputs("buddy system info:\n");
         kputs("pblk  size: ");
         for (int i = 0; i <= BUDDY_MAX_ORDER; i++)
