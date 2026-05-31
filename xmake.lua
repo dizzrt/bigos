@@ -1,11 +1,3 @@
--- 
--- File: xmake.lua
--- Created by Dizzrt on 2023/05/03.
--- 
--- Copyright (C) 2023 The BigOS Authors.
--- Licensed under the GNU General Public License v3.0 only.
--- 
-
 set_xmakever("2.7.8")
 
 set_project("bigos")
