@@ -56,25 +56,36 @@ context: |
     table self-mapping addresses as design-critical. Explain changes to them.
   - Keep public headers minimal and include only what is needed.
   - Prefer ASCII in source and docs unless there is a clear reason otherwise.
+  - OpenSpec change artifacts should use Chinese descriptions by default,
+    including proposal, design, specs, tasks, validation notes, and
+    documentation tasks. Preserve OpenSpec-required structural keywords when
+    needed for tooling.
 
 rules:
   proposal:
+    - Use Chinese descriptions by default while preserving any structural
+      headings required by OpenSpec tooling.
     - State which boot/kernel subsystem is affected.
     - Include non-goals for any OS feature that is intentionally out of scope.
     - Call out assumptions about architecture, memory layout, emulator, disk
       layout, and toolchain.
   design:
+    - Use Chinese descriptions by default while preserving any structural
+      headings required by OpenSpec tooling.
     - Include control flow or data flow when the change crosses boot, memory, IRQ,
       or driver boundaries.
     - Document any address layout, page-table, ABI, linker-script, or interrupt
       vector changes.
     - Describe failure behavior for low-level allocation, IO, and interrupt paths.
   specs:
+    - Use Chinese requirement descriptions and scenario text by default, but keep
+      OpenSpec operation headers and requirement/scenario markers parseable.
     - Requirements must be observable in the kernel, boot image, emulator output,
       or deterministic low-level behavior.
     - Avoid specifying hosted OS behavior unless the change explicitly introduces
       that layer.
   tasks:
+    - Use Chinese task descriptions by default while preserving checkbox syntax.
     - Break work by subsystem and keep each task independently reviewable.
     - Match validation tasks to the change impact area, including build, static
       checks, emulator smoke test, or targeted low-level test where practical.
@@ -92,10 +103,12 @@ rules:
       valid new warnings. Validation notes must distinguish historical
       diagnostics, current-change diagnostics, and toolchain or freestanding
       configuration false positives.
-    - Configure C++ auxiliary checks as close as practical to the GCC cross-build
-      environment: freestanding C++17, x86_64 target, project include paths,
-      no hosted runtime assumptions, no exceptions, and no RTTI. If equivalent
-      clang or clangd flags are unavailable, document the gap and remaining risk.
+    - >-
+      Configure C++ auxiliary checks as close as practical to the GCC
+      cross-build environment: freestanding C++17, x86_64 target, project
+      include paths, no hosted runtime assumptions, no exceptions, and no RTTI.
+      If equivalent clang or clangd flags are unavailable, document the gap and
+      remaining risk.
     - Treat clang and clangd as auxiliary diagnostic signals only. They do not
       replace xmake with x86_64-elf-gcc/x86_64-elf-g++ or an equivalent targeted
       GCC cross-toolchain build for runtime C++ changes.

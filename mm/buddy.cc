@@ -33,7 +33,7 @@ static bigos::mm::Zone *zone_arr[] = {&zone_dma, &zone_dma32, &zone_normal};
 #define ZONE_DMA32  1
 #define ZONE_NORMAL 2
 
-static ktl::klist<bigos::mm::PageBlock *> gPageBlockList;
+static ktl::intrusive_list<bigos::mm::PageBlock *> gPageBlockList;
 
 NAMESPACE_BIGOS_BEG
 namespace mm {
@@ -45,26 +45,26 @@ namespace mm {
         return gNrFreePages;
     }
 
-    void Zone::merge(ktl::klist_node<PageBlock *> *__pblk_node) noexcept {
+    void Zone::merge(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept {
         PageBlock *pblk = **__pblk_node;
         if (pblk->order >= BUDDY_MAX_ORDER)
             return;
 
         uint64_t end_addr;
         PageBlock *adjacent_pblk = nullptr;
-        ktl::klist_node<PageBlock *> *adjacent_pblk_node = nullptr;
+        ktl::intrusive_list_node<PageBlock *> *adjacent_pblk_node = nullptr;
 
         auto &ls = pblk->zone->free_area_[pblk->order];
 
         // try to merge with next one
         if (__pblk_node->next != nullptr) {
-            adjacent_pblk_node = (ktl::klist_node<PageBlock *> *)__pblk_node->next;
+            adjacent_pblk_node = (ktl::intrusive_list_node<PageBlock *> *)__pblk_node->next;
             adjacent_pblk = **adjacent_pblk_node;
 
             end_addr = pblk->base + pblk->len;
             if (end_addr == adjacent_pblk->base) {
-                auto iter = ktl::klist<PageBlock *>::iterator(__pblk_node);
-                auto iter_next = ktl::klist<PageBlock *>::iterator(adjacent_pblk_node);
+                auto iter = ktl::intrusive_list<PageBlock *>::iterator(__pblk_node);
+                auto iter_next = ktl::intrusive_list<PageBlock *>::iterator(adjacent_pblk_node);
 
                 ls.erase(iter);
                 ls.erase(iter_next);
@@ -82,13 +82,13 @@ namespace mm {
 
         // try to merge with previous one
         if (__pblk_node->prev != nullptr) {
-            adjacent_pblk_node = (ktl::klist_node<PageBlock *> *)__pblk_node->next;
+            adjacent_pblk_node = (ktl::intrusive_list_node<PageBlock *> *)__pblk_node->next;
             adjacent_pblk = **adjacent_pblk_node;
 
             end_addr = adjacent_pblk->base + adjacent_pblk->len;
             if (end_addr == pblk->base) {
-                auto iter = ktl::klist<PageBlock *>::iterator(__pblk_node);
-                auto iter_prev = ktl::klist<PageBlock *>::iterator(adjacent_pblk_node);
+                auto iter = ktl::intrusive_list<PageBlock *>::iterator(__pblk_node);
+                auto iter_prev = ktl::intrusive_list<PageBlock *>::iterator(adjacent_pblk_node);
 
                 ls.erase(iter);
                 ls.erase(iter_prev);
@@ -105,7 +105,7 @@ namespace mm {
         }
     }
 
-    void Zone::__base_free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept {
+    void Zone::__base_free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept {
         auto pblk = **__pblk_node;
 
         if (pblk->order > BUDDY_MAX_ORDER)
@@ -124,7 +124,7 @@ namespace mm {
         merge(__pblk_node);
     }
 
-    void Zone::__new_free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept {
+    void Zone::__new_free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept {
         __base_free(__pblk_node);
 
         auto pblk = **__pblk_node;
@@ -137,7 +137,7 @@ namespace mm {
         gNrFreePages += pages;
     }
 
-    void Zone::free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept {
+    void Zone::free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept {
         __base_free(__pblk_node);
 
         auto pblk = **__pblk_node;
@@ -148,7 +148,7 @@ namespace mm {
         gNrFreePages += pages;
     }
 
-    ktl::klist_node<PageBlock *> *Zone::alloc(uint32_t __order) noexcept {
+    ktl::intrusive_list_node<PageBlock *> *Zone::alloc(uint32_t __order) noexcept {
         uint32_t real_order = __order;
         while (real_order <= BUDDY_MAX_ORDER && free_area_[real_order].empty())
             real_order++;
@@ -176,7 +176,7 @@ namespace mm {
                 uint64_t temp_len = get_pblk_size(BUDDY_MAX_ORDER - i);
                 while (rest_len >= temp_len) {
                     auto temp_pblk = new PageBlock();
-                    auto pblk_node = new ktl::klist_node<PageBlock *>(temp_pblk);
+                    auto pblk_node = new ktl::intrusive_list_node<PageBlock *>(temp_pblk);
 
                     temp_pblk->base = base;
                     temp_pblk->len = temp_len;
@@ -198,7 +198,7 @@ namespace mm {
         gNrFreePages -= pages;
         nr_free_pages_ -= pages;
 
-        return static_cast<ktl::klist_node<PageBlock *> *>(iter._node);
+        return static_cast<ktl::intrusive_list_node<PageBlock *> *>(iter._node);
     }
 
     namespace __detail {
@@ -273,7 +273,7 @@ namespace mm {
                     pblk->order = BUDDY_MAX_ORDER - i;
                     pblk->zone = zone;
 
-                    auto node = new ktl::klist_node<PageBlock *>(pblk);
+                    auto node = new ktl::intrusive_list_node<PageBlock *>(pblk);
                     zone->__new_free(node);
 
                     __base += pblk_size;
@@ -364,7 +364,7 @@ namespace mm {
 
             gPageBlockList.erase(iter);
 
-            auto pblk_node = (ktl::klist_node<mm::PageBlock *> *)iter._node;
+            auto pblk_node = (ktl::intrusive_list_node<mm::PageBlock *> *)iter._node;
             auto zone = (**pblk_node)->zone;
 
             zone->free(pblk_node);

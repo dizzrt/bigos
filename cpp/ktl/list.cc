@@ -61,6 +61,7 @@ namespace ktl {
             _List_node_base *const __prev_node = this->prev;
             __prev_node->next = __next_node;
             __next_node->prev = __prev_node;
+            this->next = this->prev = nullptr;
         }
     }   // namespace __detail
 }   // namespace ktl

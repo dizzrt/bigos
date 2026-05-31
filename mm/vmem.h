@@ -1,13 +1,10 @@
 #ifndef _BIG_VMEM_H
 #define _BIG_VMEM_H
 
+#include <ktl/list.h>
 #include <ktl/pair.h>
 #include <bigos/types.h>
 #include <bigos/attributes.h>
-
-#include "buddy.h"
-#include "memdef.h"
-#include "memory.h"
 
 NAMESPACE_BIGOS_BEG
 namespace mm {
@@ -23,7 +20,7 @@ namespace mm {
         // uint64_t len;
         uint32_t flags;
         uint32_t nr_pages;
-        ktl::klist<ktl::pair<ptr_t, uint32_t>> physical_area;
+        ktl::intrusive_list<ktl::pair<ptr_t, uint32_t>> physical_area;
     };
 
     namespace __detail {
@@ -33,11 +30,11 @@ namespace mm {
     class VMem {
     private:
         friend void __detail::init_vmem();
-        void merge(ktl::klist_node<MemoryBlock *> *__mblk_node) noexcept;
+        void merge(ktl::intrusive_list_node<MemoryBlock *> *__mblk_node) noexcept;
 
         pml4_t pml4_;
-        ktl::klist<MemoryBlock *> free_area_;
-        ktl::klist<MemoryBlock *> used_area_;
+        ktl::intrusive_list<MemoryBlock *> free_area_;
+        ktl::intrusive_list<MemoryBlock *> used_area_;
 
         uint32_t nr_pages_;
         uint32_t nr_free_pages_;

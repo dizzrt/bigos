@@ -5,8 +5,6 @@
 #include <ktl/bitset.h>
 #include <bigos/types.h>
 
-#include "buddy.h"
-
 #define LONG_ALIGN(SIZE) ((SIZE + sizeof(long) - 1) & ~(sizeof(long) - 1))
 
 #define SLAB_HEADER_SIZE  sizeof(bigos::mm::SlabHeader)
@@ -62,8 +60,8 @@ namespace mm {
     private:
         friend class CacheChain;
 
-        ktl::klist<Slab *> avl_list;
-        ktl::klist<Slab *> full_list;
+        ktl::intrusive_list<Slab *> avl_list;
+        ktl::intrusive_list<Slab *> full_list;
 
         uint32_t flags_;
         uint32_t obj_size_;
@@ -87,11 +85,11 @@ namespace mm {
 
     class CacheChain {
     private:
-        ktl::klist<Cache *> cache_list;
+        ktl::intrusive_list<Cache *> cache_list;
 
     public:
         void __add_cache(Cache *__cache) noexcept;
-        void __add_cache(ktl::klist_node<Cache *> *__cache_node) noexcept;
+        void __add_cache(ktl::intrusive_list_node<Cache *> *__cache_node) noexcept;
 
         void *alloc(uint32_t __size, gfm_t __gfm) noexcept _attr_malloc_;
     };

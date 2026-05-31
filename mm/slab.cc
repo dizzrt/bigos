@@ -3,6 +3,7 @@
 #include <bigos/io.h>   // TODO remove later
 
 #include "slab.h"
+#include "buddy.h"
 #include "memory.h"
 #include "memdef.h"
 
@@ -17,9 +18,12 @@ namespace mm {
           chunk_size_(__chunk_size),
           belong_cache_(__belong_cache) {}
 
-    void *Slab::alloc_obj(gfm_t __gfm) {
+    void *Slab::alloc_obj(gfm_t __gfm) noexcept {
         uint64_t offset = scan(1);
-        set(offset);
+        if (offset == ktl::bitset::npos)
+            return nullptr;
+        if (set(offset) != 1)
+            return nullptr;
 
         offset = offset * chunk_size_ + base_;
         new ((SlabHeader *)offset) SlabHeader(this);
@@ -48,7 +52,7 @@ namespace mm {
         va_start(static_slabs, __nr_static_slab_nodes);
 
         while (__nr_static_slab_nodes--) {
-            auto node = va_arg(static_slabs, ktl::klist_node<Slab *> *);
+            auto node = va_arg(static_slabs, ktl::intrusive_list_node<Slab *> *);
             Slab *slab = **node;
             avl_list.insert(node);
 
@@ -80,16 +84,22 @@ namespace mm {
         }
     }
 
-    void *Cache::alloc(gfm_t __gfm) {
+    void *Cache::alloc(gfm_t __gfm) noexcept {
         if (avl_list.empty()) {
             ptr_t heap = alloc_pages(buddy_order_, __gfm);
             ptr8_t bp_heap = (ptr8_t)kmalloc((objs_per_slab_ + 7) / 8, __gfm);
+            if (heap == nullptr || bp_heap == nullptr)
+                return nullptr;
 
             Slab *s = (Slab *)kmalloc(sizeof(Slab));
+            if (s == nullptr)
+                return nullptr;
             new (s) Slab(heap, 0, objs_per_slab_, chunk_size_, this, bp_heap);
 
-            auto s_node = (ktl::klist_node<Slab *> *)kmalloc(sizeof(ktl::klist_node<Slab *>));
-            new (s_node) ktl::klist_node<Slab *>(s);
+            auto s_node = (ktl::intrusive_list_node<Slab *> *)kmalloc(sizeof(ktl::intrusive_list_node<Slab *>));
+            if (s_node == nullptr)
+                return nullptr;
+            new (s_node) ktl::intrusive_list_node<Slab *>(s);
 
             avl_list.insert(s_node);
         }
@@ -112,14 +122,17 @@ namespace mm {
 
     // cache chain
     void CacheChain::__add_cache(Cache *__cache) noexcept {
-        // auto node = new ktl::klist_node<Cache *>(__cache);
-        auto node = (ktl::klist_node<Cache *> *)kmalloc(sizeof(ktl::klist_node<Cache *>), GFM_PERFECT_FIT);
-        new (node) ktl::klist_node<Cache *>(__cache);
+        // auto node = new ktl::intrusive_list_node<Cache *>(__cache);
+        auto node =
+            (ktl::intrusive_list_node<Cache *> *)kmalloc(sizeof(ktl::intrusive_list_node<Cache *>), GFM_PERFECT_FIT);
+        if (node == nullptr)
+            return;
+        new (node) ktl::intrusive_list_node<Cache *>(__cache);
 
         __add_cache(node);
     }
 
-    void CacheChain::__add_cache(ktl::klist_node<Cache *> *__cache_node) noexcept {
+    void CacheChain::__add_cache(ktl::intrusive_list_node<Cache *> *__cache_node) noexcept {
         auto iter = cache_list.begin();
         auto cache = **__cache_node;
         while (iter != cache_list.end()) {

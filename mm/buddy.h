@@ -25,9 +25,9 @@ namespace mm {
     class Zone {
     private:
         friend void handle_ards(uint64_t __base, uint64_t __len) noexcept;
-        void merge(ktl::klist_node<PageBlock *> *__pblk_node) noexcept;
+        void merge(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept;
 
-        ktl::klist<PageBlock *> free_area_[BUDDY_MAX_ORDER + 1];
+        ktl::intrusive_list<PageBlock *> free_area_[BUDDY_MAX_ORDER + 1];
 
         uint32_t nr_pages_;
         uint32_t nr_free_pages_;
@@ -44,11 +44,11 @@ namespace mm {
             return free_area_[__order].size();
         }
 
-        void __base_free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept;
-        void __new_free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept;
-        void free(ktl::klist_node<PageBlock *> *__pblk_node) noexcept;
+        void __base_free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept;
+        void __new_free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept;
+        void free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept;
 
-        ktl::klist_node<PageBlock *> *alloc(uint32_t __order) noexcept;
+        ktl::intrusive_list_node<PageBlock *> *alloc(uint32_t __order) noexcept;
     };
 
     // total number of physical pages

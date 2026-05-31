@@ -27,11 +27,11 @@ void bigos::kput(char c) {
     driver::video::vga::write(c);
 }
 
-void bigos::kputs(const char* s) {
+void bigos::kputs(const char *s) {
     driver::video::vga::write(s);
 }
 
-static uint8_t buffer_append(char* buffer, char* str, uint32_t offset) {
+static uint8_t buffer_append(char *buffer, char *str, uint32_t offset) {
     uint32_t soffset = 0;
     uint32_t slen = strlen(str);
     uint32_t ret = (offset + slen) % 256;
@@ -52,7 +52,7 @@ static uint8_t buffer_append(char* buffer, char* str, uint32_t offset) {
     return ret;
 }
 
-void bigos::kprintf(const char* fmt, ...) {
+void bigos::kprintf(const char *fmt, ...) {
     va_list vlist;
     va_start(vlist, fmt);
 
@@ -67,13 +67,13 @@ void bigos::kprintf(const char* fmt, ...) {
                 c[0] = va_arg(vlist, int);
                 offset_buf = buffer_append(buffer, c, offset_buf);
             } else if (fmt[1] == 's') {
-                char* s = (char*)va_arg(vlist, long long);
+                char *s = (char *)va_arg(vlist, long long);
                 offset_buf = buffer_append(buffer, s, offset_buf);
             } else {
                 // may be a number
                 bool is_long = false;
                 char nbuffer[32] = {0};
-                char* nbuffer_ptr = (char*)&nbuffer;
+                char *nbuffer_ptr = (char *)&nbuffer;
 
                 if (fmt[1] == 'l' && fmt[2] == 'l') {
                     is_long = true;

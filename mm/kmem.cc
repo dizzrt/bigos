@@ -39,12 +39,12 @@ namespace bigos::mm::__detail {
     static uint8_t __static_slab_bp_heap_##NAME[slab_bp_heap_size(OBJ_SIZE)];                                          \
     static bigos::mm::Slab __static_slab_##NAME((ptr_t)__static_slab_heap_##NAME, FLAGS, slab_nr_objs(OBJ_SIZE),       \
         slab_chunk_size(OBJ_SIZE), nullptr, __static_slab_bp_heap_##NAME);                                             \
-    static ktl::klist_node<bigos::mm::Slab *> static_slab_node_##NAME(&__static_slab_##NAME);
+    static ktl::intrusive_list_node<bigos::mm::Slab *> static_slab_node_##NAME(&__static_slab_##NAME);
 
 #define static_cache(NAME, OBJ_SIZE, FLAGS, NR_STATIC_SLABS, ...)                                                      \
     static bigos::mm::Cache __static_cache_##NAME(                                                                     \
         FLAGS, OBJ_SIZE, pblk_perfect_order(OBJ_SIZE), NR_STATIC_SLABS, ##__VA_ARGS__);                                \
-    static ktl::klist_node<bigos::mm::Cache *> static_cache_node_##NAME(&__static_cache_##NAME);
+    static ktl::intrusive_list_node<bigos::mm::Cache *> static_cache_node_##NAME(&__static_cache_##NAME);
 
 // static slabs
 static_slab(1B, sizeof(uint8_t), SLAB_PERMANENT);
@@ -65,8 +65,8 @@ static_slab(slab_1, sizeof(bigos::mm::Slab), SLAB_PERMANENT);
 static_slab(slab_2, sizeof(bigos::mm::Slab), SLAB_PERMANENT);
 static_slab(pblk_1, PAGE_BLOCK_SIZE, SLAB_PERMANENT);
 static_slab(pblk_2, PAGE_BLOCK_SIZE, SLAB_PERMANENT);
-static_slab(klist_node_ptr_1, sizeof(ktl::klist_node<ptr_t>), SLAB_PERMANENT);
-static_slab(klist_node_ptr_2, sizeof(ktl::klist_node<ptr_t>), SLAB_PERMANENT);
+static_slab(intrusive_list_node_ptr_1, sizeof(ktl::intrusive_list_node<ptr_t>), SLAB_PERMANENT);
+static_slab(intrusive_list_node_ptr_2, sizeof(ktl::intrusive_list_node<ptr_t>), SLAB_PERMANENT);
 
 // static caches
 static_cache(1B, sizeof(uint8_t), 0, 1, &static_slab_node_1B);
@@ -85,8 +85,8 @@ static_cache(2048B, sizeof(uint64_t), 0, 1, &static_slab_node_2048B);
 static_cache(cache, sizeof(bigos::mm::Cache), 0, 1, &static_slab_node_cache);
 static_cache(slab, sizeof(bigos::mm::Slab), 0, 2, &static_slab_node_slab_1, &static_slab_node_slab_2);
 static_cache(pblk, PAGE_BLOCK_SIZE, 0, 2, &static_slab_node_pblk_1, &static_slab_node_pblk_2);
-static_cache(klist_node_ptr, sizeof(ktl::klist_node<ptr_t>), 0, 2, &static_slab_node_klist_node_ptr_1,
-    &static_slab_node_klist_node_ptr_2);
+static_cache(intrusive_list_node_ptr, sizeof(ktl::intrusive_list_node<ptr_t>), 0, 2, &static_slab_node_intrusive_list_node_ptr_1,
+    &static_slab_node_intrusive_list_node_ptr_2);
 
 static bigos::mm::CacheChain kmem_cache;
 
@@ -110,7 +110,7 @@ namespace mm {
             kmem_cache.__add_cache(&static_cache_node_cache);
             kmem_cache.__add_cache(&static_cache_node_slab);
             kmem_cache.__add_cache(&static_cache_node_pblk);
-            kmem_cache.__add_cache(&static_cache_node_klist_node_ptr);
+            kmem_cache.__add_cache(&static_cache_node_intrusive_list_node_ptr);
         }
     }   // namespace __detail
 
@@ -122,11 +122,11 @@ namespace mm {
 }   // namespace mm
 
 // defined in memory.h
-void *kmalloc(size_t __size, gfm_t __gfm) {
+void *kmalloc(size_t __size, gfm_t __gfm) noexcept {
     return kmem_cache.alloc(__size, __gfm);
 }
 
-void free(const void *__p) {
+void free(const void *__p) noexcept {
     uint64_t addr = (uint64_t)__p;
     auto slab_header = (mm::SlabHeader *)(addr - SLAB_HEADER_SIZE);
 

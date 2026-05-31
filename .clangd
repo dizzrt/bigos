@@ -7,3 +7,8 @@ CompileFlags:
     - -fno-exceptions
     - -std=c++17
     - -Iinclude
+    - -Icpp/include
+    - -Icpp/libsupc++/include
+    - -Idrivers/include
+    - -Imm
+    - -Imm/include

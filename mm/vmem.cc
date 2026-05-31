@@ -2,6 +2,9 @@
 #include <bigos/io.h>   //TODO remove later
 
 #include "vmem.h"
+#include "buddy.h"
+#include "memdef.h"
+#include "memory.h"
 
 #define KVMEM_LEN        0x10000000000ul
 #define KVMEM_BASE       0xffff880000000000ul
@@ -50,7 +53,7 @@ namespace mm {
             mblk->nr_pages = KVMEM_LEN / PAGE_SIZE;
             mblk->flags = 0;
 
-            auto node = new ktl::klist_node<MemoryBlock *>(mblk);
+            auto node = new ktl::intrusive_list_node<MemoryBlock *>(mblk);
 
             kvmem.pml4_ = (pml4_t)KERNEL_PML4_ADDR;
             kvmem.free_area_.insert(node);
@@ -59,7 +62,7 @@ namespace mm {
         }
     }   // namespace __detail
 
-    void VMem::set_paging(MemoryBlock *__mblk) {
+    void VMem::set_paging(MemoryBlock *__mblk) noexcept {
         uint64_t base = __mblk->base;
 
         uint16_t i_pml4 = get_pml4_index(base);
@@ -136,22 +139,22 @@ namespace mm {
         }
     }
 
-    void VMem::merge(ktl::klist_node<MemoryBlock *> *__mblk_node) {
+    void VMem::merge(ktl::intrusive_list_node<MemoryBlock *> *__mblk_node) noexcept {
         MemoryBlock *mblk = **__mblk_node;
 
         uint64_t end_addr;
         MemoryBlock *adjacent_mblk = nullptr;
-        ktl::klist_node<MemoryBlock *> *adjacent_mblk_node = nullptr;
+        ktl::intrusive_list_node<MemoryBlock *> *adjacent_mblk_node = nullptr;
 
         // try to merge with next one
         if (__mblk_node->next != nullptr) {
-            adjacent_mblk_node = (ktl::klist_node<MemoryBlock *> *)__mblk_node->next;
+            adjacent_mblk_node = (ktl::intrusive_list_node<MemoryBlock *> *)__mblk_node->next;
             adjacent_mblk = **adjacent_mblk_node;
 
             end_addr = mblk->base + mblk->nr_pages * PAGE_SIZE;
             if (end_addr == adjacent_mblk->base) {
-                auto iter = ktl::klist<MemoryBlock *>::iterator(__mblk_node);
-                auto iter_next = ktl::klist<MemoryBlock *>::iterator(adjacent_mblk_node);
+                auto iter = ktl::intrusive_list<MemoryBlock *>::iterator(__mblk_node);
+                auto iter_next = ktl::intrusive_list<MemoryBlock *>::iterator(adjacent_mblk_node);
 
                 free_area_.erase(iter);
                 free_area_.erase(iter_next);
@@ -176,13 +179,13 @@ namespace mm {
 
         // try to merge with previous one
         if (__mblk_node->prev != nullptr) {
-            adjacent_mblk_node = (ktl::klist_node<MemoryBlock *> *)__mblk_node->prev;
+            adjacent_mblk_node = (ktl::intrusive_list_node<MemoryBlock *> *)__mblk_node->prev;
             adjacent_mblk = **adjacent_mblk_node;
 
             end_addr = adjacent_mblk->base + adjacent_mblk->nr_pages * PAGE_SIZE;
             if (end_addr == mblk->base) {
-                auto iter = ktl::klist<MemoryBlock *>::iterator(__mblk_node);
-                auto iter_prev = ktl::klist<MemoryBlock *>::iterator(adjacent_mblk_node);
+                auto iter = ktl::intrusive_list<MemoryBlock *>::iterator(__mblk_node);
+                auto iter_prev = ktl::intrusive_list<MemoryBlock *>::iterator(adjacent_mblk_node);
 
                 free_area_.erase(iter);
                 free_area_.erase(iter_prev);
@@ -206,7 +209,7 @@ namespace mm {
         }
     }
 
-    void VMem::__free(const void *__p) {
+    void VMem::__free(const void *__p) noexcept {
         uint64_t addr = (uint64_t)__p;
 
         auto iter = used_area_.begin();
@@ -241,10 +244,10 @@ namespace mm {
         }
 
         free_area_.insert(insert_position, iter._node);
-        merge((ktl::klist_node<MemoryBlock *> *)iter._node);
+        merge((ktl::intrusive_list_node<MemoryBlock *> *)iter._node);
     }
 
-    MemoryBlock *VMem::__alloc_pages(uint32_t __pages, gfm_t __gfm) {
+    MemoryBlock *VMem::__alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept {
         if (nr_free_pages_ < __pages)
             return nullptr;
 
@@ -263,7 +266,7 @@ namespace mm {
 
             mblk->nr_pages = __pages;
 
-            auto node = new ktl::klist_node<MemoryBlock *>(new_mblk);
+            auto node = new ktl::intrusive_list_node<MemoryBlock *>(new_mblk);
             free_area_.insert(node);
         }
 
@@ -273,7 +276,7 @@ namespace mm {
 }   // namespace mm
 
 // defined in memory.h
-void *alloc_pages(uint32_t __pages, gfm_t __gfm) {
+void *alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept {
     mm::MemoryBlock *mblk = kvmem.__alloc_pages(__pages, __gfm);
 
     // set paging in advance
@@ -286,7 +289,7 @@ void *alloc_pages(uint32_t __pages, gfm_t __gfm) {
                 void *physical_addr = mm::__detail::alloc_physical_pages(buddy_order, 0);
 
                 auto pair = ktl::make_pair<ptr_t, uint32_t>(physical_addr, nr_pages_by_order);
-                auto node = new ktl::klist_node<ktl::pair<void *, uint32_t>>(pair);
+                auto node = new ktl::intrusive_list_node<ktl::pair<void *, uint32_t>>(pair);
 
                 mblk->physical_area.insert(node);
                 nr_pages -= nr_pages_by_order;
@@ -299,7 +302,7 @@ void *alloc_pages(uint32_t __pages, gfm_t __gfm) {
     return reinterpret_cast<void *>(mblk->base);
 }
 
-void free_pages(const void *__p) {
+void free_pages(const void *__p) noexcept {
     kvmem.__free(__p);
 }
 NAMESPACE_BIGOS_END
