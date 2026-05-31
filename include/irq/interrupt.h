@@ -1,26 +1,17 @@
-//
-// File: interrupt.h
-// Created by Dizzrt on 2023/08/31.
-//
-// Copyright (C) 2023 The BigOS Authors.
-// Licensed under the GNU General Public License v3.0 only.
-//
-
 #ifndef _BIG_INTERRUPT_H
 #define _BIG_INTERRUPT_H
 
 #include <bigos/types.h>
 
-// interrupt descriptor table
-#define IDT_SIZE 0x1000
-#define IDT_BASE 0x1000ul
+// idt = interrupt descriptor table
+#define IDT_SIZE  0x1000
+#define IDT_BASE  0x1000ul
+#define IRQ_COUNT (IDT_SIZE / sizeof(bigos::irq::INTRDescriptor))
 
 NAMESPACE_BIGOS_BEG
-namespace intr {
+namespace irq {
     namespace __detail {
-        void initIDT() noexcept;
-
-        struct GateAttributes {
+        struct INTRAttributes {
             uint16_t ist : 3;
             uint16_t reserved_0 : 5;
             uint16_t type : 4;
@@ -28,14 +19,16 @@ namespace intr {
             uint16_t dpl : 2;
             uint16_t p : 1;
         } __attribute__((packed));
+
+        void initIDT() noexcept;
     }   // namespace __detail
 
-    struct Gate {
+    struct INTRDescriptor {
         uint16_t offset_low;
         uint16_t selector;
         union {
             uint16_t attributes_brief;
-            __detail::GateAttributes attributes;
+            __detail::INTRAttributes attributes;
         };
         uint16_t offset_mid;
         uint32_t offset_high;
@@ -46,6 +39,11 @@ namespace intr {
             offset_low = isr_address;
             offset_mid = isr_address >> 16;
             offset_high = isr_address >> 32;
+        }
+
+        INTRDescriptor() = default;
+        INTRDescriptor(void *isr) {
+            this->setISR(isr);
         }
     };
 
@@ -59,7 +57,7 @@ namespace intr {
         asm volatile("cli");
     }
 
-    void initINTR() noexcept;
-}   // namespace intr
+    void initIRQ() noexcept;
+}   // namespace irq
 NAMESPACE_BIGOS_END
 #endif   // _BIG_INTERRUPT_H

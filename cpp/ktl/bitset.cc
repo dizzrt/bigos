@@ -1,11 +1,3 @@
-//
-// File: bitset.cc
-// Created by Dizzrt on 2023/04/05.
-//
-// Copyright (C) 2023 The BigOS Authors.
-// Licensed under the GNU General Public License v3.0 only.
-//
-
 #include <ktl/bitset.h>
 
 namespace ktl {

@@ -1,11 +1,3 @@
-//
-// File: new.cc
-// Created by Dizzrt on 2023/04/08.
-//
-// Copyright (C) 2023 The BigOS Authors.
-// Licensed under the GNU General Public License v3.0 only.
-//
-
 #include <memory.h>
 #include <bigos/types.h>
 

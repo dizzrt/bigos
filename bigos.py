@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-# File: bigos.py
-# Created by Dizzrt on 2023/08/07.
-#
-# Copyright (C) 2023 The BigOS Authors.
-# Licensed under the GNU General Public License v3.0 only.
-#
-
-import sys
 import signal
-import getopt
 import subprocess
+import sys
+from getopt import GetoptError, gnu_getopt
 
 SHORT_OPTS = "hbir"
 LONG_OPTS = [
@@ -28,18 +21,18 @@ OPT_BUILD_KERNEL = "BUILD_KERNEL"
 OPT_INSTALL_KERNEL = "INSTALL_KERNEL"
 OPT_RUN = "RUN"
 
-SUBPROCESS: subprocess.Popen = None
+SUBPROCESS: subprocess.Popen[str] | None = None
 
 
 def help():
     print("Usage: bigos [option...]")
-    print("  %-30s%s" % ("-h, --help", "Display this information"))
-    print("  %-30s%s" % ("-b", "build kernel, but do not install"))
-    print("  %-30s%s" % ("-i", "build and install kernel"))
-    print("  %-30s%s" % ("-r, --run", "run kernel in bochs"))
-    print("  %-30s%s" % ("--init-disk", "build and install mbr, dbr ..."))
-    print("  %-30s%s" % ("--install-boot", "build and install bootloader"))
-    print("  %-30s%s" % ("--build-lib", "build libs which kernel needs"))
+    print(f"  {'-h, --help':<30}Display this information")
+    print(f"  {'-b':<30}build kernel, but do not install")
+    print(f"  {'-i':<30}build and install kernel")
+    print(f"  {'-r, --run':<30}run kernel in bochs")
+    print(f"  {'--init-disk':<30}build and install mbr, dbr ...")
+    print(f"  {'--install-boot':<30}build and install bootloader")
+    print(f"  {'--build-lib':<30}build libs which kernel needs")
     return None
 
 
@@ -77,15 +70,15 @@ class Log:
         exit(code)
 
 
-def parseOpts(argv) -> (dict, slice):
+def parseOpts(argv: list[str]) -> tuple[dict[str, bool], list[str]]:
     try:
-        opts, args = getopt.gnu_getopt(argv, SHORT_OPTS, LONG_OPTS)
-    except getopt.GetoptError as error:
+        opts, args = gnu_getopt(argv, SHORT_OPTS, LONG_OPTS)
+    except GetoptError as error:
         Log.error(error)
         return ({}, [])
 
     taskMap = {}
-    for opt, val in opts:
+    for opt, _val in opts:
         if opt in ["-h", "--help"]:
             taskMap[OPT_HELP] = True
         elif opt in ["--init-disk"]:
@@ -159,7 +152,7 @@ def run():
 
 
 def main(argv):
-    taskMap, args = parseOpts(argv)
+    taskMap, _args = parseOpts(argv)
     if taskMap.get(OPT_HELP, False):
         help()
     if taskMap.get(OPT_INIT_DISK, False):

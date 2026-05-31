@@ -1,11 +1,3 @@
-//
-// File: slab.cc
-// Created by Dizzrt on 2023/04/15.
-//
-// Copyright (C) 2023 The BigOS Authors.
-// Licensed under the GNU General Public License v3.0 only.
-//
-
 #include <new>
 #include <stdarg.h>
 #include <bigos/io.h>   // TODO remove later

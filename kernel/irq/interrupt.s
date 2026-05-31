@@ -1,11 +1,3 @@
-# 
-# File: interrupt.s
-# Created by Dizzrt on 2023/04/29.
-# 
-# Copyright (C) 2023 The BigOS Authors.
-# Licensed under the GNU General Public License v3.0 only.
-# 
-
 .file "interrupt.s"
 .code64
 
@@ -49,8 +41,8 @@ pre_call_isr_with_ecode:
 .data
 .extern isr_list
 
-.globl isr_entry_list
-isr_entry_list:
+.globl isr_entries
+isr_entries:
 
 .macro isr_entry irq_num, has_ecode = 0
 .text

@@ -1,11 +1,3 @@
-//
-// File: i8259.cc
-// Created by Dizzrt on 2023/04/26.
-//
-// Copyright (C) 2023 The BigOS Authors.
-// Licensed under the GNU General Public License v3.0 only.
-//
-
 #include <irqchip/i8259.h>
 
 #include <bigos/io.h>

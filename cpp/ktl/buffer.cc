@@ -1,11 +1,3 @@
-//
-// File: buffer.cc
-// Created by Dizzrt on 2023/04/30.
-//
-// Copyright (C) 2023 The BigOS Authors.
-// Licensed under the GNU General Public License v3.0 only.
-//
-
 #include <ktl/buffer.h>
 
 #include <string.h>

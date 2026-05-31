@@ -1,11 +1,3 @@
-# 
-# File: mbr.s
-# Created by Dizzrt on 2023/03/10.
-# 
-# Copyright (C) 2023 The BigOS Authors.
-# Licensed under the GNU General Public License v3.0 only.
-# 
-
 # this mbr will copy itself to 0x9fc00
 # and then load the dbr to 0x9fe00
 

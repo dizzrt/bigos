@@ -1,11 +1,3 @@
-# 
-# File: dbr_exfat.s
-# Created by Dizzrt on 2023/03/10.
-# 
-# Copyright (C) 2023 The BigOS Authors.
-# Licensed under the GNU General Public License v3.0 only.
-# 
-
 .file "dbr_exfat.s"
 .code16
 .text

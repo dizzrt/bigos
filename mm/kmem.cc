@@ -1,11 +1,3 @@
-//
-// File: kmem.cc
-// Created by Dizzrt on 2023/04/15.
-//
-// Copyright (C) 2023 The BigOS Authors.
-// Licensed under the GNU General Public License v3.0 only.
-//
-
 #include <type_traits>
 #include <bigos/io.h>   // TODO remove later
 
