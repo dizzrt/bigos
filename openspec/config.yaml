@@ -76,10 +76,40 @@ rules:
       that layer.
   tasks:
     - Break work by subsystem and keep each task independently reviewable.
-    - Include validation steps such as build, static checks, emulator smoke test,
-      or targeted low-level test where practical.
+    - Match validation tasks to the change impact area, including build, static
+      checks, emulator smoke test, or targeted low-level test where practical.
+    - For runtime changes under kernel, mm, drivers, cpp, include, arch, or
+      lib/src, include the narrowest useful validation for the affected code path
+      or explicitly record why the validation cannot run.
     - Call out manual setup needed for x86_64-elf-gcc, xmake, Bochs, or disk
       image paths.
+    - For changes that add or modify C++ source, C++ headers, kernel C++ support,
+      KTL code, or C++ build configuration, include clang and clangd auxiliary
+      static-check tasks, or record why either tool is unavailable or not
+      applicable.
+    - For C++ changes, fix clang/clangd errors introduced by the current change
+      before marking related implementation tasks complete, and confirm or fix
+      valid new warnings. Validation notes must distinguish historical
+      diagnostics, current-change diagnostics, and toolchain or freestanding
+      configuration false positives.
+    - Configure C++ auxiliary checks as close as practical to the GCC cross-build
+      environment: freestanding C++17, x86_64 target, project include paths,
+      no hosted runtime assumptions, no exceptions, and no RTTI. If equivalent
+      clang or clangd flags are unavailable, document the gap and remaining risk.
+    - Treat clang and clangd as auxiliary diagnostic signals only. They do not
+      replace xmake with x86_64-elf-gcc/x86_64-elf-g++ or an equivalent targeted
+      GCC cross-toolchain build for runtime C++ changes.
+    - For boot, linker, handoff, page-table, or address-layout changes, include
+      bootability, ABI/layout compatibility, and address-assumption review tasks.
+    - For buddy, slab, kmalloc, virtual memory, or early memory initialization
+      changes, include initialization-order, allocation-phase, object-lifetime,
+      alignment, and failure-behavior review tasks.
+    - For IRQ, PIC, port IO, MMIO, or driver-state changes, include interrupt
+      safety, reentrancy, hardware-access ordering, and visible-failure review
+      tasks.
+    - Validation records must separate checks that passed, checks that could not
+      run with reasons and remaining risk, historical diagnostics, and issues
+      introduced by the current change.
     - For changes that add or modify Python files, include tasks to run
       `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, and
       `uv run pytest`.
