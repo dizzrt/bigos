@@ -7,9 +7,9 @@
 #warning It is recommended to build with GCC
 #endif
 
-#include <video/vga.h>
+#include <drivers/video/vga.h>
 
-#include <memory.h>
+#include <bigos/memory.h>
 #include <irq/interrupt.h>
 
 #include <bigos/io.h>

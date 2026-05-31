@@ -40,15 +40,17 @@ Not implemented or still skeletal:
 
 ```text
 .
-|-- arch/x86/boot     x86 boot code, MBR/DBR, ELF loader, disk install helper
 |-- cpp               kernel C++ support library, KTL, libsupc++ subset
-|-- drivers           hardware drivers such as VGA and i8259 PIC
 |-- include           public kernel headers and small libc-style header subset
-|-- kernel            kernel entry, IRQ, IO, string, console/TTY skeletons
-|-- lib/src           runtime startup assembly objects
-|-- mm                buddy, slab, kmalloc, and virtual memory code
+|-- src               implementation sources for boot, kernel, drivers, mm, runtime
+|   |-- arch/x86/boot x86 boot code, MBR/DBR, and ELF loader
+|   |-- drivers       hardware drivers such as VGA and i8259 PIC
+|   |-- kernel        kernel entry, IRQ, IO, string, console/TTY skeletons
+|   |-- mm            buddy, slab, kmalloc, and virtual memory code
+|   `-- runtime       runtime startup assembly source objects
+|-- tools             developer helpers such as the boot disk install tool
 |-- openspec          OpenSpec project configuration
-|-- test              Bochs config, virtual disk image, low-level test snippets
+|-- tests             validation tests and local test assets
 |-- link.lds          kernel linker script
 |-- toolchains.lua    xmake cross-toolchain definition
 |-- xmake.lua         primary build configuration
@@ -88,9 +90,9 @@ kernel()
 
 Key files:
 
-- `arch/x86/boot/boot.s`: early CPU mode switch and jump to the kernel.
-- `arch/x86/boot/boot.cc`: disk read, exFAT lookup, ELF loading.
-- `kernel/kernel.cc`: main kernel entry.
+- `src/arch/x86/boot/boot.s`: early CPU mode switch and jump to the kernel.
+- `src/arch/x86/boot/boot.cc`: disk read, exFAT lookup, ELF loading.
+- `src/kernel/kernel.cc`: main kernel entry.
 - `link.lds`: higher-half kernel layout.
 
 ## Build And Run
@@ -162,16 +164,16 @@ Notes:
 The bootloader is specific to x86/x86_64 and assumes a disk image layout that can
 provide an exFAT partition containing a file named `kernel`.
 
-- `mbr.s`: first-stage boot code.
-- `dbr_exfat.s`: exFAT boot-sector code.
-- `exdbr_exfat.s`: extended exFAT boot code.
-- `boot.s`: mode switching, early page tables, and transfer to long mode.
-- `boot.cc`: ATA disk reads, exFAT directory scan, and ELF64 load.
-- `install.py`: helper for writing boot sectors into a virtual disk image.
+- `src/arch/x86/boot/mbr.s`: first-stage boot code.
+- `src/arch/x86/boot/dbr_exfat.s`: exFAT boot-sector code.
+- `src/arch/x86/boot/exdbr_exfat.s`: extended exFAT boot code.
+- `src/arch/x86/boot/boot.s`: mode switching, early page tables, and transfer to long mode.
+- `src/arch/x86/boot/boot.cc`: ATA disk reads, exFAT directory scan, and ELF64 load.
+- `tools/install.py`: helper for writing boot sectors into a virtual disk image.
 
 ### Kernel Entry
 
-`kernel/kernel.cc` currently performs the minimal runtime setup:
+`src/kernel/kernel.cc` currently performs the minimal runtime setup:
 
 - Clears the VGA text screen.
 - Calls `bigos::init_mem()`.
@@ -181,22 +183,23 @@ provide an exFAT partition containing a file named `kernel`.
 
 ### Memory Management
 
-The memory subsystem lives under `mm/`.
+The memory subsystem lives under `src/mm/`.
 
-- `buddy.cc`: parses the BIOS memory map, separates DMA/DMA32/NORMAL zones, and
+- `src/mm/buddy.cc`: parses the BIOS memory map, separates DMA/DMA32/NORMAL zones, and
   manages physical page blocks.
-- `slab.cc` and `kmem.cc`: provide fixed-size caches and `kmalloc/free`.
-- `vmem.cc`: tracks kernel virtual address blocks and can pre-map allocated pages.
-- `memdef.h`: defines page size, buddy order, and allocation flags.
+- `src/mm/slab.cc` and `src/mm/kmem.cc`: provide fixed-size caches and `kmalloc/free`.
+- `src/mm/vmem.cc`: tracks kernel virtual address blocks and can pre-map allocated pages.
+- `include/bigos/memory.h`: exposes the public allocation API.
+- `src/mm/memdef.h`: defines mm-private page size, buddy order, and allocation flags.
 
 ### Interrupts And Input
 
 The interrupt subsystem combines assembly stubs and C++ descriptors.
 
-- `kernel/irq/interrupt.s`: generated ISR entry stubs.
-- `kernel/irq/interrupt.cc`: IDT initialization and default IRQ handler.
-- `drivers/irqchip/i8259.cc`: PIC masking and EOI support.
-- `kernel/irq/isr/isr_keyboard.cc`: keyboard scan-code parsing and temporary VGA
+- `src/kernel/irq/interrupt.s`: generated ISR entry stubs.
+- `src/kernel/irq/interrupt.cc`: IDT initialization and default IRQ handler.
+- `src/drivers/irqchip/i8259.cc`: PIC masking and EOI support.
+- `src/kernel/irq/isr.cc`: keyboard scan-code parsing and temporary VGA
   character output.
 
 Keyboard input is not yet routed through a complete TTY layer.
@@ -205,8 +208,8 @@ Keyboard input is not yet routed through a complete TTY layer.
 
 VGA text mode is the current display backend.
 
-- `drivers/video/vga.cc`: text buffer writes, cursor movement, screen clearing.
-- `kernel/bigos/io.cc`: port IO wrappers and basic kernel printing.
+- `src/drivers/video/vga.cc`: text buffer writes, cursor movement, screen clearing.
+- `src/kernel/bigos/io.cc`: port IO wrappers and basic kernel printing.
 
 ### Kernel C++ Support
 

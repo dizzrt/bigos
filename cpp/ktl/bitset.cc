@@ -1,5 +1,5 @@
 #include <ktl/bitset.h>
-#include <memory.h>
+#include <bigos/memory.h>
 #include <string.h>
 
 namespace ktl {

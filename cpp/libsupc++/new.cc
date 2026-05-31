@@ -1,4 +1,4 @@
-#include <memory.h>
+#include <bigos/memory.h>
 #include <bigos/types.h>
 
 // operator new

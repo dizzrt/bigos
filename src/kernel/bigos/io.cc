@@ -1,7 +1,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <bigos/io.h>
-#include <video/vga.h>
+#include <drivers/video/vga.h>
 #include <bigos/utils.h>
 
 uint8_t bigos::inb(uint16_t port) {

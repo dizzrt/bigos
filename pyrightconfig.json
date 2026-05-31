@@ -1,7 +1,7 @@
 {
   "include": [
     "bigos.py",
-    "arch/x86/boot/install.py",
+    "tools/install.py",
     "tests"
   ],
   "exclude": [

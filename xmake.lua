@@ -12,9 +12,6 @@ add_rules("mode.debug", "mode.release")
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
-add_includedirs("$(projectdir)/drivers/include")
-add_includedirs("$(projectdir)/mm")
-add_includedirs("$(projectdir)/mm/include")
 
 add_cxxflags("-mno-sse","-mno-sse2", "-mno-mmx", "-mcmodel=kernel", "-ffreestanding", "-mno-red-zone", "-fno-rtti", "-fno-exceptions")
 
@@ -28,11 +25,11 @@ target("kernel")
     -- O2 optimize
     set_optimize("faster")
     
-    add_files("kernel/**.cc")
-    add_files("kernel/**.s")
+    add_files("src/kernel/**.cc")
+    add_files("src/kernel/**.s")
+    add_files("src/drivers/**.cc")
+    add_files("src/mm/**.cc")
     add_files("cpp/**.cc")
-    add_files("drivers/**.cc")
-    add_files("mm/**.cc")
 
     if is_mode("debug") then 
         set_symbols("debug")

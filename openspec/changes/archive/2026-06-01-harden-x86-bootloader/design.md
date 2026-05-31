@@ -8,7 +8,7 @@ BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> higher-half ELF64 kernel
 
 这条启动链短小且显式，但依赖若干隐式契约：
 
-- MBR 分区表项由 `install.py` 直接从磁盘镜像读取。
+- MBR 分区表项由 `tools/install.py` 直接从磁盘镜像读取。
 - BIOS boot drive 初始位于 `DL`，被保存到 `0x802`，但后续阶段复用并不一致。
 - 扩展 DBR 将 E820 和其他启动数据存放在固定低地址。
 - `boot.cc` 假设 exFAT 目录布局简单，且 ELF 只有一个 load segment。
@@ -84,7 +84,7 @@ handoff address、字段 offset 常量和 C-compatible packed struct，不依赖
 备选方案：
 
 - 继续保留魔法地址，仅补文档。该方案侵入性更低，但无法防止未来 producer/consumer 意外不匹配。
-- 只在 `boot.cc` 或 `mm/buddy.cc` 附近定义结构。该方案局部简单，但 assembly、boot C++
+- 只在 `boot.cc` 或 `src/mm/buddy.cc` 附近定义结构。该方案局部简单，但 assembly、boot C++
   和 kernel C++ 很容易复制出不一致的 offset。
 
 ### 保留固定早期地址布局并补充文档
@@ -113,7 +113,7 @@ handoff address、字段 offset 常量和 C-compatible packed struct，不依赖
 
 ### 实现最小 exFAT 感知安装
 
-`install.py` 将负责把生成的 `boot.bin` 写入受支持的 exFAT 磁盘镜像布局；如果所需目录/文件放置无法安全更新，则以明确诊断失败。该 change 只支持已有、连续、容量足够的 `/boot/boot.bin`；`install.py` 不负责新建文件、扩展文件、分配 cluster、更新 allocation bitmap，或生成新的 exFAT 目录项。
+`tools/install.py` 将负责把生成的 `boot.bin` 写入受支持的 exFAT 磁盘镜像布局；如果所需目录/文件放置无法安全更新，则以明确诊断失败。该 change 只支持已有、连续、容量足够的 `/boot/boot.bin`；`tools/install.py` 不负责新建文件、扩展文件、分配 cluster、更新 allocation bitmap，或生成新的 exFAT 目录项。
 
 必要行为：
 
@@ -132,7 +132,7 @@ handoff address、字段 offset 常量和 C-compatible packed struct，不依赖
 备选方案：
 
 - 要求用户手动挂载镜像并复制 `boot.bin`。这更容易实现，但会让构建/安装路径不完整且不可重复。
-- 让 `install.py` 创建或扩展 `/boot/boot.bin`。这能降低镜像准备成本，但等价于实现更多
+- 让 `tools/install.py` 创建或扩展 `/boot/boot.bin`。这能降低镜像准备成本，但等价于实现更多
   exFAT 写路径，不符合“不实现完整 exFAT”的非目标。
 
 ### 为磁盘读取增加超时和错误码
@@ -177,7 +177,7 @@ BIOS 和 ATA 读循环都应在明确失败条件下停止：
 
 ## 风险 / 权衡
 
-- [风险] 引入 `BootInfo` 时 producer 和 consumer 布局不一致会破坏 `mm/buddy.cc` -> [缓解] 在 kernel consumer 迁移并验证前保留现有魔法地址兼容写入。
+- [风险] 引入 `BootInfo` 时 producer 和 consumer 布局不一致会破坏 `src/mm/buddy.cc` -> [缓解] 在 kernel consumer 迁移并验证前保留现有魔法地址兼容写入。
 - [风险] 写入 exFAT 中的 `boot.bin` 时，如果误解 FAT 分配，可能损坏镜像 -> [缓解] 初期只支持连续预分配目标空间，校验容量，并 fail closed。
 - [风险] ELF 多段加载可能因畸形 segment 覆盖页表或 bootloader 内存 -> [缓解] 读入前校验目标范围不与文档化保留区域冲突。
 - [风险] 超时常量对某些模拟器或磁盘过低 -> [缓解] 使用保守重试次数，并将常量命名以便调参。
@@ -201,7 +201,7 @@ BIOS 和 ATA 读循环都应在明确失败条件下停止：
 
 ## 已确认决策
 
-- `boot.bin` 安装要求镜像中已有预分配、连续、容量足够的 `/boot/boot.bin`；`install.py`
+- `boot.bin` 安装要求镜像中已有预分配、连续、容量足够的 `/boot/boot.bin`；`tools/install.py`
   只做受支持布局的定位、校验和覆盖写入。
 - canonical `BootInfo` ABI 定义放在公共 x86 boot handoff 头中，并用 offset 常量和
   `static_assert` 防止 assembly、boot C++ 与 kernel C++ 布局漂移。

@@ -9,6 +9,3 @@ CompileFlags:
     - -Iinclude
     - -Icpp/include
     - -Icpp/libsupc++/include
-    - -Idrivers/include
-    - -Imm
-    - -Imm/include

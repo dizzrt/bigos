@@ -10,7 +10,7 @@ Define the project-level quality assurance requirements for BigOS OpenSpec chang
 
 #### Scenario: Change 影响内核运行时代码
 
-- **WHEN** OpenSpec change 修改 `kernel`、`mm`、`drivers`、`cpp`、`include`、`arch` 或 `lib/src` 下的内核运行时代码
+- **WHEN** OpenSpec change 修改 `src/kernel`、`src/mm`、`src/drivers`、`cpp`、`include`、`src/arch` 或 `src/runtime` 下的内核运行时代码
 - **THEN** 其 tasks 必须（MUST）包含适用于受影响区域的构建、静态检查、emulator smoke test 或 targeted low-level test
 
 #### Scenario: Change 仅修改文档

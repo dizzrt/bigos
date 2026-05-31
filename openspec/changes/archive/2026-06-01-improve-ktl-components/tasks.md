@@ -67,8 +67,8 @@
 
 ## 验证记录
 
-- `x86_64-elf-g++ -std=c++17 -ffreestanding ... -fsyntax-only cpp/ktl/bitset.cc cpp/ktl/buffer.cc cpp/ktl/list.cc mm/slab.cc mm/buddy.cc mm/vmem.cc mm/kmem.cc`：通过。
-- `clang++ --target=x86_64-elf -std=c++17 -ffreestanding ... -fsyntax-only cpp/ktl/bitset.cc cpp/ktl/buffer.cc cpp/ktl/list.cc mm/slab.cc mm/buddy.cc mm/vmem.cc mm/kmem.cc`：通过。
+- `x86_64-elf-g++ -std=c++17 -ffreestanding ... -fsyntax-only cpp/ktl/bitset.cc cpp/ktl/buffer.cc cpp/ktl/list.cc src/mm/slab.cc src/mm/buddy.cc src/mm/vmem.cc src/mm/kmem.cc`：通过。
+- `clang++ --target=x86_64-elf -std=c++17 -ffreestanding ... -fsyntax-only cpp/ktl/bitset.cc cpp/ktl/buffer.cc cpp/ktl/list.cc src/mm/slab.cc src/mm/buddy.cc src/mm/vmem.cc src/mm/kmem.cc`：通过。
 - `x86_64-elf-g++` 和 `clang++` 对包含 `algorithm`、`allocator`、`queue`、`priority_queue`、`rb_tree`、`map` 的聚焦头文件检查：通过。
-- `xmake`：已运行，但当前全量构建在 `kernel/irq/isr.cc` 的既有 `irq_handler`/`MAX_IRQ_NUM` 诊断处失败，未到达链接和 Bochs smoke test。
+- `xmake`：已运行，但当前全量构建在 `src/kernel/irq/isr.cc` 的既有 `irq_handler`/`MAX_IRQ_NUM` 诊断处失败，未到达链接和 Bochs smoke test。
 - 旧名搜索：`ktl::Buffer`、`ktl::klist`、`ktl::klist_node`、旧名 alias/typedef 在活动代码和 `docs/ktl` 中未发现。

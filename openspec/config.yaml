@@ -21,18 +21,19 @@ context: |
   - Python scripts are auxiliary build/install helpers, not the core runtime.
 
   Major directories:
-  - arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, ELF loader,
-    and disk-image install helper.
-  - kernel: kernel entry, IRQ setup, low-level IO, string functions, console/TTY
+  - src/arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, and
+    ELF loader.
+  - src/kernel: kernel entry, IRQ setup, low-level IO, string functions, console/TTY
     skeletons.
-  - mm: buddy physical page allocator, slab/kmalloc allocator, and virtual memory
-    area/page-table mapping framework.
-  - drivers: VGA text-mode driver and i8259 PIC driver.
+  - src/mm: buddy physical page allocator, slab/kmalloc allocator, and virtual
+    memory area/page-table mapping framework.
+  - src/drivers: VGA text-mode driver and i8259 PIC driver.
+  - src/runtime: startup objects such as crt0, crti, and crtn.
+  - tools: developer helper scripts such as the boot disk-image install helper.
   - cpp: small kernel C++ support library, KTL containers, new/delete, and minimal
     libsupc++/ABI support.
   - include: public kernel headers and small libc-style header subset.
-  - lib/src: startup objects such as crt0, crti, and crtn.
-  - test: Bochs configuration, virtual disk image, and low-level test snippets.
+  - tests: validation tests and local test assets.
 
   Current maturity:
   - The project is in kernel infrastructure bring-up stage.
@@ -89,8 +90,8 @@ rules:
     - Break work by subsystem and keep each task independently reviewable.
     - Match validation tasks to the change impact area, including build, static
       checks, emulator smoke test, or targeted low-level test where practical.
-    - For runtime changes under kernel, mm, drivers, cpp, include, arch, or
-      lib/src, include the narrowest useful validation for the affected code path
+    - For runtime changes under src/kernel, src/mm, src/drivers, cpp, include,
+      src/arch, or src/runtime, include the narrowest useful validation for the affected code path
       or explicitly record why the validation cannot run.
     - Call out manual setup needed for x86_64-elf-gcc, xmake, Bochs, or disk
       image paths.

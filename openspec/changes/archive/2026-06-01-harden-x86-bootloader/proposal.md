@@ -40,14 +40,14 @@
 
 - 受影响子系统：x86 BIOS 启动和早期内核 handoff。
 - 受影响代码：
-  - `arch/x86/boot/install.py`
-  - `arch/x86/boot/mbr.s`
-  - `arch/x86/boot/dbr_exfat.s`
-  - `arch/x86/boot/exdbr_exfat.s`
-  - `arch/x86/boot/boot.s`
-  - `arch/x86/boot/boot.cc`
-  - `arch/x86/boot/Makefile`
-  - 消费启动 handoff 数据的早期内存初始化代码，尤其是 `mm/buddy.cc`
+  - `tools/install.py`
+  - `src/arch/x86/boot/mbr.s`
+  - `src/arch/x86/boot/dbr_exfat.s`
+  - `src/arch/x86/boot/exdbr_exfat.s`
+  - `src/arch/x86/boot/boot.s`
+  - `src/arch/x86/boot/boot.cc`
+  - `src/arch/x86/boot/Makefile`
+  - 消费启动 handoff 数据的早期内存初始化代码，尤其是 `src/mm/buddy.cc`
 - 基本假设：
   - 架构仍为 x86/x86_64 legacy BIOS boot。
   - 内核仍是链接到 `0xffffffff80000000` 附近的 higher-half ELF64 镜像，但最终入口由已校验的 ELF `e_entry` 决定。

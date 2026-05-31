@@ -2,7 +2,7 @@
 #define _BIG_KTL_ALLOCATOR_H
 
 #include <bigos/types.h>
-#include <memory.h>
+#include <bigos/memory.h>
 #include <new>   // IWYU pragma: keep
 
 namespace ktl {

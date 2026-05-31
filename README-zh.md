@@ -38,15 +38,17 @@ C++17、C17 和汇编编写。目前项目重点在于引导流程、基础文�
 
 ```text
 .
-|-- arch/x86/boot     x86 引导代码、MBR/DBR、ELF 加载器、磁盘安装辅助工具
 |-- cpp               内核 C++ 支持库、KTL、libsupc++ 子集
-|-- drivers           VGA、i8259 PIC 等硬件驱动
 |-- include           公共内核头文件和小型 libc 风格头文件子集
-|-- kernel            内核入口、IRQ、IO、字符串、控制台/TTY 骨架
-|-- lib/src           运行时启动汇编对象
-|-- mm                buddy、slab、kmalloc 和虚拟内存代码
+|-- src               boot、kernel、drivers、mm、runtime 等实现源码
+|   |-- arch/x86/boot x86 引导代码、MBR/DBR 和 ELF 加载器
+|   |-- drivers       VGA、i8259 PIC 等硬件驱动
+|   |-- kernel        内核入口、IRQ、IO、字符串、控制台/TTY 骨架
+|   |-- mm            buddy、slab、kmalloc 和虚拟内存代码
+|   `-- runtime       运行时启动汇编源码对象
+|-- tools             boot 磁盘安装工具等开发辅助脚本
 |-- openspec          OpenSpec 项目配置
-|-- test              Bochs 配置、虚拟磁盘镜像、底层测试片段
+|-- tests             验证测试和本地测试资产
 |-- link.lds          内核链接脚本
 |-- toolchains.lua    xmake 交叉工具链定义
 |-- xmake.lua         主构建配置
@@ -86,9 +88,9 @@ kernel()
 
 关键文件：
 
-- `arch/x86/boot/boot.s`：早期 CPU 模式切换并跳转到内核。
-- `arch/x86/boot/boot.cc`：磁盘读取、exFAT 查找、ELF 加载。
-- `kernel/kernel.cc`：主内核入口。
+- `src/arch/x86/boot/boot.s`：早期 CPU 模式切换并跳转到内核。
+- `src/arch/x86/boot/boot.cc`：磁盘读取、exFAT 查找、ELF 加载。
+- `src/kernel/kernel.cc`：主内核入口。
 - `link.lds`：高半区内核布局。
 
 ## 构建与运行
@@ -158,16 +160,16 @@ make run
 引导加载器专用于 x86/x86_64，并假设磁盘镜像布局中存在一个 exFAT 分区，
 该分区包含名为 `kernel` 的文件。
 
-- `mbr.s`：第一阶段引导代码。
-- `dbr_exfat.s`：exFAT 引导扇区代码。
-- `exdbr_exfat.s`：扩展 exFAT 引导代码。
-- `boot.s`：模式切换、早期页表、转入长模式。
-- `boot.cc`：ATA 磁盘读取、exFAT 目录扫描、ELF64 加载。
-- `install.py`：用于将引导扇区写入虚拟磁盘镜像的辅助工具。
+- `src/arch/x86/boot/mbr.s`：第一阶段引导代码。
+- `src/arch/x86/boot/dbr_exfat.s`：exFAT 引导扇区代码。
+- `src/arch/x86/boot/exdbr_exfat.s`：扩展 exFAT 引导代码。
+- `src/arch/x86/boot/boot.s`：模式切换、早期页表、转入长模式。
+- `src/arch/x86/boot/boot.cc`：ATA 磁盘读取、exFAT 目录扫描、ELF64 加载。
+- `tools/install.py`：用于将引导扇区写入虚拟磁盘镜像的辅助工具。
 
 ### 内核入口
 
-`kernel/kernel.cc` 当前执行最小运行时设置：
+`src/kernel/kernel.cc` 当前执行最小运行时设置：
 
 - 清空 VGA 文本屏幕。
 - 调用 `bigos::init_mem()`。
@@ -177,21 +179,22 @@ make run
 
 ### 内存管理
 
-内存子系统位于 `mm/`。
+内存子系统位于 `src/mm/`。
 
-- `buddy.cc`：解析 BIOS 内存映射，划分 DMA/DMA32/NORMAL 区域，并管理物理页块。
-- `slab.cc` 和 `kmem.cc`：提供固定大小缓存和 `kmalloc/free`。
-- `vmem.cc`：跟踪内核虚拟地址块，并可预映射已分配页面。
-- `memdef.h`：定义页大小、buddy 阶数和分配标志。
+- `src/mm/buddy.cc`：解析 BIOS 内存映射，划分 DMA/DMA32/NORMAL 区域，并管理物理页块。
+- `src/mm/slab.cc` 和 `src/mm/kmem.cc`：提供固定大小缓存和 `kmalloc/free`。
+- `src/mm/vmem.cc`：跟踪内核虚拟地址块，并可预映射已分配页面。
+- `include/bigos/memory.h`：暴露公共内存分配 API。
+- `src/mm/memdef.h`：定义 mm 私有的页大小、buddy 阶数和分配标志。
 
 ### 中断与输入
 
 中断子系统结合了汇编桩和 C++ 描述符。
 
-- `kernel/irq/interrupt.s`：生成的 ISR 入口桩。
-- `kernel/irq/interrupt.cc`：IDT 初始化和默认 IRQ 处理器。
-- `drivers/irqchip/i8259.cc`：PIC 屏蔽和 EOI 支持。
-- `kernel/irq/isr/isr_keyboard.cc`：键盘扫描码解析和临时 VGA 字符输出。
+- `src/kernel/irq/interrupt.s`：生成的 ISR 入口桩。
+- `src/kernel/irq/interrupt.cc`：IDT 初始化和默认 IRQ 处理器。
+- `src/drivers/irqchip/i8259.cc`：PIC 屏蔽和 EOI 支持。
+- `src/kernel/irq/isr.cc`：键盘扫描码解析和临时 VGA 字符输出。
 
 键盘输入尚未接入完整 TTY 层。
 
@@ -199,8 +202,8 @@ make run
 
 VGA 文本模式是当前显示后端。
 
-- `drivers/video/vga.cc`：文本缓冲区写入、光标移动、清屏。
-- `kernel/bigos/io.cc`：端口 IO 封装和基础内核打印。
+- `src/drivers/video/vga.cc`：文本缓冲区写入、光标移动、清屏。
+- `src/kernel/bigos/io.cc`：端口 IO 封装和基础内核打印。
 
 ### 内核 C++ 支持
 

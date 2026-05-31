@@ -4,7 +4,7 @@
 #include "vmem.h"
 #include "buddy.h"
 #include "memdef.h"
-#include "memory.h"
+#include <bigos/memory.h>
 
 #define KVMEM_LEN        0x10000000000ul
 #define KVMEM_BASE       0xffff880000000000ul

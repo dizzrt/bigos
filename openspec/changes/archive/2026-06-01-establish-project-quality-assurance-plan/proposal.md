@@ -33,7 +33,7 @@ BigOS 是处于早期 bring-up 阶段的 freestanding x86_64 内核，后续变�
 - 受影响代码与配置：
   - `openspec/config.yaml`
   - `openspec/specs/project-quality-assurance/spec.md`
-  - 后续涉及 boot、kernel、mm、drivers、cpp、include、lib/src、arch/x86、test 或构建配置的 OpenSpec change。
+  - 后续涉及 boot、src/kernel、src/mm、src/drivers、cpp、include、src/runtime、src/arch/x86、tests 或构建配置的 OpenSpec change。
 - 基本假设：
   - 架构仍为 x86_64 freestanding kernel。
   - C++ 代码仍以 C++17、freestanding 模式和当前交叉工具链约束为基础。

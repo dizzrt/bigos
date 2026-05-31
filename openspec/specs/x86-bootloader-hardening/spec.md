@@ -16,7 +16,7 @@ Define the required hardening behavior for the supported x86 BIOS/MBR/exFAT boot
 #### Scenario: boot.bin 安装行为明确
 
 - **GIVEN** 目标镜像包含已有、连续、容量足够的 `/boot/boot.bin`
-- **WHEN** 使用 `--with-boot` 调用 `install.py`
+- **WHEN** 使用 `--with-boot` 调用 `tools/install.py`
 - **THEN** 它 MUST 将生成的 `boot.bin` 覆盖写入该预分配文件的数据区
 - **AND** 它 MUST NOT 新建文件、扩展文件、分配 cluster、更新 allocation bitmap，或生成新的 exFAT 目录项
 

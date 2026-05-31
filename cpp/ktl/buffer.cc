@@ -1,7 +1,7 @@
 #include <ktl/buffer.h>
 
 #include <string.h>
-#include <memory.h>
+#include <bigos/memory.h>
 
 ktl::buffer::buffer(uint32_t __cap, ptr8_t __buffer)
     : cap_(__cap), size_(0), head(0), tail(0), buffer_(__buffer), owns_storage_(false) {

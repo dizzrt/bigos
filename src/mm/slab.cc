@@ -4,7 +4,7 @@
 
 #include "slab.h"
 #include "buddy.h"
-#include "memory.h"
+#include <bigos/memory.h>
 #include "memdef.h"
 
 NAMESPACE_BIGOS_BEG

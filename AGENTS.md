@@ -14,16 +14,16 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
 
 ## Important Directories
 
-- `arch/x86/boot`: boot sectors, long-mode transition, ELF loader, disk install
-  helper.
-- `kernel`: kernel entry, IRQ, low-level IO, string functions, console/TTY
+- `src/arch/x86/boot`: boot sectors, long-mode transition, and ELF loader.
+- `src/kernel`: kernel entry, IRQ, low-level IO, string functions, console/TTY
   skeletons.
-- `mm`: buddy allocator, slab allocator, `kmalloc/free`, virtual memory code.
-- `drivers`: VGA text mode and i8259 PIC drivers.
+- `src/mm`: buddy allocator, slab allocator, `kmalloc/free`, virtual memory code.
+- `src/drivers`: VGA text mode and i8259 PIC drivers.
+- `src/runtime`: startup assembly source objects.
+- `tools`: developer helper scripts such as the boot disk install tool.
 - `cpp`: kernel C++ support library, KTL containers, `new/delete`, ABI stubs.
 - `include`: public kernel headers and small freestanding header subset.
-- `lib/src`: startup assembly objects.
-- `test`: Bochs config, VHD image, and low-level test snippets.
+- `tests`: validation tests and local test assets.
 
 ## Coding Rules
 
@@ -75,12 +75,15 @@ Notes:
 
 ## Low-Level Risk Areas
 
-- Boot flow: `arch/x86/boot/boot.s`, `arch/x86/boot/boot.cc`, `link.lds`.
-- Memory initialization order: `mm/kmem.cc`, `mm/buddy.cc`, `mm/vmem.cc`.
-- Interrupt descriptors and ISR calling convention: `kernel/irq/interrupt.s`,
-  `kernel/irq/interrupt.cc`, `include/irq/interrupt.h`.
-- Driver port IO and hardware state: `drivers/video/vga.cc`,
-  `drivers/irqchip/i8259.cc`, `kernel/bigos/io.cc`.
+- Boot flow: `src/arch/x86/boot/boot.s`, `src/arch/x86/boot/boot.cc`,
+  `link.lds`.
+- Memory initialization order: `src/mm/kmem.cc`, `src/mm/buddy.cc`,
+  `src/mm/vmem.cc`.
+- Interrupt descriptors and ISR calling convention:
+  `src/kernel/irq/interrupt.s`, `src/kernel/irq/interrupt.cc`,
+  `include/irq/interrupt.h`.
+- Driver port IO and hardware state: `src/drivers/video/vga.cc`,
+  `src/drivers/irqchip/i8259.cc`, `src/kernel/bigos/io.cc`.
 - C++ runtime behavior: `cpp/libsupc++`, `cpp/ktl`, global constructors, and
   `new/delete`.
 

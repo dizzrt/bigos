@@ -1,4 +1,4 @@
-#include <irqchip/i8259.h>
+#include <drivers/irqchip/i8259.h>
 
 #include <bigos/io.h>
 #include <bigos/types.h>

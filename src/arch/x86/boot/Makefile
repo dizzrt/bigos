@@ -5,7 +5,7 @@ else
 	PWD_PATH = $(CURDIR)
 endif
 
-TOP_PATH = $(PWD_PATH)/../../..
+TOP_PATH = $(PWD_PATH)/../../../..
 BIN_PATH = $(TOP_PATH)/build/bin/x86/boot
 TEMP_PATH = $(TOP_PATH)/build/temp/x86/boot
 INCLUDE_PATH = $(TOP_PATH)/include
@@ -88,19 +88,19 @@ build-boot: $(PATH_CHECK) $(TEMP_PATH)/boot.s.o $(TEMP_PATH)/boot.cc.o
 
 .PHONY:install-mbr
 install-mbr:
-	@./install.py $(INSTALL_FLAGS) --with-mbr $(BIN_PATH)/mbr.bin
+	@$(TOP_PATH)/tools/install.py $(INSTALL_FLAGS) --with-mbr $(BIN_PATH)/mbr.bin
 
 .PHONY:install-dbr
 install-dbr:
-	@./install.py $(INSTALL_FLAGS) --with-dbr $(BIN_PATH)/dbr.bin
+	@$(TOP_PATH)/tools/install.py $(INSTALL_FLAGS) --with-dbr $(BIN_PATH)/dbr.bin
 
 .PHONY:install-exdbr
 install-exdbr:
-	@./install.py $(INSTALL_FLAGS) --with-exdbr $(BIN_PATH)/exdbr.bin
+	@$(TOP_PATH)/tools/install.py $(INSTALL_FLAGS) --with-exdbr $(BIN_PATH)/exdbr.bin
 
 .PHONY:install-boot
 install-boot:
-	@./install.py $(INSTALL_FLAGS) --with-boot $(BIN_PATH)/boot.bin
+	@$(TOP_PATH)/tools/install.py $(INSTALL_FLAGS) --with-boot $(BIN_PATH)/boot.bin
 
 .PHONY:run
 run:
