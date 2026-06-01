@@ -8,7 +8,7 @@ import math
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -151,11 +151,30 @@ def require_file(path: Path, stage: str, description: str, max_size: int | None 
             raise StageError(stage, f'{description} is too large: {size} bytes > {max_size} bytes')
 
 
-def run_command(stage: str, command: Sequence[str], cwd: Path) -> None:
+def run_command(
+    stage: str,
+    command: Sequence[str],
+    cwd: Path,
+    *,
+    capture_output: bool = False,
+    allow_result: Callable[[subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]], bool] | None = None,
+) -> None:
     printable = ' '.join(command)
     log_stage(f'{stage}: {printable}')
-    result = subprocess.run(command, cwd=cwd, check=False)
-    if result.returncode != 0:
+    if capture_output:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if result.stdout:
+            print(result.stdout, end='' if result.stdout.endswith('\n') else '\n')
+    else:
+        result = subprocess.run(command, cwd=cwd, check=False)
+    if result.returncode != 0 and not (allow_result and allow_result(result)):
         raise StageError(stage, f'command failed with exit code {result.returncode}: {printable}')
 
 
@@ -553,8 +572,23 @@ def render_bochsrc(
     output_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
+def is_bochs_user_shutdown(
+    result: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
+) -> bool:
+    output = result.stdout or ''
+    if isinstance(output, bytes):
+        output = output.decode(errors='replace')
+    return result.returncode == 1 and 'User requested shutdown.' in output
+
+
 def launch_bochs(bochsrc: Path) -> None:
-    run_command('bochs launch', ['bochs', '-f', str(bochsrc), '-q'], PROJECT_ROOT)
+    run_command(
+        'bochs launch',
+        ['bochs', '-f', str(bochsrc), '-q'],
+        PROJECT_ROOT,
+        capture_output=True,
+        allow_result=is_bochs_user_shutdown,
+    )
 
 
 def run(args: argparse.Namespace) -> int:

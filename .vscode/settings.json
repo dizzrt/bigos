@@ -4,5 +4,37 @@
         "type_traits": "cpp",
         "algorithm": "cpp",
         "new": "cpp"
-    }
+    },
+    "Lua.runtime.version": "Lua 5.4",
+    "Lua.workspace.checkThirdParty": false,
+    "Lua.diagnostics.globals": [
+        "toolchain",
+        "target",
+        "set_xmakever",
+        "set_project",
+        "set_version",
+        "set_kind",
+        "set_plat",
+        "set_arch",
+        "set_languages",
+        "set_toolchains",
+        "set_toolset",
+        "set_optimize",
+        "set_symbols",
+        "set_strip",
+        "includes",
+        "add_rules",
+        "add_files",
+        "add_defines",
+        "add_includedirs",
+        "add_cxxflags",
+        "add_asflags",
+        "on_check",
+        "on_link",
+        "on_run",
+        "is_mode",
+        "is_host",
+        "import",
+        "path"
+    ]
 }

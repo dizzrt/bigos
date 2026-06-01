@@ -19,6 +19,6 @@ set_toolset("as", "x86_64-elf-gcc")
 add_defines("x86_64-elf-gcc")
 
 -- check toolchain
-on_check(function(toolchain)
+on_check(function()
     return import("lib.detect.find_tool")("x86_64-elf-gcc")
 end)
