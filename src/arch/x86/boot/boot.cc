@@ -37,6 +37,12 @@
 #define EV_CURRENT           1
 #define SUPPORTED_BOOT_DRIVE 0x80
 
+#define ARDS_USABLE   1u
+#define ARDS_RESERVED 2u
+#define ARDS_ARM      3u
+#define ARDS_ANM      4u
+#define ARDS_BAD      5u
+
 // entry type
 #define ET_FDE  0x85   // file directory entry
 #define ET_SEDE 0xc0   // stream extension directory entry
@@ -83,10 +89,20 @@ struct fileNameDirectoryEntry {
     const char16_t fileName[15];
 };
 
+struct ARDS {
+    uint64_t base;
+    uint64_t len;
+    uint32_t type;
+    uint32_t attributes;
+};
+
 uint8_t disk_buffer[BYTES_PER_SECTOR];
 uint8_t phdr_buffer[PHDR_BUFFER_SIZE];
 uint16_t vga_cursor = 0;
 uint64_t g_kernel_entry = KERNEL_VMD;
+extern "C" {
+uint64_t g_boot_handoff_address = 0;
+}
 
 // functions
 extern "C" uint64_t boot();
@@ -142,6 +158,98 @@ void *memcpy(void *dest, const void *src, uint64_t size) {
         out[i] = in[i];
     }
     return dest;
+}
+
+uint32_t align_up_u32(uint32_t value, uint32_t alignment) {
+    return alignment == 0 ? value : (value + alignment - 1) & ~(alignment - 1);
+}
+
+uint32_t normalize_e820_type(uint32_t type) {
+    switch (type) {
+        case ARDS_USABLE:
+            return BIGOS_BOOT_MEMORY_TYPE_USABLE;
+        case ARDS_RESERVED:
+            return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
+        case ARDS_ARM:
+            return BIGOS_BOOT_MEMORY_TYPE_ACPI_RECLAIM;
+        case ARDS_ANM:
+            return BIGOS_BOOT_MEMORY_TYPE_ACPI_NVS;
+        case ARDS_BAD:
+            return BIGOS_BOOT_MEMORY_TYPE_BAD_MEMORY;
+        default:
+            return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
+    }
+}
+
+uint64_t e820_attributes(const ARDS &ards) {
+    return ((uint64_t)ards.type << BIGOS_BOOT_MEMORY_ATTR_FIRMWARE_TYPE_SHIFT) |
+           (ards.attributes & 0x1u ? BIGOS_BOOT_MEMORY_ATTR_WRITE_BACK : 0);
+}
+
+BootInfoHeader *build_boot_info_v2(uint64_t entry_point, uint64_t kernel_file_size, uint64_t kernel_memory_size) {
+    uint16_t e820_count = *(uint16_t *)E820_COUNT_ADDR;
+    uint32_t section_count = 2;
+    uint32_t section_table_offset = align_up_u32(sizeof(BootInfoHeader), alignof(BootInfoSection));
+    uint32_t core_offset =
+        align_up_u32(section_table_offset + section_count * sizeof(BootInfoSection), alignof(BootInfoCore));
+    uint32_t memory_map_offset = align_up_u32(core_offset + sizeof(BootInfoCore), alignof(BootMemoryRegion));
+    uint32_t memory_map_size = (uint32_t)e820_count * sizeof(BootMemoryRegion);
+    uint32_t total_size = align_up_u32(memory_map_offset + memory_map_size, BIGOS_BOOT_INFO_V2_ALIGNMENT);
+
+    if (total_size > BIGOS_BOOT_INFO_V2_MAX_SIZE) {
+        error("boot info v2 too large");
+    }
+
+    BootInfoHeader *header = (BootInfoHeader *)BIGOS_BOOT_INFO_V2_ADDRESS;
+    memset(header, 0, BIGOS_BOOT_INFO_V2_MAX_SIZE);
+
+    header->magic = BIGOS_BOOT_INFO_V2_MAGIC;
+    header->version = BIGOS_BOOT_INFO_V2_VERSION;
+    header->header_size = sizeof(BootInfoHeader);
+    header->total_size = total_size;
+    header->flags = BIGOS_BOOT_CORE_FLAG_LEGACY_BIOS;
+    header->boot_protocol = BIGOS_BOOT_PROTOCOL_LEGACY_BIOS;
+    header->section_count = section_count;
+    header->section_table_offset = section_table_offset;
+
+    BootInfoSection *sections = (BootInfoSection *)((uint8_t *)header + section_table_offset);
+    sections[0].type = BIGOS_BOOT_SECTION_TYPE_CORE;
+    sections[0].flags = BIGOS_BOOT_SECTION_FLAG_REQUIRED;
+    sections[0].offset = core_offset;
+    sections[0].size = sizeof(BootInfoCore);
+    sections[0].alignment = alignof(BootInfoCore);
+
+    sections[1].type = BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP;
+    sections[1].flags = BIGOS_BOOT_SECTION_FLAG_REQUIRED;
+    sections[1].offset = memory_map_offset;
+    sections[1].size = memory_map_size;
+    sections[1].alignment = alignof(BootMemoryRegion);
+
+    BootInfoCore *core = (BootInfoCore *)((uint8_t *)header + core_offset);
+    core->flags = BIGOS_BOOT_CORE_FLAG_LEGACY_BIOS;
+    core->boot_protocol = BIGOS_BOOT_PROTOCOL_LEGACY_BIOS;
+    core->boot_drive = *(uint8_t *)BOOT_DRIVE_ADDR;
+    core->exfat_data_area_lba = *(uint64_t *)DATA_AREA_OFF;
+    core->kernel_load_vaddr = KERNEL_VMD;
+    core->kernel_entry_vaddr = entry_point;
+    core->kernel_file_size = kernel_file_size;
+    core->kernel_memory_size = kernel_memory_size;
+
+    ARDS *ards_arr = (ARDS *)E820_ENTRIES_ADDR;
+    BootMemoryRegion *regions = (BootMemoryRegion *)((uint8_t *)header + memory_map_offset);
+    for (uint16_t i = 0; i < e820_count; i++) {
+        regions[i].physical_base = ards_arr[i].base;
+        regions[i].length = ards_arr[i].len;
+        regions[i].normalized_type = normalize_e820_type(ards_arr[i].type);
+        regions[i].source_type = BIGOS_BOOT_MEMORY_SOURCE_BIOS_E820;
+        regions[i].attributes = e820_attributes(ards_arr[i]);
+        regions[i].source_value = ards_arr[i].type;
+    }
+
+    if (!bigos_boot_info_v2_validate(header)) {
+        error("invalid boot info v2");
+    }
+    return header;
 }
 
 int wait_for_ata_data() {
@@ -417,6 +525,9 @@ uint64_t load_kernel() {
     boot_info->kernel_entry_vaddr = entry_point;
     boot_info->kernel_file_size = kernel_file_size;
     boot_info->kernel_memory_size = kernel_memory_size;
+
+    BootInfoHeader *boot_info_v2 = build_boot_info_v2(entry_point, kernel_file_size, kernel_memory_size);
+    g_boot_handoff_address = (uint64_t)boot_info_v2;
 
     g_kernel_entry = entry_point;
     return entry_point;

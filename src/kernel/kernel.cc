@@ -9,18 +9,19 @@
 
 #include <drivers/video/vga.h>
 
+#include <arch/x86/boot/boot_info.h>
 #include <bigos/memory.h>
 #include <irq/interrupt.h>
 
 #include <bigos/io.h>
 #include <ktl/buffer.h>
 
-extern "C" void kernel();
+extern "C" void kernel(const BootInfoHeader *boot_info);
 
-void kernel() {
+void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
 
-    bigos::init_mem();
+    bigos::init_mem(boot_info);
     bigos::irq::initIRQ();
     // bigos::terminal::init_tty();
     // bigos::irq::enableIRQ();

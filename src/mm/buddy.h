@@ -3,6 +3,7 @@
 
 #include <ktl/list.h>
 #include <bigos/types.h>
+#include <arch/x86/boot/boot_info.h>
 
 #include "memdef.h"
 
@@ -57,7 +58,7 @@ namespace mm {
     uint32_t g_nr_free_pages() noexcept;
 
     namespace __detail {
-        void init_buddy();
+        void init_buddy(const BootInfoHeader *__boot_info);
 
         void free_physical_pages(const void *__p) noexcept;
         _attr_nodiscard_ void *alloc_physical_pages(uint32_t __order, gfm_t __gfm) noexcept _attr_malloc_;

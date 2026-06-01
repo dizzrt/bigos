@@ -9,7 +9,7 @@
 BigOS 当前可运行的启动路径仍然是 Legacy BIOS：
 
 ```text
-BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel -> kernel()
+BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel -> kernel(BootInfoHeader*)
 ```
 
 未来 UEFI 路径应作为并行 boot backend 引入，而不是替换当前路径：
@@ -35,7 +35,7 @@ MBR -> DBR -> exDBR -> boot.bin          BOOTX64.EFI
 - 不实现 `BOOTX64.EFI`。
 - 不改变 `make boot-debug` 的 Legacy BIOS/MBR/exFAT/Bochs 语义。
 - 不替换 MBR、DBR、extended DBR、`boot.bin` 或现有 raw exFAT image。
-- 不改变 `boot.s`、`boot.cc`、`BootInfo` header、`link.lds`、kernel entry 或现有启动地址。
+- 不实现 `BOOTX64.EFI`、ESP/FAT UEFI image、QEMU/OVMF UEFI 入口或 UEFI Runtime Services。
 - 不要求 kernel 调用 BIOS interrupt、UEFI Boot Services 或 UEFI Runtime Services。
 - 不引入外部 UEFI 库、hosted runtime、异常、RTTI 或其它非 freestanding 依赖。
 
@@ -67,6 +67,7 @@ boot backend 负责把固件数据规范化为统一 handoff。
 0x0840..0x0887  canonical BootInfo handoff structure
 0x2000..0x6fff  boot-stage PML4/PDPT/PD/PT setup area
 0x5000..        kernel higher-half page-directory handoff area
+0x9000..0x9fff  Legacy BIOS-produced BootInfo v2 handoff blob
 0x100000        kernel higher-half page-table backing area
 0x1000000       kernel physical load base
 0xffffffff80000000  kernel higher-half virtual base
@@ -83,8 +84,10 @@ boot backend 负责把固件数据规范化为统一 handoff。
 
 ## BootInfo 与 Handoff 规划
 
-`BootInfo` 后续版本长期采用 `BootInfoHeader + tagged sections`。固定 struct 不适合
-UEFI 会带来的变长 memory map、framebuffer、ACPI/SMBIOS table 和 loader metadata。
+`BootInfo` v2 ABI 基础已经落地为 `BootInfoHeader + tagged sections`。固定 v1 struct
+仍保留在 `BIGOS_BOOT_INFO_ADDRESS`，仅作为 Legacy BIOS fallback；v2 使用独立 magic，
+通过 `rdi` 传递 `BootInfoHeader*`，并用相对 header 的 section offset/size 描述
+payload。
 
 建议的长期结构：
 
@@ -116,17 +119,25 @@ BootInfoSection[]
 - loader metadata：loader 名称、版本、镜像布局、调试标志和保留区。
 - ABI compatibility：旧版 `BootInfo` fallback、必需 section、可选 section 和 unknown section 跳过策略。
 
-分阶段方案：
+当前已实现的基础：
 
-- 下一阶段先定义 `BootInfoHeader` 和少量固定 core 字段，保持 BIOS v1 fallback 可用。
-- 后续把 memory map、framebuffer、firmware tables 和 loader metadata 逐步迁移到 tagged sections。
-- kernel consumer 必须校验 magic、version、size、alignment、field offset、section offset、section size 和边界。
-- 未识别的非必需 section 可以跳过；必需 section 缺失或格式错误必须导致早期失败或显式 fallback。
+- Legacy BIOS backend 生产完整 v2 blob，包含 required `core` section 和 required
+  `memory_map` section。
+- runtime `_start` 保存入口 `BootInfoHeader*`，调用 `_init` 后恢复为 `kernel()` 的第一个参数。
+- kernel consumer 校验 magic、version、size、alignment、field offset、section offset、section size 和边界。
+- 未识别的非必需 section 可以跳过；必需 section 缺失或格式错误导致 v2 失败，并显式 fallback 到 v1 fixed-address `BootInfo`。
 - BIOS backend 与未来 UEFI backend 都必须作为统一 handoff producer，不允许 kernel consumer 直接依赖固件原始协议。
+
+仍未实现的范围：
+
+- `BOOTX64.EFI` loader、ESP/FAT image 和 QEMU/OVMF UEFI 调试入口。
+- GOP framebuffer、ACPI/SMBIOS firmware table section 和 loader metadata section。
+- UEFI `GetMemoryMap` producer、`ExitBootServices()` 处理和 Runtime Services 支持。
 
 ## 统一内存图规划
 
-内存模块后续应从 E820/legacy alias fallback 迁移到统一 `BootMemoryRegion` consumer。
+内存模块已经从 primary raw E820 consumer 迁移到统一 `BootMemoryRegion` consumer。
+Legacy BIOS fallback 仍可从 v1 `BootInfo` 指向的 E820 ARDS 栈上临时规范化。
 `BootMemoryRegion` 至少表达：
 
 ```text
@@ -134,6 +145,7 @@ physical_base
 length
 normalized_type
 attributes
+source_type
 ```
 
 初步 normalized type：
@@ -148,14 +160,18 @@ attributes
 - `bad_memory`
 - `runtime`
 
-BIOS E820 初步映射方向：
+BIOS E820 映射：
 
 - E820 type 1 映射为 `usable`。
 - E820 type 2 映射为 `reserved`。
 - E820 type 3 映射为 `acpi_reclaim`。
 - E820 type 4 映射为 `acpi_nvs`。
 - E820 type 5 映射为 `bad_memory`。
-- 未识别类型保守映射为 `reserved`，并保留原始类型到 attributes 或 loader metadata。
+- 未识别类型保守映射为 `reserved`，并保留原始类型到 attributes/source metadata。
+
+early buddy 初始化只释放 `usable` 区域。`reserved`、`runtime`、`mmio`、
+`acpi_reclaim`、`acpi_nvs`、`bad_memory` 和 unknown 区域都不会进入 buddy free list。
+`acpi_reclaim` 在 ACPI 表发现、复制和生命周期管理完成前保持保留。
 
 UEFI `GetMemoryMap` 初步映射方向：
 
@@ -216,8 +232,8 @@ exFAT、固定低地址和页表准备的实现。BIOS 与 UEFI loader 需要共
 
 | 阶段 | 规划项 | 当前是否实现 | 推荐前置条件 | 主要风险 | OpenSpec change 候选 |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `BootInfoHeader + tagged sections`、寄存器传递 `BootInfo*`、统一 handoff header 设计与文档化 | 否 | 当前 BIOS `BootInfo` layout 校验稳定 | ABI 破坏、legacy fallback 不一致 | `define-bootinfo-v2-handoff` |
-| 2 | 内存模块迁移到统一 `BootMemoryRegion` consumer，并保留 BIOS fallback | 否 | 阶段 1 header 和 memory map section 草案 | allocator 初始化顺序、可用内存误判 | `migrate-mm-to-boot-memory-map` |
+| 1 | `BootInfoHeader + tagged sections`、寄存器传递 `BootInfo*`、统一 handoff header 设计与文档化 | 是，Legacy BIOS producer/consumer 已落地 | 当前 BIOS `BootInfo` layout 校验稳定 | ABI 破坏、legacy fallback 不一致 | `define-unified-boot-handoff-abi` |
+| 2 | 内存模块迁移到统一 `BootMemoryRegion` consumer，并保留 BIOS fallback | 是，BIOS E820 已规范化 | 阶段 1 header 和 memory map section 草案 | allocator 初始化顺序、可用内存误判 | `define-unified-boot-handoff-abi` |
 | 3 | 最小 UEFI loader spike，单独实现 UEFI ELF reader，目标仅为加载 kernel、填充 handoff、进入 `kernel()` | 否 | 阶段 1 ABI、ELF64 加载规则、工具链 spike | PE/COFF 构建、ExitBootServices 顺序、页表差异 | `spike-minimal-uefi-loader` |
 | 4 | ESP/FAT 镜像生成、OVMF/QEMU 调试入口和文档化命令 | 否 | 阶段 3 loader 可启动 | 宿主机 OVMF 路径、CI 可移植性、产物隔离 | `add-uefi-boot-debug-entry` |
 | 5 | GOP framebuffer、ACPI RSDP/SMBIOS handoff 和更完整的 UEFI 验证策略 | 否 | 阶段 1 sections、阶段 3/4 UEFI smoke test | framebuffer 映射、ACPI 表生命周期、runtime metadata 误用 | `handoff-gop-acpi-firmware-tables` |

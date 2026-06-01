@@ -210,11 +210,42 @@ namespace mm {
             uint32_t attributes;
         };
 
+        static uint32_t normalize_ards_type(uint32_t type) noexcept {
+            switch (type) {
+            case ARDS_USABLE:
+                return BIGOS_BOOT_MEMORY_TYPE_USABLE;
+            case ARDS_RESERVED:
+                return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
+            case ARDS_ARM:
+                return BIGOS_BOOT_MEMORY_TYPE_ACPI_RECLAIM;
+            case ARDS_ANM:
+                return BIGOS_BOOT_MEMORY_TYPE_ACPI_NVS;
+            case ARDS_BAD:
+                return BIGOS_BOOT_MEMORY_TYPE_BAD_MEMORY;
+            default:
+                return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
+            }
+        }
+
+        static uint64_t ards_attributes(const ARDS &ards) noexcept {
+            return ((uint64_t)ards.type << BIGOS_BOOT_MEMORY_ATTR_FIRMWARE_TYPE_SHIFT) |
+                   (ards.attributes & 0x1u ? BIGOS_BOOT_MEMORY_ATTR_WRITE_BACK : 0);
+        }
+
+        static void halt_memory_handoff_failed() noexcept {
+            bigos::kprintf("invalid boot memory map\n");
+            while (true) {
+                asm volatile("hlt");
+            }
+        }
+
         static void handle_ards(uint64_t __base, uint64_t __len) noexcept {
             // base 4k alignment
             if (__base % PAGE_SIZE) {
                 uint64_t aligned_base = (__base & 0xfffffffffffff000ul) + PAGE_SIZE;
                 uint64_t drop_size = aligned_base - __base;
+                if (__len <= drop_size)
+                    return;
 
                 __base = aligned_base;
                 __len -= drop_size;
@@ -225,6 +256,8 @@ namespace mm {
                 __len = __len & 0xfffffffffffff000ul;
 
             uint64_t end_addr = __base + __len;
+            if (end_addr <= __base)
+                return;
 
             // lowest memory are reserved
             if (__base < LOWEST_LIMIT) {
@@ -293,21 +326,75 @@ namespace mm {
             return info;
         }
 
-        void init_buddy() {
-            const BootInfo *info = boot_info();
-            if (info != nullptr)
-                gKernelSize = (uint32_t)info->kernel_memory_size;
-            else
-                gKernelSize = *((uint32_t *)0x80c);
-            gKernelEndAddr = ((gKernelSize + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE + KERNEL_BASE;
+        static const BootInfoCore *boot_info_core(const BootInfoHeader *header) noexcept {
+            const BootInfoSection *section = bigos_boot_info_v2_find_section(header, BIGOS_BOOT_SECTION_TYPE_CORE);
+            if (section == nullptr || section->size < sizeof(BootInfoCore))
+                return nullptr;
+            return (const BootInfoCore *)((const uint8_t *)header + section->offset);
+        }
 
-            uint32_t nr_ards = info != nullptr ? info->e820_entry_count : *(uint16_t *)0x800;
-            ARDS *ards_arr = info != nullptr ? (ARDS *)info->e820_entry_address : (ARDS *)0x500;
+        static bool consume_region(const BootMemoryRegion &region) noexcept {
+            if (region.normalized_type != BIGOS_BOOT_MEMORY_TYPE_USABLE)
+                return false;
+            handle_ards(region.physical_base, region.length);
+            return true;
+        }
 
-            for (uint32_t i = 0; i < nr_ards; i++) {
-                if (ards_arr[i].type == ARDS_USABLE)
-                    handle_ards(ards_arr[i].base, ards_arr[i].len);
+        static uint32_t consume_v2_memory_map(const BootInfoHeader *header) noexcept {
+            const BootInfoSection *section =
+                bigos_boot_info_v2_find_section(header, BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP);
+            if (section == nullptr || section->size % sizeof(BootMemoryRegion) != 0)
+                return 0;
+
+            const BootMemoryRegion *regions = (const BootMemoryRegion *)((const uint8_t *)header + section->offset);
+            uint32_t usable_regions = 0;
+            uint32_t nr_regions = section->size / sizeof(BootMemoryRegion);
+            for (uint32_t i = 0; i < nr_regions; i++) {
+                if (consume_region(regions[i]))
+                    usable_regions++;
             }
+            return usable_regions;
+        }
+
+        static uint32_t consume_v1_memory_map(const BootInfo *info) noexcept {
+            ARDS *ards_arr = (ARDS *)info->e820_entry_address;
+            uint32_t usable_regions = 0;
+            for (uint32_t i = 0; i < info->e820_entry_count; i++) {
+                BootMemoryRegion region = {
+                    ards_arr[i].base,
+                    ards_arr[i].len,
+                    normalize_ards_type(ards_arr[i].type),
+                    BIGOS_BOOT_MEMORY_SOURCE_BIOS_E820,
+                    ards_attributes(ards_arr[i]),
+                    ards_arr[i].type,
+                };
+                if (consume_region(region))
+                    usable_regions++;
+            }
+            return usable_regions;
+        }
+
+        void init_buddy(const BootInfoHeader *__boot_info) {
+            BootHandoff handoff = bigos_boot_resolve_handoff(__boot_info);
+            uint32_t usable_regions = 0;
+
+            if (handoff.v2 != nullptr) {
+                const BootInfoCore *core = boot_info_core(handoff.v2);
+                if (core == nullptr)
+                    halt_memory_handoff_failed();
+                gKernelSize = (uint32_t)core->kernel_memory_size;
+                gKernelEndAddr = ((gKernelSize + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE + KERNEL_BASE;
+                usable_regions = consume_v2_memory_map(handoff.v2);
+            } else if (handoff.v1 != nullptr) {
+                gKernelSize = (uint32_t)handoff.v1->kernel_memory_size;
+                gKernelEndAddr = ((gKernelSize + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE + KERNEL_BASE;
+                usable_regions = consume_v1_memory_map(handoff.v1);
+            } else {
+                halt_memory_handoff_failed();
+            }
+
+            if (usable_regions == 0)
+                halt_memory_handoff_failed();
         }
 
         void *alloc_physical_pages(uint32_t __order, gfm_t __gfm) noexcept {

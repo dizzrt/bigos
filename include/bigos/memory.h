@@ -3,6 +3,7 @@
 
 #include <bigos/types.h>
 #include <bigos/attributes.h>
+#include <arch/x86/boot/boot_info.h>
 
 NAMESPACE_BIGOS_BEG
 
@@ -14,7 +15,7 @@ _attr_nodiscard_ extern void *kmalloc(size_t __size, gfm_t __gfm = 0) noexcept _
 
 extern void free(const void *__p) noexcept;
 
-void init_mem() noexcept;
+void init_mem(const BootInfoHeader *__boot_info) noexcept;
 
 NAMESPACE_BIGOS_END
 

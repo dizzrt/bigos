@@ -4,6 +4,7 @@
 #include "kmem.h"
 #include "vmem.h"
 #include "buddy.h"
+#include "slab.h"
 
 namespace bigos::mm::__detail {
     struct slab_order_compare {
@@ -114,9 +115,9 @@ namespace mm {
         }
     }   // namespace __detail
 
-    void init_mem() noexcept {
+    void init_mem(const BootInfoHeader *__boot_info) noexcept {
         __detail::init_cache();
-        __detail::init_buddy();
+        __detail::init_buddy(__boot_info);
         __detail::init_vmem();
     }
 }   // namespace mm

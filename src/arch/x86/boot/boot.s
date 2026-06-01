@@ -129,6 +129,7 @@ long_gate:
     iretq
 
 .extern boot
+.extern g_boot_handoff_address
 long_mode:
     lidt (idt_attribute)
 
@@ -145,6 +146,9 @@ long_mode:
 
     # call boot function to load kernel, setup paging, and return a checked ELF entry
     call boot
+
+    # Pass BootInfoHeader* in the x86_64 first argument register.
+    movq g_boot_handoff_address(%rip), %rdi
 
     # jmp to kernel
     jmp *%rax
