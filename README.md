@@ -29,6 +29,7 @@ Implemented or partially implemented:
 
 Not implemented or still skeletal:
 
+- UEFI bootloader, ESP image generation, and OVMF/QEMU UEFI smoke tests.
 - TTY and console abstraction beyond basic VGA output.
 - Scheduler, threads, processes, and user mode.
 - System calls.
@@ -94,6 +95,9 @@ Key files:
 - `src/arch/x86/boot/boot.cc`: disk read, exFAT lookup, ELF loading.
 - `src/kernel/kernel.cc`: main kernel entry.
 - `link.lds`: higher-half kernel layout.
+- `docs/arch/x86-boot-layout.md`: current Legacy BIOS address and handoff layout.
+- `docs/arch/uefi-boot-blueprint.md`: future UEFI compatibility blueprint; this is
+  project planning only and is not a currently runnable boot path.
 
 ## Build And Run
 
@@ -104,7 +108,7 @@ The primary build system is xmake and the expected compiler is
 xmake
 ```
 
-One-command local boot debug:
+One-command local boot debug for the current Legacy BIOS/MBR/exFAT path:
 
 ```bash
 make boot-debug
@@ -120,6 +124,7 @@ The command runs preflight checks, builds the kernel with `xmake`, builds the bo
 artifacts with `make -C src/arch/x86/boot build-mbr build-dbr build-exdbr
 build-boot`, creates a raw disk image entirely in user space, writes the MBR,
 exFAT boot regions, `/boot/boot.bin`, and root `kernel`, then launches Bochs.
+It does not build a UEFI loader, ESP image, or OVMF configuration.
 
 Generated boot-debug artifacts are isolated under `build/` by default:
 
@@ -144,6 +149,9 @@ a hand-prepared exFAT image.
 First-stage scope:
 
 - Bochs is the only supported emulator in this workflow.
+- `make boot-debug` remains the Legacy BIOS debug entry. A future UEFI workflow is
+  planned as a separate command such as `make uefi-boot-debug`, with isolated
+  ESP/FAT image artifacts and QEMU + OVMF as the preferred smoke-test path.
 - QEMU/headless mode, serial-log auto-detection, and CI smoke-test decisions are
   intentionally left for later changes.
 - The workflow does not change `boot.s`, `boot.cc`, `BootInfo`, `link.lds`, the
@@ -220,6 +228,8 @@ Notes:
 
 The bootloader is specific to x86/x86_64 and assumes a disk image layout that can
 provide an exFAT partition containing a file named `kernel`.
+The current runnable backend is Legacy BIOS; UEFI is documented as a future
+parallel backend in `docs/arch/uefi-boot-blueprint.md`.
 
 - `src/arch/x86/boot/mbr.s`: first-stage boot code.
 - `src/arch/x86/boot/dbr_exfat.s`: exFAT boot-sector code.

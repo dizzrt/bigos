@@ -6,6 +6,12 @@ BigOS currently uses the legacy BIOS path:
 BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel
 ```
 
+This path remains the current runnable boot backend and the producer of the
+kernel handoff data used by the existing kernel. The UEFI plan in
+`docs/arch/uefi-boot-blueprint.md` treats this path as the Legacy backend of a
+future unified handoff model; it does not replace the MBR/DBR/exDBR/`boot.bin`
+flow or change the meaning of `make boot-debug`.
+
 The early boot path depends on these fixed physical and virtual addresses:
 
 ```text
@@ -32,6 +38,12 @@ at `BIGOS_BOOT_INFO_ADDRESS` and preserves the legacy aliases while kernel
 consumers migrate. Assembly constants that touch the handoff area must match the
 same address map; C++ consumers use `static_assert` layout checks from the shared
 header.
+
+Future changes that extend `BootInfo`, move toward register-passed `BootInfo*`,
+or add a unified `BootMemoryRegion` consumer must document how the Legacy BIOS
+backend fills the new handoff contract or how it keeps a compatible fallback.
+New fixed low addresses, page-table reservations, or handoff aliases must update
+this layout and explain their compatibility with the future UEFI backend.
 
 The protected-mode extended DBR stage reads `boot.bin` with ATA primary-master
 PIO. It therefore requires BIOS boot drive `0x80`; other BIOS drive numbers halt

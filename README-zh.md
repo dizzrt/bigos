@@ -27,6 +27,7 @@ C++17、C17 和汇编编写。目前项目重点在于引导流程、基础文�
 
 尚未实现或仍处于骨架状态：
 
+- UEFI bootloader、ESP 镜像生成和 OVMF/QEMU UEFI smoke test。
 - 基础 VGA 输出之外的 TTY 和控制台抽象。
 - 调度器、线程、进程和用户态。
 - 系统调用。
@@ -92,6 +93,9 @@ kernel()
 - `src/arch/x86/boot/boot.cc`：磁盘读取、exFAT 查找、ELF 加载。
 - `src/kernel/kernel.cc`：主内核入口。
 - `link.lds`：高半区内核布局。
+- `docs/arch/x86-boot-layout.md`：当前 Legacy BIOS 地址和 handoff 布局。
+- `docs/arch/uefi-boot-blueprint.md`：未来 UEFI 兼容蓝图；这是项目规划，
+  不是当前可运行的启动路径。
 
 ## 构建与运行
 
@@ -101,7 +105,7 @@ kernel()
 xmake
 ```
 
-本地一行启动调试：
+当前 Legacy BIOS/MBR/exFAT 路径的一行本地启动调试：
 
 ```bash
 make boot-debug
@@ -116,7 +120,7 @@ python3 tools/boot_debug.py run
 命令会依次执行 preflight 检查、`xmake` 内核构建、`make -C
 src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot` boot 产物构建、
 完全用户态 raw 磁盘镜像生成、MBR/exFAT boot region/`/boot/boot.bin`/根目录
-`kernel` 写入，然后启动 Bochs。
+`kernel` 写入，然后启动 Bochs。它不会构建 UEFI loader、ESP 镜像或 OVMF 配置。
 
 默认生成物均位于 `build/` 下：
 
@@ -140,6 +144,9 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
 第一阶段范围：
 
 - 该流程仅支持 Bochs。
+- `make boot-debug` 保持 Legacy BIOS 调试入口语义。未来 UEFI 工作流规划为
+  `make uefi-boot-debug` 等独立命令，使用隔离的 ESP/FAT 镜像产物，并以
+  QEMU + OVMF 作为首选 smoke test 路径。
 - QEMU/headless、串口日志自动判定和 CI smoke test 留给后续阶段。
 - 该流程不修改 `boot.s`、`boot.cc`、`BootInfo`、`link.lds`、高半区内核地址或
   内核运行时初始化顺序。
@@ -213,6 +220,8 @@ make run
 
 引导加载器专用于 x86/x86_64，并假设磁盘镜像布局中存在一个 exFAT 分区，
 该分区包含名为 `kernel` 的文件。
+当前可运行 backend 是 Legacy BIOS；UEFI 作为未来并行 backend 记录在
+`docs/arch/uefi-boot-blueprint.md` 中。
 
 - `src/arch/x86/boot/mbr.s`：第一阶段引导代码。
 - `src/arch/x86/boot/dbr_exfat.s`：exFAT 引导扇区代码。
