@@ -7,6 +7,8 @@
 
 NAMESPACE_BIGOS_BEG
 
+_attr_nodiscard_ extern void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;
+
 _attr_nodiscard_ extern void *alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;
 
 extern void free_pages(const void *__p) noexcept;

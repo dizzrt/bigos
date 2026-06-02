@@ -61,7 +61,9 @@ namespace mm {
         void init_buddy(const BootInfoHeader *__boot_info);
 
         void free_physical_pages(const void *__p) noexcept;
+        void free_physical_order(const void *__p) noexcept;
         _attr_nodiscard_ void *alloc_physical_pages(uint32_t __order, gfm_t __gfm) noexcept _attr_malloc_;
+        _attr_nodiscard_ void *alloc_physical_order(uint32_t __order, gfm_t __gfm) noexcept _attr_malloc_;
     }   // namespace __detail
 
     void print_physical_memory_info() noexcept;

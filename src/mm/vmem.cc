@@ -20,15 +20,12 @@
 #define INDEX_PD_OFFSET   21
 #define INDEX_PT_OFFSET   12
 
-#define INDEX_PML4_MASK 0x0000ff8000000000ul
-#define INDEX_PDPT_MASK 0x0000007fc0000000ul
-#define INDEX_PD_MASK   0x000000003fe00000ul
-#define INDEX_PT_MASK   0x00000000001f0000ul
+#define INDEX_MASK 0x1fful
 
-#define get_pml4_index(ADDR) ((ADDR & INDEX_PML4_MASK) >> INDEX_PML4_OFFSET)
-#define get_pdpt_index(ADDR) ((ADDR & INDEX_PDPT_MASK) >> INDEX_PDPT_OFFSET)
-#define get_pd_index(ADDR)   ((ADDR & INDEX_PD_MASK) >> INDEX_PD_OFFSET)
-#define get_pt_index(ADDR)   ((ADDR & INDEX_PT_MASK) >> INDEX_PT_OFFSET)
+#define get_pml4_index(ADDR) (((ADDR) >> INDEX_PML4_OFFSET) & INDEX_MASK)
+#define get_pdpt_index(ADDR) (((ADDR) >> INDEX_PDPT_OFFSET) & INDEX_MASK)
+#define get_pd_index(ADDR)   (((ADDR) >> INDEX_PD_OFFSET) & INDEX_MASK)
+#define get_pt_index(ADDR)   (((ADDR) >> INDEX_PT_OFFSET) & INDEX_MASK)
 
 #define self_mapping_pml4(ADDR) ((uint64_t *)0xffff804020100000ul)
 #define self_mapping_pdpt(ADDR) ((uint64_t *)((get_pml4_index(ADDR) << 12) | 0xffff804020000000ul))
@@ -62,7 +59,10 @@ namespace mm {
         }
     }   // namespace __detail
 
-    void VMem::set_paging(MemoryBlock *__mblk) noexcept {
+    bool VMem::set_paging(MemoryBlock *__mblk) noexcept {
+        if (__mblk == nullptr)
+            return false;
+
         uint64_t base = __mblk->base;
 
         uint16_t i_pml4 = get_pml4_index(base);
@@ -86,6 +86,7 @@ namespace mm {
                             i_pml4++;
                             if (i_pml4 >= 512) {
                                 // TODO out of range
+                                return false;
                             }
                         }
                     }
@@ -98,7 +99,9 @@ namespace mm {
                 entry = self_mapping_pml4(base);
                 paging_descriptor = entry[i_pml4];
                 if (!paging_descriptor) {
-                    page = (uint64_t)__detail::alloc_physical_pages(0, 0);
+                    page = (uint64_t)__detail::alloc_physical_order(0, 0);
+                    if (page == 0)
+                        return false;
                     self_mapping_pml4(base)[i_pml4] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PML4E;
 
                     entry = self_mapping_pdpt(base);
@@ -109,7 +112,9 @@ namespace mm {
                 entry = self_mapping_pdpt(base);
                 paging_descriptor = entry[i_pdpt];
                 if (!paging_descriptor) {
-                    page = (uint64_t)__detail::alloc_physical_pages(0, 0);
+                    page = (uint64_t)__detail::alloc_physical_order(0, 0);
+                    if (page == 0)
+                        return false;
                     self_mapping_pdpt(base)[i_pdpt] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDPTE;
 
                     entry = self_mapping_pd(base);
@@ -120,7 +125,9 @@ namespace mm {
                 entry = self_mapping_pd(base);
                 paging_descriptor = entry[i_pd];
                 if (!paging_descriptor) {
-                    page = (uint64_t)__detail::alloc_physical_pages(0, 0);
+                    page = (uint64_t)__detail::alloc_physical_order(0, 0);
+                    if (page == 0)
+                        return false;
                     self_mapping_pd(base)[i_pd] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDE;
 
                     entry = self_mapping_pt(base);
@@ -137,6 +144,8 @@ namespace mm {
                 physical_base += PAGE_SIZE;
             }
         }
+
+        return true;
     }
 
     void VMem::merge(ktl::intrusive_list_node<MemoryBlock *> *__mblk_node) noexcept {
@@ -146,16 +155,16 @@ namespace mm {
         MemoryBlock *adjacent_mblk = nullptr;
         ktl::intrusive_list_node<MemoryBlock *> *adjacent_mblk_node = nullptr;
 
-        // try to merge with next one
-        if (__mblk_node->next != nullptr) {
-            adjacent_mblk_node = (ktl::intrusive_list_node<MemoryBlock *> *)__mblk_node->next;
-            adjacent_mblk = **adjacent_mblk_node;
+        auto iter = ktl::intrusive_list<MemoryBlock *>::iterator(__mblk_node);
+        auto iter_next = iter;
+        ++iter_next;
 
+        // try to merge with next one
+        if (iter_next != free_area_.end()) {
+            adjacent_mblk_node = (ktl::intrusive_list_node<MemoryBlock *> *)iter_next._node;
+            adjacent_mblk = *iter_next;
             end_addr = mblk->base + mblk->nr_pages * PAGE_SIZE;
             if (end_addr == adjacent_mblk->base) {
-                auto iter = ktl::intrusive_list<MemoryBlock *>::iterator(__mblk_node);
-                auto iter_next = ktl::intrusive_list<MemoryBlock *>::iterator(adjacent_mblk_node);
-
                 free_area_.erase(iter);
                 free_area_.erase(iter_next);
 
@@ -178,15 +187,15 @@ namespace mm {
         }
 
         // try to merge with previous one
-        if (__mblk_node->prev != nullptr) {
-            adjacent_mblk_node = (ktl::intrusive_list_node<MemoryBlock *> *)__mblk_node->prev;
-            adjacent_mblk = **adjacent_mblk_node;
+        iter = ktl::intrusive_list<MemoryBlock *>::iterator(__mblk_node);
+        if (iter != free_area_.begin()) {
+            auto iter_prev = iter;
+            --iter_prev;
+            adjacent_mblk_node = (ktl::intrusive_list_node<MemoryBlock *> *)iter_prev._node;
+            adjacent_mblk = *iter_prev;
 
             end_addr = adjacent_mblk->base + adjacent_mblk->nr_pages * PAGE_SIZE;
             if (end_addr == mblk->base) {
-                auto iter = ktl::intrusive_list<MemoryBlock *>::iterator(__mblk_node);
-                auto iter_prev = ktl::intrusive_list<MemoryBlock *>::iterator(adjacent_mblk_node);
-
                 free_area_.erase(iter);
                 free_area_.erase(iter_prev);
 
@@ -197,7 +206,7 @@ namespace mm {
 
                 iter = free_area_.begin();
                 while (iter != free_area_.end()) {
-                    if ((*iter)->base > mblk->base)
+                    if ((*iter)->base > adjacent_mblk->base)
                         break;
                     iter++;
                 }
@@ -210,6 +219,9 @@ namespace mm {
     }
 
     void VMem::__free(const void *__p) noexcept {
+        if (__p == nullptr)
+            return;
+
         uint64_t addr = (uint64_t)__p;
 
         auto iter = used_area_.begin();
@@ -221,20 +233,25 @@ namespace mm {
 
         if (iter == used_area_.end())
             return;
+
+        auto mblk = *iter;
+        auto mblk_node = iter._node;
         used_area_.erase(iter);
 
         // free physical pages
-        auto mblk = *iter;
         for (auto physical_pair : mblk->physical_area) {
-            __detail::free_physical_pages(physical_pair.first);
+            __detail::free_physical_order(physical_pair.first);
         }
 
         // empty phsical_area
         while (!mblk->physical_area.empty()) {
             auto temp = mblk->physical_area.begin();
+            auto temp_node = temp._node;
             mblk->physical_area.erase(temp);
-            delete temp._node;
+            delete temp_node;
         }
+
+        nr_free_pages_ += mblk->nr_pages;
 
         auto insert_position = free_area_.begin();
         while (insert_position != free_area_.end()) {
@@ -243,23 +260,36 @@ namespace mm {
             insert_position++;
         }
 
-        free_area_.insert(insert_position, iter._node);
-        merge((ktl::intrusive_list_node<MemoryBlock *> *)iter._node);
+        free_area_.insert(insert_position, mblk_node);
+        merge((ktl::intrusive_list_node<MemoryBlock *> *)mblk_node);
     }
 
     MemoryBlock *VMem::__alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept {
-        if (nr_free_pages_ < __pages)
+        if (__pages == 0 || nr_free_pages_ < __pages)
             return nullptr;
 
         auto iter = free_area_.begin();
-        free_area_.erase(iter);
+        while (iter != free_area_.end()) {
+            if ((*iter)->nr_pages >= __pages)
+                break;
+            iter++;
+        }
+
+        if (iter == free_area_.end())
+            return nullptr;
 
         auto mblk = *iter;
+        auto mblk_node = iter._node;
+        free_area_.erase(iter);
 
         // divide
         if (mblk->nr_pages > __pages) {
             auto new_mblk = new MemoryBlock();
-            // new_mblk->vmem = this;
+            if (new_mblk == nullptr) {
+                free_area_.insert(mblk_node);
+                return nullptr;
+            }
+
             new_mblk->base = mblk->base + PAGE_SIZE * __pages;
             new_mblk->flags = mblk->flags;
             new_mblk->nr_pages = mblk->nr_pages - __pages;
@@ -267,17 +297,33 @@ namespace mm {
             mblk->nr_pages = __pages;
 
             auto node = new ktl::intrusive_list_node<MemoryBlock *>(new_mblk);
-            free_area_.insert(node);
+            if (node == nullptr) {
+                mblk->nr_pages += new_mblk->nr_pages;
+                delete new_mblk;
+                free_area_.insert(mblk_node);
+                return nullptr;
+            }
+
+            auto insert_position = free_area_.begin();
+            while (insert_position != free_area_.end()) {
+                if ((*insert_position)->base > new_mblk->base)
+                    break;
+                insert_position++;
+            }
+            free_area_.insert(insert_position, node);
         }
 
-        used_area_.insert(iter._node);
+        used_area_.insert(mblk_node);
+        nr_free_pages_ -= __pages;
         return mblk;
     }
 }   // namespace mm
 
 // defined in memory.h
-void *alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept {
+void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept {
     mm::MemoryBlock *mblk = kvmem.__alloc_pages(__pages, __gfm);
+    if (mblk == nullptr)
+        return nullptr;
 
     // set paging in advance
     if (__gfm & _GFM_PRE_PAGING) {
@@ -286,20 +332,36 @@ void *alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept {
         for (int buddy_order = 10; buddy_order >= 0; buddy_order--) {
             uint32_t nr_pages_by_order = 1u << buddy_order;
             while (nr_pages >= nr_pages_by_order) {
-                void *physical_addr = mm::__detail::alloc_physical_pages(buddy_order, 0);
+                void *physical_addr = mm::__detail::alloc_physical_order(buddy_order, 0);
+                if (physical_addr == nullptr) {
+                    kvmem.__free((void *)mblk->base);
+                    return nullptr;
+                }
 
                 auto pair = ktl::make_pair<ptr_t, uint32_t>(physical_addr, nr_pages_by_order);
                 auto node = new ktl::intrusive_list_node<ktl::pair<void *, uint32_t>>(pair);
+                if (node == nullptr) {
+                    mm::__detail::free_physical_order(physical_addr);
+                    kvmem.__free((void *)mblk->base);
+                    return nullptr;
+                }
 
                 mblk->physical_area.insert(node);
                 nr_pages -= nr_pages_by_order;
             }
         }
 
-        kvmem.set_paging(mblk);
+        if (!kvmem.set_paging(mblk)) {
+            kvmem.__free((void *)mblk->base);
+            return nullptr;
+        }
     }
 
     return reinterpret_cast<void *>(mblk->base);
+}
+
+void *alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept {
+    return alloc_kernel_pages(__pages, __gfm);
 }
 
 void free_pages(const void *__p) noexcept {

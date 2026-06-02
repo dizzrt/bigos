@@ -56,16 +56,16 @@ namespace mm {
 
         auto &ls = pblk->zone->free_area_[pblk->order];
 
-        // try to merge with next one
-        if (__pblk_node->next != nullptr) {
-            adjacent_pblk_node = (ktl::intrusive_list_node<PageBlock *> *)__pblk_node->next;
-            adjacent_pblk = **adjacent_pblk_node;
+        auto iter = ktl::intrusive_list<PageBlock *>::iterator(__pblk_node);
+        auto iter_next = iter;
+        ++iter_next;
 
+        // try to merge with next one
+        if (iter_next != ls.end()) {
+            adjacent_pblk_node = (ktl::intrusive_list_node<PageBlock *> *)iter_next._node;
+            adjacent_pblk = *iter_next;
             end_addr = pblk->base + pblk->len;
             if (end_addr == adjacent_pblk->base) {
-                auto iter = ktl::intrusive_list<PageBlock *>::iterator(__pblk_node);
-                auto iter_next = ktl::intrusive_list<PageBlock *>::iterator(adjacent_pblk_node);
-
                 ls.erase(iter);
                 ls.erase(iter_next);
 
@@ -81,15 +81,15 @@ namespace mm {
         }
 
         // try to merge with previous one
-        if (__pblk_node->prev != nullptr) {
-            adjacent_pblk_node = (ktl::intrusive_list_node<PageBlock *> *)__pblk_node->next;
-            adjacent_pblk = **adjacent_pblk_node;
+        iter = ktl::intrusive_list<PageBlock *>::iterator(__pblk_node);
+        if (iter != ls.begin()) {
+            auto iter_prev = iter;
+            --iter_prev;
+            adjacent_pblk_node = (ktl::intrusive_list_node<PageBlock *> *)iter_prev._node;
+            adjacent_pblk = *iter_prev;
 
             end_addr = adjacent_pblk->base + adjacent_pblk->len;
             if (end_addr == pblk->base) {
-                auto iter = ktl::intrusive_list<PageBlock *>::iterator(__pblk_node);
-                auto iter_prev = ktl::intrusive_list<PageBlock *>::iterator(adjacent_pblk_node);
-
                 ls.erase(iter);
                 ls.erase(iter_prev);
 
@@ -106,6 +106,9 @@ namespace mm {
     }
 
     void Zone::__base_free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept {
+        if (__pblk_node == nullptr)
+            return;
+
         auto pblk = **__pblk_node;
 
         if (pblk->order > BUDDY_MAX_ORDER)
@@ -125,10 +128,13 @@ namespace mm {
     }
 
     void Zone::__new_free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept {
-        __base_free(__pblk_node);
+        if (__pblk_node == nullptr)
+            return;
 
         auto pblk = **__pblk_node;
         uint32_t pages = 1ul << pblk->order;
+
+        __base_free(__pblk_node);
 
         nr_pages_ += pages;
         nr_free_pages_ += pages;
@@ -138,10 +144,13 @@ namespace mm {
     }
 
     void Zone::free(ktl::intrusive_list_node<PageBlock *> *__pblk_node) noexcept {
-        __base_free(__pblk_node);
+        if (__pblk_node == nullptr)
+            return;
 
         auto pblk = **__pblk_node;
         uint32_t pages = 1ul << pblk->order;
+
+        __base_free(__pblk_node);
 
         nr_free_pages_ += pages;
 
@@ -212,18 +221,18 @@ namespace mm {
 
         static uint32_t normalize_ards_type(uint32_t type) noexcept {
             switch (type) {
-            case ARDS_USABLE:
-                return BIGOS_BOOT_MEMORY_TYPE_USABLE;
-            case ARDS_RESERVED:
-                return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
-            case ARDS_ARM:
-                return BIGOS_BOOT_MEMORY_TYPE_ACPI_RECLAIM;
-            case ARDS_ANM:
-                return BIGOS_BOOT_MEMORY_TYPE_ACPI_NVS;
-            case ARDS_BAD:
-                return BIGOS_BOOT_MEMORY_TYPE_BAD_MEMORY;
-            default:
-                return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
+                case ARDS_USABLE:
+                    return BIGOS_BOOT_MEMORY_TYPE_USABLE;
+                case ARDS_RESERVED:
+                    return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
+                case ARDS_ARM:
+                    return BIGOS_BOOT_MEMORY_TYPE_ACPI_RECLAIM;
+                case ARDS_ANM:
+                    return BIGOS_BOOT_MEMORY_TYPE_ACPI_NVS;
+                case ARDS_BAD:
+                    return BIGOS_BOOT_MEMORY_TYPE_BAD_MEMORY;
+                default:
+                    return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
             }
         }
 
@@ -397,7 +406,10 @@ namespace mm {
                 halt_memory_handoff_failed();
         }
 
-        void *alloc_physical_pages(uint32_t __order, gfm_t __gfm) noexcept {
+        void *alloc_physical_order(uint32_t __order, gfm_t __gfm) noexcept {
+            if (__order > BUDDY_MAX_ORDER)
+                return nullptr;
+
             uint32_t nr_pages = 1u << __order;
 
             uint32_t index = ZONE_NORMAL;
@@ -434,7 +446,14 @@ namespace mm {
             return ret;
         }
 
-        void free_physical_pages(const void *__p) noexcept {
+        void *alloc_physical_pages(uint32_t __order, gfm_t __gfm) noexcept {
+            return alloc_physical_order(__order, __gfm);
+        }
+
+        void free_physical_order(const void *__p) noexcept {
+            if (__p == nullptr)
+                return;
+
             uint64_t base = (uint64_t)__p;
 
             auto iter = gPageBlockList.begin();
@@ -455,6 +474,10 @@ namespace mm {
             auto zone = (**pblk_node)->zone;
 
             zone->free(pblk_node);
+        }
+
+        void free_physical_pages(const void *__p) noexcept {
+            free_physical_order(__p);
         }
     }   // namespace __detail
 

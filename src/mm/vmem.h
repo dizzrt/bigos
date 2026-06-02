@@ -40,7 +40,7 @@ namespace mm {
         uint32_t nr_free_pages_;
 
     public:
-        void set_paging(MemoryBlock *__mblk) noexcept;
+        _attr_nodiscard_ bool set_paging(MemoryBlock *__mblk) noexcept;
 
         void __free(const void *__p) noexcept;
 

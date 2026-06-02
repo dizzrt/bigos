@@ -32,9 +32,16 @@ namespace mm {
     }
 
     void Slab::free_obj(const void *__p) noexcept {
+        if (__p == nullptr || (uint64_t)__p < base_ + SLAB_HEADER_SIZE)
+            return;
+
         uint64_t offset = (uint64_t)__p;
+        if (offset >= base_ + (uint64_t)nr_objs() * chunk_size_)
+            return;
+
         offset = (offset - base_) / chunk_size_;
-        reset(offset);
+        if (reset(offset) != 1)
+            return;
 
         belong_cache_->free(this);
     }
@@ -86,26 +93,43 @@ namespace mm {
 
     void *Cache::alloc(gfm_t __gfm) noexcept {
         if (avl_list.empty()) {
-            ptr_t heap = alloc_pages(buddy_order_, __gfm);
-            ptr8_t bp_heap = (ptr8_t)kmalloc((objs_per_slab_ + 7) / 8, __gfm);
-            if (heap == nullptr || bp_heap == nullptr)
+            // Slab growth must request virtual page counts and receive mapped backing.
+            ptr_t heap = alloc_kernel_pages(1u << buddy_order_, __gfm | _GFM_PRE_PAGING);
+            if (heap == nullptr)
                 return nullptr;
 
-            Slab *s = (Slab *)kmalloc(sizeof(Slab));
-            if (s == nullptr)
+            ptr8_t bp_heap = (ptr8_t)kmalloc((objs_per_slab_ + 7) / 8, __gfm);
+            if (bp_heap == nullptr) {
+                free_pages(heap);
                 return nullptr;
+            }
+
+            Slab *s = (Slab *)kmalloc(sizeof(Slab));
+            if (s == nullptr) {
+                bigos::free(bp_heap);
+                free_pages(heap);
+                return nullptr;
+            }
             new (s) Slab(heap, 0, objs_per_slab_, chunk_size_, this, bp_heap);
 
             auto s_node = (ktl::intrusive_list_node<Slab *> *)kmalloc(sizeof(ktl::intrusive_list_node<Slab *>));
-            if (s_node == nullptr)
+            if (s_node == nullptr) {
+                bigos::free(s);
+                bigos::free(bp_heap);
+                free_pages(heap);
                 return nullptr;
+            }
             new (s_node) ktl::intrusive_list_node<Slab *>(s);
 
             avl_list.insert(s_node);
+            nr_objs_ += s->nr_objs();
+            nr_free_objs += s->nr_free_objs();
         }
 
         auto first = avl_list.begin();
         void *ret = (*first)->alloc_obj(__gfm);
+        if (ret == nullptr)
+            return nullptr;
 
         if ((*first)->nr_free_objs() == 0) {
             avl_list.erase(first);

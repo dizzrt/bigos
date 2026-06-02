@@ -52,14 +52,14 @@ static_slab(1B, sizeof(uint8_t), SLAB_PERMANENT);
 static_slab(2B, sizeof(uint16_t), SLAB_PERMANENT);
 static_slab(4B, sizeof(uint32_t), SLAB_PERMANENT);
 static_slab(8B, sizeof(uint64_t), SLAB_PERMANENT);
-static_slab(16B, sizeof(uint64_t), SLAB_PERMANENT);
-static_slab(32B, sizeof(uint64_t), SLAB_PERMANENT);
-static_slab(64B, sizeof(uint64_t), SLAB_PERMANENT);
-static_slab(128B, sizeof(uint64_t), SLAB_PERMANENT);
-static_slab(256B, sizeof(uint64_t), SLAB_PERMANENT);
-static_slab(512B, sizeof(uint64_t), SLAB_PERMANENT);
-static_slab(1024B, sizeof(uint64_t), SLAB_PERMANENT);
-static_slab(2048B, sizeof(uint64_t), SLAB_PERMANENT);
+static_slab(16B, 16, SLAB_PERMANENT);
+static_slab(32B, 32, SLAB_PERMANENT);
+static_slab(64B, 64, SLAB_PERMANENT);
+static_slab(128B, 128, SLAB_PERMANENT);
+static_slab(256B, 256, SLAB_PERMANENT);
+static_slab(512B, 512, SLAB_PERMANENT);
+static_slab(1024B, 1024, SLAB_PERMANENT);
+static_slab(2048B, 2048, SLAB_PERMANENT);
 
 static_slab(cache, sizeof(bigos::mm::Cache), SLAB_PERMANENT);
 static_slab(slab_1, sizeof(bigos::mm::Slab), SLAB_PERMANENT);
@@ -74,14 +74,14 @@ static_cache(1B, sizeof(uint8_t), 0, 1, &static_slab_node_1B);
 static_cache(2B, sizeof(uint16_t), 0, 1, &static_slab_node_2B);
 static_cache(4B, sizeof(uint32_t), 0, 1, &static_slab_node_4B);
 static_cache(8B, sizeof(uint64_t), 0, 1, &static_slab_node_8B);
-static_cache(16B, sizeof(uint64_t), 0, 1, &static_slab_node_16B);
-static_cache(32B, sizeof(uint64_t), 0, 1, &static_slab_node_32B);
-static_cache(64B, sizeof(uint64_t), 0, 1, &static_slab_node_64B);
-static_cache(128B, sizeof(uint64_t), 0, 1, &static_slab_node_128B);
-static_cache(256B, sizeof(uint64_t), 0, 1, &static_slab_node_256B);
-static_cache(512B, sizeof(uint64_t), 0, 1, &static_slab_node_512B);
-static_cache(1024B, sizeof(uint64_t), 0, 1, &static_slab_node_1024B);
-static_cache(2048B, sizeof(uint64_t), 0, 1, &static_slab_node_2048B);
+static_cache(16B, 16, 0, 1, &static_slab_node_16B);
+static_cache(32B, 32, 0, 1, &static_slab_node_32B);
+static_cache(64B, 64, 0, 1, &static_slab_node_64B);
+static_cache(128B, 128, 0, 1, &static_slab_node_128B);
+static_cache(256B, 256, 0, 1, &static_slab_node_256B);
+static_cache(512B, 512, 0, 1, &static_slab_node_512B);
+static_cache(1024B, 1024, 0, 1, &static_slab_node_1024B);
+static_cache(2048B, 2048, 0, 1, &static_slab_node_2048B);
 
 static_cache(cache, sizeof(bigos::mm::Cache), 0, 1, &static_slab_node_cache);
 static_cache(slab, sizeof(bigos::mm::Slab), 0, 2, &static_slab_node_slab_1, &static_slab_node_slab_2);
@@ -128,6 +128,9 @@ void *kmalloc(size_t __size, gfm_t __gfm) noexcept {
 }
 
 void free(const void *__p) noexcept {
+    if (__p == nullptr)
+        return;
+
     uint64_t addr = (uint64_t)__p;
     auto slab_header = (mm::SlabHeader *)(addr - SLAB_HEADER_SIZE);
 
