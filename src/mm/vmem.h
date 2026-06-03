@@ -7,6 +7,8 @@
 #include <bigos/attributes.h>
 
 NAMESPACE_BIGOS_BEG
+void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept;
+
 namespace mm {
     typedef uint64_t *pt_t;
     typedef pt_t *pd_t;
@@ -30,7 +32,12 @@ namespace mm {
     class VMem {
     private:
         friend void __detail::init_vmem();
+        friend void *::bigos::alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept;
         void merge(ktl::intrusive_list_node<MemoryBlock *> *__mblk_node) noexcept;
+        _attr_nodiscard_ bool map_kernel_range(MemoryBlock *__mblk) noexcept;
+        void rollback_kernel_range(uint64_t __base, uint32_t __nr_pages) noexcept;
+        void unmap_kernel_range(MemoryBlock *__mblk) noexcept;
+        void release_physical_area(MemoryBlock *__mblk) noexcept;
 
         pml4_t pml4_;
         ktl::intrusive_list<MemoryBlock *> free_area_;
@@ -40,8 +47,6 @@ namespace mm {
         uint32_t nr_free_pages_;
 
     public:
-        _attr_nodiscard_ bool set_paging(MemoryBlock *__mblk) noexcept;
-
         void __free(const void *__p) noexcept;
 
         _attr_nodiscard_ MemoryBlock *__alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;

@@ -169,23 +169,31 @@ namespace mm {
 
         auto &ls = free_area_[real_order];
         auto iter = ls.begin();
+        auto pblk = *iter;
+        auto pblk_node = static_cast<ktl::intrusive_list_node<PageBlock *> *>(iter._node);
 
         ls.erase(iter);
 
-        auto pblk = *iter;
         if (real_order > __order) {
-            // divide
-            pblk->order = __order;
-            pblk->len = get_pblk_size(__order);
+            uint64_t original_base = pblk->base;
+            uint64_t original_len = pblk->len;
+            uint32_t original_order = pblk->order;
+            uint32_t original_flags = pblk->flags;
+            Zone *original_zone = pblk->zone;
+            PageBlock *split_pblks[BUDDY_MAX_ORDER + 1] = {};
+            ktl::intrusive_list_node<PageBlock *> *split_nodes[BUDDY_MAX_ORDER + 1] = {};
+            uint32_t split_count = 0;
 
-            uint64_t base = pblk->base + pblk->len;
+            uint64_t alloc_len = get_pblk_size(__order);
+            uint64_t base = pblk->base + alloc_len;
             uint64_t rest_len = ((1u << real_order) - (1u << __order)) * PAGE_SIZE;
 
             for (int i = 0; i <= BUDDY_MAX_ORDER; i++) {
                 uint64_t temp_len = get_pblk_size(BUDDY_MAX_ORDER - i);
                 while (rest_len >= temp_len) {
                     auto temp_pblk = new PageBlock();
-                    auto pblk_node = new ktl::intrusive_list_node<PageBlock *>(temp_pblk);
+                    if (temp_pblk == nullptr)
+                        goto split_failed;
 
                     temp_pblk->base = base;
                     temp_pblk->len = temp_len;
@@ -193,21 +201,59 @@ namespace mm {
                     temp_pblk->flags = pblk->flags;
                     temp_pblk->zone = this;
 
-                    __base_free(pblk_node);
+                    auto temp_node = new ktl::intrusive_list_node<PageBlock *>(temp_pblk);
+                    if (temp_node == nullptr) {
+                        delete temp_pblk;
+                        goto split_failed;
+                    }
+
+                    split_pblks[split_count] = temp_pblk;
+                    split_nodes[split_count] = temp_node;
+                    split_count++;
 
                     base += temp_len;
                     rest_len -= temp_len;
                 }
             }
+
+            pblk->order = __order;
+            pblk->len = alloc_len;
+
+            for (uint32_t i = 0; i < split_count; i++)
+                __base_free(split_nodes[i]);
+
+            goto split_done;
+
+        split_failed:
+            for (uint32_t i = 0; i < split_count; i++) {
+                delete split_nodes[i];
+                delete split_pblks[i];
+            }
+
+            pblk->base = original_base;
+            pblk->len = original_len;
+            pblk->order = original_order;
+            pblk->flags = original_flags;
+            pblk->zone = original_zone;
+
+            auto insert_position = free_area_[original_order].begin();
+            while (insert_position != free_area_[original_order].end()) {
+                if ((*insert_position)->base > pblk->base)
+                    break;
+                insert_position++;
+            }
+            free_area_[original_order].insert(insert_position, pblk_node);
+            return nullptr;
         }
 
-        gPageBlockList.insert(iter._node);
-        uint32_t pages = (1ul << ((*iter)->order));
+    split_done:
+        gPageBlockList.insert(pblk_node);
+        uint32_t pages = (1ul << pblk->order);
 
         gNrFreePages -= pages;
         nr_free_pages_ -= pages;
 
-        return static_cast<ktl::intrusive_list_node<PageBlock *> *>(iter._node);
+        return pblk_node;
     }
 
     namespace __detail {

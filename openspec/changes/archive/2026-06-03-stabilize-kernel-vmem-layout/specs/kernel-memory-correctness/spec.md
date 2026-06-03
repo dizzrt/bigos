@@ -1,8 +1,4 @@
-## Purpose
-
-Define memory correctness requirements for BigOS early kernel memory management, including buddy physical page allocation, slab/kmalloc size classes, kernel virtual memory allocation, page-table mapping, allocation failure rollback, and reproducible validation.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Buddy allocator preserves physical page invariants
 
@@ -27,59 +23,6 @@ Define memory correctness requirements for BigOS early kernel memory management,
 
 - **WHEN** `Zone::alloc(order)` 拆分较大 PageBlock 时无法分配剩余块所需的 `PageBlock` 或 list node 元数据
 - **THEN** allocator 恢复被拆分前的原始 PageBlock、重新放回对应 free list、保持 zone/global free page 统计不变，并向调用方返回分配失败
-
-### Requirement: Slab allocator provides correct kmalloc size classes
-
-slab/kmalloc allocator SHALL 为声明的静态 size class 建立匹配对象大小的 cache，并 MUST 在支持范围内为 `kmalloc(size)` 和全局 `operator new` 返回可直接访问的内核地址。分配失败时 MUST 返回 `nullptr` 或遵循现有 new 失败策略，不得返回半初始化或未映射对象。
-
-#### Scenario: kmalloc 选择足够大的 size class
-
-- **WHEN** 调用 `kmalloc(size)` 且 `size` 落在已声明的静态 size class 范围内
-- **THEN** CacheChain 选择对象大小等于或大于 `size` 的最小可用 cache，除非调用方显式要求 perfect fit
-
-#### Scenario: 静态 cache 对象大小与名称一致
-
-- **WHEN** 内存初始化注册 `16B`、`32B`、`64B`、`128B`、`256B`、`512B`、`1024B` 和 `2048B` cache
-- **THEN** 每个 cache 的对象大小与其名称表达的容量一致
-
-#### Scenario: slab 扩容返回可访问地址
-
-- **WHEN** 一个 cache 的可用 slab 耗尽并需要动态扩容
-- **THEN** 新 slab 的 heap backing 已经映射到当前内核页表，调用方可以立即读写 `kmalloc()` 返回的对象地址
-
-#### Scenario: 释放对象更新 slab 状态
-
-- **WHEN** 调用 `free(ptr)` 释放由 slab 分配的对象
-- **THEN** 对象位图被重置，cache free object 计数增加，full slab 在释放后重新进入可分配列表
-
-### Requirement: Memory API exposes explicit allocation semantics
-
-BigOS early kernel memory API SHALL expose allocation entry points whose names identify the allocation layer and unit. Public kernel virtual page allocation MUST use page-count semantics through `alloc_kernel_pages(nr_pages, flags)`. Internal physical page allocation MUST use buddy-order semantics through `alloc_physical_order(order, flags)`. Legacy aliases that obscure this distinction MUST NOT remain declared or defined.
-
-#### Scenario: 公开虚拟页分配入口使用页数语义
-
-- **WHEN** kernel 代码需要分配 `nr_pages` 个内核虚拟页
-- **THEN** 调用方使用 `alloc_kernel_pages(nr_pages, flags)`，且该参数表达页数而不是 buddy order
-
-#### Scenario: 内部物理页分配入口使用 order 语义
-
-- **WHEN** VMem 或 buddy 内部代码需要分配 `2^order` 个连续物理页
-- **THEN** 调用方使用 `alloc_physical_order(order, flags)`，且该参数表达 buddy order 而不是页数
-
-#### Scenario: 旧 alias 不再暴露
-
-- **WHEN** 开发者搜索公开头文件和 `src/mm` 实现
-- **THEN** 不存在 `alloc_pages()`、`alloc_physical_pages()`、`free_physical_pages()` 或未实现的 `kmem_memory_alloc_pages()` 入口供新调用点使用
-
-#### Scenario: kmalloc 调用方不需要映射 flag
-
-- **WHEN** 普通内核代码调用 `kmalloc(size)` 或全局 `operator new(size)`
-- **THEN** 返回地址在成功时已经可直接访问，调用方不需要传入 `_GFM_PRE_PAGING` 来保证对象可读写
-
-#### Scenario: free_pages 配对 kernel virtual pages
-
-- **WHEN** 调用方释放由 `alloc_kernel_pages(nr_pages, flags)` 返回的地址
-- **THEN** 调用方使用 `free_pages(ptr)`，该释放路径处理 VMem 区间和已建立的 physical backing
 
 ### Requirement: Kernel virtual memory allocator preserves virtual range invariants
 

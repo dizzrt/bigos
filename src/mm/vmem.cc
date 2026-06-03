@@ -39,12 +39,50 @@
 
 static bigos::mm::VMem kvmem;
 
+static inline bool paging_present(uint64_t __descriptor) noexcept {
+    return (__descriptor & 0x1ul) != 0;
+}
+
+static inline void flush_kernel_tlb_page(uint64_t __vaddr) noexcept {
+    asm volatile("invlpg (%0)" ::"r"(__vaddr) : "memory");
+}
+
+struct PagingDescriptorChange {
+    uint64_t *entry;
+    uint16_t index;
+};
+
+static void clear_new_paging_descriptors(PagingDescriptorChange *__changes, uint32_t __count) noexcept {
+    while (__count) {
+        __count--;
+        __changes[__count].entry[__changes[__count].index] = 0;
+    }
+}
+
+static uint64_t *mapped_pte(uint64_t __vaddr) noexcept {
+    uint64_t *entry = self_mapping_pml4(__vaddr);
+    if (!paging_present(entry[get_pml4_index(__vaddr)]))
+        return nullptr;
+
+    entry = self_mapping_pdpt(__vaddr);
+    if (!paging_present(entry[get_pdpt_index(__vaddr)]))
+        return nullptr;
+
+    entry = self_mapping_pd(__vaddr);
+    if (!paging_present(entry[get_pd_index(__vaddr)]))
+        return nullptr;
+
+    return &self_mapping_pt(__vaddr)[get_pt_index(__vaddr)];
+}
+
 NAMESPACE_BIGOS_BEG
 namespace mm {
     namespace __detail {
         void init_vmem() {
             MemoryBlock *mblk = new MemoryBlock();
             // mblk->vmem = &kvmem;
+            // KVMEM is a kernel heap/vmalloc-style virtual allocation area,
+            // not a direct map and not a virt = phys + offset region.
             mblk->base = KVMEM_BASE;
             // mblk->len = KVMEM_LEN;
             mblk->nr_pages = KVMEM_LEN / PAGE_SIZE;
@@ -59,49 +97,50 @@ namespace mm {
         }
     }   // namespace __detail
 
-    bool VMem::set_paging(MemoryBlock *__mblk) noexcept {
+    void VMem::rollback_kernel_range(uint64_t __base, uint32_t __nr_pages) noexcept {
+        for (uint32_t i = 0; i < __nr_pages; i++) {
+            uint64_t vaddr = __base + i * PAGE_SIZE;
+            uint64_t *pte = mapped_pte(vaddr);
+            if (pte != nullptr && paging_present(*pte)) {
+                *pte = 0;
+                flush_kernel_tlb_page(vaddr);
+            }
+        }
+    }
+
+    bool VMem::map_kernel_range(MemoryBlock *__mblk) noexcept {
         if (__mblk == nullptr)
             return false;
 
         uint64_t base = __mblk->base;
-
-        uint16_t i_pml4 = get_pml4_index(base);
-        uint16_t i_pdpt = get_pdpt_index(base);
-        uint16_t i_pd = get_pd_index(base);
-        uint16_t i_pt = get_pt_index(base);
+        uint32_t mapped_pages = 0;
 
         for (auto physical_m : __mblk->physical_area) {
             uint32_t nr_physical_pages = physical_m.second;
             uint64_t physical_base = (uint64_t)physical_m.first;
 
             while (nr_physical_pages) {
-                if (i_pt >= 512) {
-                    i_pt = 0;
-                    i_pd++;
-                    if (i_pd >= 512) {
-                        i_pd = 0;
-                        i_pdpt++;
-                        if (i_pdpt >= 512) {
-                            i_pdpt = 0;
-                            i_pml4++;
-                            if (i_pml4 >= 512) {
-                                // TODO out of range
-                                return false;
-                            }
-                        }
-                    }
-                }
+                uint16_t i_pml4 = get_pml4_index(base);
+                uint16_t i_pdpt = get_pdpt_index(base);
+                uint16_t i_pd = get_pd_index(base);
+                uint16_t i_pt = get_pt_index(base);
 
                 uint64_t *entry;
                 uint64_t page, paging_descriptor;
+                PagingDescriptorChange new_descriptors[3] = {};
+                uint32_t new_descriptor_count = 0;
 
                 // check if pdpt is valid
                 entry = self_mapping_pml4(base);
                 paging_descriptor = entry[i_pml4];
                 if (!paging_descriptor) {
                     page = (uint64_t)__detail::alloc_physical_order(0, 0);
-                    if (page == 0)
+                    if (page == 0) {
+                        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+                        rollback_kernel_range(__mblk->base, mapped_pages);
                         return false;
+                    }
+                    new_descriptors[new_descriptor_count++] = {entry, i_pml4};
                     self_mapping_pml4(base)[i_pml4] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PML4E;
 
                     entry = self_mapping_pdpt(base);
@@ -113,8 +152,12 @@ namespace mm {
                 paging_descriptor = entry[i_pdpt];
                 if (!paging_descriptor) {
                     page = (uint64_t)__detail::alloc_physical_order(0, 0);
-                    if (page == 0)
+                    if (page == 0) {
+                        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+                        rollback_kernel_range(__mblk->base, mapped_pages);
                         return false;
+                    }
+                    new_descriptors[new_descriptor_count++] = {entry, i_pdpt};
                     self_mapping_pdpt(base)[i_pdpt] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDPTE;
 
                     entry = self_mapping_pd(base);
@@ -126,8 +169,12 @@ namespace mm {
                 paging_descriptor = entry[i_pd];
                 if (!paging_descriptor) {
                     page = (uint64_t)__detail::alloc_physical_order(0, 0);
-                    if (page == 0)
+                    if (page == 0) {
+                        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+                        rollback_kernel_range(__mblk->base, mapped_pages);
                         return false;
+                    }
+                    new_descriptors[new_descriptor_count++] = {entry, i_pd};
                     self_mapping_pd(base)[i_pd] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDE;
 
                     entry = self_mapping_pt(base);
@@ -137,7 +184,7 @@ namespace mm {
                 // set paging
                 self_mapping_pt(base)[i_pt] = (physical_base & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PTE;
 
-                i_pt++;
+                mapped_pages++;
                 nr_physical_pages--;
 
                 base += PAGE_SIZE;
@@ -146,6 +193,36 @@ namespace mm {
         }
 
         return true;
+    }
+
+    void VMem::unmap_kernel_range(MemoryBlock *__mblk) noexcept {
+        if (__mblk == nullptr || __mblk->physical_area.empty())
+            return;
+
+        uint32_t mapped_pages = 0;
+        for (auto physical_m : __mblk->physical_area)
+            mapped_pages += physical_m.second;
+
+        if (mapped_pages > __mblk->nr_pages)
+            mapped_pages = __mblk->nr_pages;
+
+        rollback_kernel_range(__mblk->base, mapped_pages);
+    }
+
+    void VMem::release_physical_area(MemoryBlock *__mblk) noexcept {
+        if (__mblk == nullptr)
+            return;
+
+        for (auto physical_pair : __mblk->physical_area) {
+            __detail::free_physical_order(physical_pair.first);
+        }
+
+        while (!__mblk->physical_area.empty()) {
+            auto temp = __mblk->physical_area.begin();
+            auto temp_node = temp._node;
+            __mblk->physical_area.erase(temp);
+            delete temp_node;
+        }
     }
 
     void VMem::merge(ktl::intrusive_list_node<MemoryBlock *> *__mblk_node) noexcept {
@@ -238,18 +315,8 @@ namespace mm {
         auto mblk_node = iter._node;
         used_area_.erase(iter);
 
-        // free physical pages
-        for (auto physical_pair : mblk->physical_area) {
-            __detail::free_physical_order(physical_pair.first);
-        }
-
-        // empty phsical_area
-        while (!mblk->physical_area.empty()) {
-            auto temp = mblk->physical_area.begin();
-            auto temp_node = temp._node;
-            mblk->physical_area.erase(temp);
-            delete temp_node;
-        }
+        unmap_kernel_range(mblk);
+        release_physical_area(mblk);
 
         nr_free_pages_ += mblk->nr_pages;
 
@@ -351,7 +418,7 @@ void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept {
             }
         }
 
-        if (!kvmem.set_paging(mblk)) {
+        if (!kvmem.map_kernel_range(mblk)) {
             kvmem.__free((void *)mblk->base);
             return nullptr;
         }
