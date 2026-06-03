@@ -22,6 +22,9 @@ void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
 
     bigos::init_mem(boot_info);
+#ifdef BIGOS_MM_SELF_TEST
+    bigos::mm::self_test();
+#endif
     bigos::irq::initIRQ();
     // bigos::terminal::init_tty();
     // bigos::irq::enableIRQ();

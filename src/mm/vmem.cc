@@ -95,6 +95,10 @@ namespace mm {
             kvmem.nr_pages_ = mblk->nr_pages;
             kvmem.nr_free_pages_ = mblk->nr_pages;
         }
+
+        uint32_t kernel_vmem_free_pages() noexcept {
+            return kvmem.nr_free_pages();
+        }
     }   // namespace __detail
 
     void VMem::rollback_kernel_range(uint64_t __base, uint32_t __nr_pages) noexcept {

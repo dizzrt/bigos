@@ -27,6 +27,7 @@ namespace mm {
 
     namespace __detail {
         void init_vmem();
+        uint32_t kernel_vmem_free_pages() noexcept;
     }   // namespace __detail
 
     class VMem {
@@ -47,6 +48,10 @@ namespace mm {
         uint32_t nr_free_pages_;
 
     public:
+        inline uint32_t nr_free_pages() const noexcept {
+            return nr_free_pages_;
+        }
+
         void __free(const void *__p) noexcept;
 
         _attr_nodiscard_ MemoryBlock *__alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;

@@ -1,90 +1,81 @@
-# x86 Legacy Boot Layout
+# x86 Legacy 启动布局
 
-BigOS currently uses the legacy BIOS path:
+BigOS 当前使用 legacy BIOS 路径：
 
 ```text
 BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel
 ```
 
-This path remains the current runnable boot backend and the producer of the
-kernel handoff data used by the existing kernel. The UEFI plan in
-`docs/arch/uefi-boot-blueprint.md` treats this path as the Legacy backend of a
-future unified handoff model; it does not replace the MBR/DBR/exDBR/`boot.bin`
-flow or change the meaning of `make boot-debug`.
+该路径仍是当前可运行的启动后端，也是现有内核所用 kernel handoff 数据的生产者。
+`docs/arch/uefi-boot-blueprint.md` 中的 UEFI 计划会把该路径视为未来统一
+handoff 模型中的 Legacy 后端；它不会替换 MBR/DBR/exDBR/`boot.bin` 流程，
+也不会改变 `make boot-debug` 的含义。
 
-The early boot path depends on these fixed physical and virtual addresses:
+早期启动路径依赖以下固定物理地址和虚拟地址：
 
 ```text
-0x0500..0x07ff  E820 ARDS records written by extended DBR
-0x0800..0x083f  legacy boot metadata aliases
-0x0800          legacy E820 entry count
-0x0802          BIOS boot drive
-0x080c          legacy kernel memory size
-0x0830          legacy exFAT data-area LBA
-0x0840..0x0887  canonical BootInfo handoff structure
-0x1000..0x1fff  extended DBR load area
-0x2000..0x6fff  boot-stage PML4/PDPT/PD/PT setup area
-0x5000..        kernel higher-half page-directory handoff area
-0x7c00          BIOS-loaded MBR/DBR sector
-0x9000..0x9fff  Legacy BIOS-produced BootInfo v2 handoff blob
-0x0f000         exFAT directory buffer
-0x10000         boot.bin load address
-0x100000        kernel higher-half page-table backing area
-0x1000000       kernel physical load base
-0xffffffff80000000  kernel higher-half virtual base
+0x0500..0x07ff  extended DBR 写入的 E820 ARDS 记录
+0x0800..0x083f  legacy 启动元数据别名
+0x0800          legacy E820 条目数量
+0x0802          BIOS 启动驱动器
+0x080c          legacy 内核内存大小
+0x0830          legacy exFAT 数据区 LBA
+0x0840..0x0887  规范 BootInfo handoff 结构
+0x1000..0x1fff  extended DBR 加载区域
+0x2000..0x6fff  启动阶段 PML4/PDPT/PD/PT 设置区域
+0x5000..        内核 higher-half 页目录 handoff 区域
+0x7c00          BIOS 加载的 MBR/DBR 扇区
+0x9000..0x9fff  Legacy BIOS 生成的 BootInfo v2 handoff blob
+0x0f000         exFAT 目录缓冲区
+0x10000         boot.bin 加载地址
+0x100000        内核 higher-half 页表后备区域
+0x1000000       内核物理加载基址
+0xffffffff80000000  内核 higher-half 虚拟基址
 ```
 
-`BootInfo` v1 is defined in `include/arch/x86/boot/boot_info.h`. Boot C++
-continues to write it at `BIGOS_BOOT_INFO_ADDRESS` (`0x0840`) and preserves the
-legacy aliases while kernel consumers migrate. Its magic, version, size, field
-offsets, alignment, and fixed address remain compatibility ABI.
+`BootInfo` v1 定义在 `include/arch/x86/boot/boot_info.h`。Boot C++ 会继续将其
+写入 `BIGOS_BOOT_INFO_ADDRESS` (`0x0840`)，并在内核消费者迁移期间保留 legacy
+别名。它的 magic、version、size、字段偏移、对齐方式和固定地址仍是兼容性 ABI。
 
-The primary handoff path is now `BootInfo` v2. Legacy BIOS boot C++ builds a
-bounded `BootInfoHeader + BootInfoSection[]` blob at `0x9000..0x9fff`, then
-`boot.s` passes its `BootInfoHeader*` in `rdi` before jumping to the kernel ELF
-entry. The v2 blob address is a producer-side implementation detail for this
-backend; the kernel ABI is the register-passed pointer plus relative section
-offsets from the header base.
+主要 handoff 路径现在是 `BootInfo` v2。Legacy BIOS boot C++ 会在
+`0x9000..0x9fff` 构建一个有界的 `BootInfoHeader + BootInfoSection[]` blob，
+随后 `boot.s` 在跳转到内核 ELF 入口之前，通过 `rdi` 传递它的
+`BootInfoHeader*`。v2 blob 地址是该后端生产者侧的实现细节；内核 ABI 是通过
+寄存器传入的指针，以及相对于 header 基址的 section 偏移。
 
-The v2 blob currently contains two required sections:
+v2 blob 当前包含两个必需 section：
 
-- `core`: Legacy BIOS protocol metadata, boot drive, exFAT data-area LBA, kernel
-  load virtual address, kernel entry virtual address, kernel file size, and
-  kernel memory size.
-- `memory_map`: `BootMemoryRegion[]` entries normalized from BIOS E820 ARDS.
+- `core`：Legacy BIOS 协议元数据、启动驱动器、exFAT 数据区 LBA、内核加载虚拟地址、内核入口虚拟地址、内核文件大小和内核内存大小。
+- `memory_map`：从 BIOS E820 ARDS 规范化得到的 `BootMemoryRegion[]` 条目。
 
-The v2 magic is independent from the v1 magic, so consumers do not rely only on
-`version` to distinguish a fixed v1 struct from a header/section blob. Section
-table and payload offsets are relative to `BootInfoHeader`, and consumers check
-header size, total size, section table bounds, payload bounds, required section
-presence, and payload alignment. Unknown optional sections are skipped; missing
-or malformed required sections reject v2 and allow the explicit v1 fixed-address
-fallback.
+v2 magic 独立于 v1 magic，因此消费者不会只依赖 `version` 来区分固定的 v1
+结构体与 header/section blob。Section table 与 payload 偏移都相对于
+`BootInfoHeader`，消费者会检查 header 大小、总大小、section table 边界、
+payload 边界、必需 section 是否存在，以及 payload 对齐。未知的可选 section
+会被跳过；缺失或格式错误的必需 section 会使 v2 被拒绝，并允许显式回退到 v1
+固定地址。
 
-The v2 blob at `0x9000..0x9fff` does not move or overlap the E820 buffer, legacy
-metadata aliases, v1 `BootInfo`, boot-stage page tables, kernel higher-half
-page-table backing area, kernel physical load base, or higher-half virtual base.
-Future fixed low addresses, page-table reservations, or handoff aliases must
-update this layout and explain their compatibility with the future UEFI backend.
+位于 `0x9000..0x9fff` 的 v2 blob 不会移动或重叠 E820 缓冲区、legacy 元数据别名、
+v1 `BootInfo`、启动阶段页表、内核 higher-half 页表后备区域、内核物理加载基址或
+higher-half 虚拟基址。未来如果新增固定低地址、页表保留区或 handoff 别名，必须
+更新该布局，并说明它们与未来 UEFI 后端的兼容性。
 
-`BootMemoryRegion` maps BIOS E820 as follows:
+`BootMemoryRegion` 按如下方式映射 BIOS E820：
 
-- E820 type `1` maps to `usable`; only these regions enter the buddy free lists.
-- E820 type `2` maps to `reserved`.
-- E820 type `3` maps to `acpi_reclaim`.
-- E820 type `4` maps to `acpi_nvs`.
-- E820 type `5` maps to `bad_memory`.
-- Unknown E820 types map conservatively to `reserved`.
+- E820 类型 `1` 映射为 `usable`；只有这些区域会进入 buddy 空闲链表。
+- E820 类型 `2` 映射为 `reserved`。
+- E820 类型 `3` 映射为 `acpi_reclaim`。
+- E820 类型 `4` 映射为 `acpi_nvs`。
+- E820 类型 `5` 映射为 `bad_memory`。
+- 未知 E820 类型会保守地映射为 `reserved`。
 
-Reserved, runtime, MMIO, ACPI reclaim, ACPI NVS, bad memory, and unknown memory
-types are not released during early buddy initialization. `acpi_reclaim` remains
-reserved until a future ACPI table lifecycle phase can prove it is safe to
-reclaim.
+Reserved、runtime、MMIO、ACPI reclaim、ACPI NVS、bad memory 和未知内存类型在
+早期 buddy 初始化期间都不会被释放。`acpi_reclaim` 会保持 reserved，直到未来的
+ACPI 表生命周期阶段能够证明其可安全回收。
 
-The protected-mode extended DBR stage reads `boot.bin` with ATA primary-master
-PIO. It therefore requires BIOS boot drive `0x80`; other BIOS drive numbers halt
-with the visible `U` code in VGA text memory.
+保护模式下的 extended DBR 阶段会使用 ATA primary-master PIO 读取 `boot.bin`。
+因此它要求 BIOS 启动驱动器为 `0x80`；其他 BIOS 驱动器编号会使系统暂停，并在
+VGA 文本内存中显示可见的 `U` 代码。
 
-`make boot-debug` keeps its existing Legacy BIOS/MBR/exFAT/Bochs meaning. This
-handoff change does not switch that target to `BOOTX64.EFI`, an ESP/FAT image, or
-QEMU/OVMF.
+`make boot-debug` 保持现有的 Legacy BIOS/MBR/exFAT/Bochs 含义。该 handoff 变更
+不会把该目标切换为 `BOOTX64.EFI`、ESP/FAT 镜像或 QEMU/OVMF。

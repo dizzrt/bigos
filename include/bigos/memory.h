@@ -19,6 +19,10 @@ extern void free(const void *__p) noexcept;
 
 void init_mem(const BootInfoHeader *__boot_info) noexcept;
 
+namespace mm {
+    void self_test() noexcept;
+}   // namespace mm
+
 NAMESPACE_BIGOS_END
 
 #endif   // _BIG_MEMORY_H

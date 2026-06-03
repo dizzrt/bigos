@@ -8,6 +8,7 @@ import math
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,8 @@ DEFAULT_IMAGE = BUILD_DIR / 'test' / 'os.raw'
 DEFAULT_BOCHSRC = BUILD_DIR / 'test' / 'bochsrc.bxrc'
 DEFAULT_KERNEL = BUILD_DIR / 'kernel'
 DEFAULT_CPU_MODEL = 'corei7_haswell_4770'
+DEFAULT_SERIAL_LOG = BUILD_DIR / 'test' / 'serial.log'
+MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'
 
 SECTOR_SIZE = 512
 MBR_PARTITION_TABLE_OFFSET = 0x1BE
@@ -186,7 +189,12 @@ def check_tools(need_bochs: bool) -> None:
         raise StageError('preflight', 'missing required tool(s): ' + ', '.join(missing))
 
 
-def build_kernel() -> None:
+def build_kernel(memory_self_test: bool) -> None:
+    run_command(
+        'kernel config',
+        ['xmake', 'f', f'--mm_self_test={"y" if memory_self_test else "n"}'],
+        PROJECT_ROOT,
+    )
     run_command('kernel build', ['xmake'], PROJECT_ROOT)
     require_file(DEFAULT_KERNEL, 'kernel build', 'kernel ELF')
 
@@ -545,9 +553,14 @@ def render_bochsrc(
     output_path: Path,
     romimage: str | None,
     vgaromimage: str | None,
+    serial_log: Path | None,
     extra_lines: Sequence[str],
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    serial_line = 'com1: enabled=1, mode=null'
+    if serial_log is not None:
+        serial_log.parent.mkdir(parents=True, exist_ok=True)
+        serial_line = f'com1: enabled=1, mode=file, dev="{serial_log}"'
     image_size = image_path.stat().st_size
     cylinders, heads, sectors_per_track = disk_geometry(image_size)
     lines = [
@@ -557,7 +570,7 @@ def render_bochsrc(
         'ata0: enabled=1, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14',
         f'ata0-master: type=disk, path="{image_path}", mode=flat, '
         f'cylinders={cylinders}, heads={heads}, spt={sectors_per_track}, sect_size=512',
-        'com1: enabled=1, mode=null',
+        serial_line,
         'log: -',
         'panic: action=fatal',
         'error: action=report',
@@ -591,14 +604,65 @@ def launch_bochs(bochsrc: Path) -> None:
     )
 
 
+def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: str, timeout_seconds: float) -> None:
+    if serial_log.exists():
+        serial_log.unlink()
+
+    printable = f'bochs -f {bochsrc} -q'
+    log_stage(f'bochs smoke: {printable}')
+    process = subprocess.Popen(
+        ['bochs', '-f', str(bochsrc), '-q'],
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        while time.monotonic() < deadline:
+            if serial_log.exists() and marker in serial_log.read_text(encoding='utf-8', errors='replace'):
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+                print(f'serial marker observed: {marker}')
+                return
+
+            if process.poll() is not None:
+                output = process.stdout.read() if process.stdout is not None else ''
+                raise StageError('bochs smoke', f'Bochs exited before marker {marker!r}\n{output}')
+
+            time.sleep(0.1)
+
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        raise StageError('bochs smoke', f'timed out waiting for serial marker {marker!r} in {serial_log}')
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+
 def run(args: argparse.Namespace) -> int:
     image_path = Path(args.image).resolve()
     bochsrc_path = Path(args.bochsrc).resolve() if args.bochsrc else DEFAULT_BOCHSRC
     image_size = parse_size(args.image_size)
     should_launch = not args.no_launch
+    serial_log = Path(args.serial_log).resolve() if args.serial_log else None
+    marker = args.expect_serial_marker
+
+    if args.memory_self_test:
+        serial_log = serial_log or DEFAULT_SERIAL_LOG
+        marker = marker or MM_SELF_TEST_SUCCESS_MARKER
 
     check_tools(need_bochs=should_launch)
-    build_kernel()
+    build_kernel(args.memory_self_test)
     build_boot_artifacts()
     artifacts = get_artifacts(DEFAULT_KERNEL)
 
@@ -609,15 +673,20 @@ def run(args: argparse.Namespace) -> int:
     if args.bochsrc:
         log_stage(f'using custom Bochs config: {bochsrc_path}')
     else:
-        render_bochsrc(image_path, bochsrc_path, args.romimage, args.vgaromimage, args.bochs_extra)
+        render_bochsrc(image_path, bochsrc_path, args.romimage, args.vgaromimage, serial_log, args.bochs_extra)
 
     print(f'image: {image_path}')
     print(f'bochsrc: {bochsrc_path}')
+    if serial_log:
+        print(f'serial_log: {serial_log}')
     print(f'partition_lba: {layout.partition_lba}')
     print(f'cluster_heap_lba: {layout.cluster_heap_lba}')
 
     if should_launch:
-        launch_bochs(bochsrc_path)
+        if marker and serial_log:
+            launch_bochs_until_serial_marker(bochsrc_path, serial_log, marker, args.smoke_timeout)
+        else:
+            launch_bochs(bochsrc_path)
     else:
         log_stage('bochs launch skipped by --no-launch')
     return 0
@@ -651,6 +720,25 @@ def make_parser() -> argparse.ArgumentParser:
     run_parser.add_argument('--bochsrc', help='custom Bochs config to use instead of generating one')
     run_parser.add_argument('--romimage', help='optional Bochs BIOS ROM path for generated config')
     run_parser.add_argument('--vgaromimage', help='optional Bochs VGA BIOS ROM path for generated config')
+    run_parser.add_argument(
+        '--memory-self-test',
+        action='store_true',
+        help='build with BIGOS_MM_SELF_TEST and route COM1 to a serial log',
+    )
+    run_parser.add_argument(
+        '--serial-log',
+        help='COM1 output file for generated Bochs config; defaults under build/test for memory self-test',
+    )
+    run_parser.add_argument(
+        '--expect-serial-marker',
+        help='when launching Bochs, wait until this marker appears in --serial-log',
+    )
+    run_parser.add_argument(
+        '--smoke-timeout',
+        type=float,
+        default=10.0,
+        help='seconds to wait for --expect-serial-marker before failing',
+    )
     run_parser.add_argument(
         '--bochs-extra',
         action='append',

@@ -147,3 +147,51 @@ def test_fixed_memory_layout_constants_are_unchanged() -> None:
     assert '#define LOWEST_LIMIT 0x200000ul' in buddy
     assert '#define KERNEL_PML4_ADDR 0x2000ul' in vmem
     assert '. = 0xffffffff80000000;' in link_script
+
+
+def test_memory_self_test_is_switchable_and_not_default() -> None:
+    xmake = read_source('xmake.lua')
+    kernel = read_source('src/kernel/kernel.cc')
+
+    assert 'option("mm_self_test")' in xmake
+    assert 'set_default(false)' in xmake
+    assert 'add_defines("BIGOS_MM_SELF_TEST")' in xmake
+    assert '#ifdef BIGOS_MM_SELF_TEST\n    bigos::mm::self_test();\n#endif' in kernel
+
+    init_mem_index = kernel.index('bigos::init_mem(boot_info);')
+    self_test_index = kernel.index('bigos::mm::self_test();')
+    irq_index = kernel.index('bigos::irq::initIRQ();')
+    assert init_mem_index < self_test_index < irq_index
+
+
+def test_memory_self_test_avoids_later_subsystem_dependencies() -> None:
+    self_test = read_source('src/mm/self_test.cc')
+
+    forbidden_tokens = (
+        'initIRQ',
+        'enableIRQ',
+        'scheduler',
+        'SMP',
+        'filesystem',
+        'fopen',
+        'FILE *',
+        'std::',
+    )
+    for token in forbidden_tokens:
+        assert token not in self_test
+
+    assert 'BIGOS_MM_SELF_TEST_PASSED' in self_test
+    assert 'BIGOS_MM_SELF_TEST_FAILED stage=' in self_test
+    assert 'alloc_kernel_pages(__pages, _GFM_PRE_PAGING)' in self_test
+    assert 'alloc_physical_order(__order, 0)' in self_test
+    assert 'kernel_vmem_free_pages()' in read_source('src/mm/vmem.h')
+
+
+def test_boot_debug_supports_bounded_serial_memory_smoke() -> None:
+    boot_debug = read_source('tools/boot_debug.py')
+
+    assert "MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'" in boot_debug
+    assert "'--memory-self-test'" in boot_debug
+    assert "'--expect-serial-marker'" in boot_debug
+    assert 'mode=file' in boot_debug
+    assert 'launch_bochs_until_serial_marker' in boot_debug

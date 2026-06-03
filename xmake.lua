@@ -9,6 +9,12 @@ set_languages("c17","cxx17")
 set_toolchains("x86_64-elf-gcc")
 add_rules("mode.debug", "mode.release")
 
+option("mm_self_test")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable early memory runtime self-test")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -30,6 +36,10 @@ target("kernel")
     add_files("src/drivers/**.cc")
     add_files("src/mm/**.cc")
     add_files("cpp/**.cc")
+
+    if has_config("mm_self_test") then
+        add_defines("BIGOS_MM_SELF_TEST")
+    end
 
     if is_mode("debug") then 
         set_symbols("debug")

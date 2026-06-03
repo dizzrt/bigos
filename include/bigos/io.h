@@ -12,6 +12,9 @@ namespace bigos {
     void kputs(const char *s);
     void kprintf(const char *fmt, ...);
 
+    void serial_init();
+    void serial_puts(const char *s);
+
 }   // namespace bigos
 
 #endif
