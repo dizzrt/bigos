@@ -10,10 +10,14 @@ def read_source(relative: str) -> str:
 
 def test_static_slab_size_classes_match_names() -> None:
     kmem = read_source('src/mm/kmem.cc')
+    memdef = read_source('src/mm/memdef.h')
+
+    assert '#define CACHE_MAX_OBJ_SIZE 0x800ul' in memdef
 
     for size in (16, 32, 64, 128, 256, 512, 1024, 2048):
-        assert f'static_slab({size}B, {size}, SLAB_PERMANENT);' in kmem
-        assert f'static_cache({size}B, {size}, 0, 1, &static_slab_node_{size}B);' in kmem
+        slab_size = 'CACHE_MAX_OBJ_SIZE' if size == 2048 else str(size)
+        assert f'static_slab({size}B, {slab_size}, SLAB_PERMANENT);' in kmem
+        assert f'static_cache({size}B, {slab_size}, 0, 1, &static_slab_node_{size}B);' in kmem
 
 
 def test_buddy_bootstrap_metadata_uses_internal_arena() -> None:
@@ -136,7 +140,8 @@ def test_kmalloc_callers_do_not_need_pre_paging_flag() -> None:
     allocator = read_source('cpp/include/ktl/allocator.h')
 
     assert 'return kmem_cache.alloc(__size, __gfm);' in kmem
-    assert '_GFM_PRE_PAGING' not in kmem
+    assert 'if (__size > CACHE_MAX_OBJ_SIZE)' in kmem
+    assert 'mm::alloc_large((uint32_t)__size, __gfm)' in kmem
     assert 'return bigos::kmalloc(size);' in new
     assert '_GFM_PRE_PAGING' not in new
     assert 'bigos::kmalloc(sizeof(_Tp) * __n, __gfm)' in allocator
@@ -183,8 +188,10 @@ def test_memory_self_test_is_switchable_and_not_default() -> None:
     kernel = read_source('src/kernel/kernel.cc')
 
     assert 'option("mm_self_test")' in xmake
+    assert 'option("slab_debug")' in xmake
     assert 'set_default(false)' in xmake
     assert 'add_defines("BIGOS_MM_SELF_TEST")' in xmake
+    assert 'add_defines("BIGOS_SLAB_DEBUG")' in xmake
     assert '#ifdef BIGOS_MM_SELF_TEST\n    bigos::mm::self_test();\n#endif' in kernel
 
     init_mem_index = kernel.index('bigos::init_mem(boot_info);')
@@ -213,7 +220,68 @@ def test_memory_self_test_avoids_later_subsystem_dependencies() -> None:
     assert 'BIGOS_MM_SELF_TEST_FAILED stage=' in self_test
     assert 'alloc_kernel_pages(__pages, _GFM_PRE_PAGING)' in self_test
     assert 'alloc_physical_order(__order, 0)' in self_test
+    assert 'CACHE_MAX_OBJ_SIZE + 257' in self_test
+    assert 'run_slab_reclaim_smoke();' in self_test
     assert 'kernel_vmem_free_pages()' in read_source('src/mm/vmem.h')
+
+
+def test_large_allocation_header_and_free_dispatch_are_explicit() -> None:
+    slab_h = read_source('src/mm/slab.h')
+    slab = read_source('src/mm/slab.cc')
+    kmem = read_source('src/mm/kmem.cc')
+
+    assert 'SLAB_LARGE_ALLOC_MAGIC' in slab_h
+    assert 'enum class AllocationKind' in slab_h
+    assert 'LargePages = 2' in slab_h
+    assert 'void *alloc_large(uint32_t __size, gfm_t __gfm) noexcept' in slab
+    assert 'alloc_kernel_pages(pages, __gfm | _GFM_PRE_PAGING)' in slab
+    assert 'SlabHeader(AllocationKind::LargePages, pages, __size, base)' in slab
+    assert 'bool free_large(SlabHeader *__header, const void *__p) noexcept' in slab
+    assert 'mm::free_large(slab_header, __p)' in kmem
+    assert 'mm::was_recent_large_free(__p)' in kmem
+    assert 'large allocation double free' in kmem
+    assert 'free_pages(base);' in slab
+
+
+def test_empty_dynamic_slab_reclaim_preserves_permanent_slabs() -> None:
+    slab_h = read_source('src/mm/slab.h')
+    slab = read_source('src/mm/slab.cc')
+
+    assert 'bool should_reclaim_empty_slab(Slab *__slab) const noexcept' in slab_h
+    assert '(__slab->flags_ & SLAB_PERMANENT)' in slab
+    assert '__slab->nr_used_objs() != 0' in slab
+    assert 'return avl_list.size() > 1;' in slab
+    assert 'avl_list.erase(iter);' in slab
+    assert 'bigos::free(bitmap);' in slab
+    assert '__slab->~Slab();' in slab
+    assert 'free_pages(heap);' in slab
+
+
+def test_slab_stats_and_debug_guard_are_source_visible() -> None:
+    memory = read_source('include/bigos/memory.h')
+    slab_h = read_source('src/mm/slab.h')
+    slab = read_source('src/mm/slab.cc')
+
+    assert 'struct SlabCacheStats' in slab_h
+    assert 'struct SlabAllocatorStats' in slab_h
+    assert 'collect_slab_stats(SlabAllocatorStats *__stats)' in memory
+    assert 'print_slab_stats()' in memory
+    assert 'large_allocation_count' in slab_h
+    assert 'large_allocation_pages' in slab_h
+    assert 'BIGOS_SLAB_DEBUG' in slab
+    assert 'slab object double free' in slab
+    assert 'slab object invalid boundary' in slab
+    assert 'SLAB_POISON_FREE' in slab
+
+
+def test_perfect_fit_dynamic_cache_creation_is_disabled() -> None:
+    memdef = read_source('src/mm/memdef.h')
+    slab = read_source('src/mm/slab.cc')
+
+    assert '#define GFM_PERFECT_FIT _GFM_PERFECT_FIT' in memdef
+    assert 'Reserved for future kmem_cache_create-like work' in memdef
+    assert 'Dynamic perfect-fit cache creation is intentionally unsupported.' in slab
+    assert 'TODO new cache to fit' not in slab
 
 
 def test_boot_debug_supports_bounded_serial_memory_smoke() -> None:

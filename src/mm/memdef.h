@@ -19,7 +19,7 @@
 
 // cache's OBJ_SIZE must equal to SIZE
 #define _GFM_PERFECT_FIT (1u << 2)
-// if no cache is perfect fit, then create one
+// Reserved for future kmem_cache_create-like work; current allocator rejects it.
 #define _GFM_NEW_CACHE_TO_PFIT (1u << 3)
 
 // Internal/low-level flag: pre-map kernel virtual pages; ordinary kmalloc()
@@ -27,6 +27,6 @@
 #define _GFM_PRE_PAGING (1u << 4)
 
 #define GFM_DEFAULT     0
-#define GFM_PERFECT_FIT (_GFM_PERFECT_FIT | _GFM_NEW_CACHE_TO_PFIT)
+#define GFM_PERFECT_FIT _GFM_PERFECT_FIT
 
 #endif   // _BIG_MEMDEF_H

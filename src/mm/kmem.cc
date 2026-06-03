@@ -59,7 +59,7 @@ static_slab(128B, 128, SLAB_PERMANENT);
 static_slab(256B, 256, SLAB_PERMANENT);
 static_slab(512B, 512, SLAB_PERMANENT);
 static_slab(1024B, 1024, SLAB_PERMANENT);
-static_slab(2048B, 2048, SLAB_PERMANENT);
+static_slab(2048B, CACHE_MAX_OBJ_SIZE, SLAB_PERMANENT);
 
 static_slab(cache, sizeof(bigos::mm::Cache), SLAB_PERMANENT);
 static_slab(slab_1, sizeof(bigos::mm::Slab), SLAB_PERMANENT);
@@ -81,7 +81,7 @@ static_cache(128B, 128, 0, 1, &static_slab_node_128B);
 static_cache(256B, 256, 0, 1, &static_slab_node_256B);
 static_cache(512B, 512, 0, 1, &static_slab_node_512B);
 static_cache(1024B, 1024, 0, 1, &static_slab_node_1024B);
-static_cache(2048B, 2048, 0, 1, &static_slab_node_2048B);
+static_cache(2048B, CACHE_MAX_OBJ_SIZE, 0, 1, &static_slab_node_2048B);
 
 static_cache(cache, sizeof(bigos::mm::Cache), 0, 1, &static_slab_node_cache);
 static_cache(slab, sizeof(bigos::mm::Slab), 0, 2, &static_slab_node_slab_1, &static_slab_node_slab_2);
@@ -124,6 +124,12 @@ namespace mm {
 
 // defined in memory.h
 void *kmalloc(size_t __size, gfm_t __gfm) noexcept {
+    if (__size > 0xffffffffu - SLAB_HEADER_SIZE)
+        return nullptr;
+
+    if (__size > CACHE_MAX_OBJ_SIZE)
+        return mm::alloc_large((uint32_t)__size, __gfm);
+
     return kmem_cache.alloc(__size, __gfm);
 }
 
@@ -132,12 +138,54 @@ void free(const void *__p) noexcept {
         return;
 
     uint64_t addr = (uint64_t)__p;
+    if (mm::was_recent_large_free(__p)) {
+#ifdef BIGOS_SLAB_DEBUG
+        bigos::kprintf("slab debug guard: large allocation double free\n");
+        while (true) {
+            asm volatile("hlt");
+        }
+#endif
+        return;
+    }
+
     auto slab_header = (mm::SlabHeader *)(addr - SLAB_HEADER_SIZE);
 
-    // check if a slab's object
-    if (slab_header->magic != SLAB_HEADER_MAGIC)
+    if (mm::free_large(slab_header, __p))
         return;
+
+    // check if a slab's object
+    if (slab_header->magic != SLAB_HEADER_MAGIC || slab_header->kind != mm::AllocationKind::SlabObject ||
+        slab_header->slab == nullptr) {
+#ifdef BIGOS_SLAB_DEBUG
+        bigos::kprintf("slab debug guard: invalid allocation header\n");
+        while (true) {
+            asm volatile("hlt");
+        }
+#endif
+        return;
+    }
 
     slab_header->slab->free_obj(__p);
 }
+
+namespace mm {
+    void collect_slab_stats(SlabAllocatorStats *__stats) noexcept {
+        kmem_cache.collect_stats(__stats);
+    }
+
+    void print_slab_stats() noexcept {
+        SlabAllocatorStats stats = {};
+        collect_slab_stats(&stats);
+
+        bigos::kprintf("slab stats: caches=%d reclaimed=%d large=%d pages=%d bytes=%d\n", stats.cache_count,
+            stats.reclaimed_slab_count, stats.large_allocation_count, stats.large_allocation_pages,
+            stats.large_allocation_bytes);
+        for (uint32_t i = 0; i < stats.cache_count; i++) {
+            const auto &cache = stats.caches[i];
+            bigos::kprintf(" cache size=%d slabs=%d avl=%d full=%d objs=%d used=%d free=%d reclaimed=%d\n",
+                cache.object_size, cache.slab_count, cache.available_slab_count, cache.full_slab_count,
+                cache.object_count, cache.used_object_count, cache.free_object_count, cache.reclaimed_slab_count);
+        }
+    }
+}   // namespace mm
 NAMESPACE_BIGOS_END

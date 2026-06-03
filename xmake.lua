@@ -15,6 +15,12 @@ option("mm_self_test")
     set_description("enable early memory runtime self-test")
 option_end()
 
+option("slab_debug")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable slab allocator debug guards")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -39,6 +45,10 @@ target("kernel")
 
     if has_config("mm_self_test") then
         add_defines("BIGOS_MM_SELF_TEST")
+    end
+
+    if has_config("slab_debug") or has_config("mm_self_test") then
+        add_defines("BIGOS_SLAB_DEBUG")
     end
 
     if is_mode("debug") then 

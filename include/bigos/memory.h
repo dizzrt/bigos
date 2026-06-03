@@ -20,6 +20,11 @@ extern void free(const void *__p) noexcept;
 void init_mem(const BootInfoHeader *__boot_info) noexcept;
 
 namespace mm {
+    struct SlabAllocatorStats;
+
+    extern void collect_slab_stats(SlabAllocatorStats *__stats) noexcept;
+    extern void print_slab_stats() noexcept;
+
     void self_test() noexcept;
 }   // namespace mm
 
