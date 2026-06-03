@@ -16,6 +16,35 @@ def test_static_slab_size_classes_match_names() -> None:
         assert f'static_cache({size}B, {size}, 0, 1, &static_slab_node_{size}B);' in kmem
 
 
+def test_buddy_bootstrap_metadata_uses_internal_arena() -> None:
+    buddy = read_source('src/mm/buddy.cc')
+    header = read_source('src/mm/buddy.h')
+
+    assert 'class EarlyMetadataArena' in buddy
+    assert 'alignas(EARLY_METADATA_ALIGNMENT) static uint8_t gEarlyMetadataArenaStorage' in buddy
+    assert 'EARLY_METADATA_MAX_BOOT_MEMORY_REGIONS = 128' in buddy
+    assert 'EARLY_METADATA_REGION_SPLIT_BUDGET = 128' in buddy
+    assert 'BIGOS_BOOT_INFO_V2_MAX_SIZE / sizeof(BootMemoryRegion)' in buddy
+    assert 'new_bootstrap_page_block()' in buddy
+    assert 'new_bootstrap_page_block_node(pblk)' in buddy
+    assert 'early memory metadata arena exhausted while allocating %s' in buddy
+    assert 'seal_early_metadata_arena();' in buddy
+    assert 'EarlyMetadataArena' not in header
+
+
+def test_buddy_runtime_split_stays_allocator_backed() -> None:
+    buddy = read_source('src/mm/buddy.cc')
+
+    split_start = buddy.index('ktl::intrusive_list_node<PageBlock *> *Zone::alloc')
+    split_end = buddy.index('split_done:')
+    split_body = buddy[split_start:split_end]
+
+    assert 'auto temp_pblk = new PageBlock();' in split_body
+    assert 'auto temp_node = new ktl::intrusive_list_node<PageBlock *>(temp_pblk);' in split_body
+    assert 'new_bootstrap_page_block' not in split_body
+    assert 'new_bootstrap_page_block_node' not in split_body
+
+
 def test_vmem_uses_9_bit_page_table_indexes() -> None:
     vmem = read_source('src/mm/vmem.cc')
 

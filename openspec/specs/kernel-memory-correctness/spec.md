@@ -28,6 +28,25 @@ Define memory correctness requirements for BigOS early kernel memory management,
 - **WHEN** `Zone::alloc(order)` 拆分较大 PageBlock 时无法分配剩余块所需的 `PageBlock` 或 list node 元数据
 - **THEN** allocator 恢复被拆分前的原始 PageBlock、重新放回对应 free list、保持 zone/global free page 统计不变，并向调用方返回分配失败
 
+### Requirement: Buddy bootstrap does not depend on ordinary kmalloc growth
+
+Buddy initialization SHALL be able to model usable BootInfo memory regions using bootstrap metadata storage without requiring ordinary slab/kmalloc dynamic slab growth before VMem is initialized.
+
+#### Scenario: Complex memory map consumes bootstrap metadata
+
+- **WHEN** BootInfo contains multiple usable memory regions requiring several PageBlock records
+- **THEN** buddy initialization creates required metadata through the early metadata arena rather than relying on dynamic slab expansion
+
+#### Scenario: Bootstrap metadata failure preserves allocator invariants
+
+- **WHEN** metadata storage is insufficient during buddy initialization
+- **THEN** buddy initialization fails explicitly without publishing inconsistent free page counts or corrupted free lists
+
+#### Scenario: Runtime buddy split remains normal allocator backed
+
+- **WHEN** buddy performs a split after `init_mem()` has completed
+- **THEN** runtime split metadata may use the normal allocator path and remains covered by existing split failure rollback requirements
+
 ### Requirement: Slab allocator provides correct kmalloc size classes
 
 slab/kmalloc allocator SHALL 为声明的静态 size class 建立匹配对象大小的 cache，并 MUST 在支持范围内为 `kmalloc(size)` 和全局 `operator new` 返回可直接访问的内核地址。分配失败时 MUST 返回 `nullptr` 或遵循现有 new 失败策略，不得返回半初始化或未映射对象。

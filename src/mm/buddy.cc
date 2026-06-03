@@ -35,6 +35,152 @@ static bigos::mm::Zone *zone_arr[] = {&zone_dma, &zone_dma32, &zone_normal};
 
 static ktl::intrusive_list<bigos::mm::PageBlock *> gPageBlockList;
 
+namespace {
+    using PageBlockNode = ktl::intrusive_list_node<bigos::mm::PageBlock *>;
+
+    constexpr uint32_t EARLY_METADATA_MAX_BOOT_MEMORY_REGIONS = 128;
+    constexpr uint32_t EARLY_METADATA_REGION_SPLIT_BUDGET = 128;
+    constexpr uint32_t EARLY_METADATA_PAGE_BLOCK_CAPACITY =
+        EARLY_METADATA_MAX_BOOT_MEMORY_REGIONS * EARLY_METADATA_REGION_SPLIT_BUDGET;
+    constexpr uint32_t EARLY_METADATA_LIST_NODE_CAPACITY = EARLY_METADATA_PAGE_BLOCK_CAPACITY;
+    constexpr size_t EARLY_METADATA_ALIGNMENT = 16;
+
+    constexpr size_t align_up_const(size_t value, size_t alignment) noexcept {
+        return (value + alignment - 1) & ~(alignment - 1);
+    }
+
+    constexpr size_t EARLY_METADATA_ARENA_BYTES =
+        EARLY_METADATA_PAGE_BLOCK_CAPACITY * align_up_const(sizeof(bigos::mm::PageBlock), EARLY_METADATA_ALIGNMENT) +
+        EARLY_METADATA_LIST_NODE_CAPACITY * align_up_const(sizeof(PageBlockNode), EARLY_METADATA_ALIGNMENT);
+
+    static_assert(BIGOS_BOOT_INFO_V2_MAX_SIZE / sizeof(BootMemoryRegion) <= EARLY_METADATA_MAX_BOOT_MEMORY_REGIONS);
+    static_assert(alignof(bigos::mm::PageBlock) <= EARLY_METADATA_ALIGNMENT);
+    static_assert(alignof(PageBlockNode) <= EARLY_METADATA_ALIGNMENT);
+
+    alignas(EARLY_METADATA_ALIGNMENT) static uint8_t gEarlyMetadataArenaStorage[EARLY_METADATA_ARENA_BYTES];
+
+    class EarlyMetadataArena {
+    private:
+        uint8_t *base_;
+        size_t capacity_;
+        size_t used_;
+        size_t high_water_;
+        uint32_t page_blocks_used_;
+        uint32_t list_nodes_used_;
+        bool sealed_;
+
+    public:
+        void init(uint8_t *__base, size_t __capacity) noexcept {
+            base_ = __base;
+            capacity_ = __capacity;
+            used_ = 0;
+            high_water_ = 0;
+            page_blocks_used_ = 0;
+            list_nodes_used_ = 0;
+            sealed_ = false;
+        }
+
+        void seal() noexcept {
+            sealed_ = true;
+        }
+
+        void *alloc(size_t __size, size_t __alignment) noexcept {
+            if (sealed_ || __alignment == 0)
+                return nullptr;
+
+            uint64_t base_addr = (uint64_t)base_;
+            uint64_t current = base_addr + used_;
+            uint64_t aligned = (current + __alignment - 1) & ~((uint64_t)__alignment - 1);
+            size_t new_used = (size_t)(aligned - base_addr) + __size;
+            if (new_used > capacity_)
+                return nullptr;
+
+            used_ = new_used;
+            if (used_ > high_water_)
+                high_water_ = used_;
+            return (void *)aligned;
+        }
+
+        bigos::mm::PageBlock *alloc_page_block() noexcept {
+            if (page_blocks_used_ >= EARLY_METADATA_PAGE_BLOCK_CAPACITY)
+                return nullptr;
+
+            void *storage = alloc(sizeof(bigos::mm::PageBlock), alignof(bigos::mm::PageBlock));
+            if (storage == nullptr)
+                return nullptr;
+
+            page_blocks_used_++;
+            return new (storage) bigos::mm::PageBlock();
+        }
+
+        PageBlockNode *alloc_page_block_node(bigos::mm::PageBlock *__pblk) noexcept {
+            if (list_nodes_used_ >= EARLY_METADATA_LIST_NODE_CAPACITY)
+                return nullptr;
+
+            void *storage = alloc(sizeof(PageBlockNode), alignof(PageBlockNode));
+            if (storage == nullptr)
+                return nullptr;
+
+            list_nodes_used_++;
+            return new (storage) PageBlockNode(__pblk);
+        }
+
+        bool owns(const void *__p) const noexcept {
+            uint64_t addr = (uint64_t)__p;
+            uint64_t base_addr = (uint64_t)base_;
+            return addr >= base_addr && addr < base_addr + capacity_;
+        }
+
+        uint32_t page_blocks_used() const noexcept {
+            return page_blocks_used_;
+        }
+
+        uint32_t page_blocks_capacity() const noexcept {
+            return EARLY_METADATA_PAGE_BLOCK_CAPACITY;
+        }
+
+        uint32_t list_nodes_used() const noexcept {
+            return list_nodes_used_;
+        }
+
+        uint32_t list_nodes_capacity() const noexcept {
+            return EARLY_METADATA_LIST_NODE_CAPACITY;
+        }
+
+        uint32_t used_bytes() const noexcept {
+            return (uint32_t)used_;
+        }
+
+        uint32_t high_water_bytes() const noexcept {
+            return (uint32_t)high_water_;
+        }
+
+        uint32_t capacity_bytes() const noexcept {
+            return (uint32_t)capacity_;
+        }
+    };
+
+    static EarlyMetadataArena gEarlyMetadataArena;
+
+    static void destroy_buddy_metadata(bigos::mm::PageBlock *__pblk, PageBlockNode *__node) noexcept {
+        if (__pblk != nullptr) {
+            if (gEarlyMetadataArena.owns(__pblk)) {
+                // Arena-backed PageBlock storage has static lifetime and is never returned to kmalloc.
+                (void)__pblk;
+            } else {
+                delete __pblk;
+            }
+        }
+
+        if (__node != nullptr) {
+            if (gEarlyMetadataArena.owns(__node))
+                __node->~PageBlockNode();
+            else
+                delete __node;
+        }
+    }
+}   // namespace
+
 NAMESPACE_BIGOS_BEG
 namespace mm {
     uint32_t g_nr_pages() noexcept {
@@ -72,8 +218,7 @@ namespace mm {
                 pblk->len += adjacent_pblk->len;
                 pblk->order++;
 
-                delete adjacent_pblk;
-                delete adjacent_pblk_node;
+                destroy_buddy_metadata(adjacent_pblk, adjacent_pblk_node);
 
                 pblk->zone->__base_free(__pblk_node);
                 return;
@@ -96,8 +241,7 @@ namespace mm {
                 adjacent_pblk->len += pblk->len;
                 adjacent_pblk->order++;
 
-                delete pblk;
-                delete __pblk_node;
+                destroy_buddy_metadata(pblk, __pblk_node);
 
                 adjacent_pblk->zone->__base_free(adjacent_pblk_node);
                 return;
@@ -294,6 +438,42 @@ namespace mm {
             }
         }
 
+        static void halt_early_metadata_exhausted(const char *__kind) noexcept {
+            bigos::kprintf("early memory metadata arena exhausted while allocating %s\n", __kind);
+            bigos::kprintf("page blocks:%d/%d list nodes:%d/%d\n", gEarlyMetadataArena.page_blocks_used(),
+                gEarlyMetadataArena.page_blocks_capacity(), gEarlyMetadataArena.list_nodes_used(),
+                gEarlyMetadataArena.list_nodes_capacity());
+            bigos::kprintf("arena bytes:%d/%d high-water:%d\n", gEarlyMetadataArena.used_bytes(),
+                gEarlyMetadataArena.capacity_bytes(), gEarlyMetadataArena.high_water_bytes());
+            while (true) {
+                asm volatile("hlt");
+            }
+        }
+
+        static void init_early_metadata_arena() noexcept {
+            gEarlyMetadataArena.init(gEarlyMetadataArenaStorage, sizeof(gEarlyMetadataArenaStorage));
+        }
+
+        static void seal_early_metadata_arena() noexcept {
+            gEarlyMetadataArena.seal();
+        }
+
+        static PageBlock *new_bootstrap_page_block() noexcept {
+            PageBlock *pblk = gEarlyMetadataArena.alloc_page_block();
+            if (pblk == nullptr)
+                halt_early_metadata_exhausted("PageBlock");
+            return pblk;
+        }
+
+        static ktl::intrusive_list_node<PageBlock *> *new_bootstrap_page_block_node(PageBlock *__pblk) noexcept {
+            auto node = gEarlyMetadataArena.alloc_page_block_node(__pblk);
+            if (node == nullptr) {
+                destroy_buddy_metadata(__pblk, nullptr);
+                halt_early_metadata_exhausted("PageBlock list node");
+            }
+            return node;
+        }
+
         static void handle_ards(uint64_t __base, uint64_t __len) noexcept {
             // base 4k alignment
             if (__base % PAGE_SIZE) {
@@ -354,14 +534,14 @@ namespace mm {
             for (int i = 0; i <= BUDDY_MAX_ORDER; i++) {
                 uint64_t pblk_size = get_pblk_size(BUDDY_MAX_ORDER - i);
                 while (__len >= pblk_size) {
-                    PageBlock *pblk = new PageBlock;
+                    PageBlock *pblk = new_bootstrap_page_block();
                     pblk->base = __base;
                     pblk->len = pblk_size;
                     pblk->flags = 0;
                     pblk->order = BUDDY_MAX_ORDER - i;
                     pblk->zone = zone;
 
-                    auto node = new ktl::intrusive_list_node<PageBlock *>(pblk);
+                    auto node = new_bootstrap_page_block_node(pblk);
                     zone->__new_free(node);
 
                     __base += pblk_size;
@@ -433,6 +613,8 @@ namespace mm {
             BootHandoff handoff = bigos_boot_resolve_handoff(__boot_info);
             uint32_t usable_regions = 0;
 
+            init_early_metadata_arena();
+
             if (handoff.v2 != nullptr) {
                 const BootInfoCore *core = boot_info_core(handoff.v2);
                 if (core == nullptr)
@@ -450,6 +632,8 @@ namespace mm {
 
             if (usable_regions == 0)
                 halt_memory_handoff_failed();
+
+            seal_early_metadata_arena();
         }
 
         void *alloc_physical_order(uint32_t __order, gfm_t __gfm) noexcept {
