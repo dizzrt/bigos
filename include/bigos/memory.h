@@ -7,10 +7,10 @@
 
 NAMESPACE_BIGOS_BEG
 
+// Allocates kernel virtual pages by page count, not by buddy order.
 _attr_nodiscard_ extern void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;
 
-_attr_nodiscard_ extern void *alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;
-
+// Releases a kernel virtual range returned by alloc_kernel_pages().
 extern void free_pages(const void *__p) noexcept;
 
 _attr_nodiscard_ extern void *kmalloc(size_t __size, gfm_t __gfm = 0) noexcept _attr_malloc_;

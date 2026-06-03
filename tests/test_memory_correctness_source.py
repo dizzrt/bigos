@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +34,34 @@ def test_page_count_and_physical_order_apis_are_separate() -> None:
     assert 'alloc_physical_order(uint32_t __order' in buddy
     assert 'alloc_kernel_pages(1u << buddy_order_, __gfm | _GFM_PRE_PAGING)' in slab
     assert 'alloc_physical_order(buddy_order, 0)' in vmem
+
+
+def test_legacy_memory_api_aliases_are_not_exposed() -> None:
+    for relative in (
+        'include/bigos/memory.h',
+        'src/mm/buddy.h',
+        'src/mm/buddy.cc',
+        'src/mm/kmem.h',
+        'src/mm/vmem.cc',
+    ):
+        source = read_source(relative)
+        assert re.search(r'(?<!_)alloc_pages\(', source) is None
+        assert re.search(r'(?<!_)alloc_physical_pages\(', source) is None
+        assert re.search(r'(?<!_)free_physical_pages\(', source) is None
+        assert 'kmem_memory_alloc_pages' not in source
+
+
+def test_kmalloc_callers_do_not_need_pre_paging_flag() -> None:
+    kmem = read_source('src/mm/kmem.cc')
+    new = read_source('cpp/libsupc++/new.cc')
+    allocator = read_source('cpp/include/ktl/allocator.h')
+
+    assert 'return kmem_cache.alloc(__size, __gfm);' in kmem
+    assert '_GFM_PRE_PAGING' not in kmem
+    assert 'return bigos::kmalloc(size);' in new
+    assert '_GFM_PRE_PAGING' not in new
+    assert 'bigos::kmalloc(sizeof(_Tp) * __n, __gfm)' in allocator
+    assert '_GFM_PRE_PAGING' not in allocator
 
 
 def test_no_debug_allocator_scanners_added() -> None:

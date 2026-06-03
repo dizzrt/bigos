@@ -19,6 +19,8 @@ context: |
   - x86_64-elf-gcc is the expected cross toolchain.
   - Bochs is used for local emulation.
   - Python scripts are auxiliary build/install helpers, not the core runtime.
+  - Python-related commands should run through uv, for example `uv run pytest`,
+    `uv run python <script>`, `uv run ruff check`, and `uv run pyright`.
 
   Major directories:
   - src/arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, and
@@ -124,6 +126,11 @@ rules:
     - Validation records must separate checks that passed, checks that could not
       run with reasons and remaining risk, historical diagnostics, and issues
       introduced by the current change.
+    - For any Python-related execution or validation, describe commands through
+      `uv run ...` by default. This includes pytest, Python helper scripts,
+      linting, formatting, type checks, and ad-hoc Python commands. If `uv` is
+      unavailable, tasks must say to record that blocker explicitly instead of
+      silently using system Python.
     - For changes that add or modify Python files, include tasks to run
       `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, and
       `uv run pytest`.

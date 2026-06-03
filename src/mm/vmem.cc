@@ -360,10 +360,6 @@ void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept {
     return reinterpret_cast<void *>(mblk->base);
 }
 
-void *alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept {
-    return alloc_kernel_pages(__pages, __gfm);
-}
-
 void free_pages(const void *__p) noexcept {
     kvmem.__free(__p);
 }

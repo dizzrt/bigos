@@ -446,10 +446,6 @@ namespace mm {
             return ret;
         }
 
-        void *alloc_physical_pages(uint32_t __order, gfm_t __gfm) noexcept {
-            return alloc_physical_order(__order, __gfm);
-        }
-
         void free_physical_order(const void *__p) noexcept {
             if (__p == nullptr)
                 return;
@@ -476,9 +472,6 @@ namespace mm {
             zone->free(pblk_node);
         }
 
-        void free_physical_pages(const void *__p) noexcept {
-            free_physical_order(__p);
-        }
     }   // namespace __detail
 
     void print_physical_memory_info() noexcept {

@@ -10,6 +10,8 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
 - `x86_64-elf-gcc` is the expected cross toolchain.
 - Bochs is used for local emulation.
 - Python files are helper scripts unless explicitly stated otherwise.
+- Run Python-related commands through `uv run` by default, including `pytest`,
+  helper scripts, linting, formatting, and type checks.
 - OpenSpec uses `openspec/config.yaml` for project context.
 
 ## Important Directories
@@ -72,6 +74,10 @@ Notes:
 - If Bochs or the cross toolchain is unavailable, report that clearly instead of
   claiming runtime validation.
 - After documentation-only changes, syntax checks are enough when applicable.
+- For Python-related validation or helper execution, use `uv run ...` such as
+  `uv run pytest`, `uv run python <script>`, `uv run ruff check`, and
+  `uv run pyright`. If `uv` is unavailable, record that explicitly instead of
+  falling back silently.
 
 ## Low-Level Risk Areas
 

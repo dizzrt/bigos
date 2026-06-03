@@ -22,6 +22,8 @@
 // if no cache is perfect fit, then create one
 #define _GFM_NEW_CACHE_TO_PFIT (1u << 3)
 
+// Internal/low-level flag: pre-map kernel virtual pages; ordinary kmalloc()
+// callers do not need this to receive accessible memory.
 #define _GFM_PRE_PAGING (1u << 4)
 
 #define GFM_DEFAULT     0
