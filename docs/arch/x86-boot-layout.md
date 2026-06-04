@@ -37,6 +37,41 @@ handoff 模型中的 Legacy 后端；它不会替换 MBR/DBR/exDBR/`boot.bin` �
 写入 `BIGOS_BOOT_INFO_ADDRESS` (`0x0840`)，并在内核消费者迁移期间保留 legacy
 别名。它的 magic、version、size、字段偏移、对齐方式和固定地址仍是兼容性 ABI。
 
+## Kernel ELF segment 布局
+
+`link.lds` 将 higher-half kernel 保持在 `0xffffffff80000000`，入口仍为
+`_start`，并将 loadable ELF program headers 拆成三个权限类别：
+
+- `text`：`PT_LOAD FLAGS(5)`，即 `PF_R | PF_X`。它覆盖 `.bigos`、`.init`、`.text`
+  和 `.fini`，因此 `_start` 位于 RX segment 内。
+- `rodata`：`PT_LOAD FLAGS(4)`，即 `PF_R`。它覆盖 `.rodata`、`.rodata1`、只读
+  `.eh_frame_hdr` 和只读 `.eh_frame`。
+- `data`：`PT_LOAD FLAGS(6)`，即 `PF_R | PF_W`。它覆盖 `.ctors`、`.dtors`、
+  `.data`、`.4k_area` 和 `.bss`，其中 `.4k_area` 同时收集历史 `.4k_area` 名称和
+  当前 `_section_4k_align_` 使用的 `.4k_align_area` input section。
+
+`text` 到 `rodata`、`rodata` 到 `data` 的权限类别边界使用 4KiB 对齐，避免未来按页
+收敛权限时让可执行内容和可写内容共享同一页。当前 change 只修正 ELF program
+header 权限布局，不启用运行时页级 W^X；Legacy BIOS bootloader 仍建立可写的
+higher-half 页表映射，并继续通过 BootInfo 传递固定的 kernel load base、entry 和
+memory extent。
+
+`.ctors` 和 `.dtors` 本 change 保持在 RW `data` segment，避免在修正 ELF layout 时
+同时改变 legacy C++ runtime 构造/析构表的可写性假设。后续若要启用 kernel
+text/rodata/data 页级权限收敛，优先由 `link.lds` 暴露页对齐的 linker 边界符号，再
+由 kernel virtual memory 初始化消费这些边界；直接消费 ELF `p_flags` 需要另起
+BootInfo/loader segment metadata 设计。
+
+布局验证优先使用：
+
+- `xmake -r`：确认交叉构建成功且不再出现 `LOAD segment with RWX permissions`。
+- `x86_64-elf-objdump -p build/kernel` 或 `x86_64-elf-readelf -l build/kernel`：确认
+  三个 `LOAD` segment 分别为 `r-x`、`r--`、`rw-`，且没有 `rwx`。
+- `x86_64-elf-objdump -f build/kernel`：确认 entry point 仍为
+  `0xffffffff80000000`。
+- `x86_64-elf-objdump -h build/kernel`：确认 `.bigos/.init/.text/.fini`、只读
+  `.rodata/.eh_frame*`、`.ctors/.dtors/.data/.4k_area/.bss` 分别落入预期地址范围。
+
 主要 handoff 路径现在是 `BootInfo` v2。Legacy BIOS boot C++ 会在
 `0x9000..0x9fff` 构建一个有界的 `BootInfoHeader + BootInfoSection[]` blob，
 随后 `boot.s` 在跳转到内核 ELF 入口之前，通过 `rdi` 传递它的

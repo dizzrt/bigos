@@ -3,7 +3,9 @@ OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
 
 PHDRS {
-    All PT_LOAD;
+    text PT_LOAD FLAGS(5);
+    rodata PT_LOAD FLAGS(4);
+    data PT_LOAD FLAGS(6);
 }
 
 SECTIONS {
@@ -11,11 +13,11 @@ SECTIONS {
 
     .bigos : {
         KEEP (*(.bigos))
-    } : All
+    } : text
 
     .init : {
         KEEP (*(SORT_NONE(.init)))
-    } : All
+    } : text
 
     .text : {
         *(.text.unlikely .text.*_unlikely .text.unlikely.*)
@@ -25,35 +27,39 @@ SECTIONS {
         *(SORT(.text.sorted.*))
         *(.text .stub .text.* .gnu.linkonce.t.*)
         *(.gnu.warning)
-    } : All
+    } : text
 
     .fini : {
         KEEP (*(SORT_NONE(.fini)))
-    } : All
+    } : text
+
+    . = ALIGN(0x1000);
 
     .rodata : {
         *(.rodata .rodata.* .gnu.linkonce.r.*) 
-    } : All
+    } : rodata
 
     .rodata1 : {
         *(.rodata1) 
-    } : All
+    } : rodata
 
     .eh_frame_hdr : {
         *(.eh_frame_hdr)
         *(.eh_frame_entry 
         .eh_frame_entry.*)
-    } : All
+    } : rodata
 
     .eh_frame : ONLY_IF_RO {
         KEEP (*(.eh_frame)) 
         *(.eh_frame.*) 
-    } : All
+    } : rodata
+
+    . = ALIGN(0x1000);
 
     .eh_frame : ONLY_IF_RW {
         KEEP (*(.eh_frame)) 
         *(.eh_frame.*) 
-    } : All
+    } : data
 
     .ctors : {
         KEEP (*crtbegin.o(.ctors))
@@ -61,7 +67,7 @@ SECTIONS {
         KEEP (*(EXCLUDE_FILE (*crtend.o *crtend?.o ) .ctors))
         KEEP (*(SORT(.ctors.*)))
         KEEP (*(.ctors))
-    } : All
+    } : data
 
     .dtors : {
         KEEP (*crtbegin.o(.dtors))
@@ -69,23 +75,24 @@ SECTIONS {
         KEEP (*(EXCLUDE_FILE (*crtend.o *crtend?.o ) .dtors))
         KEEP (*(SORT(.dtors.*)))
         KEEP (*(.dtors))
-    } : All
+    } : data
 
     .data : {
         *(.data .data.* .gnu.linkonce.d.*)
         SORT(CONSTRUCTORS)
-    } : All
+    } : data
 
     .4k_area ALIGN(0x1000) : {
         *(.4k_area)
-    } : All
+        *(.4k_align_area)
+    } : data
 
     .bss : {
         *(.dynbss)
         *(.bss .bss.* .gnu.linkonce.b.*)
         *(COMMON)
         . = ALIGN(. != 0 ? 64 / 8 : 1);
-    } : All
+    } : data
 
     /DISCARD/ : {
         *(.note.GNU-stack) 
