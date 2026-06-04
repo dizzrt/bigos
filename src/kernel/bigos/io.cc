@@ -59,7 +59,13 @@ void bigos::kputs(const char *s) {
     driver::video::vga::write(s);
 }
 
-static uint8_t buffer_append(char *buffer, char *str, uint32_t offset) {
+static void emit_buffer(const char *buffer, bool dual) {
+    bigos::kputs(buffer);
+    if (dual)
+        bigos::serial_puts(buffer);
+}
+
+static uint8_t buffer_append(char *buffer, char *str, uint32_t offset, bool dual) {
     uint32_t soffset = 0;
     uint32_t slen = strlen(str);
     uint32_t ret = (offset + slen) % 256;
@@ -67,7 +73,7 @@ static uint8_t buffer_append(char *buffer, char *str, uint32_t offset) {
     while (slen > 0xff - offset) {
         uint32_t len = 0xff - offset;
         memcpy(buffer, str + soffset, len);
-        bigos::kputs(buffer);
+        emit_buffer(buffer, dual);
         memset(buffer, 0, sizeof(char) * 256);
 
         slen -= len;
@@ -80,10 +86,7 @@ static uint8_t buffer_append(char *buffer, char *str, uint32_t offset) {
     return ret;
 }
 
-void bigos::kprintf(const char *fmt, ...) {
-    va_list vlist;
-    va_start(vlist, fmt);
-
+static void kvprintf_impl(const char *fmt, va_list vlist, bool dual) {
     char buffer[256];
     uint32_t offset_buf = 0;
     memset(buffer, 0, sizeof(char) * 256);
@@ -93,10 +96,10 @@ void bigos::kprintf(const char *fmt, ...) {
             if (fmt[1] == 'c') {
                 char c[2] = {0};
                 c[0] = va_arg(vlist, int);
-                offset_buf = buffer_append(buffer, c, offset_buf);
+                offset_buf = buffer_append(buffer, c, offset_buf, dual);
             } else if (fmt[1] == 's') {
                 char *s = (char *)va_arg(vlist, long long);
-                offset_buf = buffer_append(buffer, s, offset_buf);
+                offset_buf = buffer_append(buffer, s, offset_buf, dual);
             } else {
                 // may be a number
                 bool is_long = false;
@@ -125,10 +128,10 @@ void bigos::kprintf(const char *fmt, ...) {
                 }
 
                 if (is_long)
-                    utoa(va_arg(vlist, uint64_t), nbuffer_ptr, radix);
+                    bigos::utoa(va_arg(vlist, uint64_t), nbuffer_ptr, radix);
                 else
-                    utoa(va_arg(vlist, uint32_t), nbuffer_ptr, radix);
-                offset_buf = buffer_append(buffer, nbuffer, offset_buf);
+                    bigos::utoa(va_arg(vlist, uint32_t), nbuffer_ptr, radix);
+                offset_buf = buffer_append(buffer, nbuffer, offset_buf, dual);
             }
 
             fmt += 2;
@@ -137,7 +140,7 @@ void bigos::kprintf(const char *fmt, ...) {
             if (offset_buf < 255)
                 buffer[offset_buf++] = *fmt++;
             else {
-                kputs(buffer);
+                emit_buffer(buffer, dual);
                 memset(buffer, 0, sizeof(char) * 256);
                 buffer[0] = *fmt++;
                 offset_buf = 0;
@@ -146,5 +149,16 @@ void bigos::kprintf(const char *fmt, ...) {
     }
 
     if (offset_buf > 0)
-        kputs(buffer);
+        emit_buffer(buffer, dual);
+}
+
+void bigos::kprintf(const char *fmt, ...) {
+    va_list vlist;
+    va_start(vlist, fmt);
+    kvprintf_impl(fmt, vlist, false);
+    va_end(vlist);
+}
+
+void bigos::kvprintf_dual(const char *fmt, va_list args) {
+    kvprintf_impl(fmt, args, true);
 }

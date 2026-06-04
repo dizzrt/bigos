@@ -24,6 +24,9 @@ Implemented or partially implemented:
 - Kernel-owned static IDT, generated assembly ISR stubs, and a stable
   `InterruptFrame` dispatch ABI that separates CPU exceptions from i8259 IRQs.
 - Diagnostic-only `#PF` handler that reads `CR2` and emits a `BIGOS_PAGE_FAULT` marker.
+- Unified early fatal diagnostics (`bigos::kpanic`/`khalt`) that emit a stable
+  `BIGOS_PANIC code=<code> source=<source>` marker on COM1 and VGA, then disable
+  interrupts and halt.
 - i8259 PIC driver and a minimal keyboard IRQ1 scan-code smoke path.
 - Buddy physical page allocator with an early metadata arena for bootstrap.
 - Slab/kmalloc allocator with size classes, dynamic slab reclaim, page-backed

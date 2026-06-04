@@ -16,8 +16,6 @@ set_toolset("mm", "x86_64-elf-gcc")
 set_toolset("mxx", "x86_64-elf-gcc", "x86_64-elf-g++")
 set_toolset("as", "x86_64-elf-gcc")
 
-add_defines("x86_64-elf-gcc")
-
 -- check toolchain
 on_check(function()
     return import("lib.detect.find_tool")("x86_64-elf-gcc")

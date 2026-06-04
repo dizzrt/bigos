@@ -1,3 +1,5 @@
+---@diagnostic disable: undefined-global
+
 set_xmakever("2.7.8")
 
 set_project("bigos")
@@ -81,7 +83,7 @@ target("kernel")
 
         local objs = table.concat(objs_table," ")
         local lib_dir = path.translate("$(projectdir)/lib")
-        local output_path = path.translate("$(buildir)/kernel")
+        local output_path = path.translate("$(builddir)/kernel")
 
         os.exec("x86_64-elf-ld %s -L%s -T %s %s -o %s",ld_flags,lib_dir,ld_script,objs,output_path)
     end)

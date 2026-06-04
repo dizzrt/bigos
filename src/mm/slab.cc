@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <bigos/io.h>   // TODO remove later
+#include <bigos/panic.h>
 
 #include "slab.h"
 #include "buddy.h"
@@ -13,10 +14,7 @@ namespace {
 
     void slab_debug_fail(const char *__reason) noexcept {
 #ifdef BIGOS_SLAB_DEBUG
-        bigos::kprintf("slab debug guard: %s\n", __reason);
-        while (true) {
-            asm volatile("hlt");
-        }
+        bigos::kpanic(bigos::PanicCode::SlabDebugGuard, "mm-slab", "slab debug guard: %s\n", __reason);
 #else
         (void)__reason;
 #endif

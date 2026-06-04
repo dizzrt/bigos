@@ -1,5 +1,6 @@
 #include <type_traits>
 #include <bigos/io.h>   // TODO remove later
+#include <bigos/panic.h>
 
 #include "kmem.h"
 #include "vmem.h"
@@ -140,10 +141,7 @@ void free(const void *__p) noexcept {
     uint64_t addr = (uint64_t)__p;
     if (mm::was_recent_large_free(__p)) {
 #ifdef BIGOS_SLAB_DEBUG
-        bigos::kprintf("slab debug guard: large allocation double free\n");
-        while (true) {
-            asm volatile("hlt");
-        }
+        bigos::kpanic(bigos::PanicCode::SlabDebugGuard, "mm-slab", "slab debug guard: large allocation double free\n");
 #endif
         return;
     }
@@ -157,10 +155,7 @@ void free(const void *__p) noexcept {
     if (slab_header->magic != SLAB_HEADER_MAGIC || slab_header->kind != mm::AllocationKind::SlabObject ||
         slab_header->slab == nullptr) {
 #ifdef BIGOS_SLAB_DEBUG
-        bigos::kprintf("slab debug guard: invalid allocation header\n");
-        while (true) {
-            asm volatile("hlt");
-        }
+        bigos::kpanic(bigos::PanicCode::SlabDebugGuard, "mm-slab", "slab debug guard: invalid allocation header\n");
 #endif
         return;
     }

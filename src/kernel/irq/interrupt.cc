@@ -1,4 +1,5 @@
 #include <bigos/io.h>
+#include <bigos/panic.h>
 
 #include <drivers/irqchip/i8259.h>
 #include <irq/isr.h>
@@ -15,11 +16,8 @@ namespace irq {
         INTRDescriptor kernel_idt[IRQ_COUNT];
         IRQHandler isr_list[IRQ_COUNT];
 
-        static void halt_cpu() noexcept {
-            disableIRQ();
-            while (true) {
-                asm volatile("hlt");
-            }
+        [[noreturn]] static void halt_cpu() noexcept {
+            bigos::khalt();
         }
 
         static uint64_t read_cr2() noexcept {

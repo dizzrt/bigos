@@ -1,5 +1,6 @@
 #include <arch/x86/boot/boot_info.h>
 #include <bigos/io.h>   // remove later
+#include <bigos/panic.h>
 
 #include "buddy.h"
 
@@ -432,22 +433,18 @@ namespace mm {
         }
 
         static void halt_memory_handoff_failed() noexcept {
-            bigos::kprintf("invalid boot memory map\n");
-            while (true) {
-                asm volatile("hlt");
-            }
+            bigos::kpanic(bigos::PanicCode::BuddyMemoryHandoffFailed, "mm-buddy", "invalid boot memory map\n");
         }
 
         static void halt_early_metadata_exhausted(const char *__kind) noexcept {
-            bigos::kprintf("early memory metadata arena exhausted while allocating %s\n", __kind);
-            bigos::kprintf("page blocks:%d/%d list nodes:%d/%d\n", gEarlyMetadataArena.page_blocks_used(),
-                gEarlyMetadataArena.page_blocks_capacity(), gEarlyMetadataArena.list_nodes_used(),
-                gEarlyMetadataArena.list_nodes_capacity());
-            bigos::kprintf("arena bytes:%d/%d high-water:%d\n", gEarlyMetadataArena.used_bytes(),
-                gEarlyMetadataArena.capacity_bytes(), gEarlyMetadataArena.high_water_bytes());
-            while (true) {
-                asm volatile("hlt");
-            }
+            bigos::kpanic(bigos::PanicCode::EarlyMetadataArenaExhausted, "mm-arena",
+                "early memory metadata arena exhausted while allocating %s\n"
+                "page blocks:%d/%d list nodes:%d/%d\n"
+                "arena bytes:%d/%d high-water:%d\n",
+                __kind, gEarlyMetadataArena.page_blocks_used(), gEarlyMetadataArena.page_blocks_capacity(),
+                gEarlyMetadataArena.list_nodes_used(), gEarlyMetadataArena.list_nodes_capacity(),
+                gEarlyMetadataArena.used_bytes(), gEarlyMetadataArena.capacity_bytes(),
+                gEarlyMetadataArena.high_water_bytes());
         }
 
         static void init_early_metadata_arena() noexcept {

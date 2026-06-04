@@ -1,5 +1,6 @@
 #include <bigos/io.h>
 #include <bigos/memory.h>
+#include <bigos/panic.h>
 
 #include "buddy.h"
 #include "memdef.h"
@@ -16,9 +17,7 @@ namespace {
         bigos::serial_puts("\n");
         bigos::kprintf("BIGOS_MM_SELF_TEST_FAILED stage=%s\n", __stage);
 
-        while (true) {
-            asm volatile("hlt");
-        }
+        bigos::khalt();
     }
 
     void touch_range(void *__ptr, uint32_t __size, uint8_t __seed) noexcept {
