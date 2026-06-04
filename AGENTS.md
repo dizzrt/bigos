@@ -39,6 +39,11 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
   - `bigos::irq` for interrupt code.
   - `driver::*` for hardware drivers.
   - `ktl` for kernel containers and utilities.
+- Use the explicit memory allocation API and do not reintroduce removed aliases:
+  - `bigos::alloc_kernel_pages(nr_pages, flags)` for kernel virtual pages (page-count semantics).
+  - internal `alloc_physical_order(order, flags)` for buddy physical pages (order semantics).
+  - `bigos::kmalloc/free` for general kernel objects; `free_pages` for kernel virtual ranges.
+  - Do not add `alloc_pages()`, `alloc_physical_pages()`, or `free_physical_pages()`.
 - Keep public headers small. Include only what is required.
 - Avoid adding dependencies unless the user explicitly asks and the dependency is
   valid for a freestanding kernel.
@@ -56,6 +61,23 @@ xmake
 xmake run kernel
 make run
 ```
+
+Validation build switches (off by default, see `xmake.lua`):
+
+```bash
+xmake f --mm_self_test=y      # BIGOS_MM_SELF_TEST: early memory runtime self-test
+xmake f --slab_debug=y        # BIGOS_SLAB_DEBUG: slab debug guards (implied by mm_self_test)
+xmake f --page_fault_smoke=y  # BIGOS_PAGE_FAULT_SMOKE: validation-only #PF trigger
+```
+
+For bounded emulator smoke against memory markers:
+
+```bash
+uv run python tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+```
+
+The self-test emits `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` and
+the `#PF` handler emits `BIGOS_PAGE_FAULT` on COM1 and VGA.
 
 Notes:
 
@@ -84,23 +106,29 @@ Notes:
 - Boot flow: `src/arch/x86/boot/boot.s`, `src/arch/x86/boot/boot.cc`,
   `link.lds`.
 - Memory initialization order: `src/mm/kmem.cc`, `src/mm/buddy.cc`,
-  `src/mm/vmem.cc`.
-- Interrupt descriptors and ISR calling convention:
-  `src/kernel/irq/interrupt.s`, `src/kernel/irq/interrupt.cc`,
-  `include/irq/interrupt.h`.
+  `src/mm/vmem.cc`, `src/mm/slab.cc`, `src/mm/memory.cc`.
+- Memory API layering (page-count vs buddy-order semantics) and the early
+  metadata arena used during buddy bootstrap: do not reintroduce removed
+  mixed-semantics aliases or make bootstrap depend on dynamic slab growth.
+- Interrupt descriptors and ISR calling convention: `src/kernel/irq/interrupt.s`,
+  `src/kernel/irq/interrupt.cc`, `include/irq/interrupt.h`. Keep the kernel-owned
+  static IDT, the `InterruptFrame` layout, and the exception-vs-IRQ EOI split.
 - Driver port IO and hardware state: `src/drivers/video/vga.cc`,
-  `src/drivers/irqchip/i8259.cc`, `src/kernel/bigos/io.cc`.
+  `src/drivers/irqchip/i8259.cc`, `src/kernel/bigos/io.cc` (VGA and COM1 serial).
 - C++ runtime behavior: `cpp/libsupc++`, `cpp/ktl`, global constructors, and
   `new/delete`.
 
 ## Current Maturity
 
-- Boot, VGA output, IDT stubs, PIC code, keyboard parsing, buddy allocation, slab
-  allocation, and early virtual memory have partial implementations.
+- Boot, VGA/serial output, kernel-owned IDT and exception/IRQ dispatch, PIC,
+  keyboard smoke, buddy allocation with early metadata arena, slab allocation
+  (reclaim, large allocations, debug guards, stats), and kernel virtual memory
+  are implemented and exercised by a switchable memory runtime self-test.
 - TTY/console routing, scheduler, process model, user mode, system calls,
   filesystem services, and broad device support are not yet implemented.
 - Some code paths are scaffolding or TODOs. Inspect call sites before assuming a
-  subsystem is wired into `kernel()`.
+  subsystem is wired into `kernel()` (self-test and page-fault smoke are gated by
+  build switches).
 
 ## Collaboration Guidelines
 

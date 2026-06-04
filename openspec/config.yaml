@@ -8,9 +8,10 @@ context: |
   - The kernel boots from an x86 disk image, enters long mode, loads an ELF64
     kernel named "kernel", and jumps to the higher-half kernel address
     0xffffffff80000000.
-  - The current implementation focuses on bootstrapping, VGA text output,
-    interrupt infrastructure, i8259 PIC support, keyboard scan-code handling,
-    and early kernel memory management.
+  - The current implementation focuses on bootstrapping, VGA text and COM1 serial
+    output, a kernel-owned IDT with exception/IRQ dispatch, i8259 PIC support,
+    keyboard scan-code smoke handling, and a fairly complete early kernel memory
+    management stack (buddy, slab/kmalloc, kernel virtual memory).
 
   Tech stack:
   - C++17 and C17 in freestanding mode.
@@ -27,24 +28,30 @@ context: |
     ELF loader.
   - src/kernel: kernel entry, IRQ setup, low-level IO, string functions, console/TTY
     skeletons.
-  - src/mm: buddy physical page allocator, slab/kmalloc allocator, and virtual
-    memory area/page-table mapping framework.
+  - src/mm: buddy physical page allocator with an early metadata arena,
+    slab/kmalloc allocator (reclaim, large allocations, debug guards, stats),
+    kernel virtual memory area/page-table mapping, public memory API, and a
+    switchable memory runtime self-test.
   - src/drivers: VGA text-mode driver and i8259 PIC driver.
   - src/runtime: startup objects such as crt0, crti, and crtn.
-  - tools: developer helper scripts such as the boot disk-image install helper.
+  - tools: developer helper scripts such as the boot disk-image install helper and
+    boot_debug.py (raw image build, Bochs config generation, serial-marker smoke).
   - cpp: small kernel C++ support library, KTL containers, new/delete, and minimal
     libsupc++/ABI support.
   - include: public kernel headers and small libc-style header subset.
   - tests: validation tests and local test assets.
 
   Current maturity:
-  - The project is in kernel infrastructure bring-up stage.
-  - Boot, VGA output, IRQ descriptors/stubs, PIC, keyboard parsing, and memory
-    allocators have partial implementations.
+  - The project is in kernel infrastructure bring-up stage; boot, interrupt
+    foundation, and early memory management are reasonably complete.
+  - Boot, VGA/serial output, kernel-owned IDT and exception/IRQ dispatch, PIC,
+    keyboard smoke, buddy allocation, slab allocation, and kernel virtual memory
+    are implemented and covered by a switchable memory runtime self-test plus
+    source-level tests.
   - TTY/console abstractions, user mode, scheduler, system calls, filesystem
     services, process management, and broad device support are not implemented.
-  - Several helper scripts and initialization paths are placeholders; validate
-    code paths before assuming they are fully wired.
+  - Several helper scripts and some initialization paths are placeholders or
+    gated by build switches; validate code paths before assuming they are wired.
 
   Conventions:
   - Prefer small, explicit low-level code over abstractions that hide hardware
@@ -55,6 +62,20 @@ context: |
   - Preserve the current namespace style: bigos for kernel APIs, bigos::mm for
     memory management, bigos::irq for interrupts, driver::* for drivers, and ktl
     for kernel container utilities.
+  - Use the explicit memory allocation API: alloc_kernel_pages(nr_pages, flags)
+    for kernel virtual pages (page-count semantics) and the internal
+    alloc_physical_order(order, flags) for buddy (order semantics). Do not
+    reintroduce removed mixed-semantics aliases such as alloc_pages(),
+    alloc_physical_pages(), or free_physical_pages(). Keep buddy bootstrap on the
+    early metadata arena rather than dynamic slab growth.
+  - Preserve the interrupt foundation: kernel-owned static IDT loaded before
+    enabling IRQs, the stable InterruptFrame dispatch ABI, separation of CPU
+    exceptions (0x00-0x1f) from remapped i8259 IRQs (0x20-0x2f), and EOI only for
+    external IRQs. The #PF handler is diagnostic-only and must not attempt recovery.
+  - Validation/diagnostic features are gated by xmake switches and emit fixed
+    markers: mm_self_test (BIGOS_MM_SELF_TEST -> BIGOS_MM_SELF_TEST_PASSED/FAILED),
+    slab_debug (BIGOS_SLAB_DEBUG), and page_fault_smoke (BIGOS_PAGE_FAULT_SMOKE ->
+    BIGOS_PAGE_FAULT). Markers go to COM1 serial and VGA.
   - Treat hardware constants, linker addresses, boot protocol addresses, and page
     table self-mapping addresses as design-critical. Explain changes to them.
   - Keep public headers minimal and include only what is needed.

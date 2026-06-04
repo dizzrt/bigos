@@ -4,33 +4,41 @@ Language: English | [简体中文](README-zh.md)
 
 BigOS is an early-stage x86_64 operating system kernel written mainly in
 freestanding C++17, C17, and assembly. It currently focuses on bootstrapping,
-- basic text output, interrupt/exception setup, minimal keyboard IRQ smoke, and early kernel
-memory management.
+text/serial output, interrupt and exception handling, a minimal keyboard IRQ
+smoke path, and a fairly complete early kernel memory-management stack.
 
 This repository is a research/toy OS kernel project, not a hosted application or
 service.
 
 ## Status
 
-The project is in kernel infrastructure bring-up stage.
+The project is in kernel infrastructure bring-up stage, with the boot path,
+interrupt foundation, and early memory management now reasonably complete.
 
 Implemented or partially implemented:
 
 - x86 boot path with MBR, exFAT DBR, extended DBR, and long-mode transition.
 - ELF64 kernel loading from an exFAT disk image.
 - Higher-half kernel linking at `0xffffffff80000000`.
-- VGA text-mode output and simple `kprintf` support.
-- Kernel-owned IDT setup, assembly interrupt stubs, and diagnostic CPU exception dispatch.
-- i8259 PIC driver and minimal keyboard IRQ1 scan-code smoke.
-- Buddy-based physical page allocation.
-- Slab/kmalloc allocator and C++ `new`/`delete` integration.
-- Early virtual-memory allocation and page-table mapping framework.
+- VGA text-mode output, `kprintf`, and COM1 serial output for deterministic markers.
+- Kernel-owned static IDT, generated assembly ISR stubs, and a stable
+  `InterruptFrame` dispatch ABI that separates CPU exceptions from i8259 IRQs.
+- Diagnostic-only `#PF` handler that reads `CR2` and emits a `BIGOS_PAGE_FAULT` marker.
+- i8259 PIC driver and a minimal keyboard IRQ1 scan-code smoke path.
+- Buddy physical page allocator with an early metadata arena for bootstrap.
+- Slab/kmalloc allocator with size classes, dynamic slab reclaim, page-backed
+  large allocations, optional debug guards, and validation statistics.
+- Kernel virtual-memory allocator (first-fit, 4-level page-table mapping, PTE
+  clearing and TLB invalidation on free) plus C++ `new`/`delete` integration.
+- Explicit allocation API: `alloc_kernel_pages(nr_pages, flags)` for kernel
+  virtual pages and an internal `alloc_physical_order(order, flags)` for buddy.
+- Switchable early memory runtime self-test (`bigos::mm::self_test`).
 - Small KTL support library for kernel containers and helpers.
 
 Not implemented or still skeletal:
 
 - UEFI bootloader, ESP image generation, and OVMF/QEMU UEFI smoke tests.
-- TTY, full keyboard input, and console abstraction beyond basic VGA output.
+- TTY, full keyboard input, and console abstraction beyond VGA/serial output.
 - Scheduler, threads, processes, and user mode.
 - System calls.
 - Filesystem services inside the kernel.
@@ -83,9 +91,11 @@ boot.cc
   v
 kernel()
   - clears VGA text screen
-  - initializes memory management
+  - initializes memory management (init_mem)
+  - optionally runs the early memory runtime self-test (mm::self_test)
   - initializes kernel-owned IDT, exception dispatch, i8259 PIC, and keyboard IRQ1 smoke
   - enables interrupts after selected early handlers are registered
+  - emits the "BigOS kernel reached" marker on serial and VGA
   - enters an idle hlt loop
 ```
 
@@ -107,6 +117,17 @@ The primary build system is xmake and the expected compiler is
 ```bash
 xmake
 ```
+
+Optional validation build switches (off by default):
+
+```bash
+xmake f --mm_self_test=y    # run the early memory runtime self-test on boot
+xmake f --slab_debug=y      # enable slab allocator debug guards
+xmake f --page_fault_smoke=y # enable the validation-only page-fault trigger
+```
+
+`--mm_self_test` implies `--slab_debug`. The self-test emits the
+`BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` markers on COM1 and VGA.
 
 One-command local boot debug for the current Legacy BIOS/MBR/exFAT path:
 
@@ -139,7 +160,19 @@ Useful options:
 python3 tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
 python3 tools/boot_debug.py run --no-launch
 python3 tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
+python3 tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
 python3 tools/boot_debug.py validate-image --image build/test/os.raw
+```
+
+`--memory-self-test` builds with `BIGOS_MM_SELF_TEST` and routes COM1 to a serial
+log; combine with `--expect-serial-marker`/`--smoke-timeout` for a bounded smoke
+test. Run Python helpers through `uv run` per the project tooling convention,
+e.g. `uv run python tools/boot_debug.py run --no-launch`.
+
+A GUI shortcut is also available:
+
+```bash
+make boot-debug-gui
 ```
 
 The raw image builder uses only Python standard library file writes. It does not
@@ -240,45 +273,66 @@ parallel backend in `docs/arch/uefi-boot-blueprint.md`.
 
 ### Kernel Entry
 
-`src/kernel/kernel.cc` currently performs the minimal runtime setup:
+`src/kernel/kernel.cc` performs the current runtime setup:
 
 - Clears the VGA text screen.
 - Calls `bigos::init_mem()`.
+- Optionally runs `bigos::mm::self_test()` (when built with `BIGOS_MM_SELF_TEST`).
 - Calls `bigos::irq::initIRQ()`.
-- Enables interrupts.
+- Optionally triggers a page-fault smoke (when built with `BIGOS_PAGE_FAULT_SMOKE`).
+- Enables interrupts and emits the "BigOS kernel reached" marker.
 - Idles with `hlt`.
 
 ### Memory Management
 
-The memory subsystem lives under `src/mm/`.
+The memory subsystem lives under `src/mm/` and is the most developed part of the
+kernel. The public API distinguishes allocation layers by name: kernel virtual
+pages use page-count semantics through `alloc_kernel_pages(nr_pages, flags)`,
+while internal physical allocation uses buddy-order semantics through
+`alloc_physical_order(order, flags)`. Legacy mixed-semantics aliases were removed.
 
-- `src/mm/buddy.cc`: parses the BIOS memory map, separates DMA/DMA32/NORMAL zones, and
-  manages physical page blocks.
-- `src/mm/slab.cc` and `src/mm/kmem.cc`: provide fixed-size caches and `kmalloc/free`.
-- `src/mm/vmem.cc`: tracks kernel virtual address blocks and can pre-map allocated pages.
+- `src/mm/buddy.cc` / `src/mm/buddy.h`: parse the BIOS memory map, separate
+  DMA/DMA32/NORMAL zones, manage physical page blocks, and use an early metadata
+  arena for bootstrap so initialization does not depend on dynamic slab growth.
+- `src/mm/slab.cc` / `src/mm/slab.h`: size-class caches, `kmalloc/free`, dynamic
+  slab reclaim, page-backed large allocations, optional debug guards, and stats.
+- `src/mm/kmem.cc` / `src/mm/kmem.h`: kmalloc/free integration and cache wiring.
+- `src/mm/vmem.cc` / `src/mm/vmem.h`: first-fit kernel virtual ranges, 4-level
+  page-table mapping, and PTE clear plus TLB invalidation on free.
+- `src/mm/memory.cc`: public memory API entry points.
+- `src/mm/self_test.cc`: switchable early runtime self-test with deterministic
+  `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` markers.
 - `include/bigos/memory.h`: exposes the public allocation API.
 - `src/mm/memdef.h`: defines mm-private page size, buddy order, and allocation flags.
 
+See `docs/arch/memory-runtime-validation.md` for self-test usage.
+
 ### Interrupts And Input
 
-The interrupt subsystem combines assembly stubs and C++ descriptors.
+The interrupt subsystem combines assembly stubs and C++ descriptors. The kernel
+loads a kernel-owned static IDT before enabling maskable interrupts and routes
+all ISR entries through a stable `InterruptFrame` dispatch ABI.
 
 - `src/kernel/irq/interrupt.s`: generated ISR entry stubs.
 - `src/kernel/irq/interrupt.cc`: IDT initialization, exception dispatch, and external IRQ dispatch.
-- `src/drivers/irqchip/i8259.cc`: PIC masking and EOI support.
-- `src/kernel/irq/isr.cc`: minimal keyboard IRQ1 scancode smoke.
+- `src/drivers/irqchip/i8259.cc`: PIC remap, masking, and EOI support.
+- `src/kernel/irq/isr.cc`: diagnostic `#PF` handler and minimal keyboard IRQ1 scancode smoke.
+- `include/irq/interrupt.h`: descriptor layout, `InterruptFrame`, and vector constants.
 - `docs/arch/interrupt-exception-foundation.md`: current interrupt/exception
   design, non-goals, and validation notes.
 
-Keyboard input is not yet routed through a complete TTY layer; the current IRQ1
-path only reads one PS/2 scancode byte and prints a smoke marker.
+CPU exceptions (`0x00`-`0x1f`) and remapped i8259 IRQs (`0x20`-`0x2f`) are
+dispatched separately; EOI is only sent for external IRQs. Keyboard input is not
+yet routed through a complete TTY layer; the current IRQ1 path only reads one
+PS/2 scancode byte and prints a smoke marker.
 
 ### Display And IO
 
-VGA text mode is the current display backend.
+VGA text mode and COM1 serial are the current output backends.
 
 - `src/drivers/video/vga.cc`: text buffer writes, cursor movement, screen clearing.
-- `src/kernel/bigos/io.cc`: port IO wrappers and basic kernel printing.
+- `src/kernel/bigos/io.cc`: port IO wrappers, `kprintf`, and serial output.
+- `src/kernel/bigos/utils.cc`: small helpers such as integer-to-string conversion.
 
 ### Kernel C++ Support
 

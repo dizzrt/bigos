@@ -3,32 +3,39 @@
 语言：[English](README.md) | 简体中文
 
 BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
-C++17、C17 和汇编编写。目前项目重点在于引导流程、基础文本输出、中断/异常设置、
-最小键盘 IRQ smoke，以及早期内核内存管理。
+C++17、C17 和汇编编写。目前项目重点在于引导流程、文本/串口输出、中断与异常处理、
+最小键盘 IRQ smoke，以及一套相对完整的早期内核内存管理。
 
 本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
 
 ## 状态
 
-项目目前处于内核基础设施引导阶段。
+项目目前处于内核基础设施引导阶段，引导路径、中断基础设施和早期内存管理已较为完整。
 
 已经实现或部分实现：
 
 - x86 引导路径，包括 MBR、exFAT DBR、扩展 DBR 和长模式切换。
 - 从 exFAT 磁盘镜像加载 ELF64 内核。
 - 高半区内核链接地址 `0xffffffff80000000`。
-- VGA 文本模式输出和简单的 `kprintf` 支持。
-- kernel-owned IDT 设置、汇编中断桩和诊断型 CPU exception 分发。
+- VGA 文本模式输出、`kprintf`，以及用于确定性标记的 COM1 串口输出。
+- kernel-owned 静态 IDT、生成的汇编 ISR 桩，以及把 CPU exception 与 i8259 IRQ
+  分离的稳定 `InterruptFrame` dispatch ABI。
+- 诊断型 `#PF` 处理器：读取 `CR2` 并输出 `BIGOS_PAGE_FAULT` 标记。
 - i8259 PIC 驱动和最小 keyboard IRQ1 扫描码 smoke。
-- 基于 buddy 的物理页分配。
-- Slab/kmalloc 分配器，以及 C++ `new`/`delete` 集成。
-- 早期虚拟内存分配和页表映射框架。
+- 基于 buddy 的物理页分配器，并使用 early metadata arena 完成 bootstrap。
+- Slab/kmalloc 分配器：size class、动态 slab 回收、page-backed 大对象分配、
+  可选 debug guard 和验证统计。
+- 内核虚拟内存分配器（first-fit、四级页表映射、释放时清除 PTE 并刷新 TLB），
+  以及 C++ `new`/`delete` 集成。
+- 显式分配 API：内核虚拟页使用 `alloc_kernel_pages(nr_pages, flags)`，
+  物理 buddy 使用内部 `alloc_physical_order(order, flags)`。
+- 可切换的早期内存运行时自检（`bigos::mm::self_test`）。
 - 小型 KTL 支持库，用于内核容器和辅助工具。
 
 尚未实现或仍处于骨架状态：
 
 - UEFI bootloader、ESP 镜像生成和 OVMF/QEMU UEFI smoke test。
-- 基础 VGA 输出之外的 TTY、完整键盘输入和控制台抽象。
+- VGA/串口输出之外的 TTY、完整键盘输入和控制台抽象。
 - 调度器、线程、进程和用户态。
 - 系统调用。
 - 内核内的文件系统服务。
@@ -81,9 +88,11 @@ boot.cc
   v
 kernel()
   - 清空 VGA 文本屏幕
-  - 初始化内存管理
+  - 初始化内存管理（init_mem）
+  - 可选运行早期内存运行时自检（mm::self_test）
   - 初始化 kernel-owned IDT、异常分发、i8259 PIC 和 keyboard IRQ1 smoke
   - 在选定 early handler 注册完成后开启中断
+  - 在串口与 VGA 输出 "BigOS kernel reached" 标记
   - 进入 idle hlt 循环
 ```
 
@@ -104,6 +113,17 @@ kernel()
 ```bash
 xmake
 ```
+
+可选验证构建开关（默认关闭）：
+
+```bash
+xmake f --mm_self_test=y     # 启动时运行早期内存运行时自检
+xmake f --slab_debug=y       # 启用 slab 分配器 debug guard
+xmake f --page_fault_smoke=y # 启用仅用于验证的 page-fault 触发
+```
+
+`--mm_self_test` 会自动启用 `--slab_debug`。自检会在 COM1 与 VGA 输出
+`BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` 标记。
 
 当前 Legacy BIOS/MBR/exFAT 路径的一行本地启动调试：
 
@@ -135,7 +155,19 @@ src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot` boot 产物构建�
 python3 tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
 python3 tools/boot_debug.py run --no-launch
 python3 tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
+python3 tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
 python3 tools/boot_debug.py validate-image --image build/test/os.raw
+```
+
+`--memory-self-test` 会以 `BIGOS_MM_SELF_TEST` 构建并把 COM1 路由到串口日志；
+配合 `--expect-serial-marker`/`--smoke-timeout` 可执行有界 smoke test。按项目工具
+约定，Python 辅助脚本应通过 `uv run` 运行，例如
+`uv run python tools/boot_debug.py run --no-launch`。
+
+也提供 GUI 快捷命令：
+
+```bash
+make boot-debug-gui
 ```
 
 raw image 由 Python 标准库直接写入生成，不依赖 macOS `diskutil`、Linux loop
@@ -232,42 +264,61 @@ make run
 
 ### 内核入口
 
-`src/kernel/kernel.cc` 当前执行最小运行时设置：
+`src/kernel/kernel.cc` 当前执行的运行时设置：
 
 - 清空 VGA 文本屏幕。
 - 调用 `bigos::init_mem()`。
+- 可选运行 `bigos::mm::self_test()`（以 `BIGOS_MM_SELF_TEST` 构建时）。
 - 调用 `bigos::irq::initIRQ()`。
-- 开启中断。
+- 可选触发 page-fault smoke（以 `BIGOS_PAGE_FAULT_SMOKE` 构建时）。
+- 开启中断并输出 "BigOS kernel reached" 标记。
 - 使用 `hlt` 空闲等待。
 
 ### 内存管理
 
-内存子系统位于 `src/mm/`。
+内存子系统位于 `src/mm/`，是内核中最完善的部分。公开 API 通过命名区分分配层级：
+内核虚拟页使用页数语义 `alloc_kernel_pages(nr_pages, flags)`，内部物理分配使用
+buddy order 语义 `alloc_physical_order(order, flags)`，旧的混合语义 alias 已移除。
 
-- `src/mm/buddy.cc`：解析 BIOS 内存映射，划分 DMA/DMA32/NORMAL 区域，并管理物理页块。
-- `src/mm/slab.cc` 和 `src/mm/kmem.cc`：提供固定大小缓存和 `kmalloc/free`。
-- `src/mm/vmem.cc`：跟踪内核虚拟地址块，并可预映射已分配页面。
+- `src/mm/buddy.cc` / `src/mm/buddy.h`：解析 BIOS 内存映射，划分 DMA/DMA32/NORMAL
+  区域，管理物理页块，并使用 early metadata arena 完成 bootstrap，使初始化不依赖
+  动态 slab 扩容。
+- `src/mm/slab.cc` / `src/mm/slab.h`：size class 缓存、`kmalloc/free`、动态 slab
+  回收、page-backed 大对象分配、可选 debug guard 和统计。
+- `src/mm/kmem.cc` / `src/mm/kmem.h`：kmalloc/free 集成与 cache 接线。
+- `src/mm/vmem.cc` / `src/mm/vmem.h`：first-fit 内核虚拟区间、四级页表映射、
+  释放时清除 PTE 并刷新 TLB。
+- `src/mm/memory.cc`：公开内存 API 入口。
+- `src/mm/self_test.cc`：可切换的早期运行时自检，输出确定性
+  `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` 标记。
 - `include/bigos/memory.h`：暴露公共内存分配 API。
 - `src/mm/memdef.h`：定义 mm 私有的页大小、buddy 阶数和分配标志。
 
+自检用法见 `docs/arch/memory-runtime-validation.md`。
+
 ### 中断与输入
 
-中断子系统结合了汇编桩和 C++ 描述符。
+中断子系统结合了汇编桩和 C++ 描述符。内核在开启可屏蔽中断前加载 kernel-owned
+静态 IDT，并通过稳定的 `InterruptFrame` dispatch ABI 路由所有 ISR 入口。
 
 - `src/kernel/irq/interrupt.s`：生成的 ISR 入口桩。
 - `src/kernel/irq/interrupt.cc`：IDT 初始化、异常分发和外部 IRQ 分发。
-- `src/drivers/irqchip/i8259.cc`：PIC 屏蔽和 EOI 支持。
-- `src/kernel/irq/isr.cc`：最小 keyboard IRQ1 scancode smoke。
+- `src/drivers/irqchip/i8259.cc`：PIC remap、屏蔽和 EOI 支持。
+- `src/kernel/irq/isr.cc`：诊断型 `#PF` 处理器和最小 keyboard IRQ1 scancode smoke。
+- `include/irq/interrupt.h`：描述符布局、`InterruptFrame` 和向量常量。
 - `docs/arch/interrupt-exception-foundation.md`：当前中断/异常设计、非目标和验证记录。
 
-键盘输入尚未接入完整 TTY 层；当前 IRQ1 路径只读取一个 PS/2 scancode byte 并打印 smoke marker。
+CPU exception（`0x00`-`0x1f`）与 remap 后的 i8259 IRQ（`0x20`-`0x2f`）分开分发，
+只有外部 IRQ 才发送 EOI。键盘输入尚未接入完整 TTY 层；当前 IRQ1 路径只读取一个
+PS/2 scancode byte 并打印 smoke marker。
 
 ### 显示与 IO
 
-VGA 文本模式是当前显示后端。
+VGA 文本模式和 COM1 串口是当前输出后端。
 
 - `src/drivers/video/vga.cc`：文本缓冲区写入、光标移动、清屏。
-- `src/kernel/bigos/io.cc`：端口 IO 封装和基础内核打印。
+- `src/kernel/bigos/io.cc`：端口 IO 封装、`kprintf` 和串口输出。
+- `src/kernel/bigos/utils.cc`：整数转字符串等小型辅助函数。
 
 ### 内核 C++ 支持
 
