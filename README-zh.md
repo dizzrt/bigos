@@ -3,8 +3,8 @@
 语言：[English](README.md) | 简体中文
 
 BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
-C++17、C17 和汇编编写。目前项目重点在于引导流程、基础文本输出、中断设置、
-键盘输入处理，以及早期内核内存管理。
+C++17、C17 和汇编编写。目前项目重点在于引导流程、基础文本输出、中断/异常设置、
+最小键盘 IRQ smoke，以及早期内核内存管理。
 
 本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
 
@@ -18,8 +18,8 @@ C++17、C17 和汇编编写。目前项目重点在于引导流程、基础文�
 - 从 exFAT 磁盘镜像加载 ELF64 内核。
 - 高半区内核链接地址 `0xffffffff80000000`。
 - VGA 文本模式输出和简单的 `kprintf` 支持。
-- IDT 设置和汇编中断桩。
-- i8259 PIC 驱动和键盘扫描码解析。
+- kernel-owned IDT 设置、汇编中断桩和诊断型 CPU exception 分发。
+- i8259 PIC 驱动和最小 keyboard IRQ1 扫描码 smoke。
 - 基于 buddy 的物理页分配。
 - Slab/kmalloc 分配器，以及 C++ `new`/`delete` 集成。
 - 早期虚拟内存分配和页表映射框架。
@@ -28,7 +28,7 @@ C++17、C17 和汇编编写。目前项目重点在于引导流程、基础文�
 尚未实现或仍处于骨架状态：
 
 - UEFI bootloader、ESP 镜像生成和 OVMF/QEMU UEFI smoke test。
-- 基础 VGA 输出之外的 TTY 和控制台抽象。
+- 基础 VGA 输出之外的 TTY、完整键盘输入和控制台抽象。
 - 调度器、线程、进程和用户态。
 - 系统调用。
 - 内核内的文件系统服务。
@@ -82,8 +82,8 @@ boot.cc
 kernel()
   - 清空 VGA 文本屏幕
   - 初始化内存管理
-  - 初始化 IRQ 描述符
-  - 开启中断
+  - 初始化 kernel-owned IDT、异常分发、i8259 PIC 和 keyboard IRQ1 smoke
+  - 在选定 early handler 注册完成后开启中断
   - 进入 idle hlt 循环
 ```
 
@@ -255,11 +255,12 @@ make run
 中断子系统结合了汇编桩和 C++ 描述符。
 
 - `src/kernel/irq/interrupt.s`：生成的 ISR 入口桩。
-- `src/kernel/irq/interrupt.cc`：IDT 初始化和默认 IRQ 处理器。
+- `src/kernel/irq/interrupt.cc`：IDT 初始化、异常分发和外部 IRQ 分发。
 - `src/drivers/irqchip/i8259.cc`：PIC 屏蔽和 EOI 支持。
-- `src/kernel/irq/isr.cc`：键盘扫描码解析和临时 VGA 字符输出。
+- `src/kernel/irq/isr.cc`：最小 keyboard IRQ1 scancode smoke。
+- `docs/arch/interrupt-exception-foundation.md`：当前中断/异常设计、非目标和验证记录。
 
-键盘输入尚未接入完整 TTY 层。
+键盘输入尚未接入完整 TTY 层；当前 IRQ1 路径只读取一个 PS/2 scancode byte 并打印 smoke marker。
 
 ### 显示与 IO
 

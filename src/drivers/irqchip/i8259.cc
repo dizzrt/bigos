@@ -6,7 +6,7 @@
 NAMESPACE_DRIVER_BEG
 namespace irqchip {
     namespace i8259 {
-        void init() {
+        void init() noexcept {
             // master
             bigos::outb(I8259_MASTER_ICW1, 0x11);
             bigos::outb(I8259_MASTER_ICW2, 0x20);
@@ -22,7 +22,7 @@ namespace irqchip {
             bigos::outb(I8259_SLAVE_OCW1, 0xff);
         }
 
-        void enable_irq(uint8_t __irq) {
+        void enable_irq(uint8_t __irq) noexcept {
             uint8_t value;
             uint16_t port;
 
@@ -37,7 +37,7 @@ namespace irqchip {
             bigos::outb(port, value);
         }
 
-        void disable_irq(uint8_t __irq) {
+        void disable_irq(uint8_t __irq) noexcept {
             uint8_t value;
             uint16_t port;
 
@@ -52,7 +52,7 @@ namespace irqchip {
             bigos::outb(port, value);
         }
 
-        void send_eoi(uint16_t __irq) {
+        void send_eoi(uint16_t __irq) noexcept {
             if (__irq >= 8)
                 bigos::outb(I8259_SLAVE_OCW2, I8259_EOI);
 

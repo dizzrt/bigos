@@ -21,6 +21,12 @@ option("slab_debug")
     set_description("enable slab allocator debug guards")
 option_end()
 
+option("page_fault_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only page fault trigger")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -49,6 +55,10 @@ target("kernel")
 
     if has_config("slab_debug") or has_config("mm_self_test") then
         add_defines("BIGOS_SLAB_DEBUG")
+    end
+
+    if has_config("page_fault_smoke") then
+        add_defines("BIGOS_PAGE_FAULT_SMOKE")
     end
 
     if is_mode("debug") then 

@@ -10,6 +10,27 @@
 
 NAMESPACE_BIGOS_BEG
 namespace irq {
+    constexpr uint8_t CPU_EXCEPTION_VECTOR_FIRST = 0x00;
+    constexpr uint8_t CPU_EXCEPTION_VECTOR_LAST = 0x1f;
+    constexpr uint8_t I8259_MASTER_VECTOR_BASE = 0x20;
+    constexpr uint8_t I8259_SLAVE_VECTOR_BASE = 0x28;
+    constexpr uint8_t I8259_VECTOR_COUNT = 16;
+    constexpr uint8_t I8259_VECTOR_LAST = I8259_MASTER_VECTOR_BASE + I8259_VECTOR_COUNT - 1;
+
+    constexpr uint8_t IRQ_LINE_TIMER = 0;
+    constexpr uint8_t IRQ_LINE_KEYBOARD = 1;
+    constexpr uint8_t IRQ_LINE_SLAVE = 2;
+    constexpr uint8_t IRQ_LINE_RTC = 8;
+    constexpr uint8_t IRQ_LINE_PS2_MOUSE = 12;
+    constexpr uint8_t IRQ_LINE_PRIMARY_IDE = 14;
+    constexpr uint8_t IRQ_LINE_SECONDARY_IDE = 15;
+
+    constexpr uint8_t VECTOR_PAGE_FAULT = 0x0e;
+    constexpr uint8_t VECTOR_KEYBOARD = I8259_MASTER_VECTOR_BASE + IRQ_LINE_KEYBOARD;
+
+    struct InterruptFrame;
+    typedef void (*IRQHandler)(InterruptFrame *__frame);
+
     namespace __detail {
         struct INTRAttributes {
             uint16_t ist : 3;
@@ -20,7 +41,13 @@ namespace irq {
             uint16_t p : 1;
         } __attribute__((packed));
 
+        struct IDTPointer {
+            uint16_t limit;
+            uint64_t base;
+        } __attribute__((packed));
+
         void initIDT() noexcept;
+        void setISRHandler(uint64_t __vector, IRQHandler __handler) noexcept;
     }   // namespace __detail
 
     struct INTRDescriptor {
@@ -49,9 +76,33 @@ namespace irq {
         }
     };
 
-    typedef void (*IRQHandler)(uint64_t irq_number, uint64_t error_code);
+    struct InterruptFrame {
+        uint64_t r15;
+        uint64_t r14;
+        uint64_t r13;
+        uint64_t r12;
+        uint64_t r11;
+        uint64_t r10;
+        uint64_t r9;
+        uint64_t r8;
+        uint64_t rdi;
+        uint64_t rsi;
+        uint64_t rbp;
+        uint64_t rdx;
+        uint64_t rcx;
+        uint64_t rbx;
+        uint64_t rax;
+        uint64_t rsp;
+        uint64_t ss;
+        uint64_t vector;
+        uint64_t error_code;
+        uint64_t rip;
+        uint64_t cs;
+        uint64_t rflags;
+    } __attribute__((packed));
 
     inline void enableIRQ() noexcept {
+        // Only early registered IRQ smoke handlers are enabled; kernel APIs are not IRQ-context safe yet.
         asm volatile("sti");
     }
 
@@ -60,6 +111,7 @@ namespace irq {
     }
 
     void initIRQ() noexcept;
+    void triggerPageFaultForValidation() noexcept;
 }   // namespace irq
 NAMESPACE_BIGOS_END
 #endif   // _BIG_INTERRUPT_H

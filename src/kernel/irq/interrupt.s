@@ -2,61 +2,65 @@
 .code64
 
 .text
-call_isr:
-    push %rax
-    push %rbx
-    push %rcx
-    push %rdx
-    push %rbp
-    push %rdi
-    movq isr_list(, %rdi, 8), %rax
-    call *%rax
-    pop %rdi
-    movb $0x20, %al
-    cmp $0x08, %rdi
-    jb L0
-    movw $0xa0, %dx
-    outb %al, %dx
-L0:
-    movw $0x20, %dx
-    outb %al, %dx
-    pop %rbp
-    pop %rdx
-    pop %rcx
-    pop %rbx
-    pop %rax
-    pop %rsi
-    pop %rdi
+isr_common:
+    movq %rsp, %rax
+    addq $40, %rax
+    pushq $0
+    pushq %rax
+
+    pushq %rax
+    pushq %rbx
+    pushq %rcx
+    pushq %rdx
+    pushq %rbp
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+
+    movq %rsp, %rdi
+    call irq_dispatch
+
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rbp
+    popq %rdx
+    popq %rcx
+    popq %rbx
+    popq %rax
+
+    addq $32, %rsp
     iretq
 
-pre_call_isr:
-    push %rsi
-    xor %rsi, %rsi
-    jmp call_isr
-
-pre_call_isr_with_ecode:
-    xchg %rsi, (%rsp)
-    jmp call_isr
-
 .data
-.extern isr_list
-
 .globl isr_entries
+.extern irq_dispatch
 isr_entries:
 
 .macro isr_entry irq_num, has_ecode = 0
 .text
 isr_entry_\irq_num:
-    push %rdi
-    movq $\irq_num, %rdi
-
     # has no error code
     .if \has_ecode == 0
-        jmp pre_call_isr
+        pushq $0
     # has error code
-    .else
-        jmp pre_call_isr_with_ecode
     .endif
+    pushq $\irq_num
+    jmp isr_common
 .data
 .quad isr_entry_\irq_num
 .endm

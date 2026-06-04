@@ -62,7 +62,7 @@ def test_generated_bochsrc_is_sanitized(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
     bochsrc = tmp_path / 'bochsrc.bxrc'
 
-    boot_debug.render_bochsrc(image, bochsrc, None, None, [])
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, [])
 
     contents = bochsrc.read_text(encoding='utf-8')
     assert f'path="{image}"' in contents

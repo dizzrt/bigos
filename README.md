@@ -4,7 +4,7 @@ Language: English | [简体中文](README-zh.md)
 
 BigOS is an early-stage x86_64 operating system kernel written mainly in
 freestanding C++17, C17, and assembly. It currently focuses on bootstrapping,
-basic text output, interrupt setup, keyboard input handling, and early kernel
+- basic text output, interrupt/exception setup, minimal keyboard IRQ smoke, and early kernel
 memory management.
 
 This repository is a research/toy OS kernel project, not a hosted application or
@@ -20,8 +20,8 @@ Implemented or partially implemented:
 - ELF64 kernel loading from an exFAT disk image.
 - Higher-half kernel linking at `0xffffffff80000000`.
 - VGA text-mode output and simple `kprintf` support.
-- IDT setup and assembly interrupt stubs.
-- i8259 PIC driver and keyboard scan-code parser.
+- Kernel-owned IDT setup, assembly interrupt stubs, and diagnostic CPU exception dispatch.
+- i8259 PIC driver and minimal keyboard IRQ1 scan-code smoke.
 - Buddy-based physical page allocation.
 - Slab/kmalloc allocator and C++ `new`/`delete` integration.
 - Early virtual-memory allocation and page-table mapping framework.
@@ -30,7 +30,7 @@ Implemented or partially implemented:
 Not implemented or still skeletal:
 
 - UEFI bootloader, ESP image generation, and OVMF/QEMU UEFI smoke tests.
-- TTY and console abstraction beyond basic VGA output.
+- TTY, full keyboard input, and console abstraction beyond basic VGA output.
 - Scheduler, threads, processes, and user mode.
 - System calls.
 - Filesystem services inside the kernel.
@@ -84,8 +84,8 @@ boot.cc
 kernel()
   - clears VGA text screen
   - initializes memory management
-  - initializes IRQ descriptors
-  - enables interrupts
+  - initializes kernel-owned IDT, exception dispatch, i8259 PIC, and keyboard IRQ1 smoke
+  - enables interrupts after selected early handlers are registered
   - enters an idle hlt loop
 ```
 
@@ -264,12 +264,14 @@ The memory subsystem lives under `src/mm/`.
 The interrupt subsystem combines assembly stubs and C++ descriptors.
 
 - `src/kernel/irq/interrupt.s`: generated ISR entry stubs.
-- `src/kernel/irq/interrupt.cc`: IDT initialization and default IRQ handler.
+- `src/kernel/irq/interrupt.cc`: IDT initialization, exception dispatch, and external IRQ dispatch.
 - `src/drivers/irqchip/i8259.cc`: PIC masking and EOI support.
-- `src/kernel/irq/isr.cc`: keyboard scan-code parsing and temporary VGA
-  character output.
+- `src/kernel/irq/isr.cc`: minimal keyboard IRQ1 scancode smoke.
+- `docs/arch/interrupt-exception-foundation.md`: current interrupt/exception
+  design, non-goals, and validation notes.
 
-Keyboard input is not yet routed through a complete TTY layer.
+Keyboard input is not yet routed through a complete TTY layer; the current IRQ1
+path only reads one PS/2 scancode byte and prints a smoke marker.
 
 ### Display And IO
 

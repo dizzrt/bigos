@@ -27,8 +27,12 @@ void kernel(const BootInfoHeader *boot_info) {
 #endif
     bigos::irq::initIRQ();
     // bigos::terminal::init_tty();
-    // bigos::irq::enableIRQ();
+#ifdef BIGOS_PAGE_FAULT_SMOKE
+    bigos::irq::triggerPageFaultForValidation();
+#endif
+    bigos::irq::enableIRQ();
 
+    bigos::serial_puts("BigOS kernel reached\n");
     bigos::kprintf("BigOS kernel reached\n");
     while (true) {
         asm volatile("hlt");
