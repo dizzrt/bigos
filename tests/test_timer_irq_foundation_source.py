@@ -45,13 +45,25 @@ def test_timer_irq0_handler_is_registered_before_unmask() -> None:
 def test_timer_handler_does_not_send_pic_eoi_or_allocate() -> None:
     isr = read_source('src/kernel/irq/isr.cc')
     interrupt = read_source('src/kernel/irq/interrupt.cc')
+    timer_cc = read_source('src/kernel/timer/timer.cc')
+    timer_h = read_source('include/bigos/timer.h')
 
     handler_start = isr.index('implement_isr(timer)')
     handler_end = isr.index('implement_isr(keyboard)')
     handler_body = isr[handler_start:handler_end]
 
-    assert '++bigos::timer::__detail::g_ticks;' in handler_body
-    assert 'bigos::timer::on_tick();' not in handler_body
+    # Tick is advanced through the controlled timer-owned API, not by mutating
+    # timer-internal tick storage from the IRQ layer.
+    assert 'bigos::timer::on_tick();' in handler_body
+    assert '++bigos::timer::__detail::g_ticks' not in handler_body
+    assert '++bigos::timer::__detail::g_ticks' not in isr
+
+    # Tick state ownership lives in the timer translation unit.
+    assert 'void on_tick() noexcept;' in timer_h
+    assert 'volatile tick_t g_ticks = 0;' in timer_cc
+    assert 'volatile tick_t g_ticks = 0;' not in isr
+    assert '++__detail::g_ticks;' in timer_cc
+
     assert 'send_eoi' not in handler_body
     assert 'driver::irqchip::i8259::send_eoi' in interrupt
 
@@ -63,9 +75,27 @@ def test_timer_handler_does_not_send_pic_eoi_or_allocate() -> None:
         'scheduler',
         'sleep',
         'kprintf',
+        'mdelay',
+        'while (ticks()',
     )
     for token in forbidden_tokens:
         assert token not in handler_body
+
+
+def test_mdelay_and_tick_polling_not_in_any_isr_handler_body() -> None:
+    isr = read_source('src/kernel/irq/isr.cc')
+
+    timer_start = isr.index('implement_isr(timer)')
+    keyboard_start = isr.index('implement_isr(keyboard)')
+    init_start = isr.index('void init_isr_timer()')
+
+    timer_body = isr[timer_start:keyboard_start]
+    keyboard_body = isr[keyboard_start:init_start]
+
+    for body in (timer_body, keyboard_body):
+        assert 'mdelay' not in body
+        assert 'while (ticks()' not in body
+        assert 'while(ticks()' not in body
 
 
 def test_timer_self_test_and_irq_enable_boundaries() -> None:
@@ -94,7 +124,7 @@ def test_timer_smoke_is_default_off_gated_and_bounded() -> None:
     isr = read_source('src/kernel/irq/isr.cc')
     assert '#ifdef BIGOS_TIMER_SMOKE' in isr
     assert 'TIMER_SMOKE_MARKER_LIMIT = 3' in isr
-    assert 'if (bigos::timer::__detail::g_ticks <= TIMER_SMOKE_MARKER_LIMIT)' in isr
+    assert 'if (bigos::timer::ticks() <= TIMER_SMOKE_MARKER_LIMIT)' in isr
     assert 'serial_puts("BIGOS_TIMER_IRQ\\n");' in isr
 
 
@@ -108,3 +138,62 @@ def test_timer_delay_api_documents_busy_wait_semantics() -> None:
     assert 'not scheduler sleep' in docs
     assert 'while (ticks() < target)' in timer_cc
     assert 'asm volatile("pause")' in timer_cc
+
+
+def test_timer_api_context_contracts_are_documented() -> None:
+    timer_h = read_source('include/bigos/timer.h')
+
+    assert 'IRQ-context only.' in timer_h
+    assert 'Context-agnostic read.' in timer_h
+    assert 'Non-interrupt context only.' in timer_h
+    assert 'busy-waits forever' in timer_h
+
+
+def test_isr_abi_invariants_are_preserved() -> None:
+    interrupt_s = read_source('src/kernel/irq/interrupt.s')
+    interrupt_cc = read_source('src/kernel/irq/interrupt.cc')
+
+    common_start = interrupt_s.index('isr_common:')
+    common_end = interrupt_s.index('.data', common_start)
+    common_body = interrupt_s[common_start:common_end]
+
+    # General-purpose registers saved in reverse InterruptFrame order (r15..rax in
+    # memory), restored in mirrored order, returning through iretq.
+    save_order = [
+        'pushq %rbx',
+        'pushq %rcx',
+        'pushq %rdx',
+        'pushq %rbp',
+        'pushq %rsi',
+        'pushq %rdi',
+        'pushq %r8',
+        'pushq %r9',
+        'pushq %r10',
+        'pushq %r11',
+        'pushq %r12',
+        'pushq %r13',
+        'pushq %r14',
+        'pushq %r15',
+    ]
+    indices = [common_body.index(token) for token in save_order]
+    assert indices == sorted(indices)
+    assert 'popq %r15' in common_body
+    assert 'iretq' in common_body
+
+    # 16-byte stack alignment before the C++ dispatch call.
+    align_index = common_body.index('andq $-16, %rsp')
+    call_index = common_body.index('call irq_dispatch')
+    assert align_index < call_index
+
+    # Synthetic zero error-code slot keeps the frame layout stable for vectors
+    # without a CPU-provided error code.
+    assert 'pushq $0' in interrupt_s
+    assert '.if \\has_ecode == 0' in interrupt_s
+
+    # External IRQ sends exactly one EOI after the handler returns; CPU
+    # exceptions send none.
+    exception_start = interrupt_cc.index('is_cpu_exception(__frame->vector)')
+    exception_end = interrupt_cc.index('is_i8259_external_irq(__frame->vector)')
+    exception_block = interrupt_cc[exception_start:exception_end]
+    assert 'send_eoi' not in exception_block
+    assert interrupt_cc.count('driver::irqchip::i8259::send_eoi') == 1

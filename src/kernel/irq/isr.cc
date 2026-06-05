@@ -7,10 +7,6 @@
 #include <drivers/timer/pit.h>
 
 NAMESPACE_BIGOS_BEG
-namespace timer::__detail {
-    volatile tick_t g_ticks = 0;
-}   // namespace timer::__detail
-
 namespace irq::isr {
     namespace __detail {
         constexpr uint16_t PS2_KEYBOARD_DATA_PORT = 0x60;
@@ -18,10 +14,14 @@ namespace irq::isr {
 
         implement_isr(timer) {
             (void)__frame;
-            ++bigos::timer::__detail::g_ticks;
+            // Advance the monotonic tick through the timer-owned IRQ-context-safe
+            // API. The IRQ layer does not mutate timer-internal tick state directly,
+            // and does not send i8259 EOI here; EOI stays owned by irq_dispatch.
+            bigos::timer::on_tick();
 
 #ifdef BIGOS_TIMER_SMOKE
-            if (bigos::timer::__detail::g_ticks <= TIMER_SMOKE_MARKER_LIMIT)
+            // Validation-only bounded marker; intentionally kept out of on_tick().
+            if (bigos::timer::ticks() <= TIMER_SMOKE_MARKER_LIMIT)
                 serial_puts("BIGOS_TIMER_IRQ\n");
 #endif
         }

@@ -2,6 +2,14 @@
 .code64
 
 .text
+# isr_common builds the InterruptFrame (see include/irq/interrupt.h) and enters
+# the C++ dispatch. ABI invariants (validated, not changed by this path):
+#   - General-purpose registers are pushed in reverse InterruptFrame field order
+#     so that in memory they appear as r15..rax, matching the struct layout, and
+#     are popped in the mirrored order to restore exact state before iretq.
+#   - The synthetic error-code slot (pushed by isr_entry for vectors without a
+#     CPU error code) keeps the frame layout identical to error-code vectors.
+#   - The stack is aligned to 16 bytes (System V AMD64) before call irq_dispatch.
 isr_common:
     pushq $0
     pushq $0
@@ -23,6 +31,7 @@ isr_common:
     pushq %r14
     pushq %r15
 
+    # rdi = &InterruptFrame; align rsp to 16 bytes before the call, then restore.
     movq %rsp, %rdi
     movq %rsp, %rax
     andq $-16, %rsp
@@ -47,6 +56,7 @@ isr_common:
     popq %rbx
     popq %rax
 
+    # Drop vector + error-code slots, then return through iretq.
     addq $32, %rsp
     iretq
 

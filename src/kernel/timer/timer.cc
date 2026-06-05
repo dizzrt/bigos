@@ -3,7 +3,15 @@
 #include <bigos/io.h>
 
 NAMESPACE_BIGOS_BEG
+namespace timer::__detail {
+    volatile tick_t g_ticks = 0;
+}   // namespace timer::__detail
+
 namespace timer {
+    void on_tick() noexcept {
+        ++__detail::g_ticks;
+    }
+
     tick_t ticks() noexcept {
         return __detail::g_ticks;
     }

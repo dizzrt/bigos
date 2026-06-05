@@ -99,6 +99,7 @@ namespace irq {
             return;
 
         if (__detail::is_cpu_exception(__frame->vector)) {
+            // CPU exceptions never send an i8259 EOI.
             if (__frame->vector == VECTOR_PAGE_FAULT)
                 __detail::page_fault_handler(__frame);
 
@@ -117,6 +118,8 @@ namespace irq {
             if (handler == nullptr)
                 handler = &__detail::default_external_irq_handler;
 
+            // External IRQs (including timer vector 0x20) send exactly one EOI
+            // here, after the registered handler returns, then iretq via isr_common.
             handler(__frame);
             driver::irqchip::i8259::send_eoi(irq_line);
             return;
