@@ -118,6 +118,8 @@ namespace mm {
         void collect_stats(SlabCacheStats *__stats) const noexcept;
     };
 
+    // Read-only allocator diagnostics. collect_slab_stats() snapshots this under
+    // an IRQ-disabled-only boundary; print_slab_stats() is non-interrupt-context-only.
     struct SlabAllocatorStats {
         static constexpr uint32_t MAX_CACHES = 32;
 
@@ -143,6 +145,7 @@ namespace mm {
         void collect_stats(SlabAllocatorStats *__stats) const noexcept;
     };
 
+    // Internal slab/large-allocation helpers are non-IRQ-handler-safe.
     _attr_nodiscard_ void *alloc_large(uint32_t __size, gfm_t __gfm) noexcept _attr_malloc_;
     bool free_large(SlabHeader *__header, const void *__p) noexcept;
     bool was_recent_large_free(const void *__p) noexcept;

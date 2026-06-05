@@ -111,6 +111,33 @@ namespace irq {
         asm volatile("cli");
     }
 
+    class InterruptGuard {
+    private:
+        static constexpr uint64_t RFLAGS_IF = 1ull << 9;
+        bool restore_enabled_;
+
+        static uint64_t read_rflags() noexcept {
+            uint64_t flags;
+            asm volatile("pushfq; popq %0" : "=r"(flags)::"memory");
+            return flags;
+        }
+
+    public:
+        // Single-core guard for same-CPU maskable IRQ interleaving only.
+        // It is not an SMP lock, NMI guard, blocking primitive, or scheduler lock.
+        InterruptGuard() noexcept : restore_enabled_((read_rflags() & RFLAGS_IF) != 0) {
+            asm volatile("cli" ::: "memory");
+        }
+
+        InterruptGuard(const InterruptGuard &) = delete;
+        InterruptGuard &operator=(const InterruptGuard &) = delete;
+
+        ~InterruptGuard() noexcept {
+            if (restore_enabled_)
+                asm volatile("sti" ::: "memory");
+        }
+    };
+
     void initIRQ() noexcept;
     void triggerPageFaultForValidation() noexcept;
 }   // namespace irq

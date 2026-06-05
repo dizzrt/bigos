@@ -8,6 +8,7 @@
 #include "buddy.h"
 #include <bigos/memory.h>
 #include "memdef.h"
+#include <irq/interrupt.h>
 
 namespace {
     constexpr uint8_t SLAB_POISON_FREE = 0x5a;
@@ -34,6 +35,7 @@ namespace mm {
 #endif
 
     static void account_large_alloc(uint32_t __pages, uint32_t __bytes) noexcept {
+        bigos::irq::InterruptGuard guard;
         g_large_allocation_count++;
         g_large_allocation_pages += __pages;
         g_large_allocation_bytes += __bytes;
@@ -45,6 +47,7 @@ namespace mm {
     }
 
     static void account_large_free(uint32_t __pages, uint32_t __bytes) noexcept {
+        bigos::irq::InterruptGuard guard;
         if (g_large_allocation_count == 0 || g_large_allocation_pages < __pages || g_large_allocation_bytes < __bytes) {
             slab_debug_fail("large allocation accounting underflow");
             return;
@@ -57,6 +60,7 @@ namespace mm {
 
     static void remember_recent_large_free(const void *__p) noexcept {
 #ifdef BIGOS_SLAB_DEBUG
+        bigos::irq::InterruptGuard guard;
         g_recent_freed_large_payloads[g_recent_freed_large_index % 16] = __p;
         g_recent_freed_large_index++;
 #else
@@ -66,6 +70,7 @@ namespace mm {
 
     bool was_recent_large_free(const void *__p) noexcept {
 #ifdef BIGOS_SLAB_DEBUG
+        bigos::irq::InterruptGuard guard;
         for (uint32_t i = 0; i < 16; i++) {
             if (g_recent_freed_large_payloads[i] == __p)
                 return true;
@@ -107,7 +112,10 @@ namespace mm {
         }
 
 #ifdef BIGOS_SLAB_DEBUG
-        __header->magic = 0;
+        {
+            bigos::irq::InterruptGuard guard;
+            __header->magic = 0;
+        }
         if (requested_size != 0)
             memset((void *)__p, SLAB_POISON_FREE, requested_size);
 #endif
@@ -128,6 +136,7 @@ namespace mm {
           belong_cache_(__belong_cache) {}
 
     void *Slab::alloc_obj(gfm_t __gfm) noexcept {
+        bigos::irq::InterruptGuard guard;
         uint64_t offset = scan(1);
         if (offset == ktl::bitset::npos)
             return nullptr;
@@ -164,8 +173,11 @@ namespace mm {
         memset((void *)__p, SLAB_POISON_FREE, belong_cache_->obj_size_);
 #endif
 
-        if (reset((uint32_t)offset) != 1)
-            return;
+        {
+            bigos::irq::InterruptGuard guard;
+            if (reset((uint32_t)offset) != 1)
+                return;
+        }
 
         belong_cache_->free(this);
     }
@@ -252,25 +264,32 @@ namespace mm {
     }
 
     void Cache::free(Slab *__slab) noexcept {
-        ++nr_free_objs;
+        bool should_reclaim = false;
 
-        if (__slab->flags_ & SLAB_FULL) {
-            auto iter = full_list.begin();
-            while (iter != full_list.end()) {
-                if (*iter == __slab)
-                    break;
-                ++iter;
+        {
+            bigos::irq::InterruptGuard guard;
+            ++nr_free_objs;
+
+            if (__slab->flags_ & SLAB_FULL) {
+                auto iter = full_list.begin();
+                while (iter != full_list.end()) {
+                    if (*iter == __slab)
+                        break;
+                    ++iter;
+                }
+
+                if (iter != full_list.end()) {
+                    full_list.erase(iter);
+                    avl_list.insert(iter._node);
+
+                    __slab->flags_ &= ~SLAB_FULL;
+                }
             }
 
-            if (iter != full_list.end()) {
-                full_list.erase(iter);
-                avl_list.insert(iter._node);
-
-                __slab->flags_ &= ~SLAB_FULL;
-            }
+            should_reclaim = should_reclaim_empty_slab(__slab);
         }
 
-        if (should_reclaim_empty_slab(__slab))
+        if (should_reclaim)
             reclaim_empty_slab(__slab);
     }
 
@@ -304,11 +323,15 @@ namespace mm {
             }
             new (s_node) ktl::intrusive_list_node<Slab *>(s);
 
-            avl_list.insert(s_node);
-            nr_objs_ += s->nr_objs();
-            nr_free_objs += s->nr_free_objs();
+            {
+                bigos::irq::InterruptGuard guard;
+                avl_list.insert(s_node);
+                nr_objs_ += s->nr_objs();
+                nr_free_objs += s->nr_free_objs();
+            }
         }
 
+        bigos::irq::InterruptGuard guard;
         auto first = avl_list.begin();
         void *ret = (*first)->alloc_obj(__gfm);
         if (ret == nullptr)
@@ -331,6 +354,7 @@ namespace mm {
         if (__stats == nullptr)
             return;
 
+        bigos::irq::InterruptGuard guard;
         __stats->object_size = obj_size_;
         __stats->available_slab_count = (uint32_t)avl_list.size();
         __stats->full_slab_count = (uint32_t)full_list.size();
@@ -362,20 +386,26 @@ namespace mm {
             iter++;
         }
 
-        cache_list.insert(iter, __cache_node);
+        {
+            bigos::irq::InterruptGuard guard;
+            cache_list.insert(iter, __cache_node);
+        }
     }
 
     void *CacheChain::alloc(uint32_t __size, gfm_t __gfm) noexcept {
         bool need_perfect_fit = __gfm & _GFM_PERFECT_FIT;
 
         Cache *cache = nullptr;
-        for (auto c : cache_list) {
-            if (c->obj_size_ == __size) {
-                cache = c;
-                break;
-            } else if (c->obj_size_ > __size && !need_perfect_fit) {
-                cache = c;
-                break;
+        {
+            bigos::irq::InterruptGuard guard;
+            for (auto c : cache_list) {
+                if (c->obj_size_ == __size) {
+                    cache = c;
+                    break;
+                } else if (c->obj_size_ > __size && !need_perfect_fit) {
+                    cache = c;
+                    break;
+                }
             }
         }
 
@@ -396,6 +426,7 @@ namespace mm {
         if (__stats == nullptr)
             return;
 
+        bigos::irq::InterruptGuard guard;
         memset(__stats, 0, sizeof(*__stats));
 
         for (auto c : cache_list) {

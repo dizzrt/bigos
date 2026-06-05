@@ -8,13 +8,17 @@
 NAMESPACE_BIGOS_BEG
 
 // Allocates kernel virtual pages by page count, not by buddy order.
+// Non-IRQ-handler-safe: ordinary callers must not invoke this from IRQ handlers.
 _attr_nodiscard_ extern void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;
 
 // Releases a kernel virtual range returned by alloc_kernel_pages().
+// Non-IRQ-handler-safe: may update page tables and allocator metadata.
 extern void free_pages(const void *__p) noexcept;
 
+// Non-IRQ-handler-safe ordinary object allocator.
 _attr_nodiscard_ extern void *kmalloc(size_t __size, gfm_t __gfm = 0) noexcept _attr_malloc_;
 
+// Non-IRQ-handler-safe ordinary object/free path.
 extern void free(const void *__p) noexcept;
 
 void init_mem(const BootInfoHeader *__boot_info) noexcept;
@@ -30,7 +34,9 @@ namespace mm {
     _attr_nodiscard_ void *phys_to_direct(uint64_t __phys) noexcept;
     uint64_t direct_to_phys(const void *__addr) noexcept;
 
+    // IRQ-disabled-only snapshot: internally masks same-CPU IRQ interleaving while reading allocator lists.
     extern void collect_slab_stats(SlabAllocatorStats *__stats) noexcept;
+    // Non-interrupt-context-only diagnostic output helper.
     extern void print_slab_stats() noexcept;
 
     void self_test() noexcept;

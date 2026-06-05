@@ -29,6 +29,7 @@ namespace mm {
     namespace __detail {
         void init_direct_map(const BootInfoHeader *__boot_info);
         void init_vmem();
+        // IRQ-disabled-only snapshot of the kernel heap/vmalloc free-page count.
         uint32_t kernel_vmem_free_pages() noexcept;
     }   // namespace __detail
 
@@ -54,6 +55,7 @@ namespace mm {
             return nr_free_pages_;
         }
 
+        // Internal KVMEM metadata paths; non-IRQ-handler-safe.
         void __free(const void *__p) noexcept;
 
         _attr_nodiscard_ MemoryBlock *__alloc_pages(uint32_t __pages, gfm_t __gfm) noexcept _attr_malloc_;

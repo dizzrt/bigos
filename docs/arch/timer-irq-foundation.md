@@ -26,7 +26,9 @@ The three early timer APIs have explicit execution-context contracts:
 
 - `on_tick()` is IRQ-context only. It is called from the timer IRQ0 handler and
   only increments the monotonic tick. It does not allocate, block, do IO, call
-  `kprintf`, send i8259 EOI, or depend on scheduler/TTY/filesystem services.
+  `kprintf`, send i8259 EOI, call `kmalloc`/`free`/`alloc_kernel_pages`/
+  `free_pages`/global `new/delete`, or depend on scheduler/TTY/filesystem
+  services.
 - `ticks()` is a context-agnostic read. It returns a monotonic tick snapshot
   valid under the current single-core early-kernel model and makes no guarantee
   about SMP coherence or high-resolution timing.

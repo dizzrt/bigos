@@ -19,7 +19,13 @@ normal boot marker
 hlt loop
 ```
 
-`serial_init()` 在默认 boot path 中显式初始化 COM1，确保普通 serial marker 和 early diagnostics 不再隐式依赖 `BIGOS_MM_SELF_TEST`。`BIGOS_MM_SELF_TEST` 仍在 PIC 初始化和 `sti` 之前运行。当前 allocator、kernel API 和内存自检不承诺 IRQ-context 安全。
+`serial_init()` 在默认 boot path 中显式初始化 COM1，确保普通 serial marker 和 early diagnostics 不再隐式依赖 `BIGOS_MM_SELF_TEST`。`BIGOS_MM_SELF_TEST` 仍在 PIC 初始化和 `sti` 之前运行。普通 allocator、kernel API 和内存自检不承诺 IRQ-context 安全；`kmalloc()`、`free()`、`alloc_kernel_pages()`、`free_pages()` 和全局 `new/delete` 不允许从 IRQ handler 调用。
+
+## Interrupt Guard
+
+`bigos::irq::InterruptGuard` 是单核早期内核的最小 critical-section primitive。构造时读取 RFLAGS.IF 并执行 `cli`；析构时只在进入前 IF 为 enabled 时恢复 `sti`，进入前已 disabled 的路径保持 disabled。该 guard 只防止 same-CPU maskable IRQ interleaving，不是 SMP lock，不保护 NMI，不提供阻塞语义，也不是 scheduler lock。
+
+allocator 内部使用该 guard 保护 buddy、slab 和 KVMEM 的短元数据更新边界。它不会让普通 allocator 变成 IRQ-handler-safe API；后续 IRQ producer 若需要 handoff，仍应使用静态或 boot-time-prepared bounded storage，并明确 overflow/drop 策略。
 
 ## IDT 所有权
 
@@ -51,7 +57,7 @@ kernel runtime IDT 使用 kernel-owned static storage，由 `irq::initIRQ()` 构
 
 ## Page Fault
 
-`#PF` handler 是 diagnostic-only 路径。它读取 `CR2`，输出固定 marker `BIGOS_PAGE_FAULT`、fault address、raw error code，并解码 present、write、user、reserved-bit 和 instruction-fetch 位。输出后进入 `cli; hlt` 循环，不分配内存、不修改页表、不重试 faulting instruction，也不声明 demand paging 支持。
+`#PF` handler 是 diagnostic-only 路径。它读取 `CR2`，输出固定 marker `BIGOS_PAGE_FAULT`、fault address、raw error code，并解码 present、write、user、reserved-bit 和 instruction-fetch 位。输出后进入 `cli; hlt` 循环，不分配内存、不释放内存、不修改页表恢复、不重试 faulting instruction，也不声明 demand paging 支持。
 
 验证专用触发器由 `xmake f --page_fault_smoke=y` 打开。默认 boot 不主动触发 `#PF`。
 
@@ -59,7 +65,7 @@ kernel runtime IDT 使用 kernel-owned static storage，由 `irq::initIRQ()` 构
 
 keyboard IRQ1 现在用于受控输入 handoff，而不是在 ISR 中直接输出 smoke marker。初始化会先通过 `terminal::init_tty()` 准备 input ring、console flag 和 keyboard decoder state，再由 `irq::initIRQ()` 注册 vector `0x21` handler。默认 boot 仍保持 i8259 IRQ line 1 masked；需要人工验证键盘 IRQ 时，通过 `xmake f --keyboard_smoke=y` 显式 unmask IRQ1。
 
-handler 只读取 PS/2 data port `0x60` 的一个 scancode byte，执行 bounded set-1 decode，并把受支持字符交给 TTY fixed-capacity input buffer。handler 不直接发送 i8259 EOI、不调用 `kprintf()`/`kput()`、不写 VGA/serial、不分配内存、不阻塞、不调用 `mdelay()`，也不依赖 filesystem、scheduler、syscall、用户态或 TTY consumer progress。EOI 仍由 external IRQ dispatch 在 handler 返回后统一发送一次。
+handler 只读取 PS/2 data port `0x60` 的一个 scancode byte，执行 bounded set-1 decode，并把受支持字符交给 TTY fixed-capacity input buffer。handler 不直接发送 i8259 EOI、不调用 `kprintf()`/`kput()`、不写 VGA/serial、不调用 `kmalloc()`/`free()`/`alloc_kernel_pages()`/`free_pages()`/global `new/delete`、不阻塞、不调用 `mdelay()`，也不依赖 filesystem、scheduler、syscall、用户态或 TTY consumer progress。EOI 仍由 external IRQ dispatch 在 handler 返回后统一发送一次。
 
 本路径不是完整输入子系统；多 TTY、阻塞读、shell、用户态输入和完整 keyboard layout 留给后续阶段。
 

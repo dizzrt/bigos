@@ -6,6 +6,7 @@
 #include "buddy.h"
 #include "memdef.h"
 #include <bigos/memory.h>
+#include <irq/interrupt.h>
 
 #define KVMEM_LEN        0x10000000000ul
 #define KVMEM_BASE       0xffff880000000000ul
@@ -380,6 +381,7 @@ namespace mm {
         }
 
         uint32_t kernel_vmem_free_pages() noexcept {
+            bigos::irq::InterruptGuard guard;
             return kvmem.nr_free_pages();
         }
     }   // namespace __detail
@@ -410,6 +412,7 @@ namespace mm {
             uint64_t vaddr = __base + i * PAGE_SIZE;
             uint64_t *pte = mapped_pte(vaddr);
             if (pte != nullptr && paging_present(*pte)) {
+                bigos::irq::InterruptGuard guard;
                 *pte = 0;
                 flush_kernel_tlb_page(vaddr);
             }
@@ -449,7 +452,10 @@ namespace mm {
                         return false;
                     }
                     new_descriptors[new_descriptor_count++] = {entry, i_pml4};
-                    self_mapping_pml4(base)[i_pml4] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PML4E;
+                    {
+                        bigos::irq::InterruptGuard guard;
+                        self_mapping_pml4(base)[i_pml4] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PML4E;
+                    }
 
                     entry = self_mapping_pdpt(base);
                     memset((void *)entry, 0, PAGE_SIZE);
@@ -466,7 +472,10 @@ namespace mm {
                         return false;
                     }
                     new_descriptors[new_descriptor_count++] = {entry, i_pdpt};
-                    self_mapping_pdpt(base)[i_pdpt] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDPTE;
+                    {
+                        bigos::irq::InterruptGuard guard;
+                        self_mapping_pdpt(base)[i_pdpt] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDPTE;
+                    }
 
                     entry = self_mapping_pd(base);
                     memset((void *)entry, 0, PAGE_SIZE);
@@ -483,14 +492,20 @@ namespace mm {
                         return false;
                     }
                     new_descriptors[new_descriptor_count++] = {entry, i_pd};
-                    self_mapping_pd(base)[i_pd] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDE;
+                    {
+                        bigos::irq::InterruptGuard guard;
+                        self_mapping_pd(base)[i_pd] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDE;
+                    }
 
                     entry = self_mapping_pt(base);
                     memset((void *)entry, 0, PAGE_SIZE);
                 }
 
                 // set paging
-                self_mapping_pt(base)[i_pt] = (physical_base & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PTE;
+                {
+                    bigos::irq::InterruptGuard guard;
+                    self_mapping_pt(base)[i_pt] = (physical_base & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PTE;
+                }
 
                 mapped_pages++;
                 nr_physical_pages--;
@@ -526,6 +541,7 @@ namespace mm {
         }
 
         while (!__mblk->physical_area.empty()) {
+            bigos::irq::InterruptGuard guard;
             auto temp = __mblk->physical_area.begin();
             auto temp_node = temp._node;
             __mblk->physical_area.erase(temp);
@@ -607,6 +623,7 @@ namespace mm {
         if (__p == nullptr)
             return;
 
+        bigos::irq::InterruptGuard guard;
         uint64_t addr = (uint64_t)__p;
 
         auto iter = used_area_.begin();
@@ -643,6 +660,7 @@ namespace mm {
         if (__pages == 0 || nr_free_pages_ < __pages)
             return nullptr;
 
+        bigos::irq::InterruptGuard guard;
         auto iter = free_area_.begin();
         while (iter != free_area_.end()) {
             if ((*iter)->nr_pages >= __pages)
@@ -721,7 +739,10 @@ void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept {
                     return nullptr;
                 }
 
-                mblk->physical_area.insert(node);
+                {
+                    bigos::irq::InterruptGuard guard;
+                    mblk->physical_area.insert(node);
+                }
                 nr_pages -= nr_pages_by_order;
             }
         }

@@ -1,6 +1,7 @@
 #include <arch/x86/boot/boot_info.h>
 #include <bigos/io.h>   // remove later
 #include <bigos/panic.h>
+#include <irq/interrupt.h>
 
 #include "buddy.h"
 
@@ -185,10 +186,12 @@ namespace {
 NAMESPACE_BIGOS_BEG
 namespace mm {
     uint32_t g_nr_pages() noexcept {
+        // Context-agnostic after memory initialization: total page count is not mutated at runtime.
         return gNrPages;
     }
 
     uint32_t g_nr_free_pages() noexcept {
+        bigos::irq::InterruptGuard guard;
         return gNrFreePages;
     }
 
@@ -646,6 +649,7 @@ namespace mm {
             if ((__gfm & _GFM_ZONE_MASK) == _GFM_ZONE_DMA32)
                 index = ZONE_DMA32;
 
+            bigos::irq::InterruptGuard guard;
             while (zone_arr[index]->nr_free_pages() < nr_pages) {
                 if (index > 0)
                     index--;
@@ -677,6 +681,7 @@ namespace mm {
             if (__p == nullptr)
                 return;
 
+            bigos::irq::InterruptGuard guard;
             uint64_t base = (uint64_t)__p;
 
             auto iter = gPageBlockList.begin();
@@ -702,6 +707,20 @@ namespace mm {
     }   // namespace __detail
 
     void print_physical_memory_info() noexcept {
+        uint32_t pblk_count[BUDDY_MAX_ORDER + 1] = {};
+        uint32_t free_pages = 0;
+        uint32_t total_pages = 0;
+
+        {
+            bigos::irq::InterruptGuard guard;
+            for (int order = 0; order <= BUDDY_MAX_ORDER; order++) {
+                for (int i = 0; i < 3; i++)
+                    pblk_count[order] += zone_arr[i]->nr_pblk_by_order(order);
+            }
+            free_pages = gNrFreePages;
+            total_pages = gNrPages;
+        }
+
         kputs("buddy system info:\n");
         kputs("pblk  size: ");
         for (int i = 0; i <= BUDDY_MAX_ORDER; i++)
@@ -709,16 +728,11 @@ namespace mm {
         kput('\n');
 
         kputs("pblk count: ");
-        for (int order = 0; order <= BUDDY_MAX_ORDER; order++) {
-            uint32_t temp = 0;
-            for (int i = 0; i < 3; i++)
-                temp += zone_arr[i]->nr_pblk_by_order(order);
-
-            kprintf("%d\t", temp);
-        }
+        for (int order = 0; order <= BUDDY_MAX_ORDER; order++)
+            kprintf("%d\t", pblk_count[order]);
         kput('\n');
 
-        kprintf("free physical pages:%d\ntotal available physical pages:%d\n", gNrFreePages, gNrPages);
+        kprintf("free physical pages:%d\ntotal available physical pages:%d\n", free_pages, total_pages);
     }
 }   // namespace mm
 NAMESPACE_BIGOS_END

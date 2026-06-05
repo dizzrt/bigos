@@ -52,18 +52,20 @@ namespace mm {
         ktl::intrusive_list_node<PageBlock *> *alloc(uint32_t __order) noexcept;
     };
 
-    // total number of physical pages
+    // Context-agnostic after init: total number of physical pages is stable.
     uint32_t g_nr_pages() noexcept;
-    // total number of pysical pages which are unused
+    // IRQ-disabled-only snapshot: masks same-CPU IRQ interleaving while reading free-page accounting.
     uint32_t g_nr_free_pages() noexcept;
 
     namespace __detail {
         void init_buddy(const BootInfoHeader *__boot_info);
 
+        // Internal buddy-order APIs. They are not public page-count allocators and are non-IRQ-handler-safe.
         void free_physical_order(const void *__p) noexcept;
         _attr_nodiscard_ void *alloc_physical_order(uint32_t __order, gfm_t __gfm) noexcept _attr_malloc_;
     }   // namespace __detail
 
+    // Non-interrupt-context-only diagnostic output helper.
     void print_physical_memory_info() noexcept;
 }   // namespace mm
 NAMESPACE_BIGOS_END
