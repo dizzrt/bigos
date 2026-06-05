@@ -5,6 +5,7 @@
 #include <ktl/pair.h>
 #include <bigos/types.h>
 #include <bigos/attributes.h>
+#include <arch/x86/boot/boot_info.h>
 
 NAMESPACE_BIGOS_BEG
 void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept;
@@ -26,6 +27,7 @@ namespace mm {
     };
 
     namespace __detail {
+        void init_direct_map(const BootInfoHeader *__boot_info);
         void init_vmem();
         uint32_t kernel_vmem_free_pages() noexcept;
     }   // namespace __detail

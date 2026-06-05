@@ -1,5 +1,6 @@
 #include <string.h>
 #include <bigos/io.h>   //TODO remove later
+#include <bigos/panic.h>
 
 #include "vmem.h"
 #include "buddy.h"
@@ -9,11 +10,15 @@
 #define KVMEM_LEN        0x10000000000ul
 #define KVMEM_BASE       0xffff880000000000ul
 #define KERNEL_PML4_ADDR 0x2000ul
+#define KERNEL_HIGHER_HALF_BASE 0xffffffff80000000ul
+#define SELF_MAPPING_BASE       0xffff800000000000ul
+#define SELF_MAPPING_LEN        0x10000000000ul
 
 #define DEFAULT_ATTR_PML4E 0x0000000000000003ul
 #define DEFAULT_ATTR_PDPTE 0x0000000000000003ul
 #define DEFAULT_ATTR_PDE   0x0000000000000003ul
 #define DEFAULT_ATTR_PTE   0x0000000000000003ul
+#define PAGING_DESCRIPTOR_LARGE_PAGE 0x80ul
 
 #define INDEX_PML4_OFFSET 39
 #define INDEX_PDPT_OFFSET 30
@@ -39,6 +44,11 @@
 
 static bigos::mm::VMem kvmem;
 
+static_assert(bigos::mm::KDIRECT_BASE >= SELF_MAPPING_BASE + SELF_MAPPING_LEN);
+static_assert(bigos::mm::KDIRECT_BASE >= KVMEM_BASE + KVMEM_LEN);
+static_assert(bigos::mm::KDIRECT_BASE + bigos::mm::KDIRECT_LEN <= KERNEL_HIGHER_HALF_BASE);
+static_assert(KVMEM_BASE < bigos::mm::KDIRECT_BASE || KVMEM_BASE >= bigos::mm::KDIRECT_BASE + bigos::mm::KDIRECT_LEN);
+
 static inline bool paging_present(uint64_t __descriptor) noexcept {
     return (__descriptor & 0x1ul) != 0;
 }
@@ -51,6 +61,15 @@ struct PagingDescriptorChange {
     uint64_t *entry;
     uint16_t index;
 };
+
+struct DirectMapRange {
+    uint64_t base;
+    uint64_t len;
+};
+
+constexpr uint32_t DIRECT_MAP_MAX_RANGES = 128;
+static DirectMapRange gDirectMapRanges[DIRECT_MAP_MAX_RANGES];
+static uint32_t gDirectMapRangeCount;
 
 static void clear_new_paging_descriptors(PagingDescriptorChange *__changes, uint32_t __count) noexcept {
     while (__count) {
@@ -75,9 +94,273 @@ static uint64_t *mapped_pte(uint64_t __vaddr) noexcept {
     return &self_mapping_pt(__vaddr)[get_pt_index(__vaddr)];
 }
 
+static uint64_t align_up_page(uint64_t __value) noexcept {
+    return (__value + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+}
+
+static uint64_t align_down_page(uint64_t __value) noexcept {
+    return __value & ~(PAGE_SIZE - 1);
+}
+
+static void direct_map_panic(const char *__message) noexcept {
+    bigos::serial_init();
+    bigos::kpanic(bigos::PanicCode::DirectMapInitFailed, "mm-direct-map", "%s\n", __message);
+}
+
+static bool direct_map_select_range(uint64_t __base, uint64_t __len, uint64_t *__out_base, uint64_t *__out_len) noexcept {
+    if (__len == 0 || __base >= bigos::mm::KDIRECT_LEN)
+        return false;
+
+    uint64_t end = __base + __len;
+    if (end <= __base)
+        end = bigos::mm::KDIRECT_LEN;
+    if (end > bigos::mm::KDIRECT_LEN)
+        end = bigos::mm::KDIRECT_LEN;
+
+    uint64_t aligned_base = align_up_page(__base);
+    uint64_t aligned_end = align_down_page(end);
+    if (aligned_end <= aligned_base)
+        return false;
+
+    *__out_base = aligned_base;
+    *__out_len = aligned_end - aligned_base;
+    return true;
+}
+
+static bool direct_map_range_covered(uint64_t __phys, uint64_t __len) noexcept {
+    if (__len == 0 || __phys >= bigos::mm::KDIRECT_LEN)
+        return false;
+
+    uint64_t end = __phys + __len;
+    if (end <= __phys || end > bigos::mm::KDIRECT_LEN)
+        return false;
+
+    for (uint32_t i = 0; i < gDirectMapRangeCount; i++) {
+        uint64_t range_end = gDirectMapRanges[i].base + gDirectMapRanges[i].len;
+        if (__phys >= gDirectMapRanges[i].base && end <= range_end)
+            return true;
+    }
+    return false;
+}
+
+static bool direct_map_record_range(uint64_t __base, uint64_t __len) noexcept {
+    if (gDirectMapRangeCount >= DIRECT_MAP_MAX_RANGES)
+        return false;
+    gDirectMapRanges[gDirectMapRangeCount++] = {__base, __len};
+    return true;
+}
+
+static bool ensure_paging_descriptor(uint64_t *__entry, uint16_t __index, uint64_t __attr,
+    PagingDescriptorChange *__changes, uint32_t *__change_count) noexcept {
+    if (paging_present(__entry[__index]))
+        return true;
+
+    uint64_t page = (uint64_t)bigos::mm::__detail::alloc_physical_order(0, 0);
+    if (page == 0)
+        return false;
+
+    __changes[(*__change_count)++] = {__entry, __index};
+    __entry[__index] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+    return true;
+}
+
+static bool map_direct_page(uint64_t __vaddr, uint64_t __phys) noexcept {
+    uint16_t i_pml4 = get_pml4_index(__vaddr);
+    uint16_t i_pdpt = get_pdpt_index(__vaddr);
+    uint16_t i_pd = get_pd_index(__vaddr);
+    uint16_t i_pt = get_pt_index(__vaddr);
+    PagingDescriptorChange new_descriptors[3] = {};
+    uint32_t new_descriptor_count = 0;
+
+    uint64_t *entry = self_mapping_pml4(__vaddr);
+    if (!ensure_paging_descriptor(entry, i_pml4, DEFAULT_ATTR_PML4E, new_descriptors, &new_descriptor_count)) {
+        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
+    entry = self_mapping_pdpt(__vaddr);
+    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pml4(__vaddr))
+        memset((void *)entry, 0, PAGE_SIZE);
+
+    if (!ensure_paging_descriptor(entry, i_pdpt, DEFAULT_ATTR_PDPTE, new_descriptors, &new_descriptor_count)) {
+        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
+    entry = self_mapping_pd(__vaddr);
+    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pdpt(__vaddr))
+        memset((void *)entry, 0, PAGE_SIZE);
+
+    if (!ensure_paging_descriptor(entry, i_pd, DEFAULT_ATTR_PDE, new_descriptors, &new_descriptor_count)) {
+        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
+    entry = self_mapping_pt(__vaddr);
+    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pd(__vaddr))
+        memset((void *)entry, 0, PAGE_SIZE);
+
+    entry[i_pt] = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PTE;
+    return true;
+}
+
+static bool map_direct_large_page(uint64_t __vaddr, uint64_t __phys) noexcept {
+    uint16_t i_pml4 = get_pml4_index(__vaddr);
+    uint16_t i_pdpt = get_pdpt_index(__vaddr);
+    uint16_t i_pd = get_pd_index(__vaddr);
+    PagingDescriptorChange new_descriptors[2] = {};
+    uint32_t new_descriptor_count = 0;
+
+    uint64_t *entry = self_mapping_pml4(__vaddr);
+    if (!ensure_paging_descriptor(entry, i_pml4, DEFAULT_ATTR_PML4E, new_descriptors, &new_descriptor_count)) {
+        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
+    entry = self_mapping_pdpt(__vaddr);
+    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pml4(__vaddr))
+        memset((void *)entry, 0, PAGE_SIZE);
+
+    if (!ensure_paging_descriptor(entry, i_pdpt, DEFAULT_ATTR_PDPTE, new_descriptors, &new_descriptor_count)) {
+        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
+    entry = self_mapping_pd(__vaddr);
+    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pdpt(__vaddr))
+        memset((void *)entry, 0, PAGE_SIZE);
+
+    entry[i_pd] = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDE | PAGING_DESCRIPTOR_LARGE_PAGE;
+    return true;
+}
+
+static void rollback_direct_map_range(uint64_t __phys_base, uint64_t __mapped_pages) noexcept {
+    uint64_t i = 0;
+    while (i < __mapped_pages) {
+        uint64_t vaddr = bigos::mm::KDIRECT_BASE + __phys_base + i * PAGE_SIZE;
+        uint64_t *entry = self_mapping_pml4(vaddr);
+        if (!paging_present(entry[get_pml4_index(vaddr)])) {
+            i++;
+            continue;
+        }
+        entry = self_mapping_pdpt(vaddr);
+        if (!paging_present(entry[get_pdpt_index(vaddr)])) {
+            i++;
+            continue;
+        }
+        entry = self_mapping_pd(vaddr);
+        uint64_t &pde = entry[get_pd_index(vaddr)];
+        if (!paging_present(pde)) {
+            i++;
+            continue;
+        }
+        if ((pde & PAGING_DESCRIPTOR_LARGE_PAGE) != 0) {
+            pde = 0;
+            flush_kernel_tlb_page(vaddr);
+            uint64_t pages_to_next_pd = 1u << (INDEX_PD_OFFSET - INDEX_PT_OFFSET);
+            i += pages_to_next_pd - (i % pages_to_next_pd);
+            continue;
+        }
+
+        uint64_t *pte = &self_mapping_pt(vaddr)[get_pt_index(vaddr)];
+        if (paging_present(*pte)) {
+            *pte = 0;
+            flush_kernel_tlb_page(vaddr);
+        }
+        i++;
+    }
+}
+
+static void map_direct_range(uint64_t __phys_base, uint64_t __len) noexcept {
+    uint64_t mapped_pages = 0;
+    uint64_t phys = __phys_base;
+    uint64_t remaining = __len;
+    constexpr uint64_t LARGE_PAGE_SIZE = 1ul << INDEX_PD_OFFSET;
+
+    while (remaining != 0) {
+        bool use_large_page = (phys % LARGE_PAGE_SIZE) == 0 && remaining >= LARGE_PAGE_SIZE;
+        uint64_t step = use_large_page ? LARGE_PAGE_SIZE : PAGE_SIZE;
+        bool mapped = use_large_page ? map_direct_large_page(bigos::mm::KDIRECT_BASE + phys, phys)
+                                     : map_direct_page(bigos::mm::KDIRECT_BASE + phys, phys);
+        if (!mapped) {
+            rollback_direct_map_range(__phys_base, mapped_pages);
+            direct_map_panic("BIGOS_DIRECT_MAP_INIT_FAILED page-table allocation");
+        }
+        mapped_pages += step / PAGE_SIZE;
+        phys += step;
+        remaining -= step;
+    }
+
+    if (!direct_map_record_range(__phys_base, __len))
+        direct_map_panic("BIGOS_DIRECT_MAP_INIT_FAILED range table exhausted");
+}
+
+static bool direct_map_memory_type_is_ram(uint32_t __type) noexcept {
+    return __type == BIGOS_BOOT_MEMORY_TYPE_USABLE;
+}
+
+static void init_direct_map_from_region(uint64_t __base, uint64_t __len, uint32_t __type) noexcept {
+    if (!direct_map_memory_type_is_ram(__type))
+        return;
+
+    uint64_t aligned_base = 0;
+    uint64_t aligned_len = 0;
+    if (!direct_map_select_range(__base, __len, &aligned_base, &aligned_len))
+        return;
+
+    map_direct_range(aligned_base, aligned_len);
+}
+
+static void init_direct_map_v2(const BootInfoHeader *__header) noexcept {
+    const BootInfoSection *section = bigos_boot_info_v2_find_section(__header, BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP);
+    if (section == nullptr || section->size % sizeof(BootMemoryRegion) != 0)
+        direct_map_panic("BIGOS_DIRECT_MAP_INIT_FAILED invalid boot memory map");
+
+    const BootMemoryRegion *regions = (const BootMemoryRegion *)((const uint8_t *)__header + section->offset);
+    uint32_t nr_regions = section->size / sizeof(BootMemoryRegion);
+    for (uint32_t i = 0; i < nr_regions; i++)
+        init_direct_map_from_region(regions[i].physical_base, regions[i].length, regions[i].normalized_type);
+}
+
+static uint32_t normalize_legacy_ards_type(uint32_t __type) noexcept {
+    switch (__type) {
+        case 1:
+            return BIGOS_BOOT_MEMORY_TYPE_USABLE;
+        case 3:
+            return BIGOS_BOOT_MEMORY_TYPE_ACPI_RECLAIM;
+        case 4:
+            return BIGOS_BOOT_MEMORY_TYPE_ACPI_NVS;
+        case 5:
+            return BIGOS_BOOT_MEMORY_TYPE_BAD_MEMORY;
+        default:
+            return BIGOS_BOOT_MEMORY_TYPE_RESERVED;
+    }
+}
+
+static void init_direct_map_v1(const BootInfo *__info) noexcept {
+    struct LegacyARDS {
+        uint64_t base;
+        uint64_t len;
+        uint32_t type;
+        uint32_t attributes;
+    };
+
+    const LegacyARDS *ards_arr = (const LegacyARDS *)__info->e820_entry_address;
+    for (uint32_t i = 0; i < __info->e820_entry_count; i++)
+        init_direct_map_from_region(ards_arr[i].base, ards_arr[i].len, normalize_legacy_ards_type(ards_arr[i].type));
+}
+
 NAMESPACE_BIGOS_BEG
 namespace mm {
     namespace __detail {
+        void init_direct_map(const BootInfoHeader *__boot_info) {
+            gDirectMapRangeCount = 0;
+
+            BootHandoff handoff = bigos_boot_resolve_handoff(__boot_info);
+            if (handoff.v2 != nullptr) {
+                init_direct_map_v2(handoff.v2);
+            } else if (handoff.v1 != nullptr) {
+                init_direct_map_v1(handoff.v1);
+            } else {
+                direct_map_panic("BIGOS_DIRECT_MAP_INIT_FAILED invalid boot handoff");
+            }
+        }
+
         void init_vmem() {
             MemoryBlock *mblk = new MemoryBlock();
             // mblk->vmem = &kvmem;
@@ -100,6 +383,27 @@ namespace mm {
             return kvmem.nr_free_pages();
         }
     }   // namespace __detail
+
+    bool is_direct_mapped_phys(uint64_t __phys, uint64_t __len) noexcept {
+        return direct_map_range_covered(__phys, __len);
+    }
+
+    void *phys_to_direct(uint64_t __phys) noexcept {
+        if (!is_direct_mapped_phys(__phys, 1))
+            return nullptr;
+        return (void *)(KDIRECT_BASE + __phys);
+    }
+
+    uint64_t direct_to_phys(const void *__addr) noexcept {
+        uint64_t addr = (uint64_t)__addr;
+        if (addr < KDIRECT_BASE || addr >= KDIRECT_BASE + KDIRECT_LEN)
+            return INVALID_PHYS_ADDR;
+
+        uint64_t phys = addr - KDIRECT_BASE;
+        if (!is_direct_mapped_phys(phys, 1))
+            return INVALID_PHYS_ADDR;
+        return phys;
+    }
 
     void VMem::rollback_kernel_range(uint64_t __base, uint32_t __nr_pages) noexcept {
         for (uint32_t i = 0; i < __nr_pages; i++) {

@@ -20,8 +20,9 @@ enum class PanicCode : uint32_t {
     // mm-slab
     SlabDebugGuard = 0x1200,
 
-    // mm-vmem (reserved, not wired)
+    // mm-vmem
     VmemReserved = 0x1300,
+    DirectMapInitFailed = 0x1301,
 
     // self-test
     SelfTestFailure = 0x2000,

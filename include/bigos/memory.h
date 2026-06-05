@@ -20,7 +20,15 @@ extern void free(const void *__p) noexcept;
 void init_mem(const BootInfoHeader *__boot_info) noexcept;
 
 namespace mm {
+    constexpr uintptr_t KDIRECT_BASE = 0xffff900000000000ul;
+    constexpr uintptr_t KDIRECT_LEN = 0x400000000000ul;
+    constexpr uint64_t INVALID_PHYS_ADDR = ~0ull;
+
     struct SlabAllocatorStats;
+
+    bool is_direct_mapped_phys(uint64_t __phys, uint64_t __len = 1) noexcept;
+    _attr_nodiscard_ void *phys_to_direct(uint64_t __phys) noexcept;
+    uint64_t direct_to_phys(const void *__addr) noexcept;
 
     extern void collect_slab_stats(SlabAllocatorStats *__stats) noexcept;
     extern void print_slab_stats() noexcept;

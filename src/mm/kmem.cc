@@ -120,6 +120,7 @@ namespace mm {
         __detail::init_cache();
         __detail::init_buddy(__boot_info);
         __detail::init_vmem();
+        __detail::init_direct_map(__boot_info);
     }
 }   // namespace mm
 

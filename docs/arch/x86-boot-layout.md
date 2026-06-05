@@ -30,6 +30,9 @@ handoff 模型中的 Legacy 后端；它不会替换 MBR/DBR/exDBR/`boot.bin` �
 0x10000         boot.bin 加载地址
 0x100000        内核 higher-half 页表后备区域
 0x1000000       内核物理加载基址
+0xffff800000000000..0xffff80ffffffffff  recursive self-mapping window
+0xffff880000000000..0xffff88ffffffffff  KVMEM heap/vmalloc-style 分配窗口，不是 direct map
+0xffff900000000000..0xffffcfffffffffff  kernel direct map，仅映射 ordinary RAM
 0xffffffff80000000  内核 higher-half 虚拟基址
 ```
 
@@ -107,6 +110,18 @@ higher-half 虚拟基址。未来如果新增固定低地址、页表保留区�
 Reserved、runtime、MMIO、ACPI reclaim、ACPI NVS、bad memory 和未知内存类型在
 早期 buddy 初始化期间都不会被释放。`acpi_reclaim` 会保持 reserved，直到未来的
 ACPI 表生命周期阶段能够证明其可安全回收。
+
+内核 direct map 在 `init_buddy()` 和 `init_vmem()` 之后、`BIGOS_MM_SELF_TEST` 之前建立。它使用
+`KDIRECT_BASE = 0xffff900000000000`、`KDIRECT_LEN = 0x400000000000`，只从
+BootInfo memory map 中选择 page-aligned ordinary RAM 范围，并映射为
+`direct = KDIRECT_BASE + physical`。`KVMEM_BASE` 继续表示 kernel heap/vmalloc-style
+虚拟分配窗口，不承诺与物理地址存在线性关系；recursive self-mapping window、low
+identity map、higher-half kernel base 和固定 boot handoff 地址也不会被 direct map
+重定义。
+
+Direct map 首版不覆盖 MMIO、framebuffer、ACPI reclaim/NVS、firmware reserved、
+runtime、bad memory 或未知类型。后续设备 BAR、APIC、framebuffer 或带缓存属性要求的
+device memory 需要独立 MMIO mapping API，而不是复用 ordinary-RAM direct map helper。
 
 保护模式下的 extended DBR 阶段会使用 ATA primary-master PIO 读取 `boot.bin`。
 因此它要求 BIOS 启动驱动器为 `0x80`；其他 BIOS 驱动器编号会使系统暂停，并在

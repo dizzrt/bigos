@@ -50,8 +50,8 @@ namespace {
             bigos::free(objects[i]);
     }
 
-    const bigos::mm::SlabCacheStats *find_cache(const bigos::mm::SlabAllocatorStats &__stats,
-        uint32_t __object_size) noexcept {
+    const bigos::mm::SlabCacheStats *find_cache(
+        const bigos::mm::SlabAllocatorStats &__stats, uint32_t __object_size) noexcept {
         for (uint32_t i = 0; i < __stats.cache_count; i++) {
             if (__stats.caches[i].object_size == __object_size)
                 return &__stats.caches[i];
@@ -90,14 +90,21 @@ namespace {
     }
 
     void run_slab_reclaim_smoke() noexcept {
-        constexpr uint32_t object_size = 64;
-        constexpr uint32_t object_count = 256;
-        void *objects[object_count] = {};
+        constexpr uint32_t object_size = 128;
+        constexpr uint32_t max_object_count = 512;
+        void *objects[max_object_count] = {};
 
         bigos::mm::SlabAllocatorStats before = {};
         bigos::mm::SlabAllocatorStats after_alloc = {};
         bigos::mm::SlabAllocatorStats after_free = {};
         bigos::mm::collect_slab_stats(&before);
+        const auto *cache_before = find_cache(before, object_size);
+        if (cache_before == nullptr)
+            fail("slab-reclaim-cache");
+
+        uint32_t object_count = cache_before->free_object_count + 1;
+        if (object_count > max_object_count)
+            fail("slab-reclaim-capacity");
 
         for (uint32_t i = 0; i < object_count; i++) {
             objects[i] = bigos::kmalloc(object_size);
@@ -108,16 +115,15 @@ namespace {
 
         bigos::mm::collect_slab_stats(&after_alloc);
         const auto *cache_after_alloc = find_cache(after_alloc, object_size);
-        if (cache_after_alloc == nullptr || cache_after_alloc->slab_count < 2)
+        if (cache_after_alloc == nullptr || cache_after_alloc->slab_count <= cache_before->slab_count)
             fail("slab-reclaim-grow");
 
         for (uint32_t i = 0; i < object_count; i++)
             bigos::free(objects[i]);
 
         bigos::mm::collect_slab_stats(&after_free);
-        const auto *cache_before = find_cache(before, object_size);
         const auto *cache_after_free = find_cache(after_free, object_size);
-        if (cache_before == nullptr || cache_after_free == nullptr)
+        if (cache_after_free == nullptr)
             fail("slab-reclaim-cache");
         if (cache_after_free->slab_count > cache_after_alloc->slab_count)
             fail("slab-reclaim-count");
@@ -158,6 +164,41 @@ namespace {
         if (bigos::mm::g_nr_free_pages() != physical_before)
             fail("physical-order-restore");
     }
+
+    void run_direct_map_smoke() noexcept {
+        uint32_t physical_before = bigos::mm::g_nr_free_pages();
+
+        void *physical = bigos::mm::__detail::alloc_physical_order(0, 0);
+        if (physical == nullptr)
+            fail("direct-map-alloc");
+
+        uint64_t phys = (uint64_t)physical;
+        if (!bigos::mm::is_direct_mapped_phys(phys, PAGE_SIZE))
+            fail("direct-map-covered");
+
+        void *direct = bigos::mm::phys_to_direct(phys);
+        if (direct == nullptr)
+            fail("direct-map-phys-to-direct");
+
+        if (bigos::mm::direct_to_phys(direct) != phys)
+            fail("direct-map-direct-to-phys");
+
+        volatile uint64_t *word = (volatile uint64_t *)direct;
+        word[0] = 0x4249474f53444d41ull;
+        word[PAGE_SIZE / sizeof(uint64_t) - 1] = 0x4249474f53444d5aull;
+        if (word[0] != 0x4249474f53444d41ull || word[PAGE_SIZE / sizeof(uint64_t) - 1] != 0x4249474f53444d5aull)
+            fail("direct-map-touch");
+
+        if (bigos::mm::phys_to_direct(bigos::mm::KDIRECT_LEN) != nullptr)
+            fail("direct-map-oob-phys");
+
+        if (bigos::mm::direct_to_phys((const void *)0xffff880000000000ul) != bigos::mm::INVALID_PHYS_ADDR)
+            fail("direct-map-kvmem-reject");
+
+        bigos::mm::__detail::free_physical_order(physical);
+        if (bigos::mm::g_nr_free_pages() != physical_before)
+            fail("direct-map-restore");
+    }
 }   // namespace
 
 NAMESPACE_BIGOS_BEG
@@ -166,8 +207,8 @@ namespace mm {
         bigos::serial_init();
 
         run_kmalloc_smoke();
-        run_large_kmalloc_smoke();
         run_slab_reclaim_smoke();
+        run_large_kmalloc_smoke();
 
         // Prime retained page-table descriptors, then verify tested VMem ranges restore accounting.
         run_kernel_pages_smoke(513, "kernel-pages-prime", false);
@@ -178,6 +219,7 @@ namespace mm {
         run_physical_order_smoke(0);
         run_physical_order_smoke(1);
         run_physical_order_smoke(2);
+        run_direct_map_smoke();
 
         bigos::serial_puts(MM_SELF_TEST_PASSED);
         bigos::kputs(MM_SELF_TEST_PASSED);

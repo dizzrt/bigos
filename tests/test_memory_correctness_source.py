@@ -67,6 +67,44 @@ def test_kvmem_region_is_not_described_as_direct_map() -> None:
     assert 'not a virt = phys + offset region' in vmem
 
 
+def test_direct_map_window_is_independent_and_non_overlapping() -> None:
+    memory = read_source('include/bigos/memory.h')
+    vmem = read_source('src/mm/vmem.cc')
+    docs = read_source('docs/arch/x86-boot-layout.md')
+
+    assert 'constexpr uintptr_t KDIRECT_BASE = 0xffff900000000000ul;' in memory
+    assert 'constexpr uintptr_t KDIRECT_LEN = 0x400000000000ul;' in memory
+    assert '#define KVMEM_BASE       0xffff880000000000ul' in vmem
+    assert '#define KVMEM_LEN        0x10000000000ul' in vmem
+    assert '#define SELF_MAPPING_BASE       0xffff800000000000ul' in vmem
+    assert '#define SELF_MAPPING_LEN        0x10000000000ul' in vmem
+    assert '#define KERNEL_HIGHER_HALF_BASE 0xffffffff80000000ul' in vmem
+    assert 'KDIRECT_BASE >= SELF_MAPPING_BASE + SELF_MAPPING_LEN' in vmem
+    assert 'KDIRECT_BASE >= KVMEM_BASE + KVMEM_LEN' in vmem
+    assert 'KDIRECT_BASE + bigos::mm::KDIRECT_LEN <= KERNEL_HIGHER_HALF_BASE' in vmem
+    assert '0xffff900000000000..0xffffcfffffffffff  kernel direct map' in docs
+    assert 'KVMEM heap/vmalloc-style 分配窗口，不是 direct map' in docs
+
+
+def test_direct_map_helpers_are_checked_and_do_not_claim_kvmem_or_mmio() -> None:
+    memory = read_source('include/bigos/memory.h')
+    vmem = read_source('src/mm/vmem.cc')
+
+    assert 'bool is_direct_mapped_phys(uint64_t __phys, uint64_t __len = 1) noexcept;' in memory
+    assert 'void *phys_to_direct(uint64_t __phys) noexcept' in memory
+    assert 'uint64_t direct_to_phys(const void *__addr) noexcept' in memory
+    assert 'constexpr uint64_t INVALID_PHYS_ADDR = ~0ull;' in memory
+    assert 'return nullptr;' in vmem[vmem.index('void *phys_to_direct'):vmem.index('uint64_t direct_to_phys')]
+    assert 'return INVALID_PHYS_ADDR;' in vmem
+    assert 'direct_map_memory_type_is_ram' in vmem
+    assert '__type == BIGOS_BOOT_MEMORY_TYPE_USABLE' in vmem
+    assert 'BIGOS_BOOT_MEMORY_TYPE_ACPI_RECLAIM' in vmem
+    assert 'BIGOS_BOOT_MEMORY_TYPE_ACPI_NVS' in vmem
+    assert 'BIGOS_BOOT_MEMORY_TYPE_BAD_MEMORY' in vmem
+    assert 'phys_to_direct(bigos::mm::KDIRECT_LEN) != nullptr' in read_source('src/mm/self_test.cc')
+    assert 'direct_to_phys((const void *)0xffff880000000000ul)' in read_source('src/mm/self_test.cc')
+
+
 def test_page_count_and_physical_order_apis_are_separate() -> None:
     memory = read_source('include/bigos/memory.h')
     buddy = read_source('src/mm/buddy.h')
@@ -117,6 +155,29 @@ def test_vmem_pre_paging_failure_rolls_back_mapping_and_backing() -> None:
     assert 'mm::__detail::free_physical_order(physical_addr);' in vmem
     assert 'kvmem.__free((void *)mblk->base);' in vmem
     assert 'mblk->physical_area.insert(node);' in vmem
+
+
+def test_direct_map_initialization_uses_bootinfo_ram_and_panics_on_partial_failure() -> None:
+    vmem = read_source('src/mm/vmem.cc')
+    kmem = read_source('src/mm/kmem.cc')
+
+    assert 'void init_direct_map(const BootInfoHeader *__boot_info)' in vmem
+    assert 'BootHandoff handoff = bigos_boot_resolve_handoff(__boot_info);' in vmem
+    assert 'bigos_boot_info_v2_find_section(__header, BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP)' in vmem
+    assert 'init_direct_map_from_region(regions[i].physical_base, regions[i].length, regions[i].normalized_type);' in vmem
+    assert 'map_direct_page(bigos::mm::KDIRECT_BASE + phys, phys)' in vmem
+    assert 'map_direct_large_page(bigos::mm::KDIRECT_BASE + phys, phys)' in vmem
+    assert 'PAGING_DESCRIPTOR_LARGE_PAGE' in vmem
+    assert 'DEFAULT_ATTR_PTE' in vmem
+    assert 'DEFAULT_ATTR_PDE | PAGING_DESCRIPTOR_LARGE_PAGE' in vmem
+    assert 'rollback_direct_map_range(__phys_base, mapped_pages);' in vmem
+    assert 'PanicCode::DirectMapInitFailed' in vmem
+    assert 'BIGOS_DIRECT_MAP_INIT_FAILED' in vmem
+
+    buddy_index = kmem.index('__detail::init_buddy(__boot_info);')
+    vmem_index = kmem.index('__detail::init_vmem();')
+    direct_index = kmem.index('__detail::init_direct_map(__boot_info);')
+    assert buddy_index < vmem_index < direct_index
 
 
 def test_legacy_memory_api_aliases_are_not_exposed() -> None:
@@ -220,6 +281,10 @@ def test_memory_self_test_avoids_later_subsystem_dependencies() -> None:
     assert 'BIGOS_MM_SELF_TEST_FAILED stage=' in self_test
     assert 'alloc_kernel_pages(__pages, _GFM_PRE_PAGING)' in self_test
     assert 'alloc_physical_order(__order, 0)' in self_test
+    assert 'run_direct_map_smoke();' in self_test
+    assert 'is_direct_mapped_phys(phys, PAGE_SIZE)' in self_test
+    assert 'phys_to_direct(phys)' in self_test
+    assert 'direct_to_phys(direct) != phys' in self_test
     assert 'CACHE_MAX_OBJ_SIZE + 257' in self_test
     assert 'run_slab_reclaim_smoke();' in self_test
     assert 'kernel_vmem_free_pages()' in read_source('src/mm/vmem.h')
