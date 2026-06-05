@@ -72,3 +72,14 @@ def test_generated_bochsrc_is_sanitized(tmp_path: Path) -> None:
     assert 'cpuid:' not in contents
     assert 'win32' not in contents.lower()
     assert 'C:\\' not in contents
+
+
+def test_cleanup_image_lock_removes_image_sidecar_lock(tmp_path: Path) -> None:
+    image = write_bytes(tmp_path / 'os.raw', b'image')
+    lock = tmp_path / 'os.raw.lock'
+    lock.write_text('stale lock', encoding='utf-8')
+
+    boot_debug.cleanup_image_lock(image)
+
+    assert boot_debug.image_lock_path(image) == lock
+    assert not lock.exists()

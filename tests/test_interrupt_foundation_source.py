@@ -50,7 +50,7 @@ def test_keyboard_irq_handler_is_registered_before_unmask() -> None:
 
     assert register_index < guard_index < unmask_index
     assert 'PS2_KEYBOARD_DATA_PORT = 0x60' in isr
-    assert 'BIGOS_KEYBOARD_IRQ scancode=' in isr
+    assert 'bigos::input::handle_keyboard_scancode(scancode);' in isr
     assert 'option("keyboard_smoke")' in xmake
     assert 'set_default(false)' in xmake[xmake.index('option("keyboard_smoke")') :]
     assert 'add_defines("BIGOS_KEYBOARD_SMOKE")' in xmake
@@ -59,12 +59,15 @@ def test_keyboard_irq_handler_is_registered_before_unmask() -> None:
 def test_memory_self_test_stays_before_irq_pic_and_enable() -> None:
     kernel = read_source('src/kernel/kernel.cc')
 
+    serial_init_index = kernel.index('bigos::serial_init();')
     init_mem_index = kernel.index('bigos::init_mem(boot_info);')
     self_test_index = kernel.index('bigos::mm::self_test();')
     init_irq_index = kernel.index('bigos::irq::initIRQ();')
     enable_irq_index = kernel.index('bigos::irq::enableIRQ();')
+    serial_marker_index = kernel.index('bigos::serial_puts("BigOS kernel reached\\n");')
 
-    assert init_mem_index < self_test_index < init_irq_index < enable_irq_index
+    assert serial_init_index < init_mem_index < self_test_index < init_irq_index < enable_irq_index
+    assert serial_init_index < serial_marker_index
 
 
 def test_page_fault_handler_is_diagnostic_only() -> None:

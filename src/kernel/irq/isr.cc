@@ -1,5 +1,6 @@
 #include <irq/isr.h>
 
+#include <bigos/keyboard.h>
 #include <bigos/io.h>
 #include <bigos/timer.h>
 #include <bigos/types.h>
@@ -29,8 +30,7 @@ namespace irq::isr {
         implement_isr(keyboard) {
             (void)__frame;
             const uint8_t scancode = inb(PS2_KEYBOARD_DATA_PORT);
-            serial_puts("BIGOS_KEYBOARD_IRQ\n");
-            kprintf("BIGOS_KEYBOARD_IRQ scancode=%x\n", (uint32_t)scancode);
+            bigos::input::handle_keyboard_scancode(scancode);
         }
 
         void init_isr_timer() {

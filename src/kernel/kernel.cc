@@ -11,6 +11,7 @@
 
 #include <arch/x86/boot/boot_info.h>
 #include <bigos/memory.h>
+#include <bigos/tty.h>
 #include <irq/interrupt.h>
 
 #include <bigos/io.h>
@@ -20,13 +21,14 @@ extern "C" void kernel(const BootInfoHeader *boot_info);
 
 void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
+    bigos::serial_init();
 
     bigos::init_mem(boot_info);
 #ifdef BIGOS_MM_SELF_TEST
     bigos::mm::self_test();
 #endif
+    bigos::terminal::init_tty();
     bigos::irq::initIRQ();
-    // bigos::terminal::init_tty();
 #ifdef BIGOS_PAGE_FAULT_SMOKE
     bigos::irq::triggerPageFaultForValidation();
 #endif

@@ -6,8 +6,8 @@ from __future__ import annotations
 import argparse
 import math
 import os
-import signal
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -587,6 +587,18 @@ def render_bochsrc(
     output_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
+def image_lock_path(image_path: Path) -> Path:
+    return image_path.with_name(f'{image_path.name}.lock')
+
+
+def cleanup_image_lock(image_path: Path) -> None:
+    lock_path = image_lock_path(image_path)
+    if not lock_path.exists():
+        return
+    log_stage(f'removing stale image lock: {lock_path}')
+    lock_path.unlink()
+
+
 def is_bochs_user_shutdown(
     result: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
 ) -> bool:
@@ -693,6 +705,7 @@ def run(args: argparse.Namespace) -> int:
     print(f'cluster_heap_lba: {layout.cluster_heap_lba}')
 
     if should_launch:
+        cleanup_image_lock(image_path)
         if marker and serial_log:
             launch_bochs_until_serial_marker(bochsrc_path, serial_log, marker, args.smoke_timeout)
         else:

@@ -8,8 +8,10 @@ BigOS 早期 x86_64 中断路径当前只覆盖单核、Legacy BIOS、i8259 PIC 
 
 ```text
 VGA clear
+serial_init()
 init_mem()
 optional BIGOS_MM_SELF_TEST
+terminal::init_tty()
 irq::initIRQ()
 optional BIGOS_PAGE_FAULT_SMOKE trigger
 irq::enableIRQ()
@@ -17,7 +19,7 @@ normal boot marker
 hlt loop
 ```
 
-`BIGOS_MM_SELF_TEST` 仍在 PIC 初始化和 `sti` 之前运行。当前 allocator、kernel API 和内存自检不承诺 IRQ-context 安全。
+`serial_init()` 在默认 boot path 中显式初始化 COM1，确保普通 serial marker 和 early diagnostics 不再隐式依赖 `BIGOS_MM_SELF_TEST`。`BIGOS_MM_SELF_TEST` 仍在 PIC 初始化和 `sti` 之前运行。当前 allocator、kernel API 和内存自检不承诺 IRQ-context 安全。
 
 ## IDT 所有权
 
@@ -53,11 +55,13 @@ kernel runtime IDT 使用 kernel-owned static storage，由 `irq::initIRQ()` 构
 
 验证专用触发器由 `xmake f --page_fault_smoke=y` 打开。默认 boot 不主动触发 `#PF`。
 
-## Keyboard IRQ1 Smoke
+## Keyboard IRQ1 输入交接
 
-keyboard IRQ1 只用于证明外部 IRQ delivery、C++ dispatch 和 i8259 EOI 路径可用。初始化会先注册 vector `0x21` handler；默认 boot 保持 i8259 IRQ line 1 masked，避免 keyboard smoke 干扰 timer IRQ0 bring-up。需要人工验证键盘 IRQ 时，通过 `xmake f --keyboard_smoke=y` 显式 unmask IRQ1。handler 只读取 PS/2 data port `0x60` 的一个 scancode byte 并输出 `BIGOS_KEYBOARD_IRQ scancode=<value>`，不依赖 TTY/keymap、heap allocation、scheduler、阻塞等待或 hosted runtime API。
+keyboard IRQ1 现在用于受控输入 handoff，而不是在 ISR 中直接输出 smoke marker。初始化会先通过 `terminal::init_tty()` 准备 input ring、console flag 和 keyboard decoder state，再由 `irq::initIRQ()` 注册 vector `0x21` handler。默认 boot 仍保持 i8259 IRQ line 1 masked；需要人工验证键盘 IRQ 时，通过 `xmake f --keyboard_smoke=y` 显式 unmask IRQ1。
 
-本路径不是完整输入子系统。
+handler 只读取 PS/2 data port `0x60` 的一个 scancode byte，执行 bounded set-1 decode，并把受支持字符交给 TTY fixed-capacity input buffer。handler 不直接发送 i8259 EOI、不调用 `kprintf()`/`kput()`、不写 VGA/serial、不分配内存、不阻塞、不调用 `mdelay()`，也不依赖 filesystem、scheduler、syscall、用户态或 TTY consumer progress。EOI 仍由 external IRQ dispatch 在 handler 返回后统一发送一次。
+
+本路径不是完整输入子系统；多 TTY、阻塞读、shell、用户态输入和完整 keyboard layout 留给后续阶段。
 
 ## 验证记录
 

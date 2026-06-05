@@ -15,6 +15,16 @@ namespace video {
             return mode->width * __y + __x;
         }
 
+        static inline ptr8_t text_cell(uint16_t __pos) {
+            return (ptr8_t)((__pos << 1) + frame_buffer_base);
+        }
+
+        static inline void put_cell(uint16_t __pos, char __ch, uint8_t __color) {
+            ptr8_t fb_ptr = text_cell(__pos);
+            fb_ptr[0] = __ch;
+            fb_ptr[1] = __color;
+        }
+
         // return the offset of cursor
         static uint16_t get_cursor() {
             uint16_t ret;
@@ -43,45 +53,37 @@ namespace video {
                 return;
             }
 
+            if (__ch == '\r') {
+                __pos = (__pos / mode->width) * mode->width;
+                set_cursor(__pos);
+                return;
+            }
+
             if (__ch == '\t') {
                 move_cursor(4);
                 return;
             }
 
-            ptr8_t fb_ptr = (ptr8_t)((__pos << 1) + frame_buffer_base);
-            fb_ptr[0] = __ch;
-            fb_ptr[1] = __color;
-            move_cursor();
+            if (__ch == '\b') {
+                if (__pos > 0) {
+                    --__pos;
+                    set_cursor(__pos);
+                    put_cell(__pos, ' ', __color);
+                }
+                return;
+            }
+
+            put_cell(__pos, __ch, __color);
+            set_cursor(__pos + 1);
         }
 
         static void write(const char *__s, uint16_t __pos, uint8_t __color = VT_COLOR_NORMAL) {
-            ptr8_t fb_ptr = (ptr8_t)((__pos << 1) + frame_buffer_base);
             set_cursor(__pos);
 
             while (*__s != 0) {
                 char c = *__s;
                 ++__s;
-
-                if (c == '\n') {
-                    __pos = get_cursor();
-                    __pos = (__pos / mode->width + 1) * mode->width;
-
-                    set_cursor(__pos);
-                    fb_ptr = (ptr8_t)((__pos << 1) + frame_buffer_base);
-                    continue;
-                }
-
-                if (c == '\t') {
-                    move_cursor(4);
-                    fb_ptr += 8;
-                    continue;
-                }
-
-                fb_ptr[0] = c;
-                fb_ptr[1] = __color;
-
-                fb_ptr += 2;
-                move_cursor();
+                write(c, get_cursor(), __color);
             }
         }
 
