@@ -3,12 +3,11 @@
 
 .text
 isr_common:
-    movq %rsp, %rax
-    addq $40, %rax
+    pushq $0
     pushq $0
     pushq %rax
-
-    pushq %rax
+    leaq 64(%rsp), %rax
+    movq %rax, 8(%rsp)
     pushq %rbx
     pushq %rcx
     pushq %rdx
@@ -25,7 +24,12 @@ isr_common:
     pushq %r15
 
     movq %rsp, %rdi
+    movq %rsp, %rax
+    andq $-16, %rsp
+    subq $8, %rsp
+    pushq %rax
     call irq_dispatch
+    movq (%rsp), %rsp
 
     popq %r15
     popq %r14

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -608,6 +610,25 @@ def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: st
     if serial_log.exists():
         serial_log.unlink()
 
+    def stop_process_group(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        try:
+            process.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        process.wait(timeout=5)
+
     printable = f'bochs -f {bochsrc} -q'
     log_stage(f'bochs smoke: {printable}')
     process = subprocess.Popen(
@@ -616,17 +637,13 @@ def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: st
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        start_new_session=True,
     )
     deadline = time.monotonic() + timeout_seconds
     try:
         while time.monotonic() < deadline:
             if serial_log.exists() and marker in serial_log.read_text(encoding='utf-8', errors='replace'):
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
+                stop_process_group(process)
                 print(f'serial marker observed: {marker}')
                 return
 
@@ -636,17 +653,10 @@ def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: st
 
             time.sleep(0.1)
 
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+        stop_process_group(process)
         raise StageError('bochs smoke', f'timed out waiting for serial marker {marker!r} in {serial_log}')
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=5)
+        stop_process_group(process)
 
 
 def run(args: argparse.Namespace) -> int:

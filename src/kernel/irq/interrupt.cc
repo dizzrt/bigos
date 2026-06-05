@@ -107,12 +107,18 @@ namespace irq {
         }
 
         if (__detail::is_i8259_external_irq(__frame->vector)) {
+            const uint8_t irq_line = __detail::vector_to_i8259_irq(__frame->vector);
+            if (driver::irqchip::i8259::is_spurious_irq(irq_line)) {
+                driver::irqchip::i8259::acknowledge_spurious_irq(irq_line);
+                return;
+            }
+
             IRQHandler handler = __detail::isr_list[__frame->vector];
             if (handler == nullptr)
                 handler = &__detail::default_external_irq_handler;
 
             handler(__frame);
-            driver::irqchip::i8259::send_eoi(__detail::vector_to_i8259_irq(__frame->vector));
+            driver::irqchip::i8259::send_eoi(irq_line);
             return;
         }
 

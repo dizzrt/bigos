@@ -6,6 +6,14 @@
 NAMESPACE_DRIVER_BEG
 namespace irqchip {
     namespace i8259 {
+        constexpr uint8_t OCW3_READ_ISR = 0x0b;
+
+        static uint8_t read_isr(bool slave) noexcept {
+            const uint16_t port = slave ? I8259_SLAVE_OCW3 : I8259_MASTER_OCW3;
+            bigos::outb(port, OCW3_READ_ISR);
+            return bigos::inb(port);
+        }
+
         void init() noexcept {
             // master
             bigos::outb(I8259_MASTER_ICW1, 0x11);
@@ -50,6 +58,20 @@ namespace irqchip {
 
             value = bigos::inb(port) | (1 << __irq);
             bigos::outb(port, value);
+        }
+
+        bool is_spurious_irq(uint8_t __irq) noexcept {
+            if (__irq != I8259_IRQ_LPTA && __irq != 15)
+                return false;
+
+            const bool slave = __irq >= 8;
+            const uint8_t local_irq = slave ? (uint8_t)(__irq - 8) : __irq;
+            return (read_isr(slave) & (uint8_t)(1u << local_irq)) == 0;
+        }
+
+        void acknowledge_spurious_irq(uint8_t __irq) noexcept {
+            if (__irq >= 8)
+                bigos::outb(I8259_MASTER_OCW2, I8259_EOI);
         }
 
         void send_eoi(uint16_t __irq) noexcept {

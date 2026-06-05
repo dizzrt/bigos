@@ -46,6 +46,8 @@ namespace irqchip {
         void enable_irq(uint8_t __irq) noexcept;
         void disable_irq(uint8_t __irq) noexcept;
 
+        bool is_spurious_irq(uint8_t __irq) noexcept;
+        void acknowledge_spurious_irq(uint8_t __irq) noexcept;
         void send_eoi(uint16_t __irq) noexcept;
     }   // namespace i8259
 }   // namespace irqchip

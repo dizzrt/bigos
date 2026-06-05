@@ -26,6 +26,7 @@ namespace irq {
     constexpr uint8_t IRQ_LINE_SECONDARY_IDE = 15;
 
     constexpr uint8_t VECTOR_PAGE_FAULT = 0x0e;
+    constexpr uint8_t VECTOR_TIMER = I8259_MASTER_VECTOR_BASE + IRQ_LINE_TIMER;
     constexpr uint8_t VECTOR_KEYBOARD = I8259_MASTER_VECTOR_BASE + IRQ_LINE_KEYBOARD;
 
     struct InterruptFrame;

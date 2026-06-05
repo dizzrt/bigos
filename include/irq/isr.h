@@ -12,6 +12,7 @@ namespace irq::isr {
 
     namespace __detail {
         // isrs are implemented in file project_dir/irq/isr/isr_xxx.cc
+        extern_isr(timer);
         extern_isr(keyboard);
     }   // namespace __detail
 

@@ -55,7 +55,7 @@ kernel runtime IDT 使用 kernel-owned static storage，由 `irq::initIRQ()` 构
 
 ## Keyboard IRQ1 Smoke
 
-keyboard IRQ1 只用于证明外部 IRQ delivery、C++ dispatch 和 i8259 EOI 路径可用。初始化会先注册 vector `0x21` handler，再 unmask i8259 IRQ line 1，其他 line 保持 masked。handler 只读取 PS/2 data port `0x60` 的一个 scancode byte 并输出 `BIGOS_KEYBOARD_IRQ scancode=<value>`，不依赖 TTY/keymap、heap allocation、scheduler、阻塞等待或 hosted runtime API。
+keyboard IRQ1 只用于证明外部 IRQ delivery、C++ dispatch 和 i8259 EOI 路径可用。初始化会先注册 vector `0x21` handler；默认 boot 保持 i8259 IRQ line 1 masked，避免 keyboard smoke 干扰 timer IRQ0 bring-up。需要人工验证键盘 IRQ 时，通过 `xmake f --keyboard_smoke=y` 显式 unmask IRQ1。handler 只读取 PS/2 data port `0x60` 的一个 scancode byte 并输出 `BIGOS_KEYBOARD_IRQ scancode=<value>`，不依赖 TTY/keymap、heap allocation、scheduler、阻塞等待或 hosted runtime API。
 
 本路径不是完整输入子系统。
 

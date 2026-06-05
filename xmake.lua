@@ -29,6 +29,18 @@ option("page_fault_smoke")
     set_description("enable validation-only page fault trigger")
 option_end()
 
+option("timer_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only timer IRQ smoke marker")
+option_end()
+
+option("keyboard_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only keyboard IRQ smoke handler")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -61,6 +73,14 @@ target("kernel")
 
     if has_config("page_fault_smoke") then
         add_defines("BIGOS_PAGE_FAULT_SMOKE")
+    end
+
+    if has_config("timer_smoke") then
+        add_defines("BIGOS_TIMER_SMOKE")
+    end
+
+    if has_config("keyboard_smoke") then
+        add_defines("BIGOS_KEYBOARD_SMOKE")
     end
 
     if is_mode("debug") then 
