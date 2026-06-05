@@ -11,6 +11,7 @@
 
 #include <arch/x86/boot/boot_info.h>
 #include <bigos/memory.h>
+#include <bigos/sched.h>
 #include <bigos/tty.h>
 #include <irq/interrupt.h>
 
@@ -18,6 +19,28 @@
 #include <ktl/buffer.h>
 
 extern "C" void kernel(const BootInfoHeader *boot_info);
+
+#ifdef BIGOS_SCHEDULER_SMOKE
+namespace {
+    // Bounded deterministic scheduler smoke: two worker threads emit a fixed
+    // number of markers and yield to each other, proving cooperative switching.
+    constexpr uint32_t SCHEDULER_SMOKE_ITERATIONS = 3;
+
+    void scheduler_smoke_worker_a(void *) noexcept {
+        for (uint32_t i = 0; i < SCHEDULER_SMOKE_ITERATIONS; i++) {
+            bigos::serial_puts("BIGOS_SCHED_THREAD_A\n");
+            bigos::sched::yield();
+        }
+    }
+
+    void scheduler_smoke_worker_b(void *) noexcept {
+        for (uint32_t i = 0; i < SCHEDULER_SMOKE_ITERATIONS; i++) {
+            bigos::serial_puts("BIGOS_SCHED_THREAD_B\n");
+            bigos::sched::yield();
+        }
+    }
+}   // namespace
+#endif
 
 void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
@@ -36,7 +59,14 @@ void kernel(const BootInfoHeader *boot_info) {
 
     bigos::serial_puts("BigOS kernel reached\n");
     bigos::kprintf("BigOS kernel reached\n");
-    while (true) {
-        asm volatile("hlt");
-    }
+
+#ifdef BIGOS_SCHEDULER_SMOKE
+    bigos::sched::create_kernel_thread(&scheduler_smoke_worker_a, nullptr);
+    bigos::sched::create_kernel_thread(&scheduler_smoke_worker_b, nullptr);
+#endif
+
+    // The post-initialization halt behavior is now owned by the scheduler idle
+    // thread instead of a naked hlt loop in kernel(). Enter after IRQs are on so
+    // timer IRQ0 can wake the idle hlt.
+    bigos::sched::start();
 }

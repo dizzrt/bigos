@@ -41,6 +41,12 @@ option("keyboard_smoke")
     set_description("enable validation-only keyboard IRQ smoke handler")
 option_end()
 
+option("scheduler_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only scheduler two-thread smoke")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -81,6 +87,10 @@ target("kernel")
 
     if has_config("keyboard_smoke") then
         add_defines("BIGOS_KEYBOARD_SMOKE")
+    end
+
+    if has_config("scheduler_smoke") then
+        add_defines("BIGOS_SCHEDULER_SMOKE")
     end
 
     if is_mode("debug") then 

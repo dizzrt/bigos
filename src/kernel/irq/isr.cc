@@ -2,6 +2,7 @@
 
 #include <bigos/keyboard.h>
 #include <bigos/io.h>
+#include <bigos/sched.h>
 #include <bigos/timer.h>
 #include <bigos/types.h>
 #include <drivers/irqchip/i8259.h>
@@ -19,6 +20,11 @@ namespace irq::isr {
             // API. The IRQ layer does not mutate timer-internal tick state directly,
             // and does not send i8259 EOI here; EOI stays owned by irq_dispatch.
             bigos::timer::on_tick();
+
+            // Bounded IRQ-context-safe hook: records reschedule intent only.
+            // Stage 4 performs no IRQ-return preemption, no allocation, and no
+            // thread switch from this path.
+            bigos::sched::on_timer_tick();
 
 #ifdef BIGOS_TIMER_SMOKE
             // Validation-only bounded marker; intentionally kept out of on_tick().
