@@ -29,6 +29,8 @@ def test_map_unmap_primitives_are_declared_with_context_contracts() -> None:
     memory = read_source('include/bigos/memory.h')
 
     assert 'bool map_page(uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept;' in memory
+    assert 'bool map_page_in_root(' in memory
+    assert 'bool user_range_mapped(uint64_t __root_phys, uint64_t __vaddr, uint64_t __len) noexcept;' in memory
     assert 'void unmap_page(uint64_t __vaddr) noexcept;' in memory
     assert 'uint64_t derive_user_address_space_root() noexcept;' in memory
 
@@ -106,14 +108,19 @@ def test_user_root_copies_higher_half_and_zeros_lower_half() -> None:
     assert 'self_mapping_pml4(0)' in body
 
 
-def test_stage_does_not_switch_cr3_or_enter_ring3() -> None:
+def test_derivation_does_not_switch_cr3_and_runtime_activation_is_explicit() -> None:
     vmem = read_source('src/mm/vmem.cc')
     memory = read_source('include/bigos/memory.h')
+    proc = read_source('src/kernel/proc/proc.cc')
 
-    # No CR3 write or ring3 transition instruction is introduced by this stage.
-    for token in ('%%cr3', 'iretq', 'sysret', 'sysexit'):
-        assert token not in vmem
-    # The header records the non-goal explicitly.
+    derive_start = vmem.index('uint64_t derive_user_address_space_root() noexcept')
+    derive_end = vmem.index('bool map_page_in_root', derive_start)
+    derive_body = vmem[derive_start:derive_end]
+    assert '%%cr3' not in derive_body
+
+    assert 'uint64_t read_cr3() noexcept' in vmem
+    assert 'void activate_address_space_root(uint64_t __root_phys) noexcept' in vmem
+    assert 'bigos::mm::activate_address_space_root(__process->address_space_root);' in proc
     assert 'SHALL NOT write CR3' in memory or 'Does not write CR3' in memory
 
 

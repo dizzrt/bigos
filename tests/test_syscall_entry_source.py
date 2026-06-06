@@ -11,9 +11,8 @@ def test_syscall_vector_constant_is_named_and_centralized() -> None:
     interrupt_h = read_source('include/irq/interrupt.h')
 
     assert 'VECTOR_SYSCALL = 0x80' in interrupt_h
-    # DPL stays at ring0 this stage; raising it is an explicit later ring3 change.
-    assert 'DPL=0' in interrupt_h
-    assert 'ring3 change' in interrupt_h
+    assert 'DPL=3' in interrupt_h
+    assert 'exception' in interrupt_h and 'external IRQ gates remain ring0-only' in interrupt_h
 
 
 def test_syscall_abi_is_declared_and_documented() -> None:
@@ -34,7 +33,10 @@ def test_syscall_abi_is_declared_and_documented() -> None:
     # syscall number enum, error code, and dispatch entry declaration.
     assert 'SYS_DEBUG_WRITE = 0' in syscall_h
     assert 'SYS_GET_TICK = 1' in syscall_h
+    assert 'SYS_WRITE = 2' in syscall_h
+    assert 'SYS_EXIT = 3' in syscall_h
     assert 'SYS_ENOSYS = -38' in syscall_h
+    assert 'SYS_EFAULT = -14' in syscall_h
     assert 'void dispatch(bigos::irq::InterruptFrame *__frame) noexcept;' in syscall_h
 
 
@@ -78,6 +80,10 @@ def test_syscall_dispatch_reads_rax_and_routes_known_numbers() -> None:
     assert 'result = __detail::sys_debug_write();' in syscall
     assert 'case SYS_GET_TICK:' in syscall
     assert 'result = __detail::sys_get_tick();' in syscall
+    assert 'case SYS_WRITE:' in syscall
+    assert 'result = __detail::sys_write(__frame->rdi, __frame->rsi, __frame->rdx);' in syscall
+    assert 'case SYS_EXIT:' in syscall
+    assert 'bigos::proc::exit_current((int64_t)__frame->rdi);' in syscall
 
 
 def test_syscall_dispatch_unknown_number_returns_deterministic_error() -> None:
@@ -131,24 +137,25 @@ def test_stage_does_not_enter_ring3_or_switch_cr3() -> None:
     kernel = read_source('src/kernel/kernel.cc')
     interrupt = read_source('src/kernel/irq/interrupt.cc')
 
-    # No ring3 entry / CR3 switch / user ELF load wired into the syscall path.
-    for source in (syscall, kernel, interrupt):
-        assert 'iret_to_user' not in source
+    # Syscall dispatch itself does not perform ring3 entry or load user code.
+    for source in (syscall, interrupt):
+        assert 'enter_user_mode' not in source
         assert 'swapgs' not in source
         assert 'load_user_elf' not in source
 
-    # No CR3 write in the syscall implementation or kernel syscall smoke path.
-    assert 'movq %0, %%cr3' not in syscall
+    # CR3 activation is owned by proc/vmem helpers, not the syscall smoke path.
     assert '%%cr3' not in syscall
+    assert 'user_program_smoke_entry' in kernel
 
 
 def test_stage_does_not_change_idt_dpl_or_add_user_gdt_tss_or_syscall_msr() -> None:
     interrupt = read_source('src/kernel/irq/interrupt.cc')
     syscall = read_source('src/kernel/syscall/syscall.cc')
 
-    # IDT gate attribute is unchanged (still the ring0 interrupt gate).
+    # Only syscall vector gets the DPL=3 interrupt gate.
     assert 'PRESENT_RING0_INTERRUPT_GATE = 0x8e00' in interrupt
-    assert '0xee00' not in interrupt   # would be a DPL=3 interrupt gate
+    assert 'PRESENT_RING3_INTERRUPT_GATE = 0xee00' in interrupt
+    assert 'if (i == VECTOR_SYSCALL)' in interrupt
 
     # No syscall/sysret MSR configuration introduced.
     for source in (interrupt, syscall):

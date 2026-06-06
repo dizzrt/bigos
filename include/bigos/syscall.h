@@ -8,8 +8,8 @@ namespace bigos::irq {
 }   // namespace bigos::irq
 
 namespace bigos::sys {
-    // Minimal syscall ABI (int 0x80 software-interrupt entry, ring0-only this
-    // stage). The mapping below is fixed by source-level checks and documented in
+    // Minimal syscall ABI (int 0x80 software-interrupt entry; ring0 self-tests and
+    // the default-off first user program use the same register ABI). The mapping below is fixed by source-level checks and documented in
     // docs/arch/syscall-entry.md:
     //
     //   syscall number -> rax           (InterruptFrame.rax on entry)
@@ -30,12 +30,16 @@ namespace bigos::sys {
     enum SyscallNumber : uint64_t {
         SYS_DEBUG_WRITE = 0,   // emit a kernel-internal bounded buffer to console/serial
         SYS_GET_TICK = 1,      // return the monotonic kernel tick via rax
+        SYS_WRITE = 2,         // fd, user buffer, bounded length -> deterministic write result
+        SYS_EXIT = 3,          // exit code -> terminate current user process, does not return
     };
 
     // Deterministic error code for unknown syscall numbers or invalid requests.
     // Equivalent to -ENOSYS written into the return-value register as a 64-bit
     // two's-complement negative value.
     constexpr int64_t SYS_ENOSYS = -38;
+    constexpr int64_t SYS_EFAULT = -14;
+    constexpr uint64_t SYS_WRITE_MAX_LEN = 128;
 
     // Syscall dispatch entry. Invoked from irq_dispatch when the interrupt vector
     // is VECTOR_SYSCALL. Reads the syscall number from frame->rax, routes to the

@@ -1,6 +1,9 @@
 #include <bigos/io.h>
 #include <bigos/panic.h>
 #include <bigos/syscall.h>
+#ifdef BIGOS_USER_PROGRAM_SMOKE
+#include <bigos/proc.h>
+#endif
 
 #include <drivers/irqchip/i8259.h>
 #include <irq/isr.h>
@@ -13,6 +16,7 @@ namespace irq {
 
         constexpr uint16_t KERNEL_CODE_SELECTOR = 0x08;
         constexpr uint16_t PRESENT_RING0_INTERRUPT_GATE = 0x8e00;
+        constexpr uint16_t PRESENT_RING3_INTERRUPT_GATE = 0xee00;
 
         INTRDescriptor kernel_idt[IRQ_COUNT];
         IRQHandler isr_list[IRQ_COUNT];
@@ -37,6 +41,16 @@ namespace irq {
         static void page_fault_handler(InterruptFrame *__frame) noexcept {
             const uint64_t fault_address = read_cr2();
             const uint64_t error = __frame->error_code;
+#ifdef BIGOS_USER_PROGRAM_SMOKE
+            const bool user_mode = (__frame->cs & 0x3) == 0x3;
+
+            if (user_mode) {
+                bigos::proc::mark_current_faulted(-14);
+                kprintf("BIGOS_USER_PAGE_FAULT address=%llx error=%llx rip=%llx cs=%llx\n", fault_address, error,
+                    __frame->rip, __frame->cs);
+                halt_cpu();
+            }
+#endif
 
             serial_puts("BIGOS_PAGE_FAULT\n");
             kprintf("BIGOS_PAGE_FAULT address=%llx error=%llx rip=%llx\n", fault_address, error, __frame->rip);
@@ -82,6 +96,8 @@ namespace irq {
             INTRDescriptor id(__detail::isr_entries[i]);
             id.selector = KERNEL_CODE_SELECTOR;
             id.attributes_brief = PRESENT_RING0_INTERRUPT_GATE;
+            if (i == VECTOR_SYSCALL)
+                id.attributes_brief = PRESENT_RING3_INTERRUPT_GATE;
             id.reserved = 0;
             kernel_idt[i] = id;
 

@@ -3,6 +3,9 @@
 #include <bigos/io.h>
 #include <bigos/timer.h>
 #include <irq/interrupt.h>
+#ifdef BIGOS_USER_PROGRAM_SMOKE
+#include <bigos/proc.h>
+#endif
 
 NAMESPACE_BIGOS_BEG
 namespace sys {
@@ -40,6 +43,23 @@ namespace sys {
         static int64_t sys_get_tick() noexcept {
             return (int64_t)bigos::timer::ticks();
         }
+
+#ifdef BIGOS_USER_PROGRAM_SMOKE
+        static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
+            if (__fd != 1 || !bigos::proc::validate_user_buffer(__buffer, __len))
+                return SYS_EFAULT;
+
+            char bounded[SYS_WRITE_MAX_LEN + 1];
+            const char *src = (const char *)__buffer;
+            for (uint64_t i = 0; i < __len; i++)
+                bounded[i] = src[i];
+            bounded[__len] = 0;
+
+            serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
+            serial_puts(bounded);
+            return (int64_t)__len;
+        }
+#endif
     }   // namespace __detail
 
     void dispatch(bigos::irq::InterruptFrame *__frame) noexcept {
@@ -58,6 +78,13 @@ namespace sys {
             case SYS_GET_TICK:
                 result = __detail::sys_get_tick();
                 break;
+#ifdef BIGOS_USER_PROGRAM_SMOKE
+            case SYS_WRITE:
+                result = __detail::sys_write(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_EXIT:
+                bigos::proc::exit_current((int64_t)__frame->rdi);
+#endif
             default:
                 // Unknown number: deterministic negative error code, no crash, no
                 // exception path.

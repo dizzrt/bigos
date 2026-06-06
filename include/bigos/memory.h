@@ -75,6 +75,19 @@ namespace mm {
     // in the derived root still resolves the kernel page tables.
     _attr_nodiscard_ uint64_t derive_user_address_space_root() noexcept;
 
+    // Maps a single 4 KiB page into an explicit page-table root without changing
+    // CR3. Used by the first user-program loader to populate a derived low-half
+    // address space while the kernel root remains active.
+    _attr_nodiscard_ bool map_page_in_root(
+        uint64_t __root_phys, uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept;
+
+    // Checks that a bounded range is below the canonical user half and backed by
+    // present user PTEs in the supplied root. It does not fault in pages.
+    _attr_nodiscard_ bool user_range_mapped(uint64_t __root_phys, uint64_t __vaddr, uint64_t __len) noexcept;
+
+    _attr_nodiscard_ uint64_t read_cr3() noexcept;
+    void activate_address_space_root(uint64_t __root_phys) noexcept;
+
     bool is_direct_mapped_phys(uint64_t __phys, uint64_t __len = 1) noexcept;
     _attr_nodiscard_ void *phys_to_direct(uint64_t __phys) noexcept;
     uint64_t direct_to_phys(const void *__addr) noexcept;

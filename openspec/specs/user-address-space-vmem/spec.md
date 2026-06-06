@@ -3,8 +3,9 @@
 定义 BigOS 用户地址空间页表准备能力：一个显式的内核虚拟内存 map/unmap primitive
 （用统一的 present / writable / user / no-execute / global 页属性驱动 PTE 写入），明确的
 user 与 kernel 页属性策略，以及基于内核当前 PML4 派生用户地址空间页表根、共享内核高半区
-而隔离用户低半区的最小能力。本能力为后续 ring3 切换预留接口，但本阶段不切换 CR3、不进入
-ring3、不加载用户代码、不实现 demand paging，`#PF` handler 保持诊断-only。
+而隔离用户低半区的最小能力。派生 helper 本身保持 passive，不隐式切换 CR3、不进入 ring3、
+不加载用户代码、不实现 demand paging；后续 first-user-program 或进程 runtime MAY 在受控运行路径中
+显式激活派生根，并由该 runtime 的验证覆盖激活边界。
 
 ## Requirements
 
@@ -62,8 +63,7 @@ BigOS SHALL 定义并以源码级方式固定 user 与 kernel 映射的页属性
 
 ### Requirement: 用户地址空间页表根派生共享内核高半区
 
-BigOS SHALL 提供一个最小的用户地址空间页表根派生能力，使内核高半区在派生根中共享，用户低半区独立。
-本阶段 SHALL NOT 切换 CR3 或进入 ring3。
+BigOS SHALL provide a minimal user address-space root derivation capability where the kernel higher half is shared in the derived root and the user lower half is isolated. Derivation by itself SHALL NOT switch CR3 or enter ring3; a later process runtime path MAY explicitly activate the derived root only under its own controlled requirements.
 
 #### Scenario: 派生根复制内核高半区条目
 
@@ -72,28 +72,32 @@ BigOS SHALL 提供一个最小的用户地址空间页表根派生能力，使�
   direct map、KVMEM 所在区域）
 - **AND** 派生根的低半区（用户区）顶层条目 MUST 被清零以保证用户地址空间相互独立
 
-#### Scenario: 派生不切换地址空间
+#### Scenario: 派生不隐式切换地址空间
 
 - **WHEN** 用户地址空间页表根被派生
-- **THEN** BigOS MUST NOT 在本阶段写入 CR3 切换到该根
-- **AND** BigOS MUST NOT 进入 ring3、加载用户代码或实现 demand paging
-- **AND** `#PF` handler MUST 保持诊断-only，不做恢复
+- **THEN** BigOS MUST NOT implicitly write CR3 as part of the derivation helper
+- **AND** BigOS MUST NOT implicitly enter ring3, load user code, or implement demand paging as a side effect of deriving the root
+- **AND** `#PF` handler MUST remain diagnostic-only for kernel faults
+
+#### Scenario: 进程运行路径可显式激活派生根
+
+- **WHEN** a dedicated first-user-program or process runtime path starts a user process using a derived user address-space root
+- **THEN** that runtime path MAY explicitly activate the derived root by switching CR3 or equivalent address-space state
+- **AND** the activated root MUST preserve kernel higher-half mappings needed for syscall, exception, IRQ, direct-map, KVMEM, and diagnostic paths
+- **AND** this activation MUST be covered by that runtime capability's validation rather than by the derivation helper alone
 
 ### Requirement: 用户地址空间页表准备的验证可复现
 
-BigOS SHALL 用源码级检查与默认关闭的 emulator smoke 验证页属性 primitive 与用户根派生语义。
+BigOS SHALL use source-level checks and default-off emulator smoke to validate page attribute primitives, user root derivation semantics, and the boundary between passive derivation and explicit runtime activation.
 
 #### Scenario: 源码级检查覆盖属性与派生不变量
 
-- **WHEN** 本 change 实现完成
-- **THEN** 源码级检查 MUST 覆盖：primitive 接受显式属性、内核默认属性等价 supervisor `present+writable`、
-  用户映射置 user bit、用户数据页 NX / 代码页非 NX，以及派生根复制高半区且清零低半区
-- **AND** 源码级检查 MUST 确认本阶段不写 CR3、不进入 ring3
+- **WHEN** this change is implemented
+- **THEN** source-level checks MUST cover: primitive accepts explicit attributes, kernel default attributes are equivalent to supervisor `present+writable`, user mappings set user bit, user data pages are NX / code pages are non-NX, and derived roots copy the high half while clearing the low half
+- **AND** source-level checks MUST confirm the derivation helper itself does not write CR3 or enter ring3
 
 #### Scenario: 构建与 emulator 验证被记录
 
-- **WHEN** 实现完成
-- **THEN** 验证 MUST 记录最窄可用的 `xmake` / cross-toolchain 构建、相关 `uv run pytest` 源码级检查，
-  以及 `openspec validate prepare-user-address-space-vmem --strict`
-- **AND** 若 Bochs runtime smoke 因 emulator、ROM、serial oracle、image lock 或交互限制无法观测 marker，
-  验证 MUST 记录缺失依赖与剩余 bootability 风险
+- **WHEN** implementation completes
+- **THEN** validation MUST record the narrowest available `xmake` / cross-toolchain build, relevant `uv run pytest` source-level checks, and `openspec validate prepare-user-address-space-vmem --strict` or the current change's strict validation command when this requirement is modified
+- **AND** if Bochs runtime smoke cannot observe markers due to emulator, ROM, serial oracle, image lock, or interaction limits, validation MUST record the missing dependency and remaining bootability risk

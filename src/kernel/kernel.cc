@@ -11,6 +11,7 @@
 
 #include <arch/x86/boot/boot_info.h>
 #include <bigos/memory.h>
+#include <bigos/proc.h>
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
 #include <bigos/tty.h>
@@ -115,6 +116,11 @@ void kernel(const BootInfoHeader *boot_info) {
 #ifdef BIGOS_SCHEDULER_SMOKE
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_a, nullptr);
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_b, nullptr);
+#endif
+#ifdef BIGOS_USER_PROGRAM_SMOKE
+    if (bigos::sched::create_kernel_thread(&bigos::proc::user_program_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_USER_LOAD_FAILED thread\n");
 #endif
 
     // The post-initialization halt behavior is now owned by the scheduler idle

@@ -1,0 +1,49 @@
+# 首个用户程序运行路径
+
+阶段 6 的 `user_program_smoke` 是默认关闭的验证路径，用来证明 BigOS 可以创建一个最小用户进程、
+加载内嵌用户程序、进入 CPL3，并通过 `write` / `exit` syscall 回到内核。
+
+## 镜像格式
+
+首个用户程序采用内嵌 flat blob，而不是 ELF64 或文件系统加载：
+
+- flat blob 由 `src/kernel/proc/proc.cc` 中的 `FIRST_USER_CODE` 字节序列提供，编入内核镜像。
+- 镜像不依赖内核 FS、块设备、hosted OS 文件 IO 或 bootloader-only exFAT helper。
+- blob 只执行 bounded `SYS_WRITE(fd=1, buf, len)`，随后执行 `SYS_EXIT(0)`。
+- loader 仍显式映射 code、data/BSS 和 stack，便于验证权限边界；data/BSS 页当前为清零页。
+
+## 进程模型
+
+`bigos::proc::Process` 是单核、单进程 bounded 抽象，记录：
+
+- `pid`、用户页表根、进入前的 kernel CR3、用户入口、用户 code/data/stack 范围。
+- 专用 syscall/exception kernel stack top，用于 TSS/RSP0。
+- 生命周期状态 `Created` / `Running` / `Terminated` / `Faulted` 和 exit code。
+
+进程对象和当前 kernel stack 不在 `exit` 或 fault 返回路径立即释放；回收延后到后续生命周期 change。
+
+## 加载与地址空间
+
+loader 在非中断上下文运行：
+
+- `derive_user_address_space_root()` 产生低半区清零、高半区共享的用户根。
+- `map_page_in_root()` 将 code 映射为 `USER_CODE`，data/BSS/stack 映射为 `USER_DATA`。
+- 加载失败输出 `BIGOS_USER_LOAD_FAILED` 并 halt，禁止进入部分初始化的 ring3。
+- 仅 `proc::run_user_process()` 写 CR3 激活用户根；普通派生 helper 不隐式切换地址空间。
+
+## ring3 进入
+
+x86_64 运行期 user mode 支持由 `src/kernel/proc/user_mode.cc` / `user_mode.s` 提供：
+
+- 新 GDT 保持 kernel code/data/stack selector `0x08/0x10/0x18` 不移动。
+- 新增 user data selector `0x23`、user code selector `0x2b` 和 TSS selector `0x30`。
+- `init_user_mode()` 加载 GDT 与 TSS，`set_tss_rsp0()` 在进入用户态前设置 kernel return stack。
+- `enter_user_mode()` 构造 `SS:RSP/RFLAGS/CS:RIP` frame 并通过 `iretq` 进入 CPL3。
+
+## syscall 与 fault
+
+- `VECTOR_SYSCALL = 0x80` 是唯一放宽为 DPL=3 的 IDT gate；exception/IRQ gates 不放宽。
+- `SYS_WRITE` 验证用户 buffer 范围、present/user bit 和最大长度，然后输出 `BIGOS_USER_WRITE_SYSCALL`。
+- `SYS_EXIT` 标记当前进程 terminated、记录 exit code、恢复 kernel root，并进入 scheduler 退出路径。
+- 用户态 `#PF` 通过 saved `CS` 的 CPL 识别，输出 `BIGOS_USER_PAGE_FAULT` 并不做 demand paging。
+- 内核态 `#PF` 保持既有 `BIGOS_PAGE_FAULT` 诊断-only 语义。

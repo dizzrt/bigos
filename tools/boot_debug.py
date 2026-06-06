@@ -191,10 +191,15 @@ def check_tools(need_bochs: bool) -> None:
         raise StageError('preflight', 'missing required tool(s): ' + ', '.join(missing))
 
 
-def build_kernel(memory_self_test: bool) -> None:
+def build_kernel(memory_self_test: bool, user_program_smoke: bool) -> None:
     run_command(
         'kernel config',
-        ['xmake', 'f', f'--mm_self_test={"y" if memory_self_test else "n"}'],
+        [
+            'xmake',
+            'f',
+            f'--mm_self_test={"y" if memory_self_test else "n"}',
+            f'--user_program_smoke={"y" if user_program_smoke else "n"}',
+        ],
         PROJECT_ROOT,
     )
     run_command('kernel build', ['xmake'], PROJECT_ROOT)
@@ -684,7 +689,7 @@ def run(args: argparse.Namespace) -> int:
         marker = marker or MM_SELF_TEST_SUCCESS_MARKER
 
     check_tools(need_bochs=should_launch)
-    build_kernel(args.memory_self_test)
+    build_kernel(args.memory_self_test, args.user_program_smoke)
     build_boot_artifacts()
     artifacts = get_artifacts(DEFAULT_KERNEL)
 
@@ -747,6 +752,11 @@ def make_parser() -> argparse.ArgumentParser:
         '--memory-self-test',
         action='store_true',
         help='build with BIGOS_MM_SELF_TEST and route COM1 to a serial log',
+    )
+    run_parser.add_argument(
+        '--user-program-smoke',
+        action='store_true',
+        help='build with BIGOS_USER_PROGRAM_SMOKE to enter the first ring3 user program',
     )
     run_parser.add_argument(
         '--serial-log',

@@ -26,3 +26,7 @@ boot-debug:
 .PHONY:boot-debug-gui
 boot-debug-gui:
 	@python3 tools/boot_debug.py run --bochs-extra "display_library: sdl2"
+
+.PHONY:boot-debug-user-gui
+boot-debug-user-gui:
+	@python3 tools/boot_debug.py run --user-program-smoke --bochs-extra "display_library: sdl2"

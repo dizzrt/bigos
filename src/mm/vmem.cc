@@ -284,6 +284,92 @@ static bool map_single_page(uint64_t __vaddr, uint64_t __phys, uint64_t __attr) 
     return true;
 }
 
+static uint64_t *direct_table(uint64_t __phys) noexcept {
+    return (uint64_t *)bigos::mm::phys_to_direct(__phys & PAGING_DESCRIPTOR_ADDR_MASK);
+}
+
+static bool ensure_root_descriptor(uint64_t *__entry, uint16_t __index, uint64_t __attr) noexcept {
+    if (paging_present(__entry[__index]))
+        return true;
+
+    uint64_t page = (uint64_t)bigos::mm::__detail::alloc_physical_order(0, 0);
+    if (page == 0)
+        return false;
+
+    uint64_t *new_table = direct_table(page);
+    if (new_table == nullptr) {
+        bigos::mm::__detail::free_physical_order((void *)page);
+        return false;
+    }
+    memset(new_table, 0, PAGE_SIZE);
+
+    {
+        bigos::irq::InterruptGuard guard;
+        __entry[__index] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+    }
+    return true;
+}
+
+static uint64_t *root_pte(uint64_t __root_phys, uint64_t __vaddr) noexcept {
+    uint64_t *entry = direct_table(__root_phys);
+    if (entry == nullptr || !paging_present(entry[get_pml4_index(__vaddr)]))
+        return nullptr;
+
+    entry = direct_table(entry[get_pml4_index(__vaddr)]);
+    if (entry == nullptr || !paging_present(entry[get_pdpt_index(__vaddr)]))
+        return nullptr;
+
+    entry = direct_table(entry[get_pdpt_index(__vaddr)]);
+    if (entry == nullptr || !paging_present(entry[get_pd_index(__vaddr)]))
+        return nullptr;
+    if ((entry[get_pd_index(__vaddr)] & PAGING_DESCRIPTOR_LARGE_PAGE) != 0)
+        return nullptr;
+
+    entry = direct_table(entry[get_pd_index(__vaddr)]);
+    if (entry == nullptr)
+        return nullptr;
+    return &entry[get_pt_index(__vaddr)];
+}
+
+static bool map_root_page(uint64_t __root_phys, uint64_t __vaddr, uint64_t __phys, uint64_t __attr) noexcept {
+    uint16_t i_pml4 = get_pml4_index(__vaddr);
+    uint16_t i_pdpt = get_pdpt_index(__vaddr);
+    uint16_t i_pd = get_pd_index(__vaddr);
+    uint16_t i_pt = get_pt_index(__vaddr);
+
+    uint64_t intermediate_attr = DEFAULT_ATTR_PML4E;
+    if ((__attr & bigos::mm::page_attr::USER) != 0)
+        intermediate_attr |= bigos::mm::page_attr::USER;
+
+    uint64_t *entry = direct_table(__root_phys);
+    if (entry == nullptr)
+        return false;
+    if (!ensure_root_descriptor(entry, i_pml4, intermediate_attr))
+        return false;
+
+    entry = direct_table(entry[i_pml4]);
+    if (entry == nullptr)
+        return false;
+    if (!ensure_root_descriptor(entry, i_pdpt, intermediate_attr))
+        return false;
+
+    entry = direct_table(entry[i_pdpt]);
+    if (entry == nullptr)
+        return false;
+    if (!ensure_root_descriptor(entry, i_pd, intermediate_attr))
+        return false;
+
+    entry = direct_table(entry[i_pd]);
+    if (entry == nullptr)
+        return false;
+
+    {
+        bigos::irq::InterruptGuard guard;
+        entry[i_pt] = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+    }
+    return true;
+}
+
 static void rollback_direct_map_range(uint64_t __phys_base, uint64_t __mapped_pages) noexcept {
     uint64_t i = 0;
     while (i < __mapped_pages) {
@@ -496,6 +582,43 @@ namespace mm {
             dst[i] = kernel_pml4[i];   // share kernel higher half / self-mapping / direct map
 
         return new_root;
+    }
+
+    bool map_page_in_root(uint64_t __root_phys, uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept {
+        if (__root_phys == INVALID_PHYS_ADDR || (__vaddr & (PAGE_SIZE - 1)) != 0 || (__phys & (PAGE_SIZE - 1)) != 0)
+            return false;
+        return map_root_page(__root_phys, __vaddr, __phys, __attr);
+    }
+
+    bool user_range_mapped(uint64_t __root_phys, uint64_t __vaddr, uint64_t __len) noexcept {
+        constexpr uint64_t USER_CANONICAL_LIMIT = 0x0000800000000000ull;
+        if (__len == 0 || __root_phys == INVALID_PHYS_ADDR || __vaddr >= USER_CANONICAL_LIMIT)
+            return false;
+        const uint64_t end = __vaddr + __len;
+        if (end <= __vaddr || end > USER_CANONICAL_LIMIT)
+            return false;
+
+        uint64_t page = align_down_page(__vaddr);
+        const uint64_t last = align_down_page(end - 1);
+        while (page <= last) {
+            uint64_t *pte = root_pte(__root_phys, page);
+            if (pte == nullptr || !paging_present(*pte) || (*pte & page_attr::USER) == 0)
+                return false;
+            if (page == last)
+                break;
+            page += PAGE_SIZE;
+        }
+        return true;
+    }
+
+    uint64_t read_cr3() noexcept {
+        uint64_t cr3;
+        asm volatile("movq %%cr3, %0" : "=r"(cr3));
+        return cr3;
+    }
+
+    void activate_address_space_root(uint64_t __root_phys) noexcept {
+        asm volatile("movq %0, %%cr3" ::"r"(__root_phys) : "memory");
     }
 
 #ifdef BIGOS_USER_VMEM_SMOKE

@@ -1,14 +1,14 @@
 # 系统调用入口（syscall entry）
 
-BigOS 阶段 6 前置：建立一条受控的“软件主动进入内核”路径与最小 syscall ABI。本阶段只做 syscall 入口、ABI 与 dispatch 的建立（1~2 个诊断 syscall），**不进入 ring3、不切换 CR3、不加载用户 ELF、不实现进程模型或完整 syscall 表**。
+BigOS 阶段 6 使用一条受控的“软件主动进入内核”路径与最小 syscall ABI。阶段 5 的 ring0 诊断 syscall 仍保留；默认关闭的 `user_program_smoke` 路径会在配置 GDT/TSS 与用户地址空间后允许 CPL3 通过 `int 0x80` 进入同一个 dispatcher。
 
 ## 入口机制选择：`int 0x80` 软件中断门
 
 本阶段采用 `int 0x80` 软件中断门，而非 `syscall`/`sysret` 快速系统调用：
 
 - 复用既有 kernel-owned 静态 IDT + `interrupt.s` 的 `isr_common` + `irq_dispatch` 框架。vector `0x80` 的 `isr_entry` stub 与 dispatch 框架已存在，因此几乎是“零新增汇编”的入口：只需在 `irq_dispatch` 中识别 syscall vector 并路由到 syscall dispatcher。
-- 取舍：`syscall`/`sysret` 需要配置 `IA32_STAR/LSTAR/FMASK` MSR、定义内核/用户段排列约束、并准备内核栈切换（无 TSS/`swapgs` 基础设施）。这些都与 ring3 切换强耦合，本阶段无 ring3，收益低、改动面大、风险高。留待 ring3 切换 / 用户程序加载 change 评估是否切换到 `syscall`。
-- DPL：本阶段从 ring0 触发 `int 0x80`，现有 DPL=0 中断门即可工作，**不修改 IDT gate 的 DPL**。未来要允许 ring3 触发 `int 0x80`，需把该 vector gate 的 DPL 提升到 3——**这属于后续 ring3 change 的显式范围**，本阶段不提前改动。
+- 取舍：`syscall`/`sysret` 需要配置 `IA32_STAR/LSTAR/FMASK` MSR、定义内核/用户段排列约束、并准备 `swapgs`/内核栈策略；当前 change 继续使用更可解释的 interrupt gate + TSS/RSP0。
+- DPL：仅 `VECTOR_SYSCALL` gate 配置为 DPL=3，其它 CPU exception 与 i8259 IRQ gate 保持 ring0-only。syscall 仍不是外部 IRQ，dispatch 路径不发送 i8259 EOI。
 - vector 用具名常量 `VECTOR_SYSCALL = 0x80` 固定，集中声明在 `include/irq/interrupt.h`，避免散落魔数。
 
 ## 最小 syscall ABI
@@ -45,19 +45,21 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_DEBUG_WRITE`（number=0）：把内核内固定/受限 buffer 经现有 serial/console 输出确定性 marker `BIGOS_SYSCALL_WRITE`，并返回写出的字节数。本阶段调用方为内核态，buffer 为内核内 bounded 来源；**不做用户指针校验**。
   - **ring3 前置项**：引入 ring3 后，用户态传入的 buffer 指针与长度 **必须** 做用户地址空间范围校验与 bounded 拷贝后才能输出。
 - `SYS_GET_TICK`（number=1）：返回 `bigos::timer::ticks()` 单调 tick，验证返回值寄存器路径。`timer::ticks()` 已通过 `include/bigos/timer.h` 稳定暴露，是 context-agnostic bounded read，故选用它而非 `SYS_DEBUG_NOOP`。
+- `SYS_WRITE`（number=2）：仅支持早期 console sink（当前固定 `fd=1`），在读取用户 buffer 前检查低半区范围、页表 present/user bit 和最大长度 `SYS_WRITE_MAX_LEN`，再把 bounded 内容输出到 serial/VGA，并返回确定性字节数或 `SYS_EFAULT`。
+- `SYS_EXIT`（number=3）：记录当前用户进程 exit code，标记 terminated，恢复内核地址空间并转入 scheduler 的延后回收退出路径；该 syscall 不返回到已终止用户指令流。
 
-诊断 syscall 遵守阶段 3 中断上下文契约：dispatcher 在 `int 0x80` 上下文运行（CPU 已自动关中断进入门），只做 bounded 输出/读取，不做动态分配、不在该路径调用 non-IRQ-safe allocator（`kmalloc`/`free`/`alloc_kernel_pages`/`free_pages`/global `new/delete`）。
+syscall dispatcher 遵守阶段 3 中断上下文契约：`int 0x80` 上下文只做 bounded 输出/读取、当前进程状态更新和 CR3 恢复，不做动态分配、不在该路径调用 non-IRQ-safe allocator（`kmalloc`/`free`/`alloc_kernel_pages`/`free_pages`/global `new/delete`）。
 
 ## 验证：默认关闭构建开关 + 确定性 marker
 
-新增默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）。开启后，`kernel()` 在非中断上下文从内核态发起几次 `int 0x80` 自测（设置 `rax`=number 与参数寄存器，执行 `int $0x80`，读取返回 `rax`），断言 dispatcher 被命中、`SYS_DEBUG_WRITE`/`SYS_GET_TICK` 返回值正确、未知 number 返回 `SYS_ENOSYS`，并输出确定性 marker `BIGOS_SYSCALL_SMOKE_PASSED` / `BIGOS_SYSCALL_SMOKE_FAILED`。默认 boot 不编入该路径。
+默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）继续从 ring0 验证 `SYS_DEBUG_WRITE`、`SYS_GET_TICK` 和未知 number。新增默认关闭的 `user_program_smoke` 会创建首个用户进程，从 CPL3 调用 `SYS_WRITE` / `SYS_EXIT`，输出 `BIGOS_USER_*` marker。默认 boot 不创建用户进程。
 
 ## 本阶段非目标
 
-- 不进入 ring3、不从用户态触发 syscall、不切换 CR3。
-- 不加载用户 ELF、不实现进程模型 / fork/exec/signal / 用户线程。
+- 不切换到 `syscall`/`sysret` MSR 快速路径。
+- 不实现 fork/exec/wait、signal、用户线程或完整文件描述符表。
 - 不实现完整 syscall 表与 POSIX 语义；不实现 demand paging / COW，`#PF` 保持诊断-only。
-- 不修改 IDT gate 的 DPL，不引入 GDT user/TSS 条目或 `syscall`/`sysret` MSR(STAR/LSTAR/FMASK) 配置。
+- 不对 syscall 以外的 IDT gate 放宽 DPL；不从 syscall path 发送 i8259 EOI。
 
 ## 横切工程化项
 

@@ -59,6 +59,12 @@ option("syscall_smoke")
     set_description("enable validation-only ring0 int 0x80 syscall self-test")
 option_end()
 
+option("user_program_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only first user program ring3 smoke")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -75,8 +81,15 @@ target("kernel")
     -- O2 optimize
     set_optimize("faster")
     
-    add_files("src/kernel/**.cc")
-    add_files("src/kernel/**.s")
+    add_files("src/kernel/*.cc")
+    add_files("src/kernel/bigos/**.cc")
+    add_files("src/kernel/irq/**.cc")
+    add_files("src/kernel/irq/**.s")
+    add_files("src/kernel/sched/**.cc")
+    add_files("src/kernel/sched/**.s")
+    add_files("src/kernel/syscall/**.cc")
+    add_files("src/kernel/terminal/**.cc")
+    add_files("src/kernel/timer/**.cc")
     add_files("src/drivers/**.cc")
     add_files("src/mm/**.cc")
     add_files("cpp/**.cc")
@@ -111,6 +124,12 @@ target("kernel")
 
     if has_config("syscall_smoke") then
         add_defines("BIGOS_SYSCALL_SMOKE")
+    end
+
+    if has_config("user_program_smoke") then
+        add_defines("BIGOS_USER_PROGRAM_SMOKE")
+        add_files("src/kernel/proc/**.cc")
+        add_files("src/kernel/proc/**.s")
     end
 
     if is_mode("debug") then 

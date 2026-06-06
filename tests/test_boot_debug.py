@@ -83,3 +83,26 @@ def test_cleanup_image_lock_removes_image_sidecar_lock(tmp_path: Path) -> None:
 
     assert boot_debug.image_lock_path(image) == lock
     assert not lock.exists()
+
+
+def test_build_kernel_configures_user_program_smoke(monkeypatch) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(stage, command, cwd, **kwargs):
+        commands.append(list(command))
+
+    monkeypatch.setattr(boot_debug, 'run_command', fake_run_command)
+    monkeypatch.setattr(boot_debug, 'require_file', lambda *args, **kwargs: None)
+
+    boot_debug.build_kernel(memory_self_test=False, user_program_smoke=True)
+
+    assert commands[0] == ['xmake', 'f', '--mm_self_test=n', '--user_program_smoke=y']
+    assert commands[1] == ['xmake']
+
+
+def test_run_parser_accepts_user_program_smoke() -> None:
+    parser = boot_debug.make_parser()
+
+    args = parser.parse_args(['run', '--user-program-smoke'])
+
+    assert args.user_program_smoke is True

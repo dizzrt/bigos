@@ -29,10 +29,9 @@ namespace irq {
     constexpr uint8_t VECTOR_TIMER = I8259_MASTER_VECTOR_BASE + IRQ_LINE_TIMER;
     constexpr uint8_t VECTOR_KEYBOARD = I8259_MASTER_VECTOR_BASE + IRQ_LINE_KEYBOARD;
 
-    // Software-interrupt syscall entry vector. This stage triggers `int 0x80`
-    // only from ring0; the IDT gate keeps DPL=0 (see __detail::initIDT). Allowing
-    // ring3 to trigger this vector requires raising the gate DPL to 3, which is
-    // explicitly part of a later ring3 change, not this one.
+    // Software-interrupt syscall entry vector. The default-off first user program
+    // raises only this IDT gate to DPL=3 so CPL3 can trigger `int 0x80`; exception
+    // and external IRQ gates remain ring0-only.
     constexpr uint8_t VECTOR_SYSCALL = 0x80;
 
     struct InterruptFrame;
