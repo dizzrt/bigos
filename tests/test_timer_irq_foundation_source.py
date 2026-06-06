@@ -131,7 +131,7 @@ def test_timer_smoke_is_default_off_gated_and_bounded() -> None:
 def test_timer_delay_api_documents_busy_wait_semantics() -> None:
     timer_h = read_source('include/bigos/timer.h')
     timer_cc = read_source('src/kernel/timer/timer.cc')
-    docs = read_source('docs/arch/timer-irq-foundation.md')
+    docs = read_source('docs/en/arch/timer-irq-foundation.md')
 
     assert 'void mdelay(uint64_t milliseconds) noexcept;' in timer_h
     assert 'Busy-waits on the early PIT tick counter' in timer_h

@@ -37,14 +37,14 @@
 
 ## 5. 文档
 
-- [x] 5.1 创建 `docs/ktl/index.md`，包含组件列表、选型指导、活动/实验状态和 freestanding 约束。
+- [x] 5.1 创建 `docs/en/ktl/index.md`，包含组件列表、选型指导、活动/实验状态和 freestanding 约束。
 - [x] 5.2 文档化 `ktl::bitset`，包括初始化、scan 失败、计数语义、slab 用法和示例。
 - [x] 5.3 文档化 `ktl::buffer`，包括自有/借用存储、容量规则、读写语义和示例。
 - [x] 5.4 文档化 `ktl::intrusive_list` 和 `ktl::intrusive_list_node`，包括侵入式节点所有权、erase/remove 行为、迭代器使用和示例。
 - [x] 5.5 文档化 `ktl::pair` 和工具函数，包括构造、比较和 freestanding 限制。
 - [x] 5.6 当 allocator、queue、priority queue、tree 和 map 成为活动公共 KTL API 后，为它们补充文档。
 - [x] 5.7 为 KTL 行为变化添加迁移说明，并将 temp 启发的 API 映射到活动支持版本。
-- [x] 5.8 确认 `docs/ktl` 不包含 `ktl::Buffer`、`ktl::klist` 或 `ktl::klist_node` 作为活动 API 的旧名说明或示例。
+- [x] 5.8 确认 `docs/en/ktl` 不包含 `ktl::Buffer`、`ktl::klist` 或 `ktl::klist_node` 作为活动 API 的旧名说明或示例。
 
 ## 6. 验证
 
@@ -62,7 +62,7 @@
 
 - [x] 7.1 确认所有新增公共 KTL 头文件只在必要位置包含，且没有引入 hosted 依赖。
 - [x] 7.2 确认没有引入异常、RTTI 假设、静态初始化风险或隐藏分配路径。
-- [x] 7.3 确认 `docs/ktl` 与已实现 API 一致，且没有把 temp-only 代码描述为活动 API。
+- [x] 7.3 确认 `docs/en/ktl` 与已实现 API 一致，且没有把 temp-only 代码描述为活动 API。
 - [x] 7.4 使用验证结果和延期范围更新 OpenSpec 任务清单。
 
 ## 验证记录
@@ -71,4 +71,4 @@
 - `clang++ --target=x86_64-elf -std=c++17 -ffreestanding ... -fsyntax-only cpp/ktl/bitset.cc cpp/ktl/buffer.cc cpp/ktl/list.cc src/mm/slab.cc src/mm/buddy.cc src/mm/vmem.cc src/mm/kmem.cc`：通过。
 - `x86_64-elf-g++` 和 `clang++` 对包含 `algorithm`、`allocator`、`queue`、`priority_queue`、`rb_tree`、`map` 的聚焦头文件检查：通过。
 - `xmake`：已运行，但当前全量构建在 `src/kernel/irq/isr.cc` 的既有 `irq_handler`/`MAX_IRQ_NUM` 诊断处失败，未到达链接和 Bochs smoke test。
-- 旧名搜索：`ktl::Buffer`、`ktl::klist`、`ktl::klist_node`、旧名 alias/typedef 在活动代码和 `docs/ktl` 中未发现。
+- 旧名搜索：`ktl::Buffer`、`ktl::klist`、`ktl::klist_node`、旧名 alias/typedef 在活动代码和 `docs/en/ktl` 中未发现。

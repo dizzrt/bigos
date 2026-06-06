@@ -37,7 +37,7 @@
 ## 6. Smoke 与文档
 
 - [x] 6.1 增加默认关闭的 scheduler smoke 构建开关，创建两个 worker thread 输出 bounded deterministic marker 并通过 `yield()` 交替运行。
-- [x] 6.2 更新 `docs/arch` 中 scheduler/thread 设计说明，记录单核、无用户态、无 SMP、无阻塞 sleep、allocator context 和 timer/IRQ 边界。
+- [x] 6.2 更新 `docs/en/arch` 中 scheduler/thread 设计说明，记录单核、无用户态、无 SMP、无阻塞 sleep、allocator context 和 timer/IRQ 边界。
 - [x] 6.3 若需要调整 `tools/boot_debug.py` 才能观测 scheduler marker，单独记录为横切工程化项，不把 Python 修改混入本 change，除非明确扩展任务范围。
 
 ## 7. Validation

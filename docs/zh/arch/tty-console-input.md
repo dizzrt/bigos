@@ -57,12 +57,14 @@ VGA clear
 serial_init()
 init_mem()
 optional BIGOS_MM_SELF_TEST
+optional BIGOS_USER_VMEM_SMOKE
 terminal::init_tty()
 irq::initIRQ()
 optional BIGOS_PAGE_FAULT_SMOKE trigger
 irq::enableIRQ()
 normal boot marker
-hlt loop
+optional syscall / scheduler / user-program smoke
+sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 ```
 
 `serial_init()` 在普通 boot path 中显式完成 early COM1 bring-up，使默认 serial marker 不再依赖 `mm_self_test()` 等间接初始化路径。`terminal::init_tty()` 初始化 input ring、console ready flag 和 keyboard decoder state。`irq::initIRQ()` 随后初始化 IDT/PIC 并注册 timer/keyboard handler。PIC 初始化默认 mask 所有 IRQ line；timer IRQ0 仍在 timer init 中 unmask，keyboard IRQ1 只有在 `BIGOS_KEYBOARD_SMOKE` 显式开启时才 unmask，因此默认 boot 不依赖键盘输入。

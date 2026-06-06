@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: 组件文档
-KTL SHALL 在 `docs/ktl` 下为每个公共组件提供文档。
+KTL SHALL 在 `docs/en/ktl` 下为每个公共组件提供文档。
 
 #### Scenario: 现有组件文档
 - **WHEN** 开发者查阅 `bitset`、`buffer`、`intrusive_list`、`intrusive_list_node` 或 `pair`
-- **THEN** `docs/ktl` MUST 包含说明该组件用途、头文件路径、命名空间、构造方式、操作、所有权规则、失败行为和限制的文档
+- **THEN** `docs/en/ktl` MUST 包含说明该组件用途、头文件路径、命名空间、构造方式、操作、所有权规则、失败行为和限制的文档
 
 #### Scenario: 旧名不作为活动 API 出现
 - **WHEN** 文档描述活动 KTL API
@@ -13,7 +13,7 @@ KTL SHALL 在 `docs/ktl` 下为每个公共组件提供文档。
 
 #### Scenario: 新组件文档
 - **WHEN** 本 change 新增 allocator、algorithm、queue、priority queue、tree、map 或其他公共 KTL 组件
-- **THEN** `docs/ktl` MUST 在对应任务完成前包含新组件文档
+- **THEN** `docs/en/ktl` MUST 在对应任务完成前包含新组件文档
 
 ### Requirement: 使用示例
 KTL 文档 SHALL 包含适用于 freestanding kernel code 的小型使用示例。
@@ -31,7 +31,7 @@ KTL 文档 SHALL 记录现有 KTL 用户需要关注的行为变化和迁移说�
 
 #### Scenario: 行为变化
 - **WHEN** KTL API 的语义、返回值、失败行为、所有权行为或失效规则发生变化
-- **THEN** `docs/ktl` MUST 记录旧风险、新行为和所需调用点迁移；旧名只能出现在迁移说明中，不得作为活动 API 出现
+- **THEN** `docs/en/ktl` MUST 记录旧风险、新行为和所需调用点迁移；旧名只能出现在迁移说明中，不得作为活动 API 出现
 
 #### Scenario: Temp 参考映射
 - **WHEN** 新活动 KTL 组件受到 `temp/bigos_` 启发

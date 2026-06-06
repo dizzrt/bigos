@@ -70,7 +70,7 @@ def test_kvmem_region_is_not_described_as_direct_map() -> None:
 def test_direct_map_window_is_independent_and_non_overlapping() -> None:
     memory = read_source('include/bigos/memory.h')
     vmem = read_source('src/mm/vmem.cc')
-    docs = read_source('docs/arch/x86-boot-layout.md')
+    docs = read_source('docs/en/arch/x86-boot-layout.md')
 
     assert 'constexpr uintptr_t KDIRECT_BASE = 0xffff900000000000ul;' in memory
     assert 'constexpr uintptr_t KDIRECT_LEN = 0x400000000000ul;' in memory
@@ -83,7 +83,7 @@ def test_direct_map_window_is_independent_and_non_overlapping() -> None:
     assert 'KDIRECT_BASE >= KVMEM_BASE + KVMEM_LEN' in vmem
     assert 'KDIRECT_BASE + bigos::mm::KDIRECT_LEN <= KERNEL_HIGHER_HALF_BASE' in vmem
     assert '0xffff900000000000..0xffffcfffffffffff  kernel direct map' in docs
-    assert 'KVMEM heap/vmalloc-style 分配窗口，不是 direct map' in docs
+    assert 'KVMEM heap/vmalloc-style allocation window, not direct map' in docs
 
 
 def test_direct_map_helpers_are_checked_and_do_not_claim_kvmem_or_mmio() -> None:

@@ -18,12 +18,12 @@ i8259 IRQ0 fires
 
 关键现状与约束：
 
-- tick 状态 `volatile tick_t g_ticks` 定义在 [isr.cc](file:///Users/bytedance/Desktop/workspace/kernel/bigos/src/kernel/irq/isr.cc#L10-L12)（`timer::__detail` 命名空间），但物理上落在 IRQ translation unit 而非 timer translation unit。
-- IRQ0 handler 直接 `++bigos::timer::__detail::g_ticks`，没有受控的 `timer::on_tick()` 封装；[timer.cc](file:///Users/bytedance/Desktop/workspace/kernel/bigos/src/kernel/timer/timer.cc) 只暴露 `ticks()` 和 `mdelay()`。
-- 现有源码级测试 [test_timer_irq_foundation_source.py](file:///Users/bytedance/Desktop/workspace/kernel/bigos/tests/test_timer_irq_foundation_source.py#L53-L56) 显式断言 `bigos::timer::on_tick();` 不存在、handler 直写 `g_ticks`，因此硬化必须同步更新这些断言。
-- EOI 已由 [irq_dispatch](file:///Users/bytedance/Desktop/workspace/kernel/bigos/src/kernel/irq/interrupt.cc#L109-L123) 在 handler 返回后统一发送，handler 不直接 EOI。
-- `mdelay()` 在 [timer.cc](file:///Users/bytedance/Desktop/workspace/kernel/bigos/src/kernel/timer/timer.cc#L11-L22) 中 busy-wait 轮询 `ticks()`，依赖 IRQ0 持续推进 tick——在 IRQ disabled 或 IRQ context 中调用会死循环。
-- ISR ABI（栈对齐、寄存器保存、`InterruptFrame` layout、error-code 槽）由 [interrupt.s](file:///Users/bytedance/Desktop/workspace/kernel/bigos/src/kernel/irq/interrupt.s) 与 [interrupt.h](file:///Users/bytedance/Desktop/workspace/kernel/bigos/include/irq/interrupt.h#L80-L103) 共同约定，目前缺少针对 runtime 行为的明确不变量记录与验证。
+- tick 状态 `volatile tick_t g_ticks` 定义在 [isr.cc](`src/kernel/irq/isr.cc`)（`timer::__detail` 命名空间），但物理上落在 IRQ translation unit 而非 timer translation unit。
+- IRQ0 handler 直接 `++bigos::timer::__detail::g_ticks`，没有受控的 `timer::on_tick()` 封装；[timer.cc](`src/kernel/timer/timer.cc`) 只暴露 `ticks()` 和 `mdelay()`。
+- 现有源码级测试 [test_timer_irq_foundation_source.py](`tests/test_timer_irq_foundation_source.py`) 显式断言 `bigos::timer::on_tick();` 不存在、handler 直写 `g_ticks`，因此硬化必须同步更新这些断言。
+- EOI 已由 [irq_dispatch](`src/kernel/irq/interrupt.cc`) 在 handler 返回后统一发送，handler 不直接 EOI。
+- `mdelay()` 在 [timer.cc](`src/kernel/timer/timer.cc`) 中 busy-wait 轮询 `ticks()`，依赖 IRQ0 持续推进 tick——在 IRQ disabled 或 IRQ context 中调用会死循环。
+- ISR ABI（栈对齐、寄存器保存、`InterruptFrame` layout、error-code 槽）由 [interrupt.s](`src/kernel/irq/interrupt.s`) 与 [interrupt.h](`include/irq/interrupt.h`) 共同约定，目前缺少针对 runtime 行为的明确不变量记录与验证。
 
 约束：单核、早期可关中断、无 scheduler/SMP/用户态；不得移动任何 boot/linker/memory 地址或改变 IDT/`InterruptFrame` ABI 形状。
 
@@ -105,7 +105,7 @@ i8259 IRQ0 fires
 3. 修改 IRQ0 handler 调用 `bigos::timer::on_tick()`，保留 `BIGOS_TIMER_SMOKE` bounded marker。
 4. 复核 `interrupt.cc`/`interrupt.s` 的 EOI 与寄存器保存边界，补充必要注释（不改 ABI）。
 5. 更新 `tests/test_timer_irq_foundation_source.py`：断言 `on_tick` 存在并被 handler 调用、handler 不再直写 `g_ticks`、`mdelay`/`ticks` 不在 ISR body、smoke 仍 gated+bounded。
-6. 更新 `docs/arch/timer-irq-foundation.md`，记录 runtime 契约与上下文边界。
+6. 更新 `docs/en/arch/timer-irq-foundation.md`，记录 runtime 契约与上下文边界。
 7. 运行交叉构建、`uv run pytest` 源码级检查、clang/clangd 辅助诊断，可用时运行 Bochs serial smoke。
 8. 在 validation 记录 runtime 结果或缺失依赖与剩余风险。
 

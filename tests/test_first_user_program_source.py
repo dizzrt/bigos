@@ -23,7 +23,7 @@ def test_user_program_smoke_is_default_off_and_wired_to_scheduler() -> None:
 
 def test_flat_embedded_image_has_no_fs_or_block_dependency() -> None:
     proc = read_source('src/kernel/proc/proc.cc')
-    doc = read_source('docs/arch/first-user-program.md')
+    doc = read_source('docs/en/arch/first-user-program.md')
 
     assert 'FIRST_USER_CODE' in proc
     assert 'Flat embedded image' in proc

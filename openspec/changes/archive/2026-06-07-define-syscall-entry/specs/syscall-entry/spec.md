@@ -42,7 +42,7 @@ BigOS SHALL 定义并以源码级方式固定一个最小 syscall ABI，明确 s
 - **WHEN** syscall 带有参数
 - **THEN** 参数 MUST 按文档化的固定寄存器顺序（`rdi`、`rsi`、`rdx`、`r10`、`r8`、`r9`）从 `InterruptFrame`
   对应字段读取
-- **AND** ABI 与 `InterruptFrame` 字段的对应关系 MUST 在 `docs/arch` 文档化并由源码级检查断言
+- **AND** ABI 与 `InterruptFrame` 字段的对应关系 MUST 在 `docs/en/arch` 文档化并由源码级检查断言
 
 ### Requirement: 系统调用分发与未知 number 处理
 

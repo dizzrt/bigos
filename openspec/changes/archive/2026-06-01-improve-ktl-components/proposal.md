@@ -11,7 +11,7 @@
 - 参考 `temp/bigos_` 中对当前内核有价值的能力，补齐 allocator traits/helpers、algorithm utilities、queue/priority_queue adapters、ordered-tree/map foundations 等能力。
 - 保持所有 KTL 工作满足 freestanding kernel 约束：不使用异常、不使用 RTTI、不依赖 hosted runtime，不引入超出仓库 freestanding C++ 支持范围的隐式 libc/STL 依赖。
 - 为 KTL 行为及依赖 KTL 的现有内存管理用户补充聚焦验证。
-- 在 `/Users/bytedance/Desktop/workspace/kernel/bigos/docs/ktl` 下补充组件级文档，覆盖能力、使用方式、所有权规则和限制。
+- 在 `docs/en/ktl` 下补充组件级文档，覆盖能力、使用方式、所有权规则和限制。
 
 ## Capabilities
 
@@ -25,6 +25,6 @@
 ## Impact
 
 - 影响代码：`cpp/include/ktl`、`cpp/ktl`、必要的 freestanding 支撑头文件，以及 `mm`、`kernel` 和未来 KTL 使用方中的调用点。
-- 影响文档：`docs/ktl`。
+- 影响文档：`docs/en/ktl`。
 - 影响验证：KTL 聚焦检查、buddy/slab/vmem 集成审查、可用时的 xmake 交叉构建，以及可行时的 clang/clangd 辅助诊断。
 - 兼容风险：本 change 会一步到位迁移 `mm`、`kernel` 和文档中的旧 KTL 名称；必须保持内存管理子系统依赖的链表和位图行为，但不保留旧名兼容层。

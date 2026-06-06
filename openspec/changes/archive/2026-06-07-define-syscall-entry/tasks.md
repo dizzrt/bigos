@@ -20,7 +20,7 @@
 ## 4. Smoke 与文档
 
 - [x] 4.1 在 `xmake.lua` 新增默认关闭的 `syscall_smoke` 构建开关，在 `kernel()` 非中断上下文从内核态发起一次 `int 0x80` 自测（设置 `rax`+参数寄存器、执行 `int $0x80`、读取返回 `rax`），断言 dispatcher 命中、返回值正确、未知 number 返回错误码，并输出确定性 `BIGOS_SYSCALL_*` marker（成功/失败）；默认 boot 行为不变。
-- [x] 4.2 更新 `docs/arch` 中中断/入口设计说明，记录 syscall 入口机制选择（`int 0x80` 及取舍）、最小 ABI、dispatch 与未知 number 处理、诊断 syscall，以及本阶段非目标（不进 ring3、不切 CR3、无完整 syscall 表）。
+- [x] 4.2 更新 `docs/en/arch` 中中断/入口设计说明，记录 syscall 入口机制选择（`int 0x80` 及取舍）、最小 ABI、dispatch 与未知 number 处理、诊断 syscall，以及本阶段非目标（不进 ring3、不切 CR3、无完整 syscall 表）。
 - [x] 4.3 若需要调整 `tools/boot_debug.py` 才能注入 `syscall_smoke` 开关并观测 marker，单独记录为横切工程化项，不把 Python 修改混入本 change，除非明确扩展任务范围。
 
 ## 5. Validation

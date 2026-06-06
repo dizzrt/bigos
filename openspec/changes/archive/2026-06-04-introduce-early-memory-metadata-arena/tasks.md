@@ -1,7 +1,7 @@
 ## 1. 设计与边界确认
 
 - [x] 1.1 复查 `proposal.md`、`design.md` 和 spec delta，确认本 change 只处理 buddy 初始化元数据 arena。
-- [x] 1.2 复查 `docs/arch/x86-boot-layout.md`、BootInfo handoff、`src/mm/buddy.cc` 和 `src/mm/kmem.cc`，记录不能覆盖的固定地址和初始化顺序。
+- [x] 1.2 复查 `docs/en/arch/x86-boot-layout.md`、BootInfo handoff、`src/mm/buddy.cc` 和 `src/mm/kmem.cc`，记录不能覆盖的固定地址和初始化顺序。
 - [x] 1.3 明确第一版 arena 使用静态 buffer、BootInfo usable region 切分或其它方式，并记录容量估算依据。
 
 ## 2. Arena 基础设施

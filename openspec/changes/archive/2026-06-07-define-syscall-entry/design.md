@@ -65,7 +65,7 @@ base、`KVMEM_BASE`、direct map、self-mapping 地址与 BootInfo handoff ABI�
 - 错误返回：未知 number 或参数非法时，`rax` 写入确定性负错误码（如 `-ENOSYS` 等价的固定值），不崩溃、不进入
   exception 路径。
 - dispatcher 通过修改 `InterruptFrame.rax` 写回返回值；其余被调用方约定为 callee 可 clobber，调用方负责保存。
-  该映射关系（number/参数/返回值 ↔ `InterruptFrame` 字段）在 `docs/arch` 文档化并由源码级测试断言。
+  该映射关系（number/参数/返回值 ↔ `InterruptFrame` 字段）在 `docs/en/arch` 文档化并由源码级测试断言。
 
 ### 决策 3：syscall dispatch 层与诊断 syscall
 
@@ -105,7 +105,7 @@ base、`KVMEM_BASE`、direct map、self-mapping 地址与 BootInfo handoff ABI�
 2. 在 `irq_dispatch` 增加 syscall vector 分支，路由到 `bigos::sys::dispatch`；不动 exception/IRQ 既有分支与 EOI 语义。
 3. 实现 dispatch 层 + 1~2 个诊断 syscall + 统一错误返回。
 4. 加默认关闭 `syscall_smoke` 开关与内核态自测路径、`BIGOS_SYSCALL_*` marker。
-5. 补源码级测试与 `docs/arch` 文档。
+5. 补源码级测试与 `docs/en/arch` 文档。
 
 回滚策略：syscall 分支、dispatch 层与诊断 syscall 均为新增，smoke 默认关闭；回滚只需移除 `irq_dispatch` 中的
 syscall 分支，IDT/`InterruptFrame`/boot 路径未改，风险可控。

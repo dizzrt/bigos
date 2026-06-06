@@ -41,7 +41,7 @@ def test_syscall_abi_is_declared_and_documented() -> None:
 
 
 def test_syscall_abi_mapping_is_documented_in_arch_docs() -> None:
-    docs = read_source('docs/arch/syscall-entry.md')
+    docs = read_source('docs/en/arch/syscall-entry.md')
 
     assert 'int 0x80' in docs
     assert '`rax`' in docs

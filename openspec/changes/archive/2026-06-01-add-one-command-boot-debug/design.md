@@ -127,8 +127,8 @@ Python 脚本负责阶段编排和错误信息，Makefile/xmake 只做薄包装�
 生成配置不应默认包含：
 
 - `config_interface: win32config` 或固定 `display_library: win32`。
-- `C:\Program Files\Bochs-2.7/...` 之类 host-specific ROM 路径。
-- `C:\Users\...` 之类 host-specific disk image 路径。
+- host-specific absolute ROM paths.
+- host-specific absolute disk image paths.
 - 要求交互的 `panic: action=ask`，除非用户显式选择交互调试模式。
 
 ## Risks / Trade-offs

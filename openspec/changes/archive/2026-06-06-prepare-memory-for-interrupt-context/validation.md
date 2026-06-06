@@ -27,7 +27,7 @@
 
 ## 历史诊断
 
-- 既有 `docs/arch/interrupt-exception-foundation.md` 记录显示，本机普通 boot smoke、memory self-test runtime smoke 和 `#PF` runtime marker 曾受 Bochs/term GUI/serial 组合限制，无法作为可靠 oracle。
+- 既有 `docs/en/arch/interrupt-exception-foundation.md` 记录显示，本机普通 boot smoke、memory self-test runtime smoke 和 `#PF` runtime marker 曾受 Bochs/term GUI/serial 组合限制，无法作为可靠 oracle。
 - 本次使用隔离 image `build/test/memory-interrupt-context.raw`，未遇到 image lock；失败点仍是 serial marker 超时。
 
 ## 当前 Change 影响

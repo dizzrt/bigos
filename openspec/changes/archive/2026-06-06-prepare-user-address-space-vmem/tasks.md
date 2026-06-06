@@ -8,7 +8,7 @@
 ## 2. 内核映射改写与属性策略
 
 - [x] 2.1 把 `VMem::map_kernel_range()` / `unmap_kernel_range()` 改为经由新 primitive，以等价 supervisor 默认属性（present+writable，user=0）表达，确认 PTE bit 行为与旧 `DEFAULT_ATTR_PTE=0x3` 一致。
-- [x] 2.2 定义并文档化 user/kernel 属性策略：user 映射置 user bit、用户数据页置 NX、用户代码页清 NX、内核保持 supervisor；在 `docs/arch` 记录旧 `0x3` 与新属性的对应关系。
+- [x] 2.2 定义并文档化 user/kernel 属性策略：user 映射置 user bit、用户数据页置 NX、用户代码页清 NX、内核保持 supervisor；在 `docs/en/arch` 记录旧 `0x3` 与新属性的对应关系。
 - [x] 2.3 确认 `EFER.NXE` 在 long-mode 进入路径的使能状态；若已使能则复用，否则记录 NXE 限制与 NX 验证降级策略，不在本 change 强行改 boot 路径。
 
 ## 3. 用户地址空间页表根派生
@@ -19,7 +19,7 @@
 ## 4. Smoke 与文档
 
 - [x] 4.1 在 `xmake.lua` 新增默认关闭的 user vmem smoke 构建开关，在非中断上下文构造一次性验证：建立 user 属性映射并读取 PTE 确认 user/NX/writable bit、派生用户根确认高/低半区条目布局，随后 unmap/释放并输出确定性 `BIGOS_` marker（成功/失败）。
-- [x] 4.2 更新 `docs/arch` 中内存/页表设计说明，记录显式属性 primitive、user/kernel 属性策略、用户根派生的高/低半区共享语义与本阶段非目标（不切 CR3、无 ring3、无 demand paging）。
+- [x] 4.2 更新 `docs/en/arch` 中内存/页表设计说明，记录显式属性 primitive、user/kernel 属性策略、用户根派生的高/低半区共享语义与本阶段非目标（不切 CR3、无 ring3、无 demand paging）。
 - [x] 4.3 若需要调整 `tools/boot_debug.py` 才能注入 user vmem smoke 开关并观测 marker，单独记录为横切工程化项，不把 Python 修改混入本 change，除非明确扩展任务范围。
 
 ## 5. Validation

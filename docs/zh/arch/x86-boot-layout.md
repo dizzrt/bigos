@@ -7,7 +7,7 @@ BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel
 ```
 
 该路径仍是当前可运行的启动后端，也是现有内核所用 kernel handoff 数据的生产者。
-`docs/arch/uefi-boot-blueprint.md` 中的 UEFI 计划会把该路径视为未来统一
+`docs/zh/arch/uefi-boot-blueprint.md` 中的 UEFI 计划会把该路径视为未来统一
 handoff 模型中的 Legacy 后端；它不会替换 MBR/DBR/exDBR/`boot.bin` 流程，
 也不会改变 `make boot-debug` 的含义。
 

@@ -8,10 +8,13 @@ context: |
   - The kernel boots from an x86 disk image, enters long mode, loads an ELF64
     kernel named "kernel", and jumps to the higher-half kernel address
     0xffffffff80000000.
-  - The current implementation focuses on bootstrapping, VGA text and COM1 serial
-    output, a kernel-owned IDT with exception/IRQ dispatch, i8259 PIC support,
-    keyboard scan-code smoke handling, and a fairly complete early kernel memory
-    management stack (buddy, slab/kmalloc, kernel virtual memory).
+  - The current implementation covers bootstrapping, VGA text and COM1 serial
+    output, a kernel-owned IDT with exception/IRQ/syscall dispatch, i8259 PIC
+    support, a PIT timer IRQ0 with a monotonic tick, keyboard scan-code decode
+    feeding a TTY/console input path, a fairly complete early kernel memory
+    management stack (buddy, slab/kmalloc, kernel virtual memory, direct map), a
+    cooperative (non-preemptive) kernel-thread scheduler, an `int 0x80` syscall
+    entry with a minimal ABI, and a default-off first ring3 user-program smoke.
 
   Tech stack:
   - C++17 and C17 in freestanding mode.
@@ -26,32 +29,47 @@ context: |
   Major directories:
   - src/arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, and
     ELF loader.
-  - src/kernel: kernel entry, IRQ setup, low-level IO, string functions, console/TTY
-    skeletons.
+  - src/kernel: kernel entry plus subsystem subdirectories: irq (IDT, exception
+    and IRQ dispatch, ISR stubs), timer (monotonic tick), terminal (console,
+    keyboard decode, TTY input), sched (cooperative scheduler and context-switch
+    assembly), syscall (`int 0x80` dispatch), proc (process model and ring3
+    user-mode entry, compiled only under user_program_smoke), bigos (low-level
+    IO, panic, utils), and string functions.
   - src/mm: buddy physical page allocator with an early metadata arena,
     slab/kmalloc allocator (reclaim, large allocations, debug guards, stats),
-    kernel virtual memory area/page-table mapping, public memory API, and a
-    switchable memory runtime self-test.
-  - src/drivers: VGA text-mode driver and i8259 PIC driver.
+    kernel virtual memory area/page-table mapping, kernel direct map, public
+    memory API, and a switchable memory runtime self-test.
+  - src/drivers: VGA text-mode driver, i8259 PIC driver, and PIT timer driver.
   - src/runtime: startup objects such as crt0, crti, and crtn.
   - tools: developer helper scripts such as the boot disk-image install helper and
     boot_debug.py (raw image build, Bochs config generation, serial-marker smoke).
   - cpp: small kernel C++ support library, KTL containers, new/delete, and minimal
     libsupc++/ABI support.
-  - include: public kernel headers and small libc-style header subset.
+  - include: public kernel headers (bigos/{memory,sched,thread,syscall,proc,
+    user_mode,timer,tty,console,keyboard,panic}.h, drivers/timer/pit.h, irq) and a
+    small libc-style header subset.
   - tests: validation tests and local test assets.
 
   Current maturity:
-  - The project is in kernel infrastructure bring-up stage; boot, interrupt
-    foundation, and early memory management are reasonably complete.
-  - Boot, VGA/serial output, kernel-owned IDT and exception/IRQ dispatch, PIC,
-    keyboard smoke, buddy allocation, slab allocation, and kernel virtual memory
-    are implemented and covered by a switchable memory runtime self-test plus
-    source-level tests.
-  - TTY/console abstractions, user mode, scheduler, system calls, filesystem
-    services, process management, and broad device support are not implemented.
-  - Several helper scripts and some initialization paths are placeholders or
-    gated by build switches; validate code paths before assuming they are wired.
+  - The project has iterated from an early boot/kernel skeleton to a single-core
+    freestanding kernel with a minimal user-mode loop.
+  - Boot, VGA/serial output, kernel-owned IDT and exception/IRQ/syscall dispatch,
+    PIC, PIT timer IRQ0 with a monotonic tick, keyboard decode plus TTY/console
+    input, buddy allocation, slab allocation, kernel virtual memory, and the
+    kernel direct map are implemented and covered by switchable runtime smokes
+    plus source-level tests.
+  - A cooperative (non-preemptive) kernel-thread scheduler, the `int 0x80`
+    syscall entry with a minimal ABI, and a default-off first ring3 user-program
+    smoke (SYS_WRITE/SYS_EXIT closed loop) are implemented; these carry explicit
+    smoke-only boundaries.
+  - Not yet implemented: preemptive scheduling, a full multi-process model,
+    ELF user-program loading (the smoke uses a flat embedded image), demand
+    paging/COW/mmap/brk, empty page-table reclamation, in-kernel block/FS
+    services, broad device drivers, a UEFI backend, and CI automation.
+  - Several helper scripts and some paths are placeholders or gated by build
+    switches; validate code paths before assuming they are wired. The proc
+    subsystem only compiles under user_program_smoke and is not part of a normal
+    boot.
 
   Conventions:
   - Prefer small, explicit low-level code over abstractions that hide hardware
@@ -70,12 +88,24 @@ context: |
     early metadata arena rather than dynamic slab growth.
   - Preserve the interrupt foundation: kernel-owned static IDT loaded before
     enabling IRQs, the stable InterruptFrame dispatch ABI, separation of CPU
-    exceptions (0x00-0x1f) from remapped i8259 IRQs (0x20-0x2f), and EOI only for
-    external IRQs. The #PF handler is diagnostic-only and must not attempt recovery.
-  - Validation/diagnostic features are gated by xmake switches and emit fixed
-    markers: mm_self_test (BIGOS_MM_SELF_TEST -> BIGOS_MM_SELF_TEST_PASSED/FAILED),
-    slab_debug (BIGOS_SLAB_DEBUG), and page_fault_smoke (BIGOS_PAGE_FAULT_SMOKE ->
-    BIGOS_PAGE_FAULT). Markers go to COM1 serial and VGA.
+    exceptions (0x00-0x1f) from remapped i8259 IRQs (0x20-0x2f) and the software
+    syscall vector (0x80), and EOI only for external IRQs (never for exceptions
+    or syscalls). The #PF handler is diagnostic-only and must not attempt
+    recovery. The syscall IDT gate is raised to DPL=3 so CPL3 can issue
+    `int 0x80`, while exception and external IRQ gates remain ring0-only.
+  - Validation/diagnostic features are gated by xmake switches (all default-off)
+    and emit fixed COM1/VGA markers:
+    mm_self_test (BIGOS_MM_SELF_TEST -> BIGOS_MM_SELF_TEST_PASSED/FAILED),
+    slab_debug (BIGOS_SLAB_DEBUG, implied by mm_self_test),
+    page_fault_smoke (BIGOS_PAGE_FAULT_SMOKE -> BIGOS_PAGE_FAULT),
+    timer_smoke (BIGOS_TIMER_SMOKE -> BIGOS_TIMER_IRQ),
+    keyboard_smoke (BIGOS_KEYBOARD_SMOKE, enables IRQ1 line),
+    scheduler_smoke (BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B),
+    user_vmem_smoke (BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED),
+    syscall_smoke (BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED),
+    user_program_smoke (BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT, also
+    compiles src/kernel/proc/** and is not part of a normal boot).
+    The unified panic path emits BIGOS_PANIC code=<code> source=<source>.
   - Treat hardware constants, linker addresses, boot protocol addresses, and page
     table self-mapping addresses as design-critical. Explain changes to them.
   - Keep public headers minimal and include only what is needed.

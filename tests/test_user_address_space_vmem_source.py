@@ -151,10 +151,10 @@ def test_user_vmem_smoke_marker_is_wired() -> None:
 
 
 def test_nxe_state_and_degradation_are_recorded() -> None:
-    doc = read_source('docs/arch/user-address-space-vmem.md')
+    doc = read_source('docs/en/arch/user-address-space-vmem.md')
     boot = read_source('src/arch/x86/boot/boot.s')
 
     # boot.s enables LME but not NXE; doc must record the degradation.
     assert 'bts $0x08, %eax' in boot  # EFER.LME
     assert 'NXE' in doc
-    assert '属性编码正确' in doc
+    assert 'attribute-encoding check' in doc

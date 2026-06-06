@@ -3,17 +3,21 @@
 Language: English | [简体中文](README-zh.md)
 
 BigOS is an early-stage x86_64 operating system kernel written mainly in
-freestanding C++17, C17, and assembly. It currently focuses on bootstrapping,
-text/serial output, interrupt and exception handling, a minimal keyboard IRQ
-smoke path, and a fairly complete early kernel memory-management stack.
+freestanding C++17, C17, and assembly. It has grown from a boot/kernel skeleton
+into a single-core kernel with a minimal user-mode loop: bootstrapping,
+text/serial output, interrupt/exception/syscall handling, a PIT timer tick, a
+keyboard-driven TTY input path, a cooperative kernel-thread scheduler, an
+`int 0x80` syscall entry, a default-off first ring3 user program, and a fairly
+complete early kernel memory-management stack.
 
 This repository is a research/toy OS kernel project, not a hosted application or
 service.
 
 ## Status
 
-The project is in kernel infrastructure bring-up stage, with the boot path,
-interrupt foundation, and early memory management now reasonably complete.
+The project has iterated past kernel infrastructure bring-up into a single-core
+kernel with timer, input, scheduling, syscall, and a minimal user-mode smoke on
+top of the boot path, interrupt foundation, and early memory management.
 
 Implemented or partially implemented:
 
@@ -22,17 +26,29 @@ Implemented or partially implemented:
 - Higher-half kernel linking at `0xffffffff80000000`.
 - VGA text-mode output, `kprintf`, and COM1 serial output for deterministic markers.
 - Kernel-owned static IDT, generated assembly ISR stubs, and a stable
-  `InterruptFrame` dispatch ABI that separates CPU exceptions from i8259 IRQs.
+  `InterruptFrame` dispatch ABI that separates CPU exceptions, i8259 IRQs, and
+  the `int 0x80` syscall vector.
 - Diagnostic-only `#PF` handler that reads `CR2` and emits a `BIGOS_PAGE_FAULT` marker.
 - Unified early fatal diagnostics (`bigos::kpanic`/`khalt`) that emit a stable
   `BIGOS_PANIC code=<code> source=<source>` marker on COM1 and VGA, then disable
   interrupts and halt.
-- i8259 PIC driver and a minimal keyboard IRQ1 scan-code smoke path.
+- i8259 PIC driver and a PIT timer driver on IRQ0 providing a monotonic tick and
+  a minimal `mdelay` busy-wait primitive.
+- Keyboard IRQ1 scancode decode (US Set 1) feeding a fixed-capacity TTY/console
+  input path; console output routes through VGA.
+- Cooperative (non-preemptive) single-core kernel-thread scheduler with 1-page
+  kernel stacks, an x86_64 context switch, a round-robin `yield()`, and an idle
+  thread; the timer IRQ only records bounded reschedule intent.
+- `int 0x80` syscall entry with a minimal register ABI and a diagnostic
+  dispatcher (`SYS_DEBUG_WRITE`, `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`).
+- Default-off first ring3 user program smoke: a flat embedded image enters
+  ring3 via TSS/RSP0 and `iretq`, then completes a `SYS_WRITE`/`SYS_EXIT` loop.
 - Buddy physical page allocator with an early metadata arena for bootstrap.
 - Slab/kmalloc allocator with size classes, dynamic slab reclaim, page-backed
   large allocations, optional debug guards, and validation statistics.
 - Kernel virtual-memory allocator (first-fit, 4-level page-table mapping, PTE
-  clearing and TLB invalidation on free) plus C++ `new`/`delete` integration.
+  clearing and TLB invalidation on free), a kernel direct map, plus C++
+  `new`/`delete` integration.
 - Explicit allocation API: `alloc_kernel_pages(nr_pages, flags)` for kernel
   virtual pages and an internal `alloc_physical_order(order, flags)` for buddy.
 - Switchable early memory runtime self-test (`bigos::mm::self_test`).
@@ -41,12 +57,14 @@ Implemented or partially implemented:
 Not implemented or still skeletal:
 
 - UEFI bootloader, ESP image generation, and OVMF/QEMU UEFI smoke tests.
-- TTY, full keyboard input, and console abstraction beyond VGA/serial output.
-- Scheduler, threads, processes, and user mode.
-- System calls.
-- Filesystem services inside the kernel.
+- Preemptive scheduling, priorities, time slices, sleep queues, and blocking.
+- A full multi-process model: multi-process scheduling, fork/exec, signals, and
+  process reclamation (only the single first-user-program smoke exists).
+- ELF user-program loading (the smoke uses a flat embedded image).
+- Demand paging, copy-on-write, `mmap`/`brk`, and empty page-table reclamation.
+- In-kernel filesystem and block-device services.
 - Broad device-driver support.
-- Complete build/install automation.
+- Complete build/install automation and CI.
 
 ## Repository Layout
 
@@ -56,9 +74,10 @@ Not implemented or still skeletal:
 |-- include           public kernel headers and small libc-style header subset
 |-- src               implementation sources for boot, kernel, drivers, mm, runtime
 |   |-- arch/x86/boot x86 boot code, MBR/DBR, and ELF loader
-|   |-- drivers       hardware drivers such as VGA and i8259 PIC
-|   |-- kernel        kernel entry, IRQ, IO, string, console/TTY skeletons
-|   |-- mm            buddy, slab, kmalloc, and virtual memory code
+|   |-- drivers       hardware drivers such as VGA, i8259 PIC, and PIT timer
+|   |-- kernel        kernel entry and subsystems: irq, timer, terminal (console/
+|   |                 keyboard/tty), sched, syscall, proc, low-level IO
+|   |-- mm            buddy, slab, kmalloc, virtual memory, and direct map code
 |   `-- runtime       runtime startup assembly source objects
 |-- tools             developer helpers such as the boot disk install tool
 |-- openspec          OpenSpec project configuration
@@ -94,12 +113,18 @@ boot.cc
   v
 kernel()
   - clears VGA text screen
+  - initializes serial output (serial_init)
   - initializes memory management (init_mem)
-  - optionally runs the early memory runtime self-test (mm::self_test)
-  - initializes kernel-owned IDT, exception dispatch, i8259 PIC, and keyboard IRQ1 smoke
-  - enables interrupts after selected early handlers are registered
+  - optionally runs the early memory runtime self-test (mm::self_test) and the
+    user-address-space vmem smoke
+  - initializes the TTY/console input path (terminal::init_tty)
+  - initializes kernel-owned IDT, exception/IRQ/syscall dispatch, i8259 PIC, the
+    PIT timer on IRQ0, and the keyboard IRQ1 path
+  - enables interrupts after early handlers are registered
   - emits the "BigOS kernel reached" marker on serial and VGA
-  - enters an idle hlt loop
+  - optionally runs the syscall, scheduler, and first-user-program smokes
+  - enters the cooperative scheduler via sched::start(); halt behavior is owned
+    by the scheduler idle thread instead of a naked hlt loop
 ```
 
 Key files:
@@ -108,8 +133,8 @@ Key files:
 - `src/arch/x86/boot/boot.cc`: disk read, exFAT lookup, ELF loading.
 - `src/kernel/kernel.cc`: main kernel entry.
 - `link.lds`: higher-half kernel layout.
-- `docs/arch/x86-boot-layout.md`: current Legacy BIOS address and handoff layout.
-- `docs/arch/uefi-boot-blueprint.md`: future UEFI compatibility blueprint; this is
+- `docs/en/arch/x86-boot-layout.md`: current Legacy BIOS address and handoff layout.
+- `docs/en/arch/uefi-boot-blueprint.md`: future UEFI compatibility blueprint; this is
   project planning only and is not a currently runnable boot path.
 
 ## Build And Run
@@ -121,16 +146,25 @@ The primary build system is xmake and the expected compiler is
 xmake
 ```
 
-Optional validation build switches (off by default):
+Optional validation build switches (all off by default; see `xmake.lua`):
 
 ```bash
-xmake f --mm_self_test=y    # run the early memory runtime self-test on boot
-xmake f --slab_debug=y      # enable slab allocator debug guards
-xmake f --page_fault_smoke=y # enable the validation-only page-fault trigger
+xmake f --mm_self_test=y      # BIGOS_MM_SELF_TEST -> BIGOS_MM_SELF_TEST_PASSED/FAILED
+xmake f --slab_debug=y        # BIGOS_SLAB_DEBUG slab debug guards (implied by mm_self_test)
+xmake f --page_fault_smoke=y  # BIGOS_PAGE_FAULT_SMOKE -> BIGOS_PAGE_FAULT
+xmake f --timer_smoke=y       # BIGOS_TIMER_SMOKE -> BIGOS_TIMER_IRQ
+xmake f --keyboard_smoke=y    # BIGOS_KEYBOARD_SMOKE enables the IRQ1 line
+xmake f --scheduler_smoke=y   # BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B
+xmake f --user_vmem_smoke=y   # BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED
+xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED
+xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
 ```
 
 `--mm_self_test` implies `--slab_debug`. The self-test emits the
 `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` markers on COM1 and VGA.
+`--user_program_smoke` additionally compiles `src/kernel/proc/**` and enters the
+first ring3 user program; it is not part of a normal boot. All markers are
+written to COM1 serial and VGA.
 
 One-command local boot debug for the current Legacy BIOS/MBR/exFAT path:
 
@@ -164,18 +198,22 @@ python3 tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
 python3 tools/boot_debug.py run --no-launch
 python3 tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
 python3 tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+python3 tools/boot_debug.py run --user-program-smoke
 python3 tools/boot_debug.py validate-image --image build/test/os.raw
 ```
 
 `--memory-self-test` builds with `BIGOS_MM_SELF_TEST` and routes COM1 to a serial
 log; combine with `--expect-serial-marker`/`--smoke-timeout` for a bounded smoke
-test. Run Python helpers through `uv run` per the project tooling convention,
-e.g. `uv run python tools/boot_debug.py run --no-launch`.
+test. `--user-program-smoke` builds with `BIGOS_USER_PROGRAM_SMOKE` and enters the
+first ring3 user program. Run Python helpers through `uv run` per the project
+tooling convention, e.g. `uv run python tools/boot_debug.py run --no-launch`.
 
-A GUI shortcut is also available:
+A GUI shortcut is also available, including a variant that enables the
+first-user-program smoke:
 
 ```bash
 make boot-debug-gui
+make boot-debug-user-gui
 ```
 
 The raw image builder uses only Python standard library file writes. It does not
@@ -265,7 +303,7 @@ Notes:
 The bootloader is specific to x86/x86_64 and assumes a disk image layout that can
 provide an exFAT partition containing a file named `kernel`.
 The current runnable backend is Legacy BIOS; UEFI is documented as a future
-parallel backend in `docs/arch/uefi-boot-blueprint.md`.
+parallel backend in `docs/en/arch/uefi-boot-blueprint.md`.
 
 - `src/arch/x86/boot/mbr.s`: first-stage boot code.
 - `src/arch/x86/boot/dbr_exfat.s`: exFAT boot-sector code.
@@ -278,13 +316,18 @@ parallel backend in `docs/arch/uefi-boot-blueprint.md`.
 
 `src/kernel/kernel.cc` performs the current runtime setup:
 
-- Clears the VGA text screen.
+- Clears the VGA text screen and initializes COM1 serial output.
 - Calls `bigos::init_mem()`.
-- Optionally runs `bigos::mm::self_test()` (when built with `BIGOS_MM_SELF_TEST`).
-- Calls `bigos::irq::initIRQ()`.
+- Optionally runs `bigos::mm::self_test()` (when built with `BIGOS_MM_SELF_TEST`)
+  and the user-address-space vmem smoke (`BIGOS_USER_VMEM_SMOKE`).
+- Initializes the TTY/console input path (`bigos::terminal::init_tty()`).
+- Calls `bigos::irq::initIRQ()` (IDT, exception/IRQ/syscall dispatch, PIC, PIT
+  timer on IRQ0, keyboard IRQ1).
 - Optionally triggers a page-fault smoke (when built with `BIGOS_PAGE_FAULT_SMOKE`).
 - Enables interrupts and emits the "BigOS kernel reached" marker.
-- Idles with `hlt`.
+- Optionally runs the syscall, scheduler, and first-user-program smokes.
+- Enters the cooperative scheduler via `bigos::sched::start()`; the idle thread
+  owns the halt behavior.
 
 ### Memory Management
 
@@ -308,7 +351,7 @@ while internal physical allocation uses buddy-order semantics through
 - `include/bigos/memory.h`: exposes the public allocation API.
 - `src/mm/memdef.h`: defines mm-private page size, buddy order, and allocation flags.
 
-See `docs/arch/memory-runtime-validation.md` for self-test usage.
+See `docs/en/arch/memory-runtime-validation.md` for self-test usage.
 
 ### Interrupts And Input
 
@@ -317,17 +360,73 @@ loads a kernel-owned static IDT before enabling maskable interrupts and routes
 all ISR entries through a stable `InterruptFrame` dispatch ABI.
 
 - `src/kernel/irq/interrupt.s`: generated ISR entry stubs.
-- `src/kernel/irq/interrupt.cc`: IDT initialization, exception dispatch, and external IRQ dispatch.
+- `src/kernel/irq/interrupt.cc`: IDT initialization, exception dispatch, external
+  IRQ dispatch, and routing of the `int 0x80` syscall vector.
 - `src/drivers/irqchip/i8259.cc`: PIC remap, masking, and EOI support.
-- `src/kernel/irq/isr.cc`: diagnostic `#PF` handler and minimal keyboard IRQ1 scancode smoke.
+- `src/kernel/irq/isr.cc`: diagnostic `#PF` handler, the timer IRQ0 tick hook,
+  and the keyboard IRQ1 handler.
 - `include/irq/interrupt.h`: descriptor layout, `InterruptFrame`, and vector constants.
-- `docs/arch/interrupt-exception-foundation.md`: current interrupt/exception
+- `docs/en/arch/interrupt-exception-foundation.md`: current interrupt/exception
   design, non-goals, and validation notes.
 
-CPU exceptions (`0x00`-`0x1f`) and remapped i8259 IRQs (`0x20`-`0x2f`) are
-dispatched separately; EOI is only sent for external IRQs. Keyboard input is not
-yet routed through a complete TTY layer; the current IRQ1 path only reads one
-PS/2 scancode byte and prints a smoke marker.
+CPU exceptions (`0x00`-`0x1f`), remapped i8259 IRQs (`0x20`-`0x2f`), and the
+syscall vector (`0x80`) are dispatched separately; EOI is only sent for external
+IRQs. The syscall IDT gate is raised to DPL=3 so ring3 can issue `int 0x80`,
+while exception and external IRQ gates remain ring0-only.
+
+### Timer
+
+The PIT drives a periodic IRQ0 tick.
+
+- `src/drivers/timer/pit.cc` / `include/drivers/timer/pit.h`: PIT channel-0 setup.
+- `src/kernel/timer/timer.cc` / `include/bigos/timer.h`: a monotonic `ticks()`
+  counter advanced from IRQ context via `on_tick()`, and a minimal `mdelay`
+  busy-wait. The `timer_smoke` switch emits a bounded `BIGOS_TIMER_IRQ` marker.
+
+### TTY, Console, And Keyboard
+
+Keyboard input flows from the IRQ1 handler through scancode decode into a
+fixed-capacity TTY input buffer; console output routes through VGA.
+
+- `src/kernel/terminal/keyboard.cc` / `include/bigos/keyboard.h`: US Set 1
+  scancode decode with modifier tracking; the IRQ does only bounded decode and a
+  ring-buffer handoff.
+- `src/kernel/terminal/tty.cc` / `include/bigos/tty.h`: TTY input enqueue and
+  `terminal::init_tty()`.
+- `src/kernel/terminal/console.cc` / `include/bigos/console.h`: console output
+  over the VGA backend.
+
+### Scheduler
+
+A cooperative, single-core kernel-thread scheduler.
+
+- `src/kernel/sched/sched.cc` / `include/bigos/sched.h`: TCBs, a round-robin run
+  queue, `create_kernel_thread()`, `yield()`, `thread_exit()`, and `start()`
+  (which adopts the boot context as the idle thread).
+- `src/kernel/sched/switch.s`: the x86_64 callee-saved context switch.
+- The timer IRQ records bounded reschedule intent only; it never preempts on IRQ
+  return. The `scheduler_smoke` switch runs two worker threads emitting
+  `BIGOS_SCHED_THREAD_A` / `BIGOS_SCHED_THREAD_B`.
+
+### System Calls
+
+- `src/kernel/syscall/syscall.cc` / `include/bigos/syscall.h`: the `int 0x80`
+  dispatcher and minimal register ABI (number in `rax`, args in
+  `rdi/rsi/rdx/r10/r8/r9`, return in `rax`). Implements `SYS_DEBUG_WRITE`,
+  `SYS_GET_TICK`, `SYS_WRITE`, and `SYS_EXIT`; unknown numbers return
+  `SYS_ENOSYS`. The `syscall_smoke` switch exercises this from ring0.
+
+### Process And User Mode
+
+Compiled only under `user_program_smoke` and not part of a normal boot.
+
+- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a minimal `Process`,
+  user address-space derivation, mapping of a flat embedded user image, and the
+  `SYS_WRITE`/`SYS_EXIT` smoke (`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`).
+- `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
+  `include/bigos/user_mode.h`: GDT/TSS/RSP0 setup and the `iretq` ring3 entry.
+- There is no ELF user-program loader and no demand paging; the `#PF` handler
+  only records a controlled marker for user faults.
 
 ### Display And IO
 

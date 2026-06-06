@@ -32,8 +32,8 @@
 
 ## 5. 文档同步
 
-- [x] 5.1 更新 `docs/arch/x86-boot-layout.md`，记录 register-passed v2 `BootInfoHeader*`、v2 blob producer-side 存放区域、v1 fixed-address fallback 和未移动的低地址布局。
-- [x] 5.2 更新 `docs/arch/uefi-boot-blueprint.md`，标注本 change 已落地的 ABI 基础和仍未实现的 UEFI loader/ESP/OVMF 范围。
+- [x] 5.1 更新 `docs/en/arch/x86-boot-layout.md`，记录 register-passed v2 `BootInfoHeader*`、v2 blob producer-side 存放区域、v1 fixed-address fallback 和未移动的低地址布局。
+- [x] 5.2 更新 `docs/en/arch/uefi-boot-blueprint.md`，标注本 change 已落地的 ABI 基础和仍未实现的 UEFI loader/ESP/OVMF 范围。
 - [x] 5.3 记录 `BootMemoryRegion` E820 映射表、reserved/runtime/mmio/acpi_reclaim/acpi_nvs/bad_memory 的保守处理策略。
 - [x] 5.4 记录 `make boot-debug` 仍保持 Legacy BIOS/MBR/exFAT/Bochs 语义，不切换到 UEFI。
 

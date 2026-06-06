@@ -23,7 +23,7 @@
 
 ## 5. 文档
 
-- [x] 5.1 更新 `docs/arch/timer-irq-foundation.md`，记录硬化后的 timer/IRQ runtime 契约、`on_tick()` 所有权与三类 API 的上下文边界。
+- [x] 5.1 更新 `docs/en/arch/timer-irq-foundation.md`，记录硬化后的 timer/IRQ runtime 契约、`on_tick()` 所有权与三类 API 的上下文边界。
 
 ## 6. 验证
 

@@ -29,7 +29,7 @@ BigOS 当前启动链路完全围绕 Legacy BIOS/MBR/exFAT 设计，后续内存
 
 - 影响子系统：x86 boot、boot handoff ABI、内存初始化、未来显示/ACPI/调试入口规划。
 - 直接产物：OpenSpec proposal/design/tasks/specs 和项目级规划文档任务；现阶段不修改运行时代码。
-- 后续可能影响文件：`include/arch/x86/boot/boot_info.h`、`src/mm/buddy.cc`、`docs/arch/`、`tools/boot_debug.py`、顶层 `Makefile`、未来 UEFI loader 目录。
+- 后续可能影响文件：`include/arch/x86/boot/boot_info.h`、`src/mm/buddy.cc`、`docs/en/arch/`、`tools/boot_debug.py`、顶层 `Makefile`、未来 UEFI loader 目录。
 - 架构假设：目标仍是 x86_64 freestanding kernel，kernel 保持 higher-half ELF64；未来 boot backend 进入 kernel 时应已进入 long mode，分页和栈由 loader 准备，并通过寄存器传递 `BootInfo*`。
 - 内存布局假设：现有 BIOS 固定低地址布局在蓝图阶段不破坏；未来 `BootInfo` 演进需要显式定义与旧版兼容关系。
 - 模拟器假设：现有 Bochs BIOS 调试入口保留；未来 UEFI smoke test 优先规划 QEMU + OVMF，Bochs UEFI 支持作为可选验证路径。

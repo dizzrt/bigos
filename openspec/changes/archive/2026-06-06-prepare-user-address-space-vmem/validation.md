@@ -26,7 +26,7 @@
 - 修改 `src/mm/vmem.cc`：新增 `map_single_page()` primitive（属性入参、复用 self-mapping 遍历与缺级分配、`InterruptGuard` 写入边界、缺级失败回滚）；`ensure_paging_descriptor` 写入加 guard；`map_page`/`unmap_page`/`derive_user_address_space_root` 实现；`map_kernel_range()` 改为经由 primitive 以 `KERNEL_DEFAULT` 表达（PTE bit 等价旧 `0x3`）；新增默认关闭的 `user_vmem_smoke()`。
 - 修改 `src/kernel/kernel.cc`：在 `init_mem()` 之后、IRQ 使能前的非中断上下文调用 `user_vmem_smoke()`（仅在 smoke 构建下）。
 - 修改 `xmake.lua`：新增默认关闭的 `user_vmem_smoke` 开关与 `BIGOS_USER_VMEM_SMOKE` define。
-- 新增文档/测试：`docs/arch/user-address-space-vmem.md`、`tests/test_user_address_space_vmem_source.py`。
+- 新增文档/测试：`docs/en/arch/user-address-space-vmem.md`、`tests/test_user_address_space_vmem_source.py`。
 - 修改 `tests/test_memory_correctness_source.py`：把 rollback bookkeeping 断言从 `new_descriptors[new_descriptor_count++]` 更新为等价的 `__changes[(*__change_count)++]`（重构后该计数逻辑移入共享 `ensure_paging_descriptor`，rollback 行为不变）。
 - 未改动 boot 固定地址、higher-half/load base、BootInfo ABI、direct map、`KVMEM_BASE`、self-mapping 地址布局或 `KERNEL_PML4_ADDR`；既有内存源码级测试保持通过。
 

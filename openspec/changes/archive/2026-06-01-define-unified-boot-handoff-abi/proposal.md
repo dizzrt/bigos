@@ -24,7 +24,7 @@ UEFI 启动蓝图已经明确长期方向是统一 kernel handoff，但当前运
 ## Impact
 
 - 影响子系统：x86 boot handoff ABI、runtime `_start`、kernel entry、早期内存初始化、公共 boot header 和启动架构文档。
-- 可能修改文件：`include/arch/x86/boot/boot_info.h`、`src/arch/x86/boot/boot.s`、`src/runtime/crt0.s`、`src/kernel/kernel.cc`、`src/mm/buddy.cc`、`include/bigos/memory.h` 或相关 mm header、`docs/arch/x86-boot-layout.md`、`docs/arch/uefi-boot-blueprint.md`。
+- 可能修改文件：`include/arch/x86/boot/boot_info.h`、`src/arch/x86/boot/boot.s`、`src/runtime/crt0.s`、`src/kernel/kernel.cc`、`src/mm/buddy.cc`、`include/bigos/memory.h` 或相关 mm header、`docs/en/arch/x86-boot-layout.md`、`docs/en/arch/uefi-boot-blueprint.md`。
 - 架构假设：目标仍是 x86_64 freestanding kernel；Legacy BIOS loader 已进入 long mode、开启分页并跳转到 higher-half ELF64 entry；未来 backend 也必须在进入 kernel 前准备等价环境。
 - ABI 假设：x86_64 使用 System V 风格第一个参数寄存器 `rdi` 传递 `BootInfo*`；固定低地址 `BIGOS_BOOT_INFO_ADDRESS` 仅作为 Legacy fallback 和迁移期兼容。
 - 内存布局假设：不移动现有 `0x0500` E820 buffer、`0x0800` legacy aliases、`0x0840` v1 `BootInfo`、boot-stage page table 区域或 kernel load base；新增 v2/section 数据不得破坏这些地址。

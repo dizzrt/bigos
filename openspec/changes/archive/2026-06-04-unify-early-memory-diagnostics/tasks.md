@@ -74,7 +74,7 @@
 
 ## 6. 文档
 
-- [x] 6.1 视情况新增/更新 `docs/arch` 中的早期诊断/panic 说明（marker 与错误码约定），
+- [x] 6.1 视情况新增/更新 `docs/en/arch` 中的早期诊断/panic 说明（marker 与错误码约定），
   并在 README/AGENTS 涉及 marker 列表处补充 `BIGOS_PANIC`（如适用）。
-  （新增 `docs/arch/early-kernel-diagnostics.md`；README 特性列表补充 `BIGOS_PANIC`
+  （新增 `docs/en/arch/early-kernel-diagnostics.md`；README 特性列表补充 `BIGOS_PANIC`
   说明。）

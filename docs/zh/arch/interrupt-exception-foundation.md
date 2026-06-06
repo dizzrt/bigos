@@ -11,12 +11,14 @@ VGA clear
 serial_init()
 init_mem()
 optional BIGOS_MM_SELF_TEST
+optional BIGOS_USER_VMEM_SMOKE
 terminal::init_tty()
 irq::initIRQ()
 optional BIGOS_PAGE_FAULT_SMOKE trigger
 irq::enableIRQ()
 normal boot marker
-hlt loop
+optional syscall / scheduler / user-program smoke
+sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 ```
 
 `serial_init()` 在默认 boot path 中显式初始化 COM1，确保普通 serial marker 和 early diagnostics 不再隐式依赖 `BIGOS_MM_SELF_TEST`。`BIGOS_MM_SELF_TEST` 仍在 PIC 初始化和 `sti` 之前运行。普通 allocator、kernel API 和内存自检不承诺 IRQ-context 安全；`kmalloc()`、`free()`、`alloc_kernel_pages()`、`free_pages()` 和全局 `new/delete` 不允许从 IRQ handler 调用。

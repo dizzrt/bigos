@@ -10,7 +10,7 @@ namespace bigos::irq {
 namespace bigos::sys {
     // Minimal syscall ABI (int 0x80 software-interrupt entry; ring0 self-tests and
     // the default-off first user program use the same register ABI). The mapping below is fixed by source-level checks and documented in
-    // docs/arch/syscall-entry.md:
+    // docs/en/arch/syscall-entry.md:
     //
     //   syscall number -> rax           (InterruptFrame.rax on entry)
     //   argument 0     -> rdi           (InterruptFrame.rdi)

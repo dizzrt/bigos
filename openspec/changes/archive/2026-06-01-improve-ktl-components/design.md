@@ -19,7 +19,7 @@
 - 统一活动 KTL 组件命名为小写 snake_case/语义化类型名：`ktl::bitset`、`ktl::buffer`、`ktl::intrusive_list`、`ktl::intrusive_list_node`、`ktl::pair`。
 - 明确所有权和生命周期规则，尤其是侵入式节点与 buffer 存储。
 - 在当前或近期内核需求明确时，补齐缺失 KTL 能力。
-- 在 `docs/ktl` 下为每个 KTL 组件提供文档。
+- 在 `docs/en/ktl` 下为每个 KTL 组件提供文档。
 - 通过聚焦检查和受影响内存管理调用点审查验证 KTL 变更。
 
 **Non-Goals:**
@@ -123,7 +123,7 @@
 6. 添加 allocator 与 algorithm utility 基础。
 7. 添加 queue/priority queue adapters，并记录其存储行为。
 8. 分阶段添加红黑树 foundation 和 map，并以不变量验证作为进入活动 API 的前置条件。
-9. 每个组件公共接口稳定后更新 `docs/ktl`。
+9. 每个组件公共接口稳定后更新 `docs/en/ktl`。
 10. 工具链可用时运行 xmake 交叉构建；不可用时记录缺失工具链，并运行尽可能贴近 freestanding C++17 的辅助诊断。
 
 回滚策略：按 header/source 隔离组件变更，在验证前不让新增组件进入无关子系统。如果新增组件风险过高，可保持未引用或移除，不影响现有 KTL 用户。

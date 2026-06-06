@@ -12,7 +12,7 @@
 - 补齐 ISR ABI 的源码级与（可用时）runtime 验证：`interrupt.s` 进入 C++ dispatch 前的 16 字节栈对齐、原始通用寄存器保存、`InterruptFrame` layout 与 error-code 槽语义、external IRQ EOI 后经 `iretq` 返回路径。
 - 在稳定 runtime oracle 下复测 IRQ0 周期触发、EOI、`iretq` 返回、tick 单调递增和 `mdelay()` 行为；Bochs/serial oracle 不可用时显式记录原因与剩余 IRQ runtime 风险。
 - 更新 `tests/test_timer_irq_foundation_source.py` 中与“`on_tick` 必须不存在 / handler 直写 `g_ticks`”相关的断言，使其与硬化后的内部 API 一致。
-- 同步更新 `docs/arch/timer-irq-foundation.md`（或新增硬化说明），记录 timer/IRQ runtime 契约与上下文边界。
+- 同步更新 `docs/en/arch/timer-irq-foundation.md`（或新增硬化说明），记录 timer/IRQ runtime 契约与上下文边界。
 
 ## Capabilities
 
@@ -30,7 +30,7 @@
 - 影响 IRQ/timer 子系统：`src/kernel/irq/isr.cc`（handler 改为调用 `on_tick()`、tick 状态迁出）、`src/kernel/timer/timer.cc` 与 `include/bigos/timer.h`（新增 `on_tick()` 及上下文契约注释）、`src/kernel/irq/interrupt.cc`（dispatch/EOI 边界复核）。
 - 影响 ISR ABI 汇编：`src/kernel/irq/interrupt.s` 的栈对齐与寄存器保存约束需被源码级/runtime 验证覆盖；本 change 不改变 ABI，只补齐验证与不变量记录。
 - 影响测试与工具：更新 `tests/test_timer_irq_foundation_source.py` 相关断言，新增覆盖 `on_tick` 存在、handler 经 `on_tick` 更新 tick、`mdelay` 不在 IRQ handler 调用、ISR ABI 不变量的源码级检查；Bochs 可用时复用 `tools/boot_debug.py` serial marker 做 bounded runtime smoke。
-- 影响文档：更新 `docs/arch/timer-irq-foundation.md`，补充 timer/IRQ runtime 契约与上下文边界。
+- 影响文档：更新 `docs/en/arch/timer-irq-foundation.md`，补充 timer/IRQ runtime 契约与上下文边界。
 - 架构假设：仍为单核、x86_64 legacy BIOS + i8259 PIC + PIT 8253/8254 + Bochs 路径；不引入 scheduler、抢占、SMP、APIC/IOAPIC/HPET 或用户态。
 - 内存布局假设：不移动 boot 固定地址、linker higher-half base、kernel load base、BootInfo ABI、recursive self-mapping、`KVMEM_BASE` 或 direct-map 区域；不扩展 allocator 的 IRQ-context 安全语义。
 - 工具链假设：以 `xmake` + `x86_64-elf-gcc/g++` 为权威构建验证；Python 辅助验证通过 `uv run ...` 执行；Bochs/serial oracle 不可用时记录原因与剩余 bootability/IRQ runtime 风险。

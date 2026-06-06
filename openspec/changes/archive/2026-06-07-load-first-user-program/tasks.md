@@ -36,7 +36,7 @@
 
 ## 6. 文档与源码级检查
 
-- [x] 6.1 更新 `docs/arch` 中用户态进入、syscall ABI、用户地址空间激活、用户指针检查和 fault 处理说明。
+- [x] 6.1 更新 `docs/en/arch` 中用户态进入、syscall ABI、用户地址空间激活、用户指针检查和 fault 处理说明。
 - [x] 6.2 新增源码级测试覆盖用户镜像 wiring、页属性、CR3 激活边界、ring3 frame、syscall gate DPL、用户指针校验和 exit 行为。
 - [x] 6.3 新增源码级测试确认 boot 固定地址、higher-half base、direct map、`KVMEM_BASE`、self-mapping 地址和 `InterruptFrame` ABI 未被移动。
 - [x] 6.4 新增源码级测试确认 exception/IRQ/syscall EOI 语义分离，只有 syscall vector 可被 CPL3 软件触发。

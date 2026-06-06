@@ -26,7 +26,7 @@
 - 修改 `src/kernel/kernel.cc`：保持 memory/self-test/TTY/IRQ 初始化顺序不变，在 `irq::enableIRQ()` 后进入 `sched::start()`，裸 `hlt` loop 由 idle 线程取代。
 - 修改 `src/kernel/irq/isr.cc`：timer IRQ0 在 `on_tick()` 后调用 bounded `sched::on_timer_tick()`，不做抢占/分配。
 - 修改 `xmake.lua`：新增默认关闭的 `scheduler_smoke` 开关。
-- 新增文档/测试：`docs/arch/kernel-thread-scheduler.md`、`tmp/roadmap.md`、`tests/test_kernel_thread_scheduler_source.py`。
+- 新增文档/测试：`docs/en/arch/kernel-thread-scheduler.md`、`tmp/roadmap.md`、`tests/test_kernel_thread_scheduler_source.py`。
 - 未改动 boot 固定地址、higher-half/load base、BootInfo ABI、direct map、`KVMEM_BASE`、IDT vector 分配或 `InterruptFrame` layout；现有 timer/interrupt 源码级测试保持通过。
 
 ## 剩余风险

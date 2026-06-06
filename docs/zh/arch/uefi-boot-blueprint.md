@@ -59,7 +59,7 @@ boot backend 负责把固件数据规范化为统一 handoff。
 ## BIOS 地址布局兼容
 
 现有 Legacy BIOS 固定地址布局在本蓝图阶段保持不变。当前地址约束记录在
-`docs/arch/x86-boot-layout.md`，关键 handoff 区域包括：
+`docs/zh/arch/x86-boot-layout.md`，关键 handoff 区域包括：
 
 ```text
 0x0500..0x07ff  E820 ARDS records written by extended DBR
