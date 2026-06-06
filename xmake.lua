@@ -53,6 +53,12 @@ option("user_vmem_smoke")
     set_description("enable validation-only user address space vmem smoke marker")
 option_end()
 
+option("syscall_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only ring0 int 0x80 syscall self-test")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -101,6 +107,10 @@ target("kernel")
 
     if has_config("user_vmem_smoke") then
         add_defines("BIGOS_USER_VMEM_SMOKE")
+    end
+
+    if has_config("syscall_smoke") then
+        add_defines("BIGOS_SYSCALL_SMOKE")
     end
 
     if is_mode("debug") then 

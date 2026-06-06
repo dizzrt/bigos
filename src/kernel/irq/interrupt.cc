@@ -1,5 +1,6 @@
 #include <bigos/io.h>
 #include <bigos/panic.h>
+#include <bigos/syscall.h>
 
 #include <drivers/irqchip/i8259.h>
 #include <irq/isr.h>
@@ -63,6 +64,10 @@ namespace irq {
             return __vector >= I8259_MASTER_VECTOR_BASE && __vector <= I8259_VECTOR_LAST;
         }
 
+        static bool is_syscall_vector(uint64_t __vector) noexcept {
+            return __vector == VECTOR_SYSCALL;
+        }
+
         static uint8_t vector_to_i8259_irq(uint64_t __vector) noexcept {
             return (uint8_t)(__vector - I8259_MASTER_VECTOR_BASE);
         }
@@ -122,6 +127,16 @@ namespace irq {
             // here, after the registered handler returns, then iretq via isr_common.
             handler(__frame);
             driver::irqchip::i8259::send_eoi(irq_line);
+            return;
+        }
+
+        if (__detail::is_syscall_vector(__frame->vector)) {
+            // Syscall is a software interrupt, not an external IRQ: this path
+            // MUST NOT send an i8259 EOI. It routes into the syscall dispatcher
+            // and returns through the shared isr_common iretq path, leaving the
+            // exception and external-IRQ branches (and their EOI semantics)
+            // unchanged.
+            bigos::sys::dispatch(__frame);
             return;
         }
 
