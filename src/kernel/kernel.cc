@@ -50,6 +50,11 @@ void kernel(const BootInfoHeader *boot_info) {
 #ifdef BIGOS_MM_SELF_TEST
     bigos::mm::self_test();
 #endif
+#ifdef BIGOS_USER_VMEM_SMOKE
+    // Non-interrupt-context one-shot validation of the page-attribute primitives
+    // and user address-space root derivation. Does not switch CR3 or enter ring3.
+    bigos::mm::user_vmem_smoke();
+#endif
     bigos::terminal::init_tty();
     bigos::irq::initIRQ();
 #ifdef BIGOS_PAGE_FAULT_SMOKE

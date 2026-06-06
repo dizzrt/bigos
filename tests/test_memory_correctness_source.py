@@ -148,7 +148,7 @@ def test_vmem_pre_paging_failure_rolls_back_mapping_and_backing() -> None:
 
     assert 'struct PagingDescriptorChange' in vmem
     assert 'clear_new_paging_descriptors(new_descriptors, new_descriptor_count);' in vmem
-    assert 'new_descriptors[new_descriptor_count++]' in vmem
+    assert '__changes[(*__change_count)++]' in vmem
     assert 'uint32_t mapped_pages = 0;' in vmem
     assert 'rollback_kernel_range(__mblk->base, mapped_pages);' in vmem
     assert 'release_physical_area(mblk);' in vmem

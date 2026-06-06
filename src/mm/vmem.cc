@@ -108,7 +108,8 @@ static void direct_map_panic(const char *__message) noexcept {
     bigos::kpanic(bigos::PanicCode::DirectMapInitFailed, "mm-direct-map", "%s\n", __message);
 }
 
-static bool direct_map_select_range(uint64_t __base, uint64_t __len, uint64_t *__out_base, uint64_t *__out_len) noexcept {
+static bool direct_map_select_range(
+    uint64_t __base, uint64_t __len, uint64_t *__out_base, uint64_t *__out_len) noexcept {
     if (__len == 0 || __base >= bigos::mm::KDIRECT_LEN)
         return false;
 
@@ -161,7 +162,11 @@ static bool ensure_paging_descriptor(uint64_t *__entry, uint16_t __index, uint64
         return false;
 
     __changes[(*__change_count)++] = {__entry, __index};
-    __entry[__index] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+    {
+        // Mask same-CPU maskable IRQ interleaving while publishing the entry.
+        bigos::irq::InterruptGuard guard;
+        __entry[__index] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+    }
     return true;
 }
 
@@ -227,6 +232,55 @@ static bool map_direct_large_page(uint64_t __vaddr, uint64_t __phys) noexcept {
         memset((void *)entry, 0, PAGE_SIZE);
 
     entry[i_pd] = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDE | PAGING_DESCRIPTOR_LARGE_PAGE;
+    return true;
+}
+
+// Single 4 KiB mapping driven by explicit PTE attributes. Reuses the recursive
+// self-mapping walk and the shared missing-level allocator. Intermediate levels
+// inherit present+writable plus the user bit (when the leaf is a user mapping)
+// so the leaf stays reachable; NX is encoded only on the leaf PTE. On a missing
+// level allocation failure it rolls back the levels it created and returns false.
+static bool map_single_page(uint64_t __vaddr, uint64_t __phys, uint64_t __attr) noexcept {
+    uint16_t i_pml4 = get_pml4_index(__vaddr);
+    uint16_t i_pdpt = get_pdpt_index(__vaddr);
+    uint16_t i_pd = get_pd_index(__vaddr);
+    uint16_t i_pt = get_pt_index(__vaddr);
+    PagingDescriptorChange new_descriptors[3] = {};
+    uint32_t new_descriptor_count = 0;
+
+    uint64_t intermediate_attr = DEFAULT_ATTR_PML4E;
+    if ((__attr & bigos::mm::page_attr::USER) != 0)
+        intermediate_attr |= bigos::mm::page_attr::USER;
+
+    uint64_t *entry = self_mapping_pml4(__vaddr);
+    if (!ensure_paging_descriptor(entry, i_pml4, intermediate_attr, new_descriptors, &new_descriptor_count)) {
+        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
+    entry = self_mapping_pdpt(__vaddr);
+    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pml4(__vaddr))
+        memset((void *)entry, 0, PAGE_SIZE);
+
+    if (!ensure_paging_descriptor(entry, i_pdpt, intermediate_attr, new_descriptors, &new_descriptor_count)) {
+        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
+    entry = self_mapping_pd(__vaddr);
+    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pdpt(__vaddr))
+        memset((void *)entry, 0, PAGE_SIZE);
+
+    if (!ensure_paging_descriptor(entry, i_pd, intermediate_attr, new_descriptors, &new_descriptor_count)) {
+        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
+    entry = self_mapping_pt(__vaddr);
+    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pd(__vaddr))
+        memset((void *)entry, 0, PAGE_SIZE);
+
+    {
+        bigos::irq::InterruptGuard guard;
+        entry[i_pt] = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+    }
     return true;
 }
 
@@ -407,6 +461,110 @@ namespace mm {
         return phys;
     }
 
+    bool map_page(uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept {
+        return map_single_page(__vaddr, __phys, __attr);
+    }
+
+    void unmap_page(uint64_t __vaddr) noexcept {
+        uint64_t *pte = mapped_pte(__vaddr);
+        if (pte != nullptr && paging_present(*pte)) {
+            bigos::irq::InterruptGuard guard;
+            *pte = 0;
+            flush_kernel_tlb_page(__vaddr);
+        }
+    }
+
+    uint64_t derive_user_address_space_root() noexcept {
+        uint64_t new_root = (uint64_t)__detail::alloc_physical_order(0, 0);
+        if (new_root == 0)
+            return INVALID_PHYS_ADDR;
+
+        // The newly allocated frame comes from usable RAM, which the direct map
+        // covers; access it through the direct mapping to publish entries.
+        uint64_t *dst = (uint64_t *)phys_to_direct(new_root);
+        if (dst == nullptr) {
+            __detail::free_physical_order((void *)new_root);
+            return INVALID_PHYS_ADDR;
+        }
+
+        // The recursive self-mapping resolves the active (kernel) PML4.
+        const uint64_t *kernel_pml4 = self_mapping_pml4(0);
+        constexpr uint32_t HALF = 256;   // index 0..255 = lower half, 256..511 = higher half
+        for (uint32_t i = 0; i < HALF; i++)
+            dst[i] = 0;   // user lower half: independent, cleared
+        for (uint32_t i = HALF; i < 512; i++)
+            dst[i] = kernel_pml4[i];   // share kernel higher half / self-mapping / direct map
+
+        return new_root;
+    }
+
+#ifdef BIGOS_USER_VMEM_SMOKE
+    bool user_vmem_smoke() noexcept {
+        // Lower-half (user region) test address, page-aligned and unused by the
+        // kernel. We only build/read the entry; we never switch CR3 or enter ring3.
+        constexpr uint64_t TEST_VADDR = 0x0000000001000000ul;
+
+        uint64_t phys = (uint64_t)__detail::alloc_physical_order(0, 0);
+        if (phys == 0) {
+            bigos::serial_puts("BIGOS_USER_VMEM_SMOKE_FAILED alloc\n");
+            return false;
+        }
+
+        bool ok = map_page(TEST_VADDR, phys, page_attr::USER_DATA);
+        if (!ok) {
+            __detail::free_physical_order((void *)phys);
+            bigos::serial_puts("BIGOS_USER_VMEM_SMOKE_FAILED map\n");
+            return false;
+        }
+
+        uint64_t *pte = mapped_pte(TEST_VADDR);
+        bool pte_ok = pte != nullptr && paging_present(*pte) && (*pte & page_attr::USER) != 0 &&   // user bit set
+                      (*pte & page_attr::WRITABLE) != 0 &&                                         // writable
+                      (*pte & page_attr::NO_EXECUTE) != 0;   // user data page is NX-encoded
+        uint64_t pte_value = pte != nullptr ? *pte : 0;
+
+        unmap_page(TEST_VADDR);
+        __detail::free_physical_order((void *)phys);
+
+        // Encoding check for a user code page: same attribute set must clear NX.
+        bool code_attr_ok =
+            (page_attr::USER_CODE & page_attr::NO_EXECUTE) == 0 && (page_attr::USER_CODE & page_attr::USER) != 0;
+
+        // Derive a user root and confirm the higher/lower half layout.
+        uint64_t root = derive_user_address_space_root();
+        bool root_ok = false;
+        if (root != INVALID_PHYS_ADDR) {
+            const uint64_t *root_entries = (const uint64_t *)phys_to_direct(root);
+            const uint64_t *kernel_pml4 = self_mapping_pml4(0);
+            if (root_entries != nullptr) {
+                root_ok = true;
+                for (uint32_t i = 0; i < 256; i++) {
+                    if (root_entries[i] != 0) {
+                        root_ok = false;
+                        break;
+                    }
+                }
+                for (uint32_t i = 256; root_ok && i < 512; i++) {
+                    if (root_entries[i] != kernel_pml4[i]) {
+                        root_ok = false;
+                        break;
+                    }
+                }
+            }
+            __detail::free_physical_order((void *)root);
+        }
+
+        if (pte_ok && code_attr_ok && root_ok) {
+            bigos::serial_puts("BIGOS_USER_VMEM_SMOKE_PASSED\n");
+            return true;
+        }
+
+        (void)pte_value;
+        bigos::serial_puts("BIGOS_USER_VMEM_SMOKE_FAILED verify\n");
+        return false;
+    }
+#endif
+
     void VMem::rollback_kernel_range(uint64_t __base, uint32_t __nr_pages) noexcept {
         for (uint32_t i = 0; i < __nr_pages; i++) {
             uint64_t vaddr = __base + i * PAGE_SIZE;
@@ -431,80 +589,12 @@ namespace mm {
             uint64_t physical_base = (uint64_t)physical_m.first;
 
             while (nr_physical_pages) {
-                uint16_t i_pml4 = get_pml4_index(base);
-                uint16_t i_pdpt = get_pdpt_index(base);
-                uint16_t i_pd = get_pd_index(base);
-                uint16_t i_pt = get_pt_index(base);
-
-                uint64_t *entry;
-                uint64_t page, paging_descriptor;
-                PagingDescriptorChange new_descriptors[3] = {};
-                uint32_t new_descriptor_count = 0;
-
-                // check if pdpt is valid
-                entry = self_mapping_pml4(base);
-                paging_descriptor = entry[i_pml4];
-                if (!paging_descriptor) {
-                    page = (uint64_t)__detail::alloc_physical_order(0, 0);
-                    if (page == 0) {
-                        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
-                        rollback_kernel_range(__mblk->base, mapped_pages);
-                        return false;
-                    }
-                    new_descriptors[new_descriptor_count++] = {entry, i_pml4};
-                    {
-                        bigos::irq::InterruptGuard guard;
-                        self_mapping_pml4(base)[i_pml4] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PML4E;
-                    }
-
-                    entry = self_mapping_pdpt(base);
-                    memset((void *)entry, 0, PAGE_SIZE);
-                }
-
-                // check if pd is valid
-                entry = self_mapping_pdpt(base);
-                paging_descriptor = entry[i_pdpt];
-                if (!paging_descriptor) {
-                    page = (uint64_t)__detail::alloc_physical_order(0, 0);
-                    if (page == 0) {
-                        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
-                        rollback_kernel_range(__mblk->base, mapped_pages);
-                        return false;
-                    }
-                    new_descriptors[new_descriptor_count++] = {entry, i_pdpt};
-                    {
-                        bigos::irq::InterruptGuard guard;
-                        self_mapping_pdpt(base)[i_pdpt] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDPTE;
-                    }
-
-                    entry = self_mapping_pd(base);
-                    memset((void *)entry, 0, PAGE_SIZE);
-                }
-
-                // check if pt is valid
-                entry = self_mapping_pd(base);
-                paging_descriptor = entry[i_pd];
-                if (!paging_descriptor) {
-                    page = (uint64_t)__detail::alloc_physical_order(0, 0);
-                    if (page == 0) {
-                        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
-                        rollback_kernel_range(__mblk->base, mapped_pages);
-                        return false;
-                    }
-                    new_descriptors[new_descriptor_count++] = {entry, i_pd};
-                    {
-                        bigos::irq::InterruptGuard guard;
-                        self_mapping_pd(base)[i_pd] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PDE;
-                    }
-
-                    entry = self_mapping_pt(base);
-                    memset((void *)entry, 0, PAGE_SIZE);
-                }
-
-                // set paging
-                {
-                    bigos::irq::InterruptGuard guard;
-                    self_mapping_pt(base)[i_pt] = (physical_base & PAGING_DESCRIPTOR_ADDR_MASK) | DEFAULT_ATTR_PTE;
+                // Kernel ranges use the supervisor default attribute, which is
+                // bit-for-bit equivalent to the legacy DEFAULT_ATTR_PTE = 0x3
+                // (present + writable, user=0, NX=0).
+                if (!map_single_page(base, physical_base, page_attr::KERNEL_DEFAULT)) {
+                    rollback_kernel_range(__mblk->base, mapped_pages);
+                    return false;
                 }
 
                 mapped_pages++;
