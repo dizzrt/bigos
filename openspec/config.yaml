@@ -12,9 +12,11 @@ context: |
     output, a kernel-owned IDT with exception/IRQ/syscall dispatch, i8259 PIC
     support, a PIT timer IRQ0 with a monotonic tick, keyboard scan-code decode
     feeding a TTY/console input path, a fairly complete early kernel memory
-    management stack (buddy, slab/kmalloc, kernel virtual memory, direct map), a
-    cooperative (non-preemptive) kernel-thread scheduler, an `int 0x80` syscall
-    entry with a minimal ABI, and a default-off first ring3 user-program smoke.
+    management stack (buddy, slab/kmalloc, kernel virtual memory, direct map,
+    owned empty page-table reclamation), a cooperative (non-preemptive)
+    kernel-thread scheduler, an `int 0x80` syscall entry with a minimal ABI,
+    default-off ring3 user-program smokes, a read-only ATA PIO block/exFAT path,
+    and a bounded filesystem-backed ELF64 user-program loader.
 
   Tech stack:
   - C++17 and C17 in freestanding mode.
@@ -32,14 +34,17 @@ context: |
   - src/kernel: kernel entry plus subsystem subdirectories: irq (IDT, exception
     and IRQ dispatch, ISR stubs), timer (monotonic tick), terminal (console,
     keyboard decode, TTY input), sched (cooperative scheduler and context-switch
-    assembly), syscall (`int 0x80` dispatch), proc (process model and ring3
-    user-mode entry, compiled only under user_program_smoke), bigos (low-level
-    IO, panic, utils), and string functions.
+    assembly), syscall (`int 0x80` dispatch), proc (process model, ring3
+    user-mode entry, safe teardown/reaping, bounded ELF64 loader, compiled only
+    under user_program_smoke or user_elf_smoke), fs (read-only exFAT mount,
+    path lookup, and bounded reads), bigos (low-level IO, panic, utils), and
+    string functions.
   - src/mm: buddy physical page allocator with an early metadata arena,
     slab/kmalloc allocator (reclaim, large allocations, debug guards, stats),
     kernel virtual memory area/page-table mapping, kernel direct map, public
     memory API, and a switchable memory runtime self-test.
-  - src/drivers: VGA text-mode driver, i8259 PIC driver, and PIT timer driver.
+  - src/drivers: VGA text-mode driver, i8259 PIC driver, PIT timer driver, and
+    ATA PIO block driver.
   - src/runtime: startup objects such as crt0, crti, and crtn.
   - tools: developer helper scripts such as the boot disk-image install helper and
     boot_debug.py (raw image build, Bochs config generation, serial-marker smoke).
@@ -55,21 +60,22 @@ context: |
     freestanding kernel with a minimal user-mode loop.
   - Boot, VGA/serial output, kernel-owned IDT and exception/IRQ/syscall dispatch,
     PIC, PIT timer IRQ0 with a monotonic tick, keyboard decode plus TTY/console
-    input, buddy allocation, slab allocation, kernel virtual memory, and the
-    kernel direct map are implemented and covered by switchable runtime smokes
-    plus source-level tests.
+    input, buddy allocation, slab allocation, kernel virtual memory, owned empty
+    page-table reclamation, and the kernel direct map are implemented and
+    covered by switchable runtime smokes plus source-level tests.
   - A cooperative (non-preemptive) kernel-thread scheduler, the `int 0x80`
-    syscall entry with a minimal ABI, and a default-off first ring3 user-program
-    smoke (SYS_WRITE/SYS_EXIT closed loop) are implemented; these carry explicit
-    smoke-only boundaries.
+    syscall entry with a minimal ABI, default-off ring3 user-program smokes, safe
+    user-process teardown/reaping, a read-only ATA PIO block plus exFAT path, and
+    a bounded filesystem-backed ELF64 user-program loader are implemented; smoke
+    paths carry explicit default-off boundaries.
   - Not yet implemented: preemptive scheduling, a full multi-process model,
-    ELF user-program loading (the smoke uses a flat embedded image), demand
-    paging/COW/mmap/brk, empty page-table reclamation, in-kernel block/FS
-    services, broad device drivers, a UEFI backend, and CI automation.
+    general exec semantics with argv/envp and file descriptors, demand
+    paging/COW/VMA/mmap/brk, user-space libc, writable filesystems, VFS/page
+    cache, broad storage/device drivers, a UEFI backend, and CI automation.
   - Several helper scripts and some paths are placeholders or gated by build
     switches; validate code paths before assuming they are wired. The proc
-    subsystem only compiles under user_program_smoke and is not part of a normal
-    boot.
+    subsystem only compiles under user_program_smoke or user_elf_smoke and is not
+    part of a normal boot.
 
   Conventions:
   - Prefer small, explicit low-level code over abstractions that hide hardware
@@ -104,7 +110,11 @@ context: |
     user_vmem_smoke (BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED),
     syscall_smoke (BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED),
     user_program_smoke (BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT, also
-    compiles src/kernel/proc/** and is not part of a normal boot).
+    compiles src/kernel/proc/** and is not part of a normal boot),
+    fs_smoke (BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED),
+    user_elf_smoke (BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT, also compiles
+    src/kernel/proc/**, builds build/bin/user/init.elf, and packages it as
+    /boot/user/init.elf).
     The unified panic path emits BIGOS_PANIC code=<code> source=<source>.
   - Treat hardware constants, linker addresses, boot protocol addresses, and page
     table self-mapping addresses as design-critical. Explain changes to them.

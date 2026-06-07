@@ -5,15 +5,17 @@
 BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
 C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为具备最小用户态闭环的单核内核：
 引导流程、文本/串口输出、中断/异常/syscall 处理、PIT timer tick、键盘驱动的
-TTY 输入路径、协作式内核线程调度器、`int 0x80` syscall 入口、默认关闭的首个
-ring3 用户程序，以及一套相对完整的早期内核内存管理。
+TTY 输入路径、协作式内核线程调度器、`int 0x80` syscall 入口、默认关闭的
+ring3 用户程序 smoke、bounded ELF64 用户程序加载器、只读 block/exFAT 路径，
+以及一套相对完整的早期内核内存管理。
 
 本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
 
 ## 状态
 
 项目已从内核基础设施引导阶段，迭代为在 boot 路径、中断基础设施和早期内存管理之上，
-具备 timer、输入、调度、syscall 和最小用户态 smoke 的单核内核。
+具备 timer、输入、调度、syscall、只读 block/exFAT 服务、bounded 用户 ELF
+加载和最小用户态 smoke 的单核内核。
 
 已经实现或部分实现：
 
@@ -36,11 +38,17 @@ ring3 用户程序，以及一套相对完整的早期内核内存管理。
   （`SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE`、`SYS_EXIT`）。
 - 默认关闭的首个 ring3 用户程序 smoke：flat embedded image 通过 TSS/RSP0 与
   `iretq` 进入 ring3，并完成 `SYS_WRITE`/`SYS_EXIT` 闭环。
+- 默认关闭的用户 ELF smoke：bounded ELF64 `ET_EXEC` 镜像会被打包为
+  `/boot/user/init.elf`，从 exFAT 读取、映射进派生用户地址空间，并进入 ring3。
+- 只读内核 block/filesystem 路径：同步 ATA PIO sector 读取、MBR exFAT 分区发现、
+  只读 mount、绝对路径 lookup，以及面向受控 Bochs raw image 的 bounded file read。
 - 基于 buddy 的物理页分配器，并使用 early metadata arena 完成 bootstrap。
 - Slab/kmalloc 分配器：size class、动态 slab 回收、page-backed 大对象分配、
   可选 debug guard 和验证统计。
 - 内核虚拟内存分配器（first-fit、四级页表映射、释放时清除 PTE 并刷新 TLB）、
   内核 direct map，以及 C++ `new`/`delete` 集成。
+- 用户地址空间 teardown 和 owned 运行时映射的空 PT/PD/PDPT 回收；高半区内核映射
+  保持 borrowed。
 - 显式分配 API：内核虚拟页使用 `alloc_kernel_pages(nr_pages, flags)`，
   物理 buddy 使用内部 `alloc_physical_order(order, flags)`。
 - 可切换的早期内存运行时自检（`bigos::mm::self_test`）。
@@ -50,10 +58,11 @@ ring3 用户程序，以及一套相对完整的早期内核内存管理。
 
 - UEFI bootloader、ESP 镜像生成和 OVMF/QEMU UEFI smoke test。
 - 抢占调度、优先级、时间片、sleep queue 和阻塞语义。
-- 完整多进程模型：多进程调度、fork/exec、信号和进程回收（目前仅有首个用户程序 smoke）。
-- ELF 用户程序加载（smoke 使用 flat embedded image）。
-- demand paging、copy-on-write、`mmap`/`brk` 和空页表回收。
-- 内核内的文件系统与块设备服务。
+- 完整多进程模型：多进程调度、fork、带 argv/envp 和文件描述符的通用 exec 语义、
+  信号，以及超出 bounded smoke 的完整进程生命周期策略。
+- demand paging、copy-on-write、VMA、`mmap`、`brk` 和用户态 libc。
+- 可写文件系统、VFS、page cache，以及超出当前同步只读 ATA PIO + exFAT 子集的
+  广泛存储设备支持。
 - 更广泛的设备驱动支持。
 - 完整的构建/安装自动化与 CI。
 
@@ -65,9 +74,9 @@ ring3 用户程序，以及一套相对完整的早期内核内存管理。
 |-- include           公共内核头文件和小型 libc 风格头文件子集
 |-- src               boot、kernel、drivers、mm、runtime 等实现源码
 |   |-- arch/x86/boot x86 引导代码、MBR/DBR 和 ELF 加载器
-|   |-- drivers       VGA、i8259 PIC、PIT timer 等硬件驱动
+|   |-- drivers       VGA、i8259 PIC、PIT timer、ATA PIO 等硬件驱动
 |   |-- kernel        内核入口及子系统：irq、timer、terminal（console/
-|   |                 keyboard/tty）、sched、syscall、proc、底层 IO
+|   |                 keyboard/tty）、sched、syscall、proc、fs、底层 IO
 |   |-- mm            buddy、slab、kmalloc、虚拟内存和 direct map 代码
 |   `-- runtime       运行时启动汇编源码对象
 |-- tools             boot 磁盘安装工具等开发辅助脚本
@@ -112,7 +121,7 @@ kernel()
     timer 和 keyboard IRQ1 路径
   - 在 early handler 注册完成后开启中断
   - 在串口与 VGA 输出 "BigOS kernel reached" 标记
-  - 可选运行 syscall、scheduler 和首个用户程序 smoke
+  - 可选运行 syscall、scheduler、block/exFAT、首个用户程序和用户 ELF smoke
   - 通过 sched::start() 进入协作式调度器；停机行为由调度器 idle 线程拥有，
     取代裸 hlt 尾循环
 ```
@@ -147,29 +156,39 @@ xmake f --scheduler_smoke=y   # BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B
 xmake f --user_vmem_smoke=y   # BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED
 xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
+xmake f --fs_smoke=y          # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
+xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 ```
 
 `--mm_self_test` 会自动启用 `--slab_debug`。自检会在 COM1 与 VGA 输出
 `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` 标记。
-`--user_program_smoke` 会额外编译 `src/kernel/proc/**` 并进入首个 ring3 用户程序，
-默认不参与普通启动。所有标记都写到 COM1 串口和 VGA。
+`--user_program_smoke` 和 `--user_elf_smoke` 会额外编译 `src/kernel/proc/**`；
+ELF smoke 还会构建 `build/bin/user/init.elf` 并打包为 `/boot/user/init.elf`。
+这些 smoke 默认不参与普通启动。所有标记都写到 COM1 串口和 VGA。
 
-当前 Legacy BIOS/MBR/exFAT 路径的一行本地启动调试：
-
-```bash
-make boot-debug
-```
-
-该命令是下面 Python 主入口的薄包装：
+当前 Legacy BIOS/MBR/exFAT 路径的本地 Bochs 运行入口：
 
 ```bash
-python3 tools/boot_debug.py run
+xmake run bochs-sdl2
+xmake run bochs
 ```
 
-命令会依次执行 preflight 检查、`xmake` 内核构建、`make -C
-src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot` boot 产物构建、
-完全用户态 raw 磁盘镜像生成、MBR/exFAT boot region/`/boot/boot.bin`/根目录
-`kernel` 写入，然后启动 Bochs。它不会构建 UEFI loader、ESP 镜像或 OVMF 配置。
+`xmake run bochs-sdl2` 启动 SDL2 Bochs 流程；`xmake run bochs` 是非 SDL2 后备入口。
+两个 target 都通过 xmake 构建 kernel 和 boot artifacts，然后以 `--skip-build` 调用
+Python 镜像/Bochs 辅助脚本。
+
+Python helper 仍用于 raw image 生成、Bochs 配置生成、serial marker 检查和
+no-launch/offline validation：
+
+```bash
+uv run python tools/boot_debug.py run
+```
+
+helper 会执行 preflight 检查；如果不是从 xmake run target 调用，也可以构建 kernel
+和 boot artifacts。随后它在用户态生成 raw 磁盘镜像，写入 MBR、exFAT boot
+region、`/boot/boot.bin`、根目录 `kernel`、`/boot/fs_smoke.txt` 和可选
+`/boot/user/init.elf`，并在未指定 `--no-launch` 时启动 Bochs。它不会构建 UEFI
+loader、ESP 镜像或 OVMF 配置。
 
 默认生成物均位于 `build/` 下：
 
@@ -181,36 +200,25 @@ src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot` boot 产物构建�
 常用参数示例：
 
 ```bash
-python3 tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
-python3 tools/boot_debug.py run --no-launch
-python3 tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
-python3 tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
-python3 tools/boot_debug.py run --user-program-smoke
-python3 tools/boot_debug.py validate-image --image build/test/os.raw
+uv run python tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
+uv run python tools/boot_debug.py run --no-launch
+uv run python tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
+uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python tools/boot_debug.py validate-image --image build/test/os.raw
 ```
 
-`--memory-self-test` 会以 `BIGOS_MM_SELF_TEST` 构建并把 COM1 路由到串口日志；
-配合 `--expect-serial-marker`/`--smoke-timeout` 可执行有界 smoke test。
-`--user-program-smoke` 会以 `BIGOS_USER_PROGRAM_SMOKE` 构建并进入首个 ring3
-用户程序。按项目工具约定，Python 辅助脚本应通过 `uv run` 运行，例如
-`uv run python tools/boot_debug.py run --no-launch`。
-
-也提供 GUI 快捷命令，包括启用首个用户程序 smoke 的变体：
-
-```bash
-make boot-debug-gui
-make boot-debug-user-gui
-```
+运行 xmake target 前，使用 `xmake f ...=y` 配置 smoke 开关。Python helper 不是
+权威的 smoke 开关配置入口。
 
 raw image 由 Python 标准库直接写入生成，不依赖 macOS `diskutil`、Linux loop
 device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
 
-第一阶段范围：
+当前范围：
 
 - 该流程仅支持 Bochs。
-- `make boot-debug` 保持 Legacy BIOS 调试入口语义。未来 UEFI 工作流规划为
-  `make uefi-boot-debug` 等独立命令，使用隔离的 ESP/FAT 镜像产物，并以
-  QEMU + OVMF 作为首选 smoke test 路径。
+- `xmake run bochs-sdl2` 是 SDL2 Legacy BIOS 调试入口，`xmake run bochs` 是非
+  SDL2 后备入口。未来 UEFI workflow 会作为独立路径引入，使用隔离的 ESP/FAT
+  镜像产物，并以 QEMU + OVMF 作为首选 smoke test 路径。
 - QEMU/headless、串口日志自动判定和 CI smoke test 留给后续阶段。
 - 该流程不修改 `boot.s`、`boot.cc`、`BootInfo`、`link.lds`、高半区内核地址或
   内核运行时初始化顺序。
@@ -226,16 +234,11 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
   `build/test/bochsrc.bxrc` 默认不会硬编码 Windows 路径、`win32` display
   设置或固定 ROM 路径。
 
-使用已有 Bochs 配置运行：
+运行生成的 Bochs 流程：
 
 ```bash
-xmake run kernel
-```
-
-顶层 `Makefile` 也提供了 Bochs 运行快捷命令：
-
-```bash
-make run
+xmake run bochs-sdl2
+xmake run bochs
 ```
 
 注意事项：
@@ -391,15 +394,16 @@ PIT 在 IRQ0 上驱动周期性 tick。
 
 ### 进程与用户态
 
-仅在 `user_program_smoke` 下编译，不参与普通启动。
+仅在 `user_program_smoke` 或 `user_elf_smoke` 下编译，不参与普通启动。
 
 - `src/kernel/proc/proc.cc` / `include/bigos/proc.h`：最小 `Process`、用户地址
-  空间派生、flat embedded 用户镜像映射，以及 `SYS_WRITE`/`SYS_EXIT` smoke
-  （`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`）。
+  空间派生、安全 teardown/reaper、flat embedded 用户镜像映射，以及面向
+  `/boot/user/init.elf` 的 bounded ELF64 `ET_EXEC` loader。两个 smoke 路径都验证
+  `SYS_WRITE`/`SYS_EXIT` 闭环（`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`）。
 - `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
   `include/bigos/user_mode.h`：GDT/TSS/RSP0 设置和 `iretq` ring3 entry。
-- 没有 ELF 用户程序加载器、没有 demand paging；`#PF` handler 对用户态页错误
-  只记录受控 marker。
+- 尚未实现 demand paging；`#PF` handler 对用户态页错误记录受控 marker，并把进程
+  清理交给 safe reaper。
 
 ### 显示与 IO
 

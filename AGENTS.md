@@ -23,12 +23,14 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
   - `src/kernel/terminal`: console output, keyboard scancode decode, TTY input.
   - `src/kernel/sched`: cooperative scheduler and context-switch assembly.
   - `src/kernel/syscall`: `int 0x80` dispatcher and ABI.
-  - `src/kernel/proc`: minimal process model and ring3 user-mode entry
-    (compiled only under `user_program_smoke`).
+  - `src/kernel/proc`: minimal process model, ring3 user-mode entry, safe
+    teardown/reaping, and bounded ELF64 user-program loading (compiled only
+    under `user_program_smoke` or `user_elf_smoke`).
+  - `src/kernel/fs`: read-only exFAT mount, path lookup, and bounded file reads.
   - `src/kernel/bigos`: low-level IO, panic, and utility helpers.
 - `src/mm`: buddy allocator, slab allocator, `kmalloc/free`, virtual memory, and
-  the kernel direct map.
-- `src/drivers`: VGA text mode, i8259 PIC, and PIT timer drivers.
+  the kernel direct map, including owned empty page-table reclamation.
+- `src/drivers`: VGA text mode, i8259 PIC, PIT timer, and ATA PIO block drivers.
 - `src/runtime`: startup assembly source objects.
 - `tools`: developer helper scripts such as the boot disk install tool.
 - `cpp`: kernel C++ support library, KTL containers, `new/delete`, ABI stubs.
@@ -90,10 +92,15 @@ xmake f --scheduler_smoke=y    # BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B
 xmake f --user_vmem_smoke=y    # BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED
 xmake f --syscall_smoke=y      # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
+xmake f --fs_smoke=y           # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
+xmake f --user_elf_smoke=y     # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 ```
 
-`--user_program_smoke` additionally compiles `src/kernel/proc/**` and enters the
-first ring3 user program; it is not part of a normal boot.
+`--user_program_smoke` and `--user_elf_smoke` additionally compile
+`src/kernel/proc/**` and enter bounded ring3 user-program paths; neither is part
+of a normal boot. `--user_elf_smoke` builds `build/bin/user/init.elf`, packages
+it as `/boot/user/init.elf`, reads it through the kernel block/exFAT path, and
+loads a bounded ELF64 `ET_EXEC` image.
 
 For bounded emulator smoke against memory markers:
 
@@ -165,19 +172,22 @@ Notes:
 - Boot, VGA/serial output, kernel-owned IDT and exception/IRQ/syscall dispatch,
   PIC, PIT timer IRQ0 with a monotonic tick, keyboard decode plus TTY/console
   input, buddy allocation with an early metadata arena, slab allocation (reclaim,
-  large allocations, debug guards, stats), kernel virtual memory, and the kernel
-  direct map are implemented and exercised by switchable runtime smokes.
+  large allocations, debug guards, stats), kernel virtual memory, owned empty
+  page-table reclamation, and the kernel direct map are implemented and
+  exercised by switchable runtime smokes.
 - A cooperative (non-preemptive) kernel-thread scheduler, the `int 0x80` syscall
-  entry with a minimal ABI, and a default-off first ring3 user-program smoke
-  (SYS_WRITE/SYS_EXIT closed loop) are implemented with explicit smoke-only
-  boundaries.
+  entry with a minimal ABI, default-off ring3 user-program smokes, safe
+  user-process teardown/reaping, a read-only ATA PIO block plus exFAT path, and
+  a bounded filesystem-backed ELF64 user-program loader are implemented with
+  explicit smoke-only boundaries where applicable.
 - Not yet implemented: preemptive scheduling, a full multi-process model,
-  ELF user-program loading (the smoke uses a flat embedded image), demand
-  paging/COW/mmap/brk, empty page-table reclamation, in-kernel block/FS
-  services, broad device drivers, a UEFI backend, and CI automation.
+  general exec semantics with argv/envp and file descriptors, demand
+  paging/COW/VMA/mmap/brk, user-space libc, writable filesystems, VFS/page cache,
+  broad storage/device drivers, a UEFI backend, and CI automation.
 - Some code paths are scaffolding or TODOs. Inspect call sites before assuming a
   subsystem is wired into `kernel()`; smokes and the proc subsystem are gated by
-  build switches (the proc subsystem only compiles under `user_program_smoke`).
+  build switches (the proc subsystem only compiles under `user_program_smoke` or
+  `user_elf_smoke`).
 
 ## Collaboration Guidelines
 

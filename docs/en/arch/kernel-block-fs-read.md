@@ -40,6 +40,8 @@ initialization the smoke reads the file through ATA PIO and exFAT, then emits:
 - `BIGOS_FS_EXFAT_READ_FAILED code=<code>` on bounded mount, lookup, read, or
   verification failure.
 
-This stage is the API prerequisite for phase 8 `load-user-elf-program`, where
-the user ELF loader can request ELF headers and segments by path instead of
-depending on bootloader-only exFAT helpers or embedded flat images.
+This stage is the API foundation used by the archived
+`load-user-elf-program` change: the default-off user ELF smoke reads
+`/boot/user/init.elf` by path, then the bounded ELF64 `ET_EXEC` loader maps the
+image instead of depending on bootloader-only exFAT helpers or embedded flat
+images.

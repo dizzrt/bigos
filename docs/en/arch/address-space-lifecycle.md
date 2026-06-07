@@ -46,4 +46,4 @@ Source-level validation is in `tests/test_address_space_lifecycle_source.py`. It
 - User low-half-only teardown, high-half borrowed preservation, active-root rejection, and PML4-last release.
 - `SYS_EXIT`, user `#PF`, and invalid user buffer handoff to the safe reaper.
 
-Build and runtime validation for this change is recorded in `openspec/changes/reclaim-address-space-page-tables/validation.md`.
+Build and runtime validation for this change is recorded in `openspec/changes/archive/2026-06-07-reclaim-address-space-page-tables/validation.md`.

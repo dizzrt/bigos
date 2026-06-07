@@ -39,6 +39,6 @@ smoke 使用。内核初始化期间，smoke 通过 ATA PIO
 - 失败：`BIGOS_FS_EXFAT_READ_FAILED code=<code>`，覆盖 mount、lookup、read
   或 payload 校验失败。
 
-本阶段是阶段 8 `load-user-elf-program` 的 API 前置条件；后续用户 ELF loader
-可以按路径读取 ELF header 与 segment，而不再依赖 bootloader-only exFAT helper
-或嵌入式 flat image。
+本阶段是已归档 `load-user-elf-program` change 使用的 API 基础：默认关闭的用户
+ELF smoke 会按路径读取 `/boot/user/init.elf`，再由 bounded ELF64 `ET_EXEC`
+loader 映射镜像，而不再依赖 bootloader-only exFAT helper 或嵌入式 flat image。

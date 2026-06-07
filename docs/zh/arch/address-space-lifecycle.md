@@ -46,4 +46,4 @@ metadata 会在 present descriptor 发布前完成登记。如果 metadata 登�
 - 只遍历用户低半区的 teardown、高半区 borrowed 保留、active-root 拒绝和 PML4 最后释放。
 - `SYS_EXIT`、用户 `#PF` 和非法用户 buffer 到 safe reaper 的 handoff。
 
-本 change 的构建与运行期验证记录在 `openspec/changes/reclaim-address-space-page-tables/validation.md`。
+本 change 的构建与运行期验证记录在 `openspec/changes/archive/2026-06-07-reclaim-address-space-page-tables/validation.md`。

@@ -7,8 +7,9 @@ freestanding C++17, C17, and assembly. It has grown from a boot/kernel skeleton
 into a single-core kernel with a minimal user-mode loop: bootstrapping,
 text/serial output, interrupt/exception/syscall handling, a PIT timer tick, a
 keyboard-driven TTY input path, a cooperative kernel-thread scheduler, an
-`int 0x80` syscall entry, a default-off first ring3 user program, and a fairly
-complete early kernel memory-management stack.
+`int 0x80` syscall entry, default-off ring3 user-program smokes, a bounded
+ELF64 user-program loader, a read-only block/exFAT path, and a fairly complete
+early kernel memory-management stack.
 
 This repository is a research/toy OS kernel project, not a hosted application or
 service.
@@ -16,8 +17,9 @@ service.
 ## Status
 
 The project has iterated past kernel infrastructure bring-up into a single-core
-kernel with timer, input, scheduling, syscall, and a minimal user-mode smoke on
-top of the boot path, interrupt foundation, and early memory management.
+kernel with timer, input, scheduling, syscall, read-only block/exFAT services,
+bounded user ELF loading, and minimal user-mode smokes on top of the boot path,
+interrupt foundation, and early memory management.
 
 Implemented or partially implemented:
 
@@ -43,12 +45,20 @@ Implemented or partially implemented:
   dispatcher (`SYS_DEBUG_WRITE`, `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`).
 - Default-off first ring3 user program smoke: a flat embedded image enters
   ring3 via TSS/RSP0 and `iretq`, then completes a `SYS_WRITE`/`SYS_EXIT` loop.
+- Default-off user ELF smoke: a bounded ELF64 `ET_EXEC` image is packaged as
+  `/boot/user/init.elf`, read from exFAT, mapped into a derived user address
+  space, and entered in ring3.
+- Read-only kernel block/filesystem path: synchronous ATA PIO sector reads,
+  MBR exFAT partition discovery, read-only mount, absolute path lookup, and
+  bounded file reads for controlled Bochs raw images.
 - Buddy physical page allocator with an early metadata arena for bootstrap.
 - Slab/kmalloc allocator with size classes, dynamic slab reclaim, page-backed
   large allocations, optional debug guards, and validation statistics.
 - Kernel virtual-memory allocator (first-fit, 4-level page-table mapping, PTE
   clearing and TLB invalidation on free), a kernel direct map, plus C++
   `new`/`delete` integration.
+- User address-space teardown and empty PT/PD/PDPT reclamation for owned
+  runtime-created mappings, with high-half kernel mappings kept borrowed.
 - Explicit allocation API: `alloc_kernel_pages(nr_pages, flags)` for kernel
   virtual pages and an internal `alloc_physical_order(order, flags)` for buddy.
 - Switchable early memory runtime self-test (`bigos::mm::self_test`).
@@ -58,11 +68,12 @@ Not implemented or still skeletal:
 
 - UEFI bootloader, ESP image generation, and OVMF/QEMU UEFI smoke tests.
 - Preemptive scheduling, priorities, time slices, sleep queues, and blocking.
-- A full multi-process model: multi-process scheduling, fork/exec, signals, and
-  process reclamation (only the single first-user-program smoke exists).
-- ELF user-program loading (the smoke uses a flat embedded image).
-- Demand paging, copy-on-write, `mmap`/`brk`, and empty page-table reclamation.
-- In-kernel filesystem and block-device services.
+- A full multi-process model: multi-process scheduling, fork, general exec
+  semantics with argv/envp and file descriptors, signals, and broad process
+  lifecycle policy beyond the bounded smokes.
+- Demand paging, copy-on-write, VMAs, `mmap`, `brk`, and user-space libc.
+- Writable filesystems, a VFS, page cache, and broad storage-device support
+  beyond the current synchronous read-only ATA PIO plus exFAT subset.
 - Broad device-driver support.
 - Complete build/install automation and CI.
 
@@ -74,9 +85,9 @@ Not implemented or still skeletal:
 |-- include           public kernel headers and small libc-style header subset
 |-- src               implementation sources for boot, kernel, drivers, mm, runtime
 |   |-- arch/x86/boot x86 boot code, MBR/DBR, and ELF loader
-|   |-- drivers       hardware drivers such as VGA, i8259 PIC, and PIT timer
+|   |-- drivers       hardware drivers such as VGA, i8259 PIC, PIT, and ATA PIO
 |   |-- kernel        kernel entry and subsystems: irq, timer, terminal (console/
-|   |                 keyboard/tty), sched, syscall, proc, low-level IO
+|   |                 keyboard/tty), sched, syscall, proc, fs, low-level IO
 |   |-- mm            buddy, slab, kmalloc, virtual memory, and direct map code
 |   `-- runtime       runtime startup assembly source objects
 |-- tools             developer helpers such as the boot disk install tool
@@ -122,7 +133,8 @@ kernel()
     PIT timer on IRQ0, and the keyboard IRQ1 path
   - enables interrupts after early handlers are registered
   - emits the "BigOS kernel reached" marker on serial and VGA
-  - optionally runs the syscall, scheduler, and first-user-program smokes
+  - optionally runs the syscall, scheduler, block/exFAT, first-user-program, and
+    user-ELF smokes
   - enters the cooperative scheduler via sched::start(); halt behavior is owned
     by the scheduler idle thread instead of a naked hlt loop
 ```
@@ -158,31 +170,41 @@ xmake f --scheduler_smoke=y   # BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B
 xmake f --user_vmem_smoke=y   # BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED
 xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
+xmake f --fs_smoke=y          # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
+xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 ```
 
 `--mm_self_test` implies `--slab_debug`. The self-test emits the
 `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` markers on COM1 and VGA.
-`--user_program_smoke` additionally compiles `src/kernel/proc/**` and enters the
-first ring3 user program; it is not part of a normal boot. All markers are
-written to COM1 serial and VGA.
+`--user_program_smoke` and `--user_elf_smoke` additionally compile
+`src/kernel/proc/**`; the ELF smoke also builds and packages
+`build/bin/user/init.elf` as `/boot/user/init.elf`. These smokes are not part of
+a normal boot. All markers are written to COM1 serial and VGA.
 
-One-command local boot debug for the current Legacy BIOS/MBR/exFAT path:
-
-```bash
-make boot-debug
-```
-
-This is a thin wrapper around:
+Local Bochs runs for the current Legacy BIOS/MBR/exFAT path:
 
 ```bash
-python3 tools/boot_debug.py run
+xmake run bochs-sdl2
+xmake run bochs
 ```
 
-The command runs preflight checks, builds the kernel with `xmake`, builds the boot
-artifacts with `make -C src/arch/x86/boot build-mbr build-dbr build-exdbr
-build-boot`, creates a raw disk image entirely in user space, writes the MBR,
-exFAT boot regions, `/boot/boot.bin`, and root `kernel`, then launches Bochs.
-It does not build a UEFI loader, ESP image, or OVMF configuration.
+`xmake run bochs-sdl2` launches the SDL2 Bochs flow. `xmake run bochs` is the
+non-SDL2 fallback. Both targets build the kernel and boot artifacts through
+xmake, then call the Python image/Bochs helper with `--skip-build`.
+
+The Python helper remains useful for raw-image generation, generated Bochs
+configuration, serial-marker checks, and no-launch/offline validation:
+
+```bash
+uv run python tools/boot_debug.py run
+```
+
+The helper runs preflight checks, can build the kernel and boot artifacts when
+not called from an xmake run target, creates a raw disk image entirely in user
+space, writes the MBR, exFAT boot regions, `/boot/boot.bin`, root `kernel`,
+`/boot/fs_smoke.txt`, and optional `/boot/user/init.elf`, then launches Bochs
+unless `--no-launch` is supplied. It does not build a UEFI loader, ESP image, or
+OVMF configuration.
 
 Generated boot-debug artifacts are isolated under `build/` by default:
 
@@ -194,38 +216,28 @@ Generated boot-debug artifacts are isolated under `build/` by default:
 Useful options:
 
 ```bash
-python3 tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
-python3 tools/boot_debug.py run --no-launch
-python3 tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
-python3 tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
-python3 tools/boot_debug.py run --user-program-smoke
-python3 tools/boot_debug.py validate-image --image build/test/os.raw
+uv run python tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
+uv run python tools/boot_debug.py run --no-launch
+uv run python tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
+uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python tools/boot_debug.py validate-image --image build/test/os.raw
 ```
 
-`--memory-self-test` builds with `BIGOS_MM_SELF_TEST` and routes COM1 to a serial
-log; combine with `--expect-serial-marker`/`--smoke-timeout` for a bounded smoke
-test. `--user-program-smoke` builds with `BIGOS_USER_PROGRAM_SMOKE` and enters the
-first ring3 user program. Run Python helpers through `uv run` per the project
-tooling convention, e.g. `uv run python tools/boot_debug.py run --no-launch`.
-
-A GUI shortcut is also available, including a variant that enables the
-first-user-program smoke:
-
-```bash
-make boot-debug-gui
-make boot-debug-user-gui
-```
+Use `xmake f ...=y` to configure smoke switches before invoking xmake run
+targets. The Python helper is not the authoritative smoke-switch configuration
+surface.
 
 The raw image builder uses only Python standard library file writes. It does not
 require macOS `diskutil`, Linux loop devices, mount permissions, `mkfs.exfat`, or
 a hand-prepared exFAT image.
 
-First-stage scope:
+Current scope:
 
 - Bochs is the only supported emulator in this workflow.
-- `make boot-debug` remains the Legacy BIOS debug entry. A future UEFI workflow is
-  planned as a separate command such as `make uefi-boot-debug`, with isolated
-  ESP/FAT image artifacts and QEMU + OVMF as the preferred smoke-test path.
+- `xmake run bochs-sdl2` is the SDL2 Legacy BIOS debug entry, and
+  `xmake run bochs` is the non-SDL2 fallback. A future UEFI workflow is planned
+  as a separate path with isolated ESP/FAT image artifacts and QEMU + OVMF as
+  the preferred smoke-test path.
 - QEMU/headless mode, serial-log auto-detection, and CI smoke-test decisions are
   intentionally left for later changes.
 - The workflow does not change `boot.s`, `boot.cc`, `BootInfo`, `link.lds`, the
@@ -243,16 +255,11 @@ Common failures:
   generated `build/test/bochsrc.bxrc` avoids Windows paths, `win32` display
   settings, and fixed ROM paths by default.
 
-Run an existing Bochs configuration:
+Run the generated Bochs flows:
 
 ```bash
-xmake run kernel
-```
-
-The top-level `Makefile` also provides a Bochs run shortcut:
-
-```bash
-make run
+xmake run bochs-sdl2
+xmake run bochs
 ```
 
 Notes:
@@ -418,15 +425,18 @@ A cooperative, single-core kernel-thread scheduler.
 
 ### Process And User Mode
 
-Compiled only under `user_program_smoke` and not part of a normal boot.
+Compiled only under `user_program_smoke` or `user_elf_smoke`, and not part of a
+normal boot.
 
 - `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a minimal `Process`,
-  user address-space derivation, mapping of a flat embedded user image, and the
-  `SYS_WRITE`/`SYS_EXIT` smoke (`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`).
+  user address-space derivation, safe teardown/reaping, mapping of a flat
+  embedded user image, and a bounded ELF64 `ET_EXEC` loader for
+  `/boot/user/init.elf`. Both smoke paths exercise the `SYS_WRITE`/`SYS_EXIT`
+  closed loop (`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`).
 - `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
   `include/bigos/user_mode.h`: GDT/TSS/RSP0 setup and the `iretq` ring3 entry.
-- There is no ELF user-program loader and no demand paging; the `#PF` handler
-  only records a controlled marker for user faults.
+- Demand paging is not implemented; the `#PF` handler records a controlled
+  marker for user faults and hands process cleanup to the safe reaper.
 
 ### Display And IO
 
