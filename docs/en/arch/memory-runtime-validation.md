@@ -4,9 +4,9 @@ BigOS can run an optional early memory runtime self-test after `init_mem()` and 
 
 ## Enabling
 
-- Configure with `xmake f --mm_self_test=y`, then run `xmake`.
-- Or use `uv run python tools/boot_debug.py run --memory-self-test --no-launch` to build boot assets and generate a Bochs config that routes COM1 to `build/test/serial.log`.
-- For bounded Bochs smoke validation, run `uv run python tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`.
+- Configure with `xmake f --mm_self_test=y`, then run `xmake` or `xmake run bochs-sdl2`.
+- To generate and validate a raw image without launching Bochs, run `uv run python tools/boot_debug.py run --no-launch --serial-log build/test/serial.log`.
+- For bounded Bochs smoke validation, run `uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`.
 
 ## Markers
 

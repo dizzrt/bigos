@@ -353,7 +353,9 @@ def test_boot_debug_supports_bounded_serial_memory_smoke() -> None:
     boot_debug = read_source('tools/boot_debug.py')
 
     assert "MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'" in boot_debug
-    assert "'--memory-self-test'" in boot_debug
+    assert "'--memory-self-test'" not in boot_debug
+    assert "'xmake', 'build', 'kernel'" in boot_debug
+    assert "'xmake', 'build', 'boot-artifacts'" in boot_debug
     assert "'--expect-serial-marker'" in boot_debug
     assert 'mode=file' in boot_debug
     assert 'launch_bochs_until_serial_marker' in boot_debug

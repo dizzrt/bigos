@@ -74,8 +74,8 @@ Common commands:
 
 ```bash
 xmake
-xmake run kernel
-make run
+xmake run bochs-sdl2
+xmake run bochs
 ```
 
 Validation build switches (all off by default, see `xmake.lua`):
@@ -98,21 +98,22 @@ first ring3 user program; it is not part of a normal boot.
 For bounded emulator smoke against memory markers:
 
 ```bash
-uv run python tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
-uv run python tools/boot_debug.py run --user-program-smoke
+xmake f --mm_self_test=y
+uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
 ```
 
 The self-test emits `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED`,
 the `#PF` handler emits `BIGOS_PAGE_FAULT`, and the unified panic path emits
-`BIGOS_PANIC code=<code> source=<source>` on COM1 and VGA. `make boot-debug-user-gui`
-launches the GUI Bochs flow with the first-user-program smoke enabled.
+`BIGOS_PANIC code=<code> source=<source>` on COM1 and VGA. Configure smoke
+options with `xmake f ...`; `xmake run bochs-sdl2` launches the SDL2 Bochs
+flow and `xmake run bochs` launches the non-SDL2 fallback.
 
 Notes:
 
 - Verify that `x86_64-elf-gcc`, `x86_64-elf-g++`, `x86_64-elf-ld`, and related
   binutils are installed before building.
-- Bochs configuration may contain host-specific paths. Check `test/bochsrc.bxrc`
-  before assuming emulator runs are portable.
+- Generated Bochs configuration is written under `build/test/`. Check local Bochs
+  ROM/display availability before assuming emulator runs are portable.
 - `bigos.py` contains placeholder tasks. Do not assume it provides complete
   build/install automation.
 

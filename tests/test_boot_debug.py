@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'tools' / 'boot_debug.py'
+PROJECT_ROOT = MODULE_PATH.parents[1]
 spec = importlib.util.spec_from_file_location('boot_debug', MODULE_PATH)
 assert spec is not None
 boot_debug = importlib.util.module_from_spec(spec)
@@ -74,6 +75,16 @@ def test_generated_bochsrc_is_sanitized(tmp_path: Path) -> None:
     assert 'C:\\' not in contents
 
 
+def test_generated_bochsrc_can_inject_sdl2_display(tmp_path: Path) -> None:
+    image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
+    bochsrc = tmp_path / 'bochsrc.bxrc'
+
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, ['display_library: sdl2'])
+
+    contents = bochsrc.read_text(encoding='utf-8')
+    assert 'display_library: sdl2' in contents
+
+
 def test_cleanup_image_lock_removes_image_sidecar_lock(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', b'image')
     lock = tmp_path / 'os.raw.lock'
@@ -85,7 +96,7 @@ def test_cleanup_image_lock_removes_image_sidecar_lock(tmp_path: Path) -> None:
     assert not lock.exists()
 
 
-def test_build_kernel_configures_user_program_smoke(monkeypatch) -> None:
+def test_build_current_artifacts_uses_saved_xmake_config(monkeypatch) -> None:
     commands: list[list[str]] = []
 
     def fake_run_command(stage, command, cwd, **kwargs):
@@ -94,15 +105,41 @@ def test_build_kernel_configures_user_program_smoke(monkeypatch) -> None:
     monkeypatch.setattr(boot_debug, 'run_command', fake_run_command)
     monkeypatch.setattr(boot_debug, 'require_file', lambda *args, **kwargs: None)
 
-    boot_debug.build_kernel(memory_self_test=False, user_program_smoke=True)
+    boot_debug.build_current_artifacts()
 
-    assert commands[0] == ['xmake', 'f', '--mm_self_test=n', '--user_program_smoke=y']
-    assert commands[1] == ['xmake']
+    assert commands == [['xmake', 'build', 'kernel'], ['xmake', 'build', 'boot-artifacts']]
 
 
-def test_run_parser_accepts_user_program_smoke() -> None:
+def test_run_parser_rejects_smoke_shortcuts() -> None:
     parser = boot_debug.make_parser()
 
-    args = parser.parse_args(['run', '--user-program-smoke'])
+    for shortcut in ('--memory-self-test', '--user-program-smoke'):
+        try:
+            parser.parse_args(['run', shortcut])
+        except SystemExit as error:
+            assert error.code == 2
+        else:
+            raise AssertionError(f'{shortcut} should be rejected')
 
-    assert args.user_program_smoke is True
+
+def test_run_parser_accepts_skip_build() -> None:
+    parser = boot_debug.make_parser()
+
+    args = parser.parse_args(['run', '--skip-build'])
+
+    assert args.skip_build is True
+
+
+def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
+    xmake = (PROJECT_ROOT / 'xmake.lua').read_text(encoding='utf-8')
+
+    assert 'target("bochs-sdl2")' in xmake
+    assert 'target("bochs")' in xmake
+    assert 'target("boot-artifacts")' in xmake
+    assert 'build/bin/x86/boot' not in xmake
+    assert 'path.join(boot_bindir, "mbr.bin")' in xmake and 'bytes > 512 bytes' in xmake
+    assert 'path.join(boot_bindir, "dbr.bin")' in xmake and 'bytes > 512 bytes' in xmake
+    assert 'path.join(boot_bindir, "exdbr.bin")' in xmake and 'bytes > 4096 bytes' in xmake
+    assert 'path.join(boot_bindir, "boot.bin")' in xmake and 'bytes > 524288 bytes' in xmake
+    assert '--skip-build' in xmake
+    assert 'display_library: sdl2' in xmake

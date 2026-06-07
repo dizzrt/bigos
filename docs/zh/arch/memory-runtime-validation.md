@@ -5,9 +5,9 @@ BigOS 可以在 `init_mem()` 之后、IRQ/PIC 设置之前运行一个可选的�
 
 ## 启用方式
 
-- 使用 `xmake f --mm_self_test=y` 配置，然后运行 `xmake` 构建。
-- 或使用 `uv run python tools/boot_debug.py run --memory-self-test --no-launch` 构建启动资产，并生成一个将 COM1 路由到 `build/test/serial.log` 的 Bochs 配置。
-- 如需运行有界的 Bochs 冒烟验证，执行 `uv run python tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`。
+- 使用 `xmake f --mm_self_test=y` 配置，然后运行 `xmake` 或 `xmake run bochs-sdl2`。
+- 如需只生成并校验 raw image 而不启动 Bochs，运行 `uv run python tools/boot_debug.py run --no-launch --serial-log build/test/serial.log`。
+- 如需运行有界的 Bochs 冒烟验证，执行 `uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`。
 
 ## 标记
 

@@ -31,7 +31,7 @@ MBR -> DBR -> exDBR -> boot.bin          BOOTX64.EFI
 Non-goals for this stage:
 
 - Do not implement `BOOTX64.EFI`.
-- Do not change the Legacy BIOS/MBR/exFAT/Bochs semantics of `make boot-debug`.
+- Do not change the Legacy BIOS/MBR/exFAT/Bochs semantics of `xmake run bochs-sdl2` or `xmake run bochs`.
 - Do not replace MBR, DBR, extended DBR, `boot.bin`, or the existing raw exFAT image.
 - Do not implement an ESP/FAT UEFI image, QEMU/OVMF UEFI entry, or UEFI Runtime Services.
 - Do not require the kernel to call BIOS interrupts, UEFI Boot Services, or UEFI Runtime Services.
@@ -184,7 +184,7 @@ Candidate follow-up changes:
 
 ## Debug Entry And Image Plan
 
-`make boot-debug` continues to mean the Legacy BIOS/MBR/exFAT/Bochs debug path:
+`xmake run bochs-sdl2` is the SDL2 Legacy BIOS/MBR/exFAT/Bochs debug path, and `xmake run bochs` is the non-SDL2 fallback:
 
 - Build MBR, DBR, extended DBR, `boot.bin`, and root `kernel`.
 - Generate a raw exFAT disk image.
@@ -193,14 +193,14 @@ Candidate follow-up changes:
 
 Future UEFI debug entries must use separate names and separate artifacts, for example:
 
-- `make uefi-boot-debug`
+- `xmake run qemu-ovmf`
 - `python3 tools/uefi_boot_debug.py run`
 
 Future UEFI artifact isolation policy:
 
 - BIOS path continues using raw exFAT images and artifacts such as `build/test/os.raw`.
 - UEFI path uses an ESP/FAT image containing `EFI/BOOT/BOOTX64.EFI` and the kernel ELF.
-- UEFI firmware configuration, temporary directories, and emulator configuration must not overwrite Bochs artifacts used by `make boot-debug`.
+- UEFI firmware configuration, temporary directories, and emulator configuration must not overwrite Bochs artifacts used by `xmake run bochs-sdl2` or `xmake run bochs`.
 - UEFI smoke tests should primarily use QEMU + OVMF. Bochs UEFI is optional.
 - Legacy BIOS continues to use Bochs.
 
@@ -226,4 +226,4 @@ A future UEFI loader should implement an ELF reader suited for UEFI and should n
 | 5 | GOP framebuffer, ACPI RSDP/SMBIOS handoff, and fuller UEFI validation policy | No | Stage 1 sections, Stage 3/4 UEFI smoke test | Framebuffer mapping, ACPI table lifecycle, runtime metadata misuse | `handoff-gop-acpi-firmware-tables` |
 | 6 | Shared ELF64 loading rule specification for BIOS and UEFI, without requiring shared loader code soon | No | Current BIOS ELF loading behavior documented | Rule/implementation drift, inconsistent error handling | `document-common-elf64-loader-rules` |
 
-Each stage is a candidate for a later change and is not runtime implementation work for this change. Future implementation must keep the Legacy BIOS path available as fallback and continue using `make boot-debug` to validate the existing debug entry.
+Each stage is a candidate for a later change and is not runtime implementation work for this change. Future implementation must keep the Legacy BIOS path available as fallback and continue using `xmake run bochs-sdl2` or `xmake run bochs` to validate the existing debug entry.

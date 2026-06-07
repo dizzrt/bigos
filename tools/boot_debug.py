@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a bootable BigOS raw image and launch it in Bochs."""
+"""Prepare a bootable BigOS raw image and launch it in Bochs."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from typing import BinaryIO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = PROJECT_ROOT / 'build'
-BOOT_DIR = PROJECT_ROOT / 'src' / 'arch' / 'x86' / 'boot'
 BOOT_ARTIFACT_DIR = BUILD_DIR / 'bin' / 'x86' / 'boot'
 DEFAULT_IMAGE = BUILD_DIR / 'test' / 'os.raw'
 DEFAULT_BOCHSRC = BUILD_DIR / 'test' / 'bochsrc.bxrc'
@@ -57,8 +56,7 @@ ROOT_DIR_CLUSTER = 3
 BOOT_DIR_CLUSTER = 4
 BOOT_FILE_CLUSTER = 5
 
-PRE_FLIGHT_TOOLS = (
-    'python3',
+BUILD_TOOLS = (
     'xmake',
     'x86_64-elf-gcc',
     'x86_64-elf-g++',
@@ -183,35 +181,18 @@ def run_command(
         raise StageError(stage, f'command failed with exit code {result.returncode}: {printable}')
 
 
-def check_tools(need_bochs: bool) -> None:
-    missing = [tool for tool in PRE_FLIGHT_TOOLS if shutil.which(tool) is None]
+def check_tools(need_bochs: bool, need_build: bool) -> None:
+    missing = [tool for tool in BUILD_TOOLS if need_build and shutil.which(tool) is None]
     if need_bochs and shutil.which('bochs') is None:
         missing.append('bochs')
     if missing:
         raise StageError('preflight', 'missing required tool(s): ' + ', '.join(missing))
 
 
-def build_kernel(memory_self_test: bool, user_program_smoke: bool) -> None:
-    run_command(
-        'kernel config',
-        [
-            'xmake',
-            'f',
-            f'--mm_self_test={"y" if memory_self_test else "n"}',
-            f'--user_program_smoke={"y" if user_program_smoke else "n"}',
-        ],
-        PROJECT_ROOT,
-    )
-    run_command('kernel build', ['xmake'], PROJECT_ROOT)
+def build_current_artifacts() -> None:
+    run_command('kernel build', ['xmake', 'build', 'kernel'], PROJECT_ROOT)
+    run_command('boot build', ['xmake', 'build', 'boot-artifacts'], PROJECT_ROOT)
     require_file(DEFAULT_KERNEL, 'kernel build', 'kernel ELF')
-
-
-def build_boot_artifacts() -> None:
-    run_command(
-        'boot build',
-        ['make', '-C', str(BOOT_DIR), 'build-mbr', 'build-dbr', 'build-exdbr', 'build-boot'],
-        PROJECT_ROOT,
-    )
     for name, (path, max_size) in BOOT_ARTIFACTS.items():
         require_file(path, 'boot build', f'{name} artifact', max_size)
 
@@ -684,13 +665,9 @@ def run(args: argparse.Namespace) -> int:
     serial_log = Path(args.serial_log).resolve() if args.serial_log else None
     marker = args.expect_serial_marker
 
-    if args.memory_self_test:
-        serial_log = serial_log or DEFAULT_SERIAL_LOG
-        marker = marker or MM_SELF_TEST_SUCCESS_MARKER
-
-    check_tools(need_bochs=should_launch)
-    build_kernel(args.memory_self_test, args.user_program_smoke)
-    build_boot_artifacts()
+    check_tools(need_bochs=should_launch, need_build=not args.skip_build)
+    if not args.skip_build:
+        build_current_artifacts()
     artifacts = get_artifacts(DEFAULT_KERNEL)
 
     log_stage(f'image build: {image_path}')
@@ -749,14 +726,9 @@ def make_parser() -> argparse.ArgumentParser:
     run_parser.add_argument('--romimage', help='optional Bochs BIOS ROM path for generated config')
     run_parser.add_argument('--vgaromimage', help='optional Bochs VGA BIOS ROM path for generated config')
     run_parser.add_argument(
-        '--memory-self-test',
+        '--skip-build',
         action='store_true',
-        help='build with BIGOS_MM_SELF_TEST and route COM1 to a serial log',
-    )
-    run_parser.add_argument(
-        '--user-program-smoke',
-        action='store_true',
-        help='build with BIGOS_USER_PROGRAM_SMOKE to enter the first ring3 user program',
+        help='consume already-built kernel and boot artifacts instead of invoking xmake build',
     )
     run_parser.add_argument(
         '--serial-log',
