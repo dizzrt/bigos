@@ -15,6 +15,7 @@ namespace bigos::proc {
         Running,
         Terminated,
         Faulted,
+        Reaped,
     };
 
     struct UserRange {
@@ -30,10 +31,17 @@ namespace bigos::proc {
         UserRange code;
         UserRange data;
         UserRange stack;
+        uint64_t code_phys;
+        uint64_t data_phys;
+        uint64_t stack_phys;
         void *kernel_stack_base;
+        uint64_t kernel_stack_len;
         uint64_t kernel_stack_top;
         ProcessState state;
+        bool reap_pending;
+        bool resources_reclaimed;
         int64_t exit_code;
+        int64_t fault_reason;
     };
 
     bool create_first_user_process(Process *__process) noexcept;
@@ -41,7 +49,9 @@ namespace bigos::proc {
     Process *current_process() noexcept;
     bool validate_user_buffer(uint64_t __addr, uint64_t __len) noexcept;
     void mark_current_faulted(int64_t __reason) noexcept;
+    [[noreturn]] void fault_current_and_exit(int64_t __reason) noexcept;
     [[noreturn]] void exit_current(int64_t __code) noexcept;
+    void reap_pending_processes() noexcept;
 
 #ifdef BIGOS_USER_PROGRAM_SMOKE
     void user_program_smoke_entry(void *) noexcept;

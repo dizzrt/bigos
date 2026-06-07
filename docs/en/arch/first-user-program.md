@@ -17,9 +17,9 @@ The first user program uses an embedded flat blob rather than ELF64 or filesyste
 
 - `pid`, user page-table root, pre-entry kernel CR3, user entry, and user code/data/stack ranges.
 - Dedicated syscall/exception kernel stack top for TSS/RSP0.
-- Lifecycle state `Created` / `Running` / `Terminated` / `Faulted` and exit code.
+- Lifecycle state `Created` / `Running` / `Terminated` / `Faulted` / `Reaped`, exit code, fault reason, owned user frames, and kernel stack range.
 
-The process object and current kernel stack are not freed immediately from the `exit` or fault return path. Reclamation is deferred to a later lifecycle change.
+The process object and current kernel stack are not freed immediately from the `exit` or fault return path. Reclamation is handed to a safe reaper after execution has switched to a non-target kernel stack.
 
 ## Loading And Address Space
 
@@ -42,7 +42,8 @@ x86_64 runtime user-mode support is provided by `src/kernel/proc/user_mode.cc` /
 ## Syscall And Fault
 
 - `VECTOR_SYSCALL = 0x80` is the only IDT gate relaxed to DPL=3; exception/IRQ gates are not relaxed.
-- `SYS_WRITE` validates the user buffer range, present/user bits, and maximum length, then emits `BIGOS_USER_WRITE_SYSCALL`.
-- `SYS_EXIT` marks the current process terminated, records the exit code, restores the kernel root, and enters the scheduler's deferred-reclamation exit path.
-- User-mode `#PF` is identified from the saved `CS` CPL, emits `BIGOS_USER_PAGE_FAULT`, and does not implement demand paging.
+- `SYS_WRITE` validates the user buffer range, present/user bits, and maximum length, then emits `BIGOS_USER_WRITE_SYSCALL`; invalid user buffers fault the process and use the same safe reaper boundary.
+- `SYS_EXIT` marks the current process terminated/reap-pending, records the exit code, restores the kernel root, and enters the scheduler's deferred-reclamation exit path.
+- User-mode `#PF` is identified from the saved `CS` CPL, emits `BIGOS_USER_PAGE_FAULT`, marks the process faulted/reap-pending, and does not implement demand paging.
 - Kernel-mode `#PF` keeps the existing diagnostic-only `BIGOS_PAGE_FAULT` semantics.
+- The idle-loop reaper releases the user address space and kernel stack once the active stack/root checks pass, then emits `BIGOS_USER_RECLAIMED`.

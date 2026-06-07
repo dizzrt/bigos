@@ -18,9 +18,9 @@
 
 - `pid`、用户页表根、进入前的 kernel CR3、用户入口、用户 code/data/stack 范围。
 - 专用 syscall/exception kernel stack top，用于 TSS/RSP0。
-- 生命周期状态 `Created` / `Running` / `Terminated` / `Faulted` 和 exit code。
+- 生命周期状态 `Created` / `Running` / `Terminated` / `Faulted` / `Reaped`、exit code、fault reason、owned 用户帧和 kernel stack 范围。
 
-进程对象和当前 kernel stack 不在 `exit` 或 fault 返回路径立即释放；回收延后到后续生命周期 change。
+进程对象和当前 kernel stack 不在 `exit` 或 fault 返回路径立即释放；资源回收会在执行已切换到非目标 kernel stack 后交给 safe reaper。
 
 ## 加载与地址空间
 
@@ -43,7 +43,8 @@ x86_64 运行期 user mode 支持由 `src/kernel/proc/user_mode.cc` / `user_mode
 ## syscall 与 fault
 
 - `VECTOR_SYSCALL = 0x80` 是唯一放宽为 DPL=3 的 IDT gate；exception/IRQ gates 不放宽。
-- `SYS_WRITE` 验证用户 buffer 范围、present/user bit 和最大长度，然后输出 `BIGOS_USER_WRITE_SYSCALL`。
-- `SYS_EXIT` 标记当前进程 terminated、记录 exit code、恢复 kernel root，并进入 scheduler 退出路径。
-- 用户态 `#PF` 通过 saved `CS` 的 CPL 识别，输出 `BIGOS_USER_PAGE_FAULT` 并不做 demand paging。
+- `SYS_WRITE` 验证用户 buffer 范围、present/user bit 和最大长度，然后输出 `BIGOS_USER_WRITE_SYSCALL`；非法用户 buffer 会 fault 当前进程，并使用同一个 safe reaper 边界。
+- `SYS_EXIT` 标记当前进程 terminated/reap-pending、记录 exit code、恢复 kernel root，并进入 scheduler 延后回收退出路径。
+- 用户态 `#PF` 通过 saved `CS` 的 CPL 识别，输出 `BIGOS_USER_PAGE_FAULT`，标记进程 faulted/reap-pending，并不做 demand paging。
 - 内核态 `#PF` 保持既有 `BIGOS_PAGE_FAULT` 诊断-only 语义。
+- idle-loop reaper 在 active stack/root 检查通过后释放用户地址空间和 kernel stack，然后输出 `BIGOS_USER_RECLAIMED`。

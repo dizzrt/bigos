@@ -63,6 +63,38 @@ struct PagingDescriptorChange {
     uint16_t index;
 };
 
+enum class PageTableOwner : uint8_t {
+    None = 0,
+    KernelVmem,
+    UserAddressSpace,
+};
+
+enum class PageTableLevel : uint8_t {
+    Pml4 = 4,
+    Pdpt = 3,
+    Pd = 2,
+    Pt = 1,
+};
+
+struct PageTableMetadata {
+    bool used;
+    PageTableOwner owner;
+    PageTableLevel level;
+    uint64_t root_phys;
+    uint64_t frame_phys;
+    uint16_t present_entries;
+};
+
+struct OwnedPagingDescriptorChange {
+    uint64_t *entry;
+    uint16_t index;
+    uint64_t parent_frame;
+    uint64_t child_frame;
+    uint64_t root_phys;
+    PageTableOwner owner;
+    PageTableLevel child_level;
+};
+
 struct DirectMapRange {
     uint64_t base;
     uint64_t len;
@@ -72,10 +104,86 @@ constexpr uint32_t DIRECT_MAP_MAX_RANGES = 128;
 static DirectMapRange gDirectMapRanges[DIRECT_MAP_MAX_RANGES];
 static uint32_t gDirectMapRangeCount;
 
+constexpr uint32_t PAGE_TABLE_METADATA_CAPACITY = 512;
+static PageTableMetadata gPageTableMetadata[PAGE_TABLE_METADATA_CAPACITY];
+
 static void clear_new_paging_descriptors(PagingDescriptorChange *__changes, uint32_t __count) noexcept {
     while (__count) {
         __count--;
         __changes[__count].entry[__changes[__count].index] = 0;
+    }
+}
+
+static PageTableMetadata *find_page_table_metadata(uint64_t __frame) noexcept {
+    const uint64_t frame = __frame & PAGING_DESCRIPTOR_ADDR_MASK;
+    for (uint32_t i = 0; i < PAGE_TABLE_METADATA_CAPACITY; i++) {
+        if (gPageTableMetadata[i].used && gPageTableMetadata[i].frame_phys == frame)
+            return &gPageTableMetadata[i];
+    }
+    return nullptr;
+}
+
+static bool register_page_table(
+    uint64_t __root, uint64_t __frame, PageTableOwner __owner, PageTableLevel __level) noexcept {
+    const uint64_t frame = __frame & PAGING_DESCRIPTOR_ADDR_MASK;
+    if (find_page_table_metadata(frame) != nullptr)
+        return false;
+
+    for (uint32_t i = 0; i < PAGE_TABLE_METADATA_CAPACITY; i++) {
+        if (!gPageTableMetadata[i].used) {
+            gPageTableMetadata[i] = {true, __owner, __level, __root & PAGING_DESCRIPTOR_ADDR_MASK, frame, 0};
+            return true;
+        }
+    }
+    return false;
+}
+
+static void unregister_page_table(uint64_t __frame) noexcept {
+    PageTableMetadata *metadata = find_page_table_metadata(__frame);
+    if (metadata != nullptr)
+        metadata->used = false;
+}
+
+static bool page_table_owned_by(
+    uint64_t __frame, uint64_t __root, PageTableOwner __owner, PageTableLevel __level) noexcept {
+    PageTableMetadata *metadata = find_page_table_metadata(__frame);
+    return metadata != nullptr && metadata->owner == __owner && metadata->level == __level &&
+           metadata->root_phys == (__root & PAGING_DESCRIPTOR_ADDR_MASK);
+}
+
+static bool increment_present_entry(uint64_t __frame) noexcept {
+    PageTableMetadata *metadata = find_page_table_metadata(__frame);
+    if (metadata == nullptr)
+        return true;   // Static/borrowed page tables are intentionally not reclaimable.
+    if (metadata->present_entries == INDEX_MASK + 1)
+        return false;
+    metadata->present_entries++;
+    return true;
+}
+
+static bool decrement_present_entry(uint64_t __frame) noexcept {
+    PageTableMetadata *metadata = find_page_table_metadata(__frame);
+    if (metadata == nullptr)
+        return true;
+    if (metadata->present_entries == 0)
+        return false;
+    metadata->present_entries--;
+    return true;
+}
+
+static bool page_table_empty(uint64_t __frame) noexcept {
+    PageTableMetadata *metadata = find_page_table_metadata(__frame);
+    return metadata != nullptr && metadata->present_entries == 0;
+}
+
+static void clear_owned_paging_descriptors(OwnedPagingDescriptorChange *__changes, uint32_t __count) noexcept {
+    while (__count) {
+        __count--;
+        OwnedPagingDescriptorChange &change = __changes[__count];
+        change.entry[change.index] = 0;
+        decrement_present_entry(change.parent_frame);
+        unregister_page_table(change.child_frame);
+        bigos::mm::__detail::free_physical_order((void *)change.child_frame);
     }
 }
 
@@ -235,6 +343,11 @@ static bool map_direct_large_page(uint64_t __vaddr, uint64_t __phys) noexcept {
     return true;
 }
 
+static uint64_t *direct_table(uint64_t __phys) noexcept;
+static bool ensure_owned_descriptor(uint64_t *__entry, uint16_t __index, uint64_t __attr, uint64_t __parent_frame,
+    uint64_t __root_phys, PageTableOwner __owner, PageTableLevel __child_level,
+    OwnedPagingDescriptorChange *__changes, uint32_t *__change_count) noexcept;
+
 // Single 4 KiB mapping driven by explicit PTE attributes. Reuses the recursive
 // self-mapping walk and the shared missing-level allocator. Intermediate levels
 // inherit present+writable plus the user bit (when the leaf is a user mapping)
@@ -245,47 +358,96 @@ static bool map_single_page(uint64_t __vaddr, uint64_t __phys, uint64_t __attr) 
     uint16_t i_pdpt = get_pdpt_index(__vaddr);
     uint16_t i_pd = get_pd_index(__vaddr);
     uint16_t i_pt = get_pt_index(__vaddr);
-    PagingDescriptorChange new_descriptors[3] = {};
+    OwnedPagingDescriptorChange new_descriptors[3] = {};
     uint32_t new_descriptor_count = 0;
+    const uint64_t root_phys = bigos::mm::read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK;
+    const PageTableOwner owner = PageTableOwner::KernelVmem;
 
     uint64_t intermediate_attr = DEFAULT_ATTR_PML4E;
     if ((__attr & bigos::mm::page_attr::USER) != 0)
         intermediate_attr |= bigos::mm::page_attr::USER;
 
     uint64_t *entry = self_mapping_pml4(__vaddr);
-    if (!ensure_paging_descriptor(entry, i_pml4, intermediate_attr, new_descriptors, &new_descriptor_count)) {
-        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+    if (!ensure_owned_descriptor(entry, i_pml4, intermediate_attr, root_phys, root_phys, owner, PageTableLevel::Pdpt,
+            new_descriptors, &new_descriptor_count)) {
+        clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
         return false;
     }
+    uint64_t pdpt_phys = entry[i_pml4] & PAGING_DESCRIPTOR_ADDR_MASK;
     entry = self_mapping_pdpt(__vaddr);
-    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pml4(__vaddr))
-        memset((void *)entry, 0, PAGE_SIZE);
 
-    if (!ensure_paging_descriptor(entry, i_pdpt, intermediate_attr, new_descriptors, &new_descriptor_count)) {
-        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+    if (!ensure_owned_descriptor(entry, i_pdpt, intermediate_attr, pdpt_phys, root_phys, owner, PageTableLevel::Pd,
+            new_descriptors, &new_descriptor_count)) {
+        clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
         return false;
     }
+    uint64_t pd_phys = entry[i_pdpt] & PAGING_DESCRIPTOR_ADDR_MASK;
     entry = self_mapping_pd(__vaddr);
-    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pdpt(__vaddr))
-        memset((void *)entry, 0, PAGE_SIZE);
 
-    if (!ensure_paging_descriptor(entry, i_pd, intermediate_attr, new_descriptors, &new_descriptor_count)) {
-        clear_new_paging_descriptors(new_descriptors, new_descriptor_count);
+    if (!ensure_owned_descriptor(entry, i_pd, intermediate_attr, pd_phys, root_phys, owner, PageTableLevel::Pt,
+            new_descriptors, &new_descriptor_count)) {
+        clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
         return false;
     }
+    uint64_t pt_phys = entry[i_pd] & PAGING_DESCRIPTOR_ADDR_MASK;
     entry = self_mapping_pt(__vaddr);
-    if (new_descriptor_count != 0 && new_descriptors[new_descriptor_count - 1].entry == self_mapping_pd(__vaddr))
-        memset((void *)entry, 0, PAGE_SIZE);
 
     {
         bigos::irq::InterruptGuard guard;
+        if (paging_present(entry[i_pt])) {
+            clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
+            return false;
+        }
         entry[i_pt] = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+        if (!increment_present_entry(pt_phys)) {
+            entry[i_pt] = 0;
+            clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
+            return false;
+        }
     }
     return true;
 }
 
 static uint64_t *direct_table(uint64_t __phys) noexcept {
     return (uint64_t *)bigos::mm::phys_to_direct(__phys & PAGING_DESCRIPTOR_ADDR_MASK);
+}
+
+static bool ensure_owned_descriptor(uint64_t *__entry, uint16_t __index, uint64_t __attr, uint64_t __parent_frame,
+    uint64_t __root_phys, PageTableOwner __owner, PageTableLevel __child_level,
+    OwnedPagingDescriptorChange *__changes, uint32_t *__change_count) noexcept {
+    if (paging_present(__entry[__index]))
+        return true;
+
+    uint64_t page = (uint64_t)bigos::mm::__detail::alloc_physical_order(0, 0);
+    if (page == 0)
+        return false;
+
+    uint64_t *new_table = direct_table(page);
+    if (new_table == nullptr) {
+        bigos::mm::__detail::free_physical_order((void *)page);
+        return false;
+    }
+    memset(new_table, 0, PAGE_SIZE);
+
+    if (!register_page_table(__root_phys, page, __owner, __child_level)) {
+        bigos::mm::__detail::free_physical_order((void *)page);
+        return false;
+    }
+
+    __changes[(*__change_count)++] = {__entry, __index, __parent_frame, page, __root_phys, __owner, __child_level};
+    {
+        // Ownership metadata exists before the present descriptor is published.
+        bigos::irq::InterruptGuard guard;
+        __entry[__index] = (page & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+        if (!increment_present_entry(__parent_frame)) {
+            __entry[__index] = 0;
+            unregister_page_table(page);
+            bigos::mm::__detail::free_physical_order((void *)page);
+            (*__change_count)--;
+            return false;
+        }
+    }
+    return true;
 }
 
 static bool ensure_root_descriptor(uint64_t *__entry, uint16_t __index, uint64_t __attr) noexcept {
@@ -336,6 +498,10 @@ static bool map_root_page(uint64_t __root_phys, uint64_t __vaddr, uint64_t __phy
     uint16_t i_pdpt = get_pdpt_index(__vaddr);
     uint16_t i_pd = get_pd_index(__vaddr);
     uint16_t i_pt = get_pt_index(__vaddr);
+    OwnedPagingDescriptorChange new_descriptors[3] = {};
+    uint32_t new_descriptor_count = 0;
+    const uint64_t root_phys = __root_phys & PAGING_DESCRIPTOR_ADDR_MASK;
+    const PageTableOwner owner = PageTableOwner::UserAddressSpace;
 
     uint64_t intermediate_attr = DEFAULT_ATTR_PML4E;
     if ((__attr & bigos::mm::page_attr::USER) != 0)
@@ -344,30 +510,175 @@ static bool map_root_page(uint64_t __root_phys, uint64_t __vaddr, uint64_t __phy
     uint64_t *entry = direct_table(__root_phys);
     if (entry == nullptr)
         return false;
-    if (!ensure_root_descriptor(entry, i_pml4, intermediate_attr))
+    if (!ensure_owned_descriptor(entry, i_pml4, intermediate_attr, root_phys, root_phys, owner, PageTableLevel::Pdpt,
+            new_descriptors, &new_descriptor_count)) {
+        clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
         return false;
+    }
+    uint64_t pdpt_phys = entry[i_pml4] & PAGING_DESCRIPTOR_ADDR_MASK;
 
     entry = direct_table(entry[i_pml4]);
     if (entry == nullptr)
         return false;
-    if (!ensure_root_descriptor(entry, i_pdpt, intermediate_attr))
+    if (!ensure_owned_descriptor(entry, i_pdpt, intermediate_attr, pdpt_phys, root_phys, owner, PageTableLevel::Pd,
+            new_descriptors, &new_descriptor_count)) {
+        clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
         return false;
+    }
+    uint64_t pd_phys = entry[i_pdpt] & PAGING_DESCRIPTOR_ADDR_MASK;
 
     entry = direct_table(entry[i_pdpt]);
     if (entry == nullptr)
         return false;
-    if (!ensure_root_descriptor(entry, i_pd, intermediate_attr))
+    if (!ensure_owned_descriptor(entry, i_pd, intermediate_attr, pd_phys, root_phys, owner, PageTableLevel::Pt,
+            new_descriptors, &new_descriptor_count)) {
+        clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
         return false;
+    }
+    uint64_t pt_phys = entry[i_pd] & PAGING_DESCRIPTOR_ADDR_MASK;
 
     entry = direct_table(entry[i_pd]);
     if (entry == nullptr)
         return false;
+    if (paging_present(entry[i_pt])) {
+        clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
+        return false;
+    }
 
     {
         bigos::irq::InterruptGuard guard;
         entry[i_pt] = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+        if (!increment_present_entry(pt_phys)) {
+            entry[i_pt] = 0;
+            clear_owned_paging_descriptors(new_descriptors, new_descriptor_count);
+            return false;
+        }
     }
     return true;
+}
+
+static bool reclaim_active_empty_tables(uint64_t __root_phys, uint64_t __vaddr, PageTableOwner __owner) noexcept {
+    uint64_t *pml4 = self_mapping_pml4(__vaddr);
+    uint64_t *pdpt = self_mapping_pdpt(__vaddr);
+    uint64_t *pd = self_mapping_pd(__vaddr);
+
+    uint64_t &pml4e = pml4[get_pml4_index(__vaddr)];
+    uint64_t &pdpte = pdpt[get_pdpt_index(__vaddr)];
+    uint64_t &pde = pd[get_pd_index(__vaddr)];
+    const uint64_t pdpt_phys = pml4e & PAGING_DESCRIPTOR_ADDR_MASK;
+    const uint64_t pd_phys = pdpte & PAGING_DESCRIPTOR_ADDR_MASK;
+    const uint64_t pt_phys = pde & PAGING_DESCRIPTOR_ADDR_MASK;
+
+    if (page_table_owned_by(pt_phys, __root_phys, __owner, PageTableLevel::Pt) && page_table_empty(pt_phys)) {
+        pde = 0;
+        flush_kernel_tlb_page(__vaddr);
+        if (!decrement_present_entry(pd_phys))
+            return false;
+        unregister_page_table(pt_phys);
+        bigos::mm::__detail::free_physical_order((void *)pt_phys);
+    } else {
+        return true;
+    }
+
+    if (page_table_owned_by(pd_phys, __root_phys, __owner, PageTableLevel::Pd) && page_table_empty(pd_phys)) {
+        pdpte = 0;
+        flush_kernel_tlb_page(__vaddr);
+        if (!decrement_present_entry(pdpt_phys))
+            return false;
+        unregister_page_table(pd_phys);
+        bigos::mm::__detail::free_physical_order((void *)pd_phys);
+    } else {
+        return true;
+    }
+
+    if (page_table_owned_by(pdpt_phys, __root_phys, __owner, PageTableLevel::Pdpt) && page_table_empty(pdpt_phys)) {
+        pml4e = 0;
+        flush_kernel_tlb_page(__vaddr);
+        unregister_page_table(pdpt_phys);
+        bigos::mm::__detail::free_physical_order((void *)pdpt_phys);
+    }
+    return true;
+}
+
+static bool teardown_user_low_half(uint64_t __root_phys) noexcept {
+    uint64_t *pml4 = direct_table(__root_phys);
+    if (pml4 == nullptr)
+        return false;
+
+    constexpr uint32_t USER_PML4_LIMIT = 256;
+    for (uint32_t pml4_i = 0; pml4_i < USER_PML4_LIMIT; pml4_i++) {
+        if (!paging_present(pml4[pml4_i]))
+            continue;
+
+        const uint64_t pdpt_phys = pml4[pml4_i] & PAGING_DESCRIPTOR_ADDR_MASK;
+        if (!page_table_owned_by(pdpt_phys, __root_phys, PageTableOwner::UserAddressSpace, PageTableLevel::Pdpt))
+            return false;
+        uint64_t *pdpt = direct_table(pdpt_phys);
+        if (pdpt == nullptr)
+            return false;
+
+        for (uint32_t pdpt_i = 0; pdpt_i < 512; pdpt_i++) {
+            if (!paging_present(pdpt[pdpt_i]))
+                continue;
+
+            const uint64_t pd_phys = pdpt[pdpt_i] & PAGING_DESCRIPTOR_ADDR_MASK;
+            if (!page_table_owned_by(pd_phys, __root_phys, PageTableOwner::UserAddressSpace, PageTableLevel::Pd))
+                return false;
+            uint64_t *pd = direct_table(pd_phys);
+            if (pd == nullptr)
+                return false;
+
+            for (uint32_t pd_i = 0; pd_i < 512; pd_i++) {
+                if (!paging_present(pd[pd_i]))
+                    continue;
+                if ((pd[pd_i] & PAGING_DESCRIPTOR_LARGE_PAGE) != 0)
+                    return false;
+
+                const uint64_t pt_phys = pd[pd_i] & PAGING_DESCRIPTOR_ADDR_MASK;
+                if (!page_table_owned_by(pt_phys, __root_phys, PageTableOwner::UserAddressSpace, PageTableLevel::Pt))
+                    return false;
+                uint64_t *pt = direct_table(pt_phys);
+                if (pt == nullptr)
+                    return false;
+
+                for (uint32_t pt_i = 0; pt_i < 512; pt_i++) {
+                    if (!paging_present(pt[pt_i]))
+                        continue;
+                    const uint64_t leaf_phys = pt[pt_i] & PAGING_DESCRIPTOR_ADDR_MASK;
+                    pt[pt_i] = 0;
+                    if (!decrement_present_entry(pt_phys))
+                        return false;
+                    bigos::mm::__detail::free_physical_order((void *)leaf_phys);
+                }
+
+                if (!page_table_empty(pt_phys))
+                    return false;
+                pd[pd_i] = 0;
+                if (!decrement_present_entry(pd_phys))
+                    return false;
+                unregister_page_table(pt_phys);
+                bigos::mm::__detail::free_physical_order((void *)pt_phys);
+            }
+
+            if (!page_table_empty(pd_phys))
+                return false;
+            pdpt[pdpt_i] = 0;
+            if (!decrement_present_entry(pdpt_phys))
+                return false;
+            unregister_page_table(pd_phys);
+            bigos::mm::__detail::free_physical_order((void *)pd_phys);
+        }
+
+        if (!page_table_empty(pdpt_phys))
+            return false;
+        pml4[pml4_i] = 0;
+        if (!decrement_present_entry(__root_phys))
+            return false;
+        unregister_page_table(pdpt_phys);
+        bigos::mm::__detail::free_physical_order((void *)pdpt_phys);
+    }
+
+    return page_table_empty(__root_phys);
 }
 
 static void rollback_direct_map_range(uint64_t __phys_base, uint64_t __mapped_pages) noexcept {
@@ -552,11 +863,28 @@ namespace mm {
     }
 
     void unmap_page(uint64_t __vaddr) noexcept {
-        uint64_t *pte = mapped_pte(__vaddr);
-        if (pte != nullptr && paging_present(*pte)) {
-            bigos::irq::InterruptGuard guard;
-            *pte = 0;
-            flush_kernel_tlb_page(__vaddr);
+        uint64_t *pml4 = self_mapping_pml4(__vaddr);
+        if (!paging_present(pml4[get_pml4_index(__vaddr)]))
+            return;
+        uint64_t *pdpt = self_mapping_pdpt(__vaddr);
+        if (!paging_present(pdpt[get_pdpt_index(__vaddr)]))
+            return;
+        uint64_t *pd = self_mapping_pd(__vaddr);
+        if (!paging_present(pd[get_pd_index(__vaddr)]) || (pd[get_pd_index(__vaddr)] & PAGING_DESCRIPTOR_LARGE_PAGE) != 0)
+            return;
+
+        uint64_t *pte = &self_mapping_pt(__vaddr)[get_pt_index(__vaddr)];
+        if (paging_present(*pte)) {
+            const uint64_t root_phys = read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK;
+            const uint64_t pt_phys = pd[get_pd_index(__vaddr)] & PAGING_DESCRIPTOR_ADDR_MASK;
+            {
+                bigos::irq::InterruptGuard guard;
+                *pte = 0;
+                flush_kernel_tlb_page(__vaddr);
+            }
+            if (!decrement_present_entry(pt_phys) ||
+                !reclaim_active_empty_tables(root_phys, __vaddr, PageTableOwner::KernelVmem))
+                direct_map_panic("BIGOS_PAGE_TABLE_RECLAIM_FAILED active-unmap");
         }
     }
 
@@ -580,6 +908,11 @@ namespace mm {
             dst[i] = 0;   // user lower half: independent, cleared
         for (uint32_t i = HALF; i < 512; i++)
             dst[i] = kernel_pml4[i];   // share kernel higher half / self-mapping / direct map
+
+        if (!register_page_table(new_root, new_root, PageTableOwner::UserAddressSpace, PageTableLevel::Pml4)) {
+            __detail::free_physical_order((void *)new_root);
+            return INVALID_PHYS_ADDR;
+        }
 
         return new_root;
     }
@@ -608,6 +941,25 @@ namespace mm {
                 break;
             page += PAGE_SIZE;
         }
+        return true;
+    }
+
+    bool teardown_user_address_space(uint64_t __root_phys) noexcept {
+        if (__root_phys == INVALID_PHYS_ADDR)
+            return false;
+        const uint64_t root = __root_phys & PAGING_DESCRIPTOR_ADDR_MASK;
+        if (root == (read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK))
+            return false;
+        if (!page_table_owned_by(root, root, PageTableOwner::UserAddressSpace, PageTableLevel::Pml4))
+            return false;
+
+        // The root is inactive here, so no immediate invlpg is required. The
+        // single-core runtime must not reactivate it after this teardown starts.
+        if (!teardown_user_low_half(root))
+            return false;
+
+        unregister_page_table(root);
+        __detail::free_physical_order((void *)root);
         return true;
     }
 
@@ -674,7 +1026,7 @@ namespace mm {
                     }
                 }
             }
-            __detail::free_physical_order((void *)root);
+            (void)teardown_user_address_space(root);
         }
 
         if (pte_ok && code_attr_ok && root_ok) {

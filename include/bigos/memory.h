@@ -85,6 +85,12 @@ namespace mm {
     // present user PTEs in the supplied root. It does not fault in pages.
     _attr_nodiscard_ bool user_range_mapped(uint64_t __root_phys, uint64_t __vaddr, uint64_t __len) noexcept;
 
+    // Safe-context-only teardown for a derived user address-space root. It only
+    // walks user low-half entries owned by the process, leaves copied kernel
+    // high-half entries borrowed, refuses the active CR3 root, and releases the
+    // PML4 root last.
+    _attr_nodiscard_ bool teardown_user_address_space(uint64_t __root_phys) noexcept;
+
     _attr_nodiscard_ uint64_t read_cr3() noexcept;
     void activate_address_space_root(uint64_t __root_phys) noexcept;
 

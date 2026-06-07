@@ -45,10 +45,9 @@ namespace irq {
             const bool user_mode = (__frame->cs & 0x3) == 0x3;
 
             if (user_mode) {
-                bigos::proc::mark_current_faulted(-14);
                 kprintf("BIGOS_USER_PAGE_FAULT address=%llx error=%llx rip=%llx cs=%llx\n", fault_address, error,
                     __frame->rip, __frame->cs);
-                halt_cpu();
+                bigos::proc::fault_current_and_exit(-14);
             }
 #endif
 

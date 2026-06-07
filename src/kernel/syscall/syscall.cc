@@ -47,7 +47,7 @@ namespace sys {
 #ifdef BIGOS_USER_PROGRAM_SMOKE
         static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
             if (__fd != 1 || !bigos::proc::validate_user_buffer(__buffer, __len))
-                return SYS_EFAULT;
+                bigos::proc::fault_current_and_exit(SYS_EFAULT);
 
             char bounded[SYS_WRITE_MAX_LEN + 1];
             const char *src = (const char *)__buffer;

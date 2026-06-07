@@ -64,8 +64,8 @@ def test_unmap_primitive_clears_pte_and_flushes_tlb() -> None:
     vmem = read_source('src/mm/vmem.cc')
 
     unmap_start = vmem.index('void unmap_page(uint64_t __vaddr) noexcept')
-    unmap_body = vmem[unmap_start : unmap_start + 320]
-    assert 'mapped_pte(__vaddr)' in unmap_body
+    unmap_body = vmem[unmap_start : vmem.index('uint64_t derive_user_address_space_root', unmap_start)]
+    assert 'self_mapping_pt(__vaddr)' in unmap_body
     assert '*pte = 0;' in unmap_body
     assert 'flush_kernel_tlb_page(__vaddr);' in unmap_body
     assert 'bigos::irq::InterruptGuard guard;' in unmap_body
