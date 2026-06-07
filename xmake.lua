@@ -226,10 +226,15 @@ target("kernel")
     end
 
     on_link(function (target) 
+        local runtime_tempdir = path.join("$(builddir)", "temp", "runtime")
+        os.mkdir(runtime_tempdir)
+        local crt0_object = path.join(runtime_tempdir, "crt0.o")
+        os.exec("x86_64-elf-as -c %s -o %s", path.join("$(projectdir)", "src", "runtime", "crt0.s"), crt0_object)
+
         local objs_table = target:objectfiles()
         table.insert(objs_table,1,path.translate("$(projectdir)/lib/crtbegin.o"))
         table.insert(objs_table,1,path.translate("$(projectdir)/lib/crti.o"))
-        table.insert(objs_table,1,path.translate("$(projectdir)/lib/crt0.o"))
+        table.insert(objs_table,1,path.translate(crt0_object))
         table.insert(objs_table,path.translate("$(projectdir)/lib/crtend.o"))
         table.insert(objs_table,path.translate("$(projectdir)/lib/crtn.o"))
 
