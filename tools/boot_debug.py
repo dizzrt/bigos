@@ -559,7 +559,7 @@ def render_bochsrc(
         f'ata0-master: type=disk, path="{image_path}", mode=flat, '
         f'cylinders={cylinders}, heads={heads}, spt={sectors_per_track}, sect_size=512',
         serial_line,
-        'log: -',
+        'log: build/test/bochs.log',
         'panic: action=fatal',
         'error: action=report',
         'info: action=report',

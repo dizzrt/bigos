@@ -121,7 +121,7 @@ Python 脚本负责阶段编排和错误信息，Makefile/xmake 只做薄包装�
 - `boot: disk`。
 - `ata0` enabled，`ata0-master` 指向生成的 raw image，`mode=flat`，`sect_size=512`。
 - 单 CPU 和 x86_64 CPUID 能力。
-- `log: -`，便于在终端观察 Bochs 日志。
+- `log: build/test/bochs.log`，将 Bochs 日志写入项目内可复现路径。
 - `com1: enabled=true, mode=null`，直到后续阶段引入串口自动判定。
 
 生成配置不应默认包含：
