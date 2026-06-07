@@ -2,7 +2,7 @@
 
 #include <bigos/io.h>
 #include <bigos/memory.h>
-#ifdef BIGOS_USER_PROGRAM_SMOKE
+#ifdef BIGOS_USER_PROCESS
 #include <bigos/proc.h>
 #endif
 #include <irq/interrupt.h>
@@ -217,7 +217,7 @@ namespace sched {
         // hlt until an IRQ wakes the CPU, then re-evaluate.
         for (;;) {
             sched::yield();
-#ifdef BIGOS_USER_PROGRAM_SMOKE
+#ifdef BIGOS_USER_PROCESS
             bigos::proc::reap_pending_processes();
 #endif
             asm volatile("hlt");

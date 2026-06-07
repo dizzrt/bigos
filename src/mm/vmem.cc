@@ -262,8 +262,13 @@ static bool direct_map_record_range(uint64_t __base, uint64_t __len) noexcept {
 
 static bool ensure_paging_descriptor(uint64_t *__entry, uint16_t __index, uint64_t __attr,
     PagingDescriptorChange *__changes, uint32_t *__change_count) noexcept {
-    if (paging_present(__entry[__index]))
+    if (paging_present(__entry[__index])) {
+        if ((__attr & bigos::mm::page_attr::USER) != 0 && (__entry[__index] & bigos::mm::page_attr::USER) == 0) {
+            bigos::irq::InterruptGuard guard;
+            __entry[__index] |= bigos::mm::page_attr::USER;
+        }
         return true;
+    }
 
     uint64_t page = (uint64_t)bigos::mm::__detail::alloc_physical_order(0, 0);
     if (page == 0)
@@ -415,8 +420,13 @@ static uint64_t *direct_table(uint64_t __phys) noexcept {
 static bool ensure_owned_descriptor(uint64_t *__entry, uint16_t __index, uint64_t __attr, uint64_t __parent_frame,
     uint64_t __root_phys, PageTableOwner __owner, PageTableLevel __child_level,
     OwnedPagingDescriptorChange *__changes, uint32_t *__change_count) noexcept {
-    if (paging_present(__entry[__index]))
+    if (paging_present(__entry[__index])) {
+        if ((__attr & bigos::mm::page_attr::USER) != 0 && (__entry[__index] & bigos::mm::page_attr::USER) == 0) {
+            bigos::irq::InterruptGuard guard;
+            __entry[__index] |= bigos::mm::page_attr::USER;
+        }
         return true;
+    }
 
     uint64_t page = (uint64_t)bigos::mm::__detail::alloc_physical_order(0, 0);
     if (page == 0)
@@ -834,6 +844,64 @@ namespace mm {
         uint32_t kernel_vmem_free_pages() noexcept {
             bigos::irq::InterruptGuard guard;
             return kvmem.nr_free_pages();
+        }
+
+        bool clone_kernel_page_mapping_in_root(uint64_t __root_phys, uint64_t __vaddr) noexcept {
+            if (__root_phys == INVALID_PHYS_ADDR || (__vaddr & (PAGE_SIZE - 1)) != 0)
+                return false;
+
+            uint64_t *dst_pml4 = direct_table(__root_phys);
+            uint64_t *kernel_pml4 = self_mapping_pml4(0);
+            const uint16_t pml4_index = get_pml4_index(__vaddr);
+            if (dst_pml4 == nullptr || kernel_pml4 == nullptr || !paging_present(kernel_pml4[pml4_index]))
+                return false;
+
+            {
+                bigos::irq::InterruptGuard guard;
+                dst_pml4[pml4_index] = kernel_pml4[pml4_index];
+            }
+
+            uint64_t *source_pte = mapped_pte(__vaddr);
+            if (source_pte == nullptr || !paging_present(*source_pte))
+                return false;
+
+            const uint64_t phys = *source_pte & PAGING_DESCRIPTOR_ADDR_MASK;
+            const PageAttr attr = *source_pte & ~PAGING_DESCRIPTOR_ADDR_MASK;
+            uint64_t *dest_pte = root_pte(__root_phys, __vaddr);
+            if (dest_pte != nullptr) {
+                if (paging_present(*dest_pte))
+                    return (*dest_pte & PAGING_DESCRIPTOR_ADDR_MASK) == phys;
+                bigos::irq::InterruptGuard guard;
+                *dest_pte = phys | attr;
+                return true;
+            }
+            return map_page_in_root(__root_phys, __vaddr, phys, attr);
+        }
+
+        bool copy_from_user_root(uint64_t __root_phys, uint64_t __addr, void *__dst, uint64_t __len) noexcept {
+            if (__dst == nullptr || __len == 0)
+                return false;
+
+            auto *dst = (uint8_t *)__dst;
+            for (uint64_t copied = 0; copied < __len;) {
+                const uint64_t vaddr = __addr + copied;
+                uint64_t *pte = root_pte(__root_phys, vaddr);
+                if (pte == nullptr || !paging_present(*pte) || (*pte & page_attr::USER) == 0)
+                    return false;
+
+                const uint64_t page_offset = vaddr & (PAGE_SIZE - 1);
+                uint64_t chunk = PAGE_SIZE - page_offset;
+                if (chunk > __len - copied)
+                    chunk = __len - copied;
+
+                const uint64_t phys = (*pte & PAGING_DESCRIPTOR_ADDR_MASK) + page_offset;
+                void *src = phys_to_direct(phys);
+                if (src == nullptr)
+                    return false;
+                memcpy(dst + copied, src, chunk);
+                copied += chunk;
+            }
+            return true;
         }
     }   // namespace __detail
 

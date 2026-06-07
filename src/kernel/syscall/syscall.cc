@@ -3,7 +3,7 @@
 #include <bigos/io.h>
 #include <bigos/timer.h>
 #include <irq/interrupt.h>
-#ifdef BIGOS_USER_PROGRAM_SMOKE
+#ifdef BIGOS_USER_PROCESS
 #include <bigos/proc.h>
 #endif
 
@@ -44,15 +44,14 @@ namespace sys {
             return (int64_t)bigos::timer::ticks();
         }
 
-#ifdef BIGOS_USER_PROGRAM_SMOKE
+#ifdef BIGOS_USER_PROCESS
         static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
             if (__fd != 1 || !bigos::proc::validate_user_buffer(__buffer, __len))
                 bigos::proc::fault_current_and_exit(SYS_EFAULT);
 
             char bounded[SYS_WRITE_MAX_LEN + 1];
-            const char *src = (const char *)__buffer;
-            for (uint64_t i = 0; i < __len; i++)
-                bounded[i] = src[i];
+            if (!bigos::proc::copy_current_user_buffer(__buffer, bounded, __len))
+                bigos::proc::fault_current_and_exit(SYS_EFAULT);
             bounded[__len] = 0;
 
             serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
@@ -78,7 +77,7 @@ namespace sys {
             case SYS_GET_TICK:
                 result = __detail::sys_get_tick();
                 break;
-#ifdef BIGOS_USER_PROGRAM_SMOKE
+#ifdef BIGOS_USER_PROCESS
             case SYS_WRITE:
                 result = __detail::sys_write(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;

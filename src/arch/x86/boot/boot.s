@@ -31,6 +31,8 @@ idt_attribute:
     .quad 0x1000
 
 _boot:
+    # Keep interrupts masked until the kernel installs its own IDT.
+    cli
     lgdt (gdt_attribute_32)
     ljmp $SELECTOR_CODE_32, $reload_gdt
 

@@ -2,6 +2,11 @@
 
 Stage 6 `user_program_smoke` is a default-off validation path that proves BigOS can create a minimal user process, load an embedded user program, enter CPL3, and return to the kernel through `write` / `exit` syscalls.
 
+Stage 8 adds a separate default-off `user_elf_smoke` path. It reuses the same
+minimal process runtime, syscall gate, user fault path, and deferred reaper, but
+loads `/boot/user/init.elf` from the kernel read-only exFAT stack instead of the
+embedded flat blob.
+
 ## Image Format
 
 The first user program uses an embedded flat blob rather than ELF64 or filesystem loading:
@@ -10,6 +15,11 @@ The first user program uses an embedded flat blob rather than ELF64 or filesyste
 - The image does not depend on an in-kernel FS, block devices, hosted OS file IO, or bootloader-only exFAT helpers.
 - The blob executes only a bounded `SYS_WRITE(fd=1, buf, len)` and then `SYS_EXIT(0)`.
 - The loader still maps code, data/BSS, and stack explicitly to validate permission boundaries; data/BSS pages are currently zero-filled pages.
+
+The ELF smoke uses a static freestanding ELF64 `ET_EXEC` image built by
+`xmake build user-init-elf` and optionally packaged by `tools/boot_debug.py` at
+`/boot/user/init.elf`. The ELF image writes `BIGOS_USER_ELF_WRITE\n` with
+`SYS_WRITE`, then calls `SYS_EXIT(0)`.
 
 ## Process Model
 
@@ -29,6 +39,13 @@ The loader runs in non-interrupt context:
 - `map_page_in_root()` maps code as `USER_CODE` and data/BSS/stack as `USER_DATA`.
 - Load failure emits `BIGOS_USER_LOAD_FAILED` and halts, preventing entry into partially initialized ring3.
 - Only `proc::run_user_process()` writes CR3 to activate the user root; ordinary derivation helpers do not switch address spaces implicitly.
+
+The ELF loader accepts only bounded x86_64 little-endian ELF64 `ET_EXEC`
+programs. It rejects unsupported program headers, W+X segments, overlapping
+segments, entries outside executable segments, ranges outside the low-half user
+window, and ranges colliding with the one-page stack at `USER_STACK_TOP`.
+Successful ELF preparation emits `BIGOS_USER_ELF_LOAD_PASSED`; bounded load
+failures emit `BIGOS_USER_ELF_LOAD_FAILED <reason>` and do not enter ring3.
 
 ## Ring3 Entry
 

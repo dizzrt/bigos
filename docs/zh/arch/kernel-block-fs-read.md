@@ -30,7 +30,9 @@ BIOS bootloader 的 exFAT 辅助逻辑分离：bootloader 仍使用固定低地�
 
 `xmake f --fs_smoke=y` 启用默认关闭的 runtime smoke。镜像生成器会加入
 `/boot/fs_smoke.txt`，payload 为 `BIGOS_FS_SMOKE_PAYLOAD\n`，同时保持现有
-`/boot/boot.bin` 与 `kernel` 布局兼容。内核初始化期间，smoke 通过 ATA PIO
+`/boot/boot.bin` 与 `kernel` 布局兼容。当 `build/bin/user/init.elf` 存在时，
+同一个镜像生成器也会把它打包为 `/boot/user/init.elf`，供默认关闭的 ELF 用户程序
+smoke 使用。内核初始化期间，smoke 通过 ATA PIO
 和 exFAT 读取该文件，并输出：
 
 - 成功：`BIGOS_FS_EXFAT_READ_PASSED`。

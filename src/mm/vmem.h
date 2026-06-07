@@ -31,6 +31,8 @@ namespace mm {
         void init_vmem();
         // IRQ-disabled-only snapshot of the kernel heap/vmalloc free-page count.
         uint32_t kernel_vmem_free_pages() noexcept;
+        bool clone_kernel_page_mapping_in_root(uint64_t __root_phys, uint64_t __vaddr) noexcept;
+        bool copy_from_user_root(uint64_t __root_phys, uint64_t __addr, void *__dst, uint64_t __len) noexcept;
     }   // namespace __detail
 
     class VMem {

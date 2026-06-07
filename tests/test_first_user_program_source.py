@@ -97,7 +97,8 @@ def test_syscall_gate_user_buffer_exit_and_fault_boundaries() -> None:
     assert 'bounded[SYS_WRITE_MAX_LEN + 1]' in syscall
     assert 'bigos::proc::exit_current((int64_t)__frame->rdi);' in syscall
     assert 'user_mode = (__frame->cs & 0x3) == 0x3' in interrupt
-    assert 'BIGOS_USER_PAGE_FAULT' in interrupt
+    assert 'bigos::proc::fault_current_and_exit(-14);' in interrupt
+    assert 'bigos::serial_puts("BIGOS_USER_PAGE_FAULT\\n");' in proc
     assert 'bigos::mm::user_range_mapped(process->address_space_root, __addr, __len)' in proc
 
 

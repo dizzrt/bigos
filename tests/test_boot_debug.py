@@ -59,6 +59,25 @@ def test_create_image_and_validate_layout(tmp_path: Path) -> None:
     boot_debug.validate_image(image)
 
 
+def test_create_image_can_package_user_init_elf(tmp_path: Path) -> None:
+    artifacts = make_artifacts(tmp_path)
+    artifacts = boot_debug.PreparedArtifacts(
+        kernel=artifacts.kernel,
+        mbr=artifacts.mbr,
+        dbr=artifacts.dbr,
+        exdbr=artifacts.exdbr,
+        boot=artifacts.boot,
+        user_init_elf=write_bytes(tmp_path / 'init.elf', b'\x7fELF' + bytes(128)),
+    )
+    image = tmp_path / 'os.raw'
+
+    layout = boot_debug.create_image(image, boot_debug.DEFAULT_IMAGE_SIZE, artifacts)
+
+    assert layout.user_init_clusters == 1
+    assert layout.user_init_cluster > layout.user_dir_cluster
+    boot_debug.validate_image(image)
+
+
 def test_generated_bochsrc_is_sanitized(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
     bochsrc = tmp_path / 'bochsrc.bxrc'
@@ -107,7 +126,11 @@ def test_build_current_artifacts_uses_saved_xmake_config(monkeypatch) -> None:
 
     boot_debug.build_current_artifacts()
 
-    assert commands == [['xmake', 'build', 'kernel'], ['xmake', 'build', 'boot-artifacts']]
+    assert commands == [
+        ['xmake', 'build', 'kernel'],
+        ['xmake', 'build', 'boot-artifacts'],
+        ['xmake', 'build', 'user-init-elf'],
+    ]
 
 
 def test_run_parser_rejects_smoke_shortcuts() -> None:

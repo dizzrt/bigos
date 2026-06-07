@@ -145,6 +145,73 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_USER_ELF_SMOKE
+namespace {
+    void user_elf_smoke_failed(const char *__reason) noexcept {
+        bigos::serial_puts("BIGOS_USER_ELF_LOAD_FAILED ");
+        bigos::serial_puts(__reason);
+        bigos::serial_puts("\n");
+    }
+
+    void user_elf_smoke_entry(void *) noexcept {
+        driver::block::AtaPioDevice ata = {};
+        driver::block::ata_pio_primary_master_init(&ata);
+
+        bigos::fs::Partition partition = {};
+        bigos::fs::FsStatus status = bigos::fs::find_exfat_partition(&ata.block, &partition);
+        if (status != bigos::fs::FsStatus::Success) {
+            user_elf_smoke_failed(bigos::fs::status_name(status));
+            return;
+        }
+
+        bigos::fs::ExfatMount mount = {};
+        status = bigos::fs::mount_exfat(&ata.block, &partition, &mount);
+        if (status != bigos::fs::FsStatus::Success) {
+            user_elf_smoke_failed(bigos::fs::status_name(status));
+            return;
+        }
+
+        bigos::fs::FileMetadata file = {};
+        status = bigos::fs::lookup(&mount, bigos::proc::USER_ELF_SMOKE_PATH, &file);
+        if (status != bigos::fs::FsStatus::Success) {
+            user_elf_smoke_failed(bigos::fs::status_name(status));
+            return;
+        }
+        if (file.data_length == 0 || file.data_length > bigos::proc::USER_ELF_MAX_FILE_BYTES) {
+            user_elf_smoke_failed("file-size");
+            return;
+        }
+
+        void *image = bigos::kmalloc((size_t)file.data_length);
+        if (image == nullptr) {
+            user_elf_smoke_failed("buffer");
+            return;
+        }
+
+        bigos::fs::ReadResult read = bigos::fs::read_file(
+            &mount, &file, 0, image, (size_t)file.data_length, (size_t)file.data_length);
+        if (read.status != bigos::fs::FsStatus::Success || read.bytes_read != file.data_length) {
+            bigos::free(image);
+            user_elf_smoke_failed(read.status == bigos::fs::FsStatus::Success ? "short-read"
+                                                                              : bigos::fs::status_name(read.status));
+            return;
+        }
+
+        static bigos::proc::Process elf_process;
+        const bigos::proc::UserElfLoadError load_status =
+            bigos::proc::create_elf_user_process(&elf_process, image, file.data_length);
+        bigos::free(image);
+        if (load_status != bigos::proc::UserElfLoadError::Success) {
+            user_elf_smoke_failed(bigos::proc::user_elf_load_error_name(load_status));
+            return;
+        }
+
+        bigos::serial_puts("BIGOS_USER_ELF_LOAD_PASSED\n");
+        bigos::proc::run_user_process(&elf_process);
+    }
+}   // namespace
+#endif
+
 void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
     bigos::serial_init();
@@ -189,6 +256,10 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&bigos::proc::user_program_smoke_entry, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_USER_LOAD_FAILED thread\n");
+#endif
+#ifdef BIGOS_USER_ELF_SMOKE
+    if (bigos::sched::create_kernel_thread(&user_elf_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_USER_ELF_LOAD_FAILED thread\n");
 #endif
 
     // The post-initialization halt behavior is now owned by the scheduler idle

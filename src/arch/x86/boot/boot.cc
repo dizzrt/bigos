@@ -414,14 +414,19 @@ bool validate_segment_file_range(const Elf64_Phdr *pheader, uint64_t file_size) 
 }
 
 void read_file_bytes(uint64_t file_lba, uint64_t file_offset, uint64_t size, uint8_t *dest) {
-    uint64_t copied = 0;
-    while (copied < size) {
-        uint64_t absolute_offset = file_offset + copied;
+    const uint32_t base_offset = (uint32_t)file_offset;
+    const uint32_t total_size = (uint32_t)size;
+    uint32_t copied = 0;
+    while (copied < total_size) {
+        uint32_t absolute_offset = base_offset + copied;
+        if (absolute_offset < base_offset) {
+            error("kernel read overflow");
+        }
         uint64_t lba = file_lba + absolute_offset / BYTES_PER_SECTOR;
-        uint64_t sector_offset = absolute_offset % BYTES_PER_SECTOR;
-        uint64_t to_copy = BYTES_PER_SECTOR - sector_offset;
-        if (to_copy > size - copied) {
-            to_copy = size - copied;
+        uint32_t sector_offset = absolute_offset % BYTES_PER_SECTOR;
+        uint32_t to_copy = BYTES_PER_SECTOR - sector_offset;
+        if (to_copy > total_size - copied) {
+            to_copy = total_size - copied;
         }
 
         checked_read_disk(1, lba, (uint16_t *)disk_buffer);

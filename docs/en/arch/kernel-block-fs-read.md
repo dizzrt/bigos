@@ -31,7 +31,9 @@ that later stages can reuse after memory management is initialized.
 
 `xmake f --fs_smoke=y` enables a default-off runtime smoke. The image generator
 adds `/boot/fs_smoke.txt` with the payload `BIGOS_FS_SMOKE_PAYLOAD\n` while
-preserving the existing `/boot/boot.bin` and `kernel` layout. During kernel
+preserving the existing `/boot/boot.bin` and `kernel` layout. When
+`build/bin/user/init.elf` exists, the same image generator also packages it as
+`/boot/user/init.elf` for the default-off ELF user-program smoke. During kernel
 initialization the smoke reads the file through ATA PIO and exFAT, then emits:
 
 - `BIGOS_FS_EXFAT_READ_PASSED` on success.

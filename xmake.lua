@@ -65,6 +65,12 @@ option("user_program_smoke")
     set_description("enable validation-only first user program ring3 smoke")
 option_end()
 
+option("user_elf_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only filesystem-backed user ELF ring3 smoke")
+option_end()
+
 option("fs_smoke")
     set_default(false)
     set_showmenu(true)
@@ -165,6 +171,34 @@ target("boot-artifacts")
     set_default(false)
     add_deps("boot-mbr", "boot-dbr", "boot-exdbr", "boot-loader")
 
+target("user-init-elf")
+    set_kind("phony")
+    if has_config("user_elf_smoke") then
+        set_default(true)
+    else
+        set_default(false)
+    end
+    on_build(function (target)
+        local user_srcdir = path.join("$(projectdir)", "user", "init")
+        local user_bindir = path.join("$(builddir)", "bin", "user")
+        local user_tempdir = path.join("$(builddir)", "temp", "user")
+        os.mkdir(user_bindir)
+        os.mkdir(user_tempdir)
+        local object = path.join(user_tempdir, "init.s.o")
+        local output = path.join(user_bindir, "init.elf")
+        os.exec("x86_64-elf-as -c %s -o %s", path.join(user_srcdir, "init.s"), object)
+        os.exec(
+            "x86_64-elf-ld -nostdlib -static -z max-page-size=0x1000 -T %s %s -o %s",
+            path.join(user_srcdir, "link.lds"),
+            object,
+            output
+        )
+        local size = os.filesize(output)
+        if size > 65536 then
+            raise("%s is too large: %d bytes > 65536 bytes", output, size)
+        end
+    end)
+
 target("kernel")
     set_plat("cross")
     set_arch("x86_64")
@@ -219,10 +253,18 @@ target("kernel")
         add_defines("BIGOS_SYSCALL_SMOKE")
     end
 
-    if has_config("user_program_smoke") then
-        add_defines("BIGOS_USER_PROGRAM_SMOKE")
+    if has_config("user_program_smoke") or has_config("user_elf_smoke") then
+        add_defines("BIGOS_USER_PROCESS")
         add_files("src/kernel/proc/**.cc")
         add_files("src/kernel/proc/**.s")
+    end
+
+    if has_config("user_program_smoke") then
+        add_defines("BIGOS_USER_PROGRAM_SMOKE")
+    end
+
+    if has_config("user_elf_smoke") then
+        add_defines("BIGOS_USER_ELF_SMOKE")
     end
 
     if has_config("fs_smoke") then

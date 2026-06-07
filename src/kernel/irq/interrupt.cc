@@ -1,7 +1,7 @@
 #include <bigos/io.h>
 #include <bigos/panic.h>
 #include <bigos/syscall.h>
-#ifdef BIGOS_USER_PROGRAM_SMOKE
+#ifdef BIGOS_USER_PROCESS
 #include <bigos/proc.h>
 #endif
 
@@ -41,12 +41,12 @@ namespace irq {
         static void page_fault_handler(InterruptFrame *__frame) noexcept {
             const uint64_t fault_address = read_cr2();
             const uint64_t error = __frame->error_code;
-#ifdef BIGOS_USER_PROGRAM_SMOKE
+#ifdef BIGOS_USER_PROCESS
             const bool user_mode = (__frame->cs & 0x3) == 0x3;
 
             if (user_mode) {
-                kprintf("BIGOS_USER_PAGE_FAULT address=%llx error=%llx rip=%llx cs=%llx\n", fault_address, error,
-                    __frame->rip, __frame->cs);
+                (void)fault_address;
+                (void)error;
                 bigos::proc::fault_current_and_exit(-14);
             }
 #endif

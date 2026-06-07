@@ -3,6 +3,10 @@
 阶段 6 的 `user_program_smoke` 是默认关闭的验证路径，用来证明 BigOS 可以创建一个最小用户进程、
 加载内嵌用户程序、进入 CPL3，并通过 `write` / `exit` syscall 回到内核。
 
+阶段 8 新增独立的默认关闭 `user_elf_smoke` 路径。它复用同一个最小进程运行时、
+syscall gate、用户 fault 路径和延后 reaper，但用户程序来自内核只读 exFAT 栈读取的
+`/boot/user/init.elf`，而不是内嵌 flat blob。
+
 ## 镜像格式
 
 首个用户程序采用内嵌 flat blob，而不是 ELF64 或文件系统加载：
@@ -11,6 +15,11 @@
 - 镜像不依赖内核 FS、块设备、hosted OS 文件 IO 或 bootloader-only exFAT helper。
 - blob 只执行 bounded `SYS_WRITE(fd=1, buf, len)`，随后执行 `SYS_EXIT(0)`。
 - loader 仍显式映射 code、data/BSS 和 stack，便于验证权限边界；data/BSS 页当前为清零页。
+
+ELF smoke 使用 `xmake build user-init-elf` 构建的静态 freestanding ELF64
+`ET_EXEC` 镜像，并可由 `tools/boot_debug.py` 打包到 `/boot/user/init.elf`。
+该 ELF 镜像通过 `SYS_WRITE` 输出 `BIGOS_USER_ELF_WRITE\n`，随后执行
+`SYS_EXIT(0)`。
 
 ## 进程模型
 
@@ -30,6 +39,12 @@ loader 在非中断上下文运行：
 - `map_page_in_root()` 将 code 映射为 `USER_CODE`，data/BSS/stack 映射为 `USER_DATA`。
 - 加载失败输出 `BIGOS_USER_LOAD_FAILED` 并 halt，禁止进入部分初始化的 ring3。
 - 仅 `proc::run_user_process()` 写 CR3 激活用户根；普通派生 helper 不隐式切换地址空间。
+
+ELF loader 只接受 bounded x86_64 little-endian ELF64 `ET_EXEC`。它会拒绝不支持的
+program header、W+X segment、重叠 segment、入口点不在 executable segment 内、越过
+低半区用户窗口的范围，以及与 `USER_STACK_TOP` 处单页用户栈碰撞的范围。ELF 准备成功
+输出 `BIGOS_USER_ELF_LOAD_PASSED`；bounded 加载失败输出
+`BIGOS_USER_ELF_LOAD_FAILED <reason>`，且不会进入 ring3。
 
 ## ring3 进入
 

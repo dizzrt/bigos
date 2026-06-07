@@ -56,6 +56,9 @@ ROOT_DIR_CLUSTER = 3
 BOOT_DIR_CLUSTER = 4
 BOOT_FILE_CLUSTER = 5
 FS_SMOKE_PAYLOAD = b'BIGOS_FS_SMOKE_PAYLOAD\n'
+USER_INIT_ELF = BUILD_DIR / 'bin' / 'user' / 'init.elf'
+USER_INIT_ELF_MAX_BYTES = 64 * 1024
+USER_INIT_ELF_PATH = '/boot/user/init.elf'
 
 BUILD_TOOLS = (
     'xmake',
@@ -91,6 +94,9 @@ class ImageLayout:
     kernel_cluster: int
     fs_smoke_clusters: int
     fs_smoke_cluster: int
+    user_dir_cluster: int
+    user_init_clusters: int
+    user_init_cluster: int
 
     @property
     def cluster_heap_lba(self) -> int:
@@ -117,6 +123,7 @@ class PreparedArtifacts:
     dbr: Path
     exdbr: Path
     boot: Path
+    user_init_elf: Path | None = None
 
 
 def log_stage(message: str) -> None:
@@ -195,6 +202,7 @@ def check_tools(need_bochs: bool, need_build: bool) -> None:
 def build_current_artifacts() -> None:
     run_command('kernel build', ['xmake', 'build', 'kernel'], PROJECT_ROOT)
     run_command('boot build', ['xmake', 'build', 'boot-artifacts'], PROJECT_ROOT)
+    run_command('user elf build', ['xmake', 'build', 'user-init-elf'], PROJECT_ROOT)
     require_file(DEFAULT_KERNEL, 'kernel build', 'kernel ELF')
     for name, (path, max_size) in BOOT_ARTIFACTS.items():
         require_file(path, 'boot build', f'{name} artifact', max_size)
@@ -204,16 +212,20 @@ def get_artifacts(kernel: Path = DEFAULT_KERNEL) -> PreparedArtifacts:
     require_file(kernel, 'image build', 'kernel ELF')
     for name, (path, max_size) in BOOT_ARTIFACTS.items():
         require_file(path, 'image build', f'{name} artifact', max_size)
+    user_init_elf = USER_INIT_ELF if USER_INIT_ELF.is_file() else None
+    if user_init_elf is not None:
+        require_file(user_init_elf, 'image build', USER_INIT_ELF_PATH, USER_INIT_ELF_MAX_BYTES)
     return PreparedArtifacts(
         kernel=kernel,
         mbr=BOOT_ARTIFACTS['mbr'][0],
         dbr=BOOT_ARTIFACTS['dbr'][0],
         exdbr=BOOT_ARTIFACTS['exdbr'][0],
         boot=BOOT_ARTIFACTS['boot'][0],
+        user_init_elf=user_init_elf,
     )
 
 
-def make_layout(image_size: int, boot_size: int, kernel_size: int) -> ImageLayout:
+def make_layout(image_size: int, boot_size: int, kernel_size: int, user_init_size: int = 0) -> ImageLayout:
     image_size = align_up(image_size, SECTOR_SIZE)
     total_sectors = image_size // SECTOR_SIZE
     partition_sectors = total_sectors - PARTITION_LBA
@@ -225,7 +237,14 @@ def make_layout(image_size: int, boot_size: int, kernel_size: int) -> ImageLayou
     fs_smoke_clusters = clusters_for_size(len(FS_SMOKE_PAYLOAD))
     kernel_cluster = BOOT_FILE_CLUSTER + boot_clusters
     fs_smoke_cluster = kernel_cluster + kernel_clusters
-    last_cluster = fs_smoke_cluster + fs_smoke_clusters - 1
+    user_dir_cluster = fs_smoke_cluster + fs_smoke_clusters
+    user_init_clusters = clusters_for_size(user_init_size) if user_init_size > 0 else 0
+    user_init_cluster = user_dir_cluster + 1
+    last_cluster = (
+        user_init_cluster + user_init_clusters - 1
+        if user_init_clusters > 0
+        else fs_smoke_cluster + fs_smoke_clusters - 1
+    )
     cluster_count = (partition_sectors - CLUSTER_HEAP_OFFSET) // SECTORS_PER_CLUSTER
     if cluster_count < last_cluster - 1:
         raise StageError(
@@ -243,6 +262,9 @@ def make_layout(image_size: int, boot_size: int, kernel_size: int) -> ImageLayou
         kernel_cluster=kernel_cluster,
         fs_smoke_clusters=fs_smoke_clusters,
         fs_smoke_cluster=fs_smoke_cluster,
+        user_dir_cluster=user_dir_cluster,
+        user_init_clusters=user_init_clusters,
+        user_init_cluster=user_init_cluster,
     )
 
 
@@ -374,6 +396,9 @@ def make_allocation_bitmap(layout: ImageLayout) -> bytes:
     used_clusters.extend(range(BOOT_FILE_CLUSTER, BOOT_FILE_CLUSTER + layout.boot_file_clusters))
     used_clusters.extend(range(layout.kernel_cluster, layout.kernel_cluster + layout.kernel_clusters))
     used_clusters.extend(range(layout.fs_smoke_cluster, layout.fs_smoke_cluster + layout.fs_smoke_clusters))
+    if layout.user_init_clusters > 0:
+        used_clusters.append(layout.user_dir_cluster)
+        used_clusters.extend(range(layout.user_init_cluster, layout.user_init_cluster + layout.user_init_clusters))
     for cluster in used_clusters:
         index = cluster - 2
         bitmap[index // 8] |= 1 << (index % 8)
@@ -403,8 +428,9 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
     mbr = read_file(artifacts.mbr)
     dbr = read_file(artifacts.dbr)
     exdbr = read_file(artifacts.exdbr)
+    user_init = read_file(artifacts.user_init_elf) if artifacts.user_init_elf is not None else b''
 
-    layout = make_layout(image_size, len(boot), len(kernel))
+    layout = make_layout(image_size, len(boot), len(kernel), len(user_init))
     image_path.parent.mkdir(parents=True, exist_ok=True)
 
     with image_path.open('wb') as image:
@@ -423,18 +449,27 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
                 ExfatFile('kernel', layout.kernel_cluster, len(kernel), is_directory=False),
             ]
         )
-        boot_dir = make_directory(
-            [
-                ExfatFile('boot.bin', BOOT_FILE_CLUSTER, len(boot), is_directory=False),
-                ExfatFile('kernel', layout.kernel_cluster, len(kernel), is_directory=False),
-                ExfatFile('fs_smoke.txt', layout.fs_smoke_cluster, len(FS_SMOKE_PAYLOAD), is_directory=False),
-            ]
-        )
+        boot_entries = [
+            ExfatFile('boot.bin', BOOT_FILE_CLUSTER, len(boot), is_directory=False),
+            ExfatFile('kernel', layout.kernel_cluster, len(kernel), is_directory=False),
+            ExfatFile('fs_smoke.txt', layout.fs_smoke_cluster, len(FS_SMOKE_PAYLOAD), is_directory=False),
+        ]
+        if user_init:
+            boot_entries.append(ExfatFile('user', layout.user_dir_cluster, CLUSTER_SIZE, is_directory=True))
+        boot_dir = make_directory(boot_entries)
         write_cluster(image, layout, ROOT_DIR_CLUSTER, root)
         write_cluster(image, layout, BOOT_DIR_CLUSTER, boot_dir)
         write_at(image, layout.cluster_lba(BOOT_FILE_CLUSTER) * SECTOR_SIZE, boot)
         write_at(image, layout.cluster_lba(layout.kernel_cluster) * SECTOR_SIZE, kernel)
         write_at(image, layout.cluster_lba(layout.fs_smoke_cluster) * SECTOR_SIZE, FS_SMOKE_PAYLOAD)
+        if user_init:
+            user_dir = make_directory(
+                [
+                    ExfatFile('init.elf', layout.user_init_cluster, len(user_init), is_directory=False),
+                ]
+            )
+            write_cluster(image, layout, layout.user_dir_cluster, user_dir)
+            write_at(image, layout.cluster_lba(layout.user_init_cluster) * SECTOR_SIZE, user_init)
 
     return layout
 
@@ -539,6 +574,19 @@ def validate_image(image_path: Path) -> None:
         fs_smoke_payload = image.read(fs_smoke_entry.data_length)
         if fs_smoke_payload != FS_SMOKE_PAYLOAD:
             raise StageError('image validate', '/boot/fs_smoke.txt payload is invalid')
+
+        try:
+            user_dir_entry = find_child(boot_directory, 'user', want_directory=True)
+        except StageError:
+            user_dir_entry = None
+        if user_dir_entry is not None:
+            image.seek(cluster_lba(user_dir_entry.first_cluster) * SECTOR_SIZE)
+            user_directory = image.read(CLUSTER_SIZE)
+            init_entry = find_child(user_directory, 'init.elf', want_directory=False)
+            if init_entry.data_length <= 0:
+                raise StageError('image validate', f'{USER_INIT_ELF_PATH} is empty')
+            if init_entry.data_length > USER_INIT_ELF_MAX_BYTES:
+                raise StageError('image validate', f'{USER_INIT_ELF_PATH} exceeds the loader bound')
 
 
 def disk_geometry(image_size: int) -> tuple[int, int, int]:
