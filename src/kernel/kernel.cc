@@ -15,10 +15,13 @@
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
 #include <bigos/tty.h>
+#include <drivers/block/ata_pio.h>
 #include <irq/interrupt.h>
 
+#include <bigos/fs/exfat.h>
 #include <bigos/io.h>
 #include <ktl/buffer.h>
+#include <string.h>
 
 extern "C" void kernel(const BootInfoHeader *boot_info);
 
@@ -83,6 +86,65 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_FS_SMOKE
+namespace {
+    constexpr const char *FS_SMOKE_PATH = "/boot/fs_smoke.txt";
+    constexpr const char *FS_SMOKE_PAYLOAD = "BIGOS_FS_SMOKE_PAYLOAD\n";
+
+    bool bytes_equal(const char *__a, const char *__b, size_t __len) noexcept {
+        for (size_t i = 0; i < __len; i++) {
+            if (__a[i] != __b[i])
+                return false;
+        }
+        return true;
+    }
+
+    void fs_smoke_failed(bigos::fs::FsStatus __status) noexcept {
+        bigos::serial_puts("BIGOS_FS_EXFAT_READ_FAILED code=");
+        bigos::serial_puts(bigos::fs::status_name(__status));
+        bigos::serial_puts("\n");
+    }
+
+    void fs_smoke() noexcept {
+        driver::block::AtaPioDevice ata = {};
+        driver::block::ata_pio_primary_master_init(&ata);
+
+        bigos::fs::Partition partition = {};
+        bigos::fs::FsStatus status = bigos::fs::find_exfat_partition(&ata.block, &partition);
+        if (status != bigos::fs::FsStatus::Success) {
+            fs_smoke_failed(status);
+            return;
+        }
+
+        bigos::fs::ExfatMount mount = {};
+        status = bigos::fs::mount_exfat(&ata.block, &partition, &mount);
+        if (status != bigos::fs::FsStatus::Success) {
+            fs_smoke_failed(status);
+            return;
+        }
+
+        bigos::fs::FileMetadata file = {};
+        status = bigos::fs::lookup(&mount, FS_SMOKE_PATH, &file);
+        if (status != bigos::fs::FsStatus::Success) {
+            fs_smoke_failed(status);
+            return;
+        }
+
+        char buffer[32] = {};
+        const size_t expected_len = strlen(FS_SMOKE_PAYLOAD);
+        bigos::fs::ReadResult result = bigos::fs::read_file(&mount, &file, 0, buffer, expected_len, sizeof(buffer));
+        if (result.status != bigos::fs::FsStatus::Success || result.bytes_read != expected_len ||
+            !bytes_equal(buffer, FS_SMOKE_PAYLOAD, expected_len)) {
+            fs_smoke_failed(result.status == bigos::fs::FsStatus::Success ? bigos::fs::FsStatus::MalformedFilesystem
+                                                                          : result.status);
+            return;
+        }
+
+        bigos::serial_puts("BIGOS_FS_EXFAT_READ_PASSED\n");
+    }
+}   // namespace
+#endif
+
 void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
     bigos::serial_init();
@@ -105,6 +167,12 @@ void kernel(const BootInfoHeader *boot_info) {
 
     bigos::serial_puts("BigOS kernel reached\n");
     bigos::kprintf("BigOS kernel reached\n");
+
+#ifdef BIGOS_FS_SMOKE
+    // Validation-only runtime disk read. Runs from ordinary kernel context after
+    // COM1, port I/O, and memory allocation are available; normal boot leaves it off.
+    fs_smoke();
+#endif
 
 #ifdef BIGOS_SYSCALL_SMOKE
     // Non-interrupt-context one-shot validation of the int 0x80 syscall entry,

@@ -65,6 +65,12 @@ option("user_program_smoke")
     set_description("enable validation-only first user program ring3 smoke")
 option_end()
 
+option("fs_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only kernel exFAT filesystem smoke marker")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -176,6 +182,7 @@ target("kernel")
     add_files("src/kernel/syscall/**.cc")
     add_files("src/kernel/terminal/**.cc")
     add_files("src/kernel/timer/**.cc")
+    add_files("src/kernel/fs/**.cc")
     add_files("src/drivers/**.cc")
     add_files("src/mm/**.cc")
     add_files("cpp/**.cc")
@@ -216,6 +223,10 @@ target("kernel")
         add_defines("BIGOS_USER_PROGRAM_SMOKE")
         add_files("src/kernel/proc/**.cc")
         add_files("src/kernel/proc/**.s")
+    end
+
+    if has_config("fs_smoke") then
+        add_defines("BIGOS_FS_SMOKE")
     end
 
     if is_mode("debug") then 
@@ -263,7 +274,7 @@ target("bochs")
     set_default(false)
     add_deps("kernel", "boot-artifacts")
     on_run(function (target)
-        os.exec("python3 tools/boot_debug.py run --skip-build")
+        os.exec("python3 tools/boot_debug.py run --skip-build --serial-log build/test/bochs.serial.log")
     end)
 
 target("bochs-sdl2")
@@ -271,5 +282,5 @@ target("bochs-sdl2")
     set_default(false)
     add_deps("kernel", "boot-artifacts")
     on_run(function (target)
-        os.exec("python3 tools/boot_debug.py run --skip-build --bochs-extra 'display_library: sdl2'")
+        os.exec("python3 tools/boot_debug.py run --skip-build --serial-log build/test/bochs-sdl2.serial.log --bochs-extra 'display_library: sdl2'")
     end)

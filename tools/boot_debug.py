@@ -55,6 +55,7 @@ BITMAP_CLUSTER = 2
 ROOT_DIR_CLUSTER = 3
 BOOT_DIR_CLUSTER = 4
 BOOT_FILE_CLUSTER = 5
+FS_SMOKE_PAYLOAD = b'BIGOS_FS_SMOKE_PAYLOAD\n'
 
 BUILD_TOOLS = (
     'xmake',
@@ -88,6 +89,8 @@ class ImageLayout:
     boot_file_clusters: int
     kernel_clusters: int
     kernel_cluster: int
+    fs_smoke_clusters: int
+    fs_smoke_cluster: int
 
     @property
     def cluster_heap_lba(self) -> int:
@@ -219,8 +222,10 @@ def make_layout(image_size: int, boot_size: int, kernel_size: int) -> ImageLayou
 
     boot_clusters = clusters_for_size(boot_size)
     kernel_clusters = clusters_for_size(kernel_size)
+    fs_smoke_clusters = clusters_for_size(len(FS_SMOKE_PAYLOAD))
     kernel_cluster = BOOT_FILE_CLUSTER + boot_clusters
-    last_cluster = kernel_cluster + kernel_clusters - 1
+    fs_smoke_cluster = kernel_cluster + kernel_clusters
+    last_cluster = fs_smoke_cluster + fs_smoke_clusters - 1
     cluster_count = (partition_sectors - CLUSTER_HEAP_OFFSET) // SECTORS_PER_CLUSTER
     if cluster_count < last_cluster - 1:
         raise StageError(
@@ -236,6 +241,8 @@ def make_layout(image_size: int, boot_size: int, kernel_size: int) -> ImageLayou
         boot_file_clusters=boot_clusters,
         kernel_clusters=kernel_clusters,
         kernel_cluster=kernel_cluster,
+        fs_smoke_clusters=fs_smoke_clusters,
+        fs_smoke_cluster=fs_smoke_cluster,
     )
 
 
@@ -366,6 +373,7 @@ def make_allocation_bitmap(layout: ImageLayout) -> bytes:
     used_clusters = [BITMAP_CLUSTER, ROOT_DIR_CLUSTER, BOOT_DIR_CLUSTER]
     used_clusters.extend(range(BOOT_FILE_CLUSTER, BOOT_FILE_CLUSTER + layout.boot_file_clusters))
     used_clusters.extend(range(layout.kernel_cluster, layout.kernel_cluster + layout.kernel_clusters))
+    used_clusters.extend(range(layout.fs_smoke_cluster, layout.fs_smoke_cluster + layout.fs_smoke_clusters))
     for cluster in used_clusters:
         index = cluster - 2
         bitmap[index // 8] |= 1 << (index % 8)
@@ -419,12 +427,14 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
             [
                 ExfatFile('boot.bin', BOOT_FILE_CLUSTER, len(boot), is_directory=False),
                 ExfatFile('kernel', layout.kernel_cluster, len(kernel), is_directory=False),
+                ExfatFile('fs_smoke.txt', layout.fs_smoke_cluster, len(FS_SMOKE_PAYLOAD), is_directory=False),
             ]
         )
         write_cluster(image, layout, ROOT_DIR_CLUSTER, root)
         write_cluster(image, layout, BOOT_DIR_CLUSTER, boot_dir)
         write_at(image, layout.cluster_lba(BOOT_FILE_CLUSTER) * SECTOR_SIZE, boot)
         write_at(image, layout.cluster_lba(layout.kernel_cluster) * SECTOR_SIZE, kernel)
+        write_at(image, layout.cluster_lba(layout.fs_smoke_cluster) * SECTOR_SIZE, FS_SMOKE_PAYLOAD)
 
     return layout
 
@@ -518,12 +528,17 @@ def validate_image(image_path: Path) -> None:
         boot_directory = image.read(CLUSTER_SIZE)
         boot_file_entry = find_child(boot_directory, 'boot.bin', want_directory=False)
         boot_dir_kernel_entry = find_child(boot_directory, 'kernel', want_directory=False)
+        fs_smoke_entry = find_child(boot_directory, 'fs_smoke.txt', want_directory=False)
         if boot_file_entry.data_length <= 0:
             raise StageError('image validate', '/boot/boot.bin is empty')
         if kernel_entry.data_length <= 0:
             raise StageError('image validate', 'kernel is empty')
         if boot_dir_kernel_entry.first_cluster != kernel_entry.first_cluster:
             raise StageError('image validate', '/boot/kernel does not point at the root kernel data')
+        image.seek(cluster_lba(fs_smoke_entry.first_cluster) * SECTOR_SIZE)
+        fs_smoke_payload = image.read(fs_smoke_entry.data_length)
+        if fs_smoke_payload != FS_SMOKE_PAYLOAD:
+            raise StageError('image validate', '/boot/fs_smoke.txt payload is invalid')
 
 
 def disk_geometry(image_size: int) -> tuple[int, int, int]:

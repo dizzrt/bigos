@@ -1,0 +1,43 @@
+# Kernel Block And exFAT Read Path
+
+BigOS phase 7 adds a kernel-runtime read-only block and filesystem path. This
+path is separate from the Legacy BIOS bootloader exFAT helpers: the bootloader
+still uses fixed low-memory buffers and contiguous boot files to load
+`/boot/boot.bin` and the kernel, while the kernel runtime exposes bounded APIs
+that later stages can reuse after memory management is initialized.
+
+## Scope
+
+- Block reads use a synchronous, read-only `BlockDevice` contract over whole
+  512-byte sectors with caller-owned buffers.
+- The first backend is ATA PIO for the Bochs raw image: primary master, LBA48,
+  synchronous polling, and bounded timeouts.
+- The filesystem layer discovers the first valid MBR exFAT partition, validates
+  the exFAT boot region, and mounts a single read-only volume.
+- exFAT support covers absolute path lookup, regular file metadata, bounded
+  reads, `NoFatChain` contiguous files, and bounded FAT-chain traversal.
+- The API is ordinary-kernel-context only. It is not IRQ-handler-safe, not
+  asynchronous, not DMA based, and does not provide sleep or SMP semantics.
+
+## Non-Goals
+
+- No write, delete, directory mutation, permissions, page cache, or full VFS.
+- No AHCI, NVMe, USB storage, DMA, hotplug, or interrupt-driven disk I/O.
+- No full exFAT implementation beyond the controlled read-only subset.
+- No changes to MBR/DBR/extended DBR layout, BootInfo handoff, linker addresses,
+  or the existing first user-program smoke.
+
+## Validation Smoke
+
+`xmake f --fs_smoke=y` enables a default-off runtime smoke. The image generator
+adds `/boot/fs_smoke.txt` with the payload `BIGOS_FS_SMOKE_PAYLOAD\n` while
+preserving the existing `/boot/boot.bin` and `kernel` layout. During kernel
+initialization the smoke reads the file through ATA PIO and exFAT, then emits:
+
+- `BIGOS_FS_EXFAT_READ_PASSED` on success.
+- `BIGOS_FS_EXFAT_READ_FAILED code=<code>` on bounded mount, lookup, read, or
+  verification failure.
+
+This stage is the API prerequisite for phase 8 `load-user-elf-program`, where
+the user ELF loader can request ELF headers and segments by path instead of
+depending on bootloader-only exFAT helpers or embedded flat images.
