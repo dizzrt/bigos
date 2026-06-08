@@ -513,6 +513,16 @@ namespace {
         return true;
     }
 
+    void init_fd_table(bigos::proc::Process *__process) noexcept {
+        if (__process == nullptr)
+            return;
+        for (uint32_t i = 0; i < bigos::proc::MAX_FDS; i++) {
+            __process->fd_table[i].file = nullptr;
+            __process->fd_table[i].close_on_exec = false;
+            __process->fd_table[i].readable = false;
+        }
+    }
+
     uint64_t bounded_strlen(const char *__value, uint64_t __limit) noexcept {
         if (__value == nullptr)
             return UINT64_MAX;
@@ -670,6 +680,7 @@ namespace bigos::proc {
         __process->resources_reclaimed = false;
         __process->exit_code = 0;
         __process->fault_reason = 0;
+        init_fd_table(__process);
         if (!publish_process(__process, ROOT_PARENT_PID))
             goto fail;
         return true;
@@ -805,6 +816,7 @@ namespace bigos::proc {
         __process->resources_reclaimed = false;
         __process->exit_code = 0;
         __process->fault_reason = 0;
+        init_fd_table(__process);
         if (!publish_process(__process, g_current_process != nullptr ? g_current_process->pid : ROOT_PARENT_PID)) {
             error = UserElfLoadError::OutOfMemory;
             goto fail;
@@ -870,6 +882,7 @@ namespace bigos::proc {
             mark_zombie_or_reap_pending(process);
             return UserElfLoadError::MapFailed;
         }
+        close_on_exec_fds(process);
         (void)old_code;
         (void)old_data;
         (void)old_stack;
@@ -910,11 +923,97 @@ namespace bigos::proc {
         return bigos::mm::user_range_mapped(process->address_space_root, __addr, __len);
     }
 
+    bool validate_user_io_buffer(uint64_t __addr, uint64_t __len) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_IO_MAX_LEN)
+            return false;
+        return bigos::mm::__detail::user_range_writable(process->address_space_root, __addr, __len);
+    }
+
     bool copy_current_user_buffer(uint64_t __addr, void *__dst, uint64_t __len) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_WRITE_MAX_LEN)
             return false;
         return bigos::mm::__detail::copy_from_user_root(process->address_space_root, __addr, __dst, __len);
+    }
+
+    bool copy_to_current_user_buffer(uint64_t __addr, const void *__src, uint64_t __len) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_IO_MAX_LEN)
+            return false;
+        return bigos::mm::__detail::copy_to_user_root(process->address_space_root, __addr, __src, __len);
+    }
+
+    int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __file == nullptr)
+            return FD_EBADF;
+        for (uint32_t i = 0; i < MAX_FDS; i++) {
+            if (process->fd_table[i].file == nullptr) {
+                process->fd_table[i].file = __file;
+                process->fd_table[i].close_on_exec = __close_on_exec;
+                process->fd_table[i].readable = __file->readable;
+                return (int64_t)i;
+            }
+        }
+        return FD_EMFILE;
+    }
+
+    bigos::vfs::Status read_fd_current(uint32_t __fd, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
+        if (__bytes_read != nullptr)
+            *__bytes_read = 0;
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= MAX_FDS)
+            return bigos::vfs::Status::BadFileDescriptor;
+        FdEntry *entry = &process->fd_table[__fd];
+        if (entry->file == nullptr || !entry->readable)
+            return bigos::vfs::Status::BadFileDescriptor;
+        return bigos::vfs::read(entry->file, __dst, __len, __bytes_read);
+    }
+
+    int64_t close_fd_current(uint32_t __fd) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= MAX_FDS)
+            return FD_EBADF;
+        FdEntry *entry = &process->fd_table[__fd];
+        if (entry->file == nullptr)
+            return FD_EBADF;
+        bigos::vfs::File *file = entry->file;
+        entry->file = nullptr;
+        entry->close_on_exec = false;
+        entry->readable = false;
+        bigos::vfs::release(file);
+        return 0;
+    }
+
+    void close_all_fds(Process *__process) noexcept {
+        if (__process == nullptr)
+            return;
+        for (uint32_t i = 0; i < MAX_FDS; i++) {
+            FdEntry *entry = &__process->fd_table[i];
+            if (entry->file == nullptr)
+                continue;
+            bigos::vfs::File *file = entry->file;
+            entry->file = nullptr;
+            entry->close_on_exec = false;
+            entry->readable = false;
+            bigos::vfs::release(file);
+        }
+    }
+
+    void close_on_exec_fds(Process *__process) noexcept {
+        if (__process == nullptr)
+            return;
+        for (uint32_t i = 0; i < MAX_FDS; i++) {
+            FdEntry *entry = &__process->fd_table[i];
+            if (entry->file == nullptr || !entry->close_on_exec)
+                continue;
+            bigos::vfs::File *file = entry->file;
+            entry->file = nullptr;
+            entry->close_on_exec = false;
+            entry->readable = false;
+            bigos::vfs::release(file);
+        }
     }
 
     void mark_current_faulted(int64_t __reason) noexcept {
@@ -1034,6 +1133,8 @@ namespace bigos::proc {
                 }
                 process->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
             }
+
+            close_all_fds(process);
 
             if (process->kernel_stack_base != nullptr) {
                 bigos::free_pages(process->kernel_stack_base);

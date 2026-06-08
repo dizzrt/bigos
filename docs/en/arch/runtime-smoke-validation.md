@@ -22,7 +22,7 @@ The runner explicitly configures each case through `xmake f`, builds through the
 | `scheduler-semantics` | `--scheduler_semantics_smoke=y` | `BIGOS_SCHED_SEMANTICS_PASSED` | 15s | Timer slice expiry, preemption-disable deferral, and guarded IRQ-return reschedule. |
 | `blocking-primitives` | `--blocking_smoke=y` | `BIGOS_BLOCKING_SMOKE_PASSED` | 15s | Synthetic TTY producer plus wait queue wakeup and timeout sleep. |
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` minimal syscall ABI path. |
-| `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO plus read-only exFAT file read path. |
+| `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO plus VFS open/read/release over the read-only exFAT backend. |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | Runs the embedded flat image as a lifecycle-core process; smoke entry remains default-off. |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | Packages `/boot/user/init.elf` and runs it through reusable ELF exec preparation; smoke entry remains default-off. |
 
@@ -36,10 +36,15 @@ The process lifecycle core now compiles in normal builds. User-program smoke
 cases validate smoke-only entry threads and marker behavior, while source-level
 checks cover PID uniqueness, bounded table failure, parent/child linkage,
 zombie-to-reap, wait wakeups, exec rollback, bounded `argv`/`envp`, active-root
-teardown rejection, and current-stack release deferral. Blocking `wait` remains
-for contexts where `sched::can_block()` is true; the current `int 0x80` syscall
-dispatch path reports deterministic nonblocking-context failure instead of
-sleeping inside interrupt dispatch.
+teardown rejection, and current-stack release deferral.
+
+The fd/VFS shell is validated by source-level checks plus the existing
+`filesystem-read` and `filesystem-user-elf` runtime cases. The `filesystem-read`
+case covers VFS root initialization, `open`/`read`/`release`, EOF clamp, and the
+existing `/boot/fs_smoke.txt` COM1 marker. Source-level checks cover bad fd,
+double close, fd table capacity, invalid user buffer handling, exec inheritance,
+close-on-exec, and exit/reap close-all. fd/VFS syscalls use the DPL=3 `int 0x80`
+trap gate and must pass `sched::can_block()` before synchronous storage I/O.
 
 ## Manual Single-Case Flow
 

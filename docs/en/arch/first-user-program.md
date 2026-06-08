@@ -77,7 +77,7 @@ x86_64 runtime user-mode support is provided by `src/kernel/proc/user_mode.cc` /
 - `VECTOR_SYSCALL = 0x80` is the only IDT gate relaxed to DPL=3; exception/IRQ gates are not relaxed.
 - `SYS_WRITE` validates the user buffer range, present/user bits, and maximum length, then emits `BIGOS_USER_WRITE_SYSCALL`; invalid user buffers fault the process and use the same safe reaper boundary.
 - `SYS_EXIT` marks the current process terminated/reap-pending, records the exit code, restores the kernel root, and enters the scheduler's deferred-reclamation exit path.
-- `SYS_WAIT` exposes the minimal wait ABI. The current `int 0x80` dispatch path is a nonblocking context, so blocking waits return a deterministic `WAIT_EWOULDBLOCK` result there; kernel-context lifecycle callers may use the wait queue when `sched::can_block()` is true.
+- `SYS_WAIT` exposes the minimal wait ABI and uses the same `sched::can_block()` guard as other blocking-capable syscall paths. Ordinary user process syscalls can block when the scheduler context and IF state allow it; unsupported contexts return deterministic wait errors.
 - User-mode `#PF` is identified from the saved `CS` CPL, emits `BIGOS_USER_PAGE_FAULT`, marks the process faulted/reap-pending, and does not implement demand paging.
 - Kernel-mode `#PF` keeps the existing diagnostic-only `BIGOS_PAGE_FAULT` semantics.
 - The idle-loop reaper releases the user address space and kernel stack once the active stack/root checks pass, then emits `BIGOS_USER_RECLAIMED`.

@@ -33,6 +33,9 @@ namespace bigos::sys {
         SYS_WRITE = 2,         // fd, user buffer, bounded length -> deterministic write result
         SYS_EXIT = 3,          // exit code -> terminate current user process, does not return
         SYS_WAIT = 4,          // pid or WAIT_ANY -> child pid, or deterministic negative wait error
+        SYS_OPEN = 5,          // user path, read-only flags -> process-local fd
+        SYS_READ = 6,          // fd, user buffer, bounded length -> deterministic read result
+        SYS_CLOSE = 7,         // fd -> close current process descriptor
     };
 
     // Deterministic error code for unknown syscall numbers or invalid requests.
@@ -40,15 +43,20 @@ namespace bigos::sys {
     // two's-complement negative value.
     constexpr int64_t SYS_ENOSYS = -38;
     constexpr int64_t SYS_EFAULT = -14;
+    constexpr int64_t SYS_EBADF = -9;
+    constexpr int64_t SYS_EINVAL = -22;
+    constexpr int64_t SYS_EMFILE = -24;
+    constexpr int64_t SYS_EWOULDBLOCK = -11;
     constexpr uint64_t SYS_WRITE_MAX_LEN = 128;
+    constexpr uint64_t SYS_IO_MAX_LEN = 512;
+    constexpr uint64_t SYS_PATH_MAX_LEN = 256;
 
     // Syscall dispatch entry. Invoked from irq_dispatch when the interrupt vector
     // is VECTOR_SYSCALL. Reads the syscall number from frame->rax, routes to the
     // matching kernel implementation, and writes the result (or SYS_ENOSYS for an
-    // unknown number) back into frame->rax. It runs in int 0x80 interrupt context:
-    // it performs only bounded output/reads and must not allocate or call
-    // non-IRQ-safe allocators. It MUST NOT send an i8259 EOI (syscall is not an
-    // external IRQ).
+    // unknown number) back into frame->rax. It MUST NOT send an i8259 EOI
+    // (syscall is not an external IRQ). fd/VFS syscalls additionally check the
+    // scheduler blocking guard before allocating or entering synchronous storage IO.
     void dispatch(bigos::irq::InterruptFrame *__frame) noexcept;
 }   // namespace bigos::sys
 

@@ -1,0 +1,66 @@
+#ifndef _BIGOS_FS_VFS_H
+#define _BIGOS_FS_VFS_H
+
+#include <bigos/types.h>
+
+NAMESPACE_BIGOS_BEG
+namespace vfs {
+    constexpr uint64_t OPEN_RDONLY = 0;
+    constexpr uint64_t OPEN_WRONLY = 1ull << 0;
+    constexpr uint64_t OPEN_RDWR = 1ull << 1;
+    constexpr uint64_t OPEN_CREAT = 1ull << 6;
+    constexpr uint64_t OPEN_TRUNC = 1ull << 9;
+    constexpr size_t MAX_PATH_LEN = 256;
+
+    enum class Status : int64_t {
+        Success = 0,
+        InvalidArgument = -22,
+        BadFileDescriptor = -9,
+        NotInitialized = -19,
+        NoMemory = -12,
+        NotFound = -2,
+        NotRegularFile = -21,
+        Unsupported = -95,
+        Overflow = -75,
+        BlockError = -5,
+        WouldBlock = -11,
+    };
+
+    struct Vnode;
+    struct File;
+
+    using ReadOp = Status (*)(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
+    using CloseOp = void (*)(File *__file) noexcept;
+
+    struct FileOperations {
+        ReadOp read;
+        CloseOp close;
+    };
+
+    struct Vnode {
+        uint64_t size;
+        bool is_directory;
+        void *private_data;
+    };
+
+    struct File {
+        const FileOperations *ops;
+        Vnode *vnode;
+        uint64_t offset;
+        uint32_t ref_count;
+        bool readable;
+        bool close_on_exec;
+        void *private_data;
+    };
+
+    const char *status_name(Status __status) noexcept;
+    Status init() noexcept;
+    bool initialized() noexcept;
+    Status open_absolute(const char *__path, uint64_t __flags, File **__out_file) noexcept;
+    Status read(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
+    void retain(File *__file) noexcept;
+    void release(File *__file) noexcept;
+}   // namespace vfs
+NAMESPACE_BIGOS_END
+
+#endif   // _BIGOS_FS_VFS_H

@@ -878,6 +878,28 @@ namespace mm {
             return map_page_in_root(__root_phys, __vaddr, phys, attr);
         }
 
+        bool user_range_writable(uint64_t __root_phys, uint64_t __vaddr, uint64_t __len) noexcept {
+            constexpr uint64_t USER_CANONICAL_LIMIT = 0x0000800000000000ull;
+            if (__len == 0 || __root_phys == INVALID_PHYS_ADDR || __vaddr >= USER_CANONICAL_LIMIT)
+                return false;
+            const uint64_t end = __vaddr + __len;
+            if (end <= __vaddr || end > USER_CANONICAL_LIMIT)
+                return false;
+
+            uint64_t page = align_down_page(__vaddr);
+            const uint64_t last = align_down_page(end - 1);
+            while (page <= last) {
+                uint64_t *pte = root_pte(__root_phys, page);
+                if (pte == nullptr || !paging_present(*pte) || (*pte & page_attr::USER) == 0 ||
+                    (*pte & page_attr::WRITABLE) == 0)
+                    return false;
+                if (page == last)
+                    break;
+                page += PAGE_SIZE;
+            }
+            return true;
+        }
+
         bool copy_from_user_root(uint64_t __root_phys, uint64_t __addr, void *__dst, uint64_t __len) noexcept {
             if (__dst == nullptr || __len == 0)
                 return false;
@@ -899,6 +921,33 @@ namespace mm {
                 if (src == nullptr)
                     return false;
                 memcpy(dst + copied, src, chunk);
+                copied += chunk;
+            }
+            return true;
+        }
+
+        bool copy_to_user_root(uint64_t __root_phys, uint64_t __addr, const void *__src, uint64_t __len) noexcept {
+            if (__src == nullptr || __len == 0)
+                return false;
+
+            const auto *src = (const uint8_t *)__src;
+            for (uint64_t copied = 0; copied < __len;) {
+                const uint64_t vaddr = __addr + copied;
+                uint64_t *pte = root_pte(__root_phys, vaddr);
+                if (pte == nullptr || !paging_present(*pte) || (*pte & page_attr::USER) == 0 ||
+                    (*pte & page_attr::WRITABLE) == 0)
+                    return false;
+
+                const uint64_t page_offset = vaddr & (PAGE_SIZE - 1);
+                uint64_t chunk = PAGE_SIZE - page_offset;
+                if (chunk > __len - copied)
+                    chunk = __len - copied;
+
+                const uint64_t phys = (*pte & PAGING_DESCRIPTOR_ADDR_MASK) + page_offset;
+                void *dst = phys_to_direct(phys);
+                if (dst == nullptr)
+                    return false;
+                memcpy(dst, src + copied, chunk);
                 copied += chunk;
             }
             return true;

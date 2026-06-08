@@ -22,7 +22,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `scheduler-semantics` | `--scheduler_semantics_smoke=y` | `BIGOS_SCHED_SEMANTICS_PASSED` | 15s | Time slice 到期、preemption-disable 延迟与 guarded IRQ-return reschedule。 |
 | `blocking-primitives` | `--blocking_smoke=y` | `BIGOS_BLOCKING_SMOKE_PASSED` | 15s | Synthetic TTY producer 加 wait queue wakeup 与 timeout sleep。 |
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` 最小 syscall ABI 路径。 |
-| `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO 加只读 exFAT file read 路径。 |
+| `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO 加只读 exFAT backend 上的 VFS open/read/release 路径。 |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | 以 lifecycle-core 进程运行 embedded flat image；smoke entry 仍默认关闭。 |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | 打包 `/boot/user/init.elf` 并通过可复用 ELF exec prepare 路径运行；smoke entry 仍默认关闭。 |
 
@@ -35,9 +35,14 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 process lifecycle core 现在会在 normal build 中编译。用户程序 smoke case 验证默认关闭的
 entry thread 与 marker 行为；source-level checks 覆盖 PID 唯一性、有界进程表容量失败、
 parent/child 链接、zombie-to-reap、wait wakeup、exec rollback、bounded `argv`/`envp`、
-active-root teardown rejection 和 current-stack release deferral。阻塞 `wait` 仍只允许在
-`sched::can_block()` 为 true 的上下文使用；当前 `int 0x80` syscall dispatch path 会返回
-确定性的 nonblocking-context failure，而不是在 interrupt dispatch 内睡眠。
+active-root teardown rejection 和 current-stack release deferral。
+
+fd/VFS 壳层通过 source-level checks 加现有 `filesystem-read` 与 `filesystem-user-elf`
+runtime case 验证。`filesystem-read` case 覆盖 VFS root 初始化、`open`/`read`/`release`、
+EOF clamp 和既有 `/boot/fs_smoke.txt` COM1 marker。Source-level checks 覆盖 bad fd、
+double close、fd table capacity、invalid user buffer、exec inheritance、close-on-exec
+以及 exit/reap close-all。fd/VFS syscall 使用 DPL=3 `int 0x80` trap gate，并且必须在同步
+storage I/O 前通过 `sched::can_block()`。
 
 ## 手工单 Case 流程
 

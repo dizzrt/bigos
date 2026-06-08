@@ -39,10 +39,11 @@ BigOS 已完成早期 bring-up，并形成一个带 smoke 验证的单核内核�
 - 内存：已实现 buddy、slab/kmalloc、内核虚拟内存、direct map、用户地址空间派生、
   安全用户态 teardown，以及 owned 空 PT/PD/PDPT 回收。
 - Storage/FS: synchronous read-only ATA PIO reads, MBR exFAT partition discovery,
-  read-only exFAT mount/path lookup, bounded file reads, and `fs_smoke` are
-  implemented.
+  read-only exFAT mount/path lookup, bounded file reads, a minimal read-only
+  fd/VFS shell, `open`/`read`/`close` syscalls, and `fs_smoke` are implemented.
 - 存储/文件系统：已实现同步只读 ATA PIO 读取、MBR exFAT 分区发现、只读 exFAT
-  mount/path lookup、bounded file read 和 `fs_smoke`。
+  mount/path lookup、bounded file read、最小只读 fd/VFS 壳层、`open`/`read`/`close`
+  syscall 和 `fs_smoke`。
 - User mode: the normal process lifecycle core is buildable outside smoke-only
   configurations, with bounded PID allocation, process table ownership,
   parent/child linkage, `wait`/`exit`, safe zombie/reaper teardown, and a general
@@ -90,10 +91,11 @@ BIOS boot
   -> int 0x80 syscall
   -> optional ring3 smoke
   -> optional exFAT-backed ELF smoke
+  -> minimal fd/VFS shell
 
 Missing general OS layer / 尚缺通用 OS 层
 
-fd/VFS/page cache
+page cache
   -> VMA/demand paging/COW
   -> libc/userland
   -> CI/release-grade validation
@@ -192,9 +194,9 @@ Goal: promote the smoke-only user process path into a normal kernel subsystem.
 
 ### Stage 13: File Descriptors And VFS Shell / 阶段 13：文件描述符与 VFS 壳层
 
-Status: recommended next OpenSpec change `introduce-fd-vfs-shell`.
+Status: completed and archived as `introduce-fd-vfs-shell`.
 
-状态：推荐作为下一项 OpenSpec change `introduce-fd-vfs-shell`。
+状态：已完成，并以 `introduce-fd-vfs-shell` 归档。
 
 Goal: provide a stable kernel/user I/O boundary before writable filesystems and
 page cache.
@@ -273,33 +275,27 @@ Goal: introduce user virtual-memory policy before demand paging and COW.
 
 ## Near-Term Recommendation / 近期建议
 
-With process lifecycle now archived, the next change should stabilize the
-kernel/user I/O boundary before broadening VM policy or userland expectations:
+With process lifecycle and fd/VFS archived, the next change should broaden VM
+policy before userland runtime expectations:
 
-随着进程生命周期已归档，下一项 change 应先稳定内核/用户 I/O 边界，再扩展 VM 策略
-或用户态期望：
+随着进程生命周期和 fd/VFS 均已归档，下一项 change 应先扩展 VM 策略，再提高用户态
+runtime 期望：
 
-1. `introduce-fd-vfs-shell`
-   - Choose this next to give process `exec` and future userland code stable
-     `open`/`read`/`close` semantics and place read-only exFAT behind a minimal
-     VFS boundary.
-   - 下一步优先选择它，为进程 `exec` 与未来 userland 代码提供稳定的
-     `open`/`read`/`close` 语义，并将只读 exFAT 接入最小 VFS 边界。
-2. `introduce-vma-user-memory-api`
+1. `introduce-vma-user-memory-api`
    - Choose this after process lifecycle and early file-descriptor ownership are
      stable enough to define `brk`, anonymous mappings, stack-growth policy, and
      VMA-backed user range validation.
    - 当进程生命周期和早期文件描述符所有权足够稳定后，再选择它来定义 `brk`、匿名映射、
      用户栈增长策略和基于 VMA 的用户地址范围验证。
-3. `plan-userland-runtime`
+2. `plan-userland-runtime`
    - Choose this after fd/VFS and VMA basics are explicit enough to define the
      smallest libc-adjacent startup, syscall wrappers, and user test binaries.
    - 在 fd/VFS 与 VMA 基础足够明确后，再选择它来定义最小 libc-adjacent 启动流程、
      syscall wrapper 和用户态测试二进制。
 
-VFS/file-descriptor work is now the highest-leverage next stage. VMA and
-demand-paging work remain safer after lifecycle and I/O ownership rules are
-stable, and userland runtime work should wait until both boundaries are explicit.
+VMA and demand-paging work remain safer after lifecycle and I/O ownership rules
+are stable, and userland runtime work should wait until both boundaries are
+explicit.
 
-VFS/文件描述符工作现在是收益最高的下一阶段。生命周期与 I/O 所有权规则稳定后，再推进
-VMA/demand paging 会更安全；userland runtime 应等两个边界都明确后再启动。
+生命周期与 I/O 所有权规则稳定后，再推进 VMA/demand paging 会更安全；userland
+runtime 应等两个边界都明确后再启动。

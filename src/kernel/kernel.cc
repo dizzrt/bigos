@@ -16,10 +16,9 @@
 #include <bigos/syscall.h>
 #include <bigos/timer.h>
 #include <bigos/tty.h>
-#include <drivers/block/ata_pio.h>
 #include <irq/interrupt.h>
 
-#include <bigos/fs/exfat.h>
+#include <bigos/fs/vfs.h>
 #include <bigos/io.h>
 #include <ktl/buffer.h>
 #include <string.h>
@@ -179,47 +178,45 @@ namespace {
         return true;
     }
 
-    void fs_smoke_failed(bigos::fs::FsStatus __status) noexcept {
+    void fs_smoke_failed(bigos::vfs::Status __status) noexcept {
         bigos::serial_puts("BIGOS_FS_EXFAT_READ_FAILED code=");
-        bigos::serial_puts(bigos::fs::status_name(__status));
+        bigos::serial_puts(bigos::vfs::status_name(__status));
         bigos::serial_puts("\n");
     }
 
     void fs_smoke() noexcept {
-        driver::block::AtaPioDevice ata = {};
-        driver::block::ata_pio_primary_master_init(&ata);
-
-        bigos::fs::Partition partition = {};
-        bigos::fs::FsStatus status = bigos::fs::find_exfat_partition(&ata.block, &partition);
-        if (status != bigos::fs::FsStatus::Success) {
+        bigos::vfs::Status status = bigos::vfs::init();
+        if (status != bigos::vfs::Status::Success) {
             fs_smoke_failed(status);
             return;
         }
 
-        bigos::fs::ExfatMount mount = {};
-        status = bigos::fs::mount_exfat(&ata.block, &partition, &mount);
-        if (status != bigos::fs::FsStatus::Success) {
-            fs_smoke_failed(status);
-            return;
-        }
-
-        bigos::fs::FileMetadata file = {};
-        status = bigos::fs::lookup(&mount, FS_SMOKE_PATH, &file);
-        if (status != bigos::fs::FsStatus::Success) {
+        bigos::vfs::File *file = nullptr;
+        status = bigos::vfs::open_absolute(FS_SMOKE_PATH, bigos::vfs::OPEN_RDONLY, &file);
+        if (status != bigos::vfs::Status::Success) {
             fs_smoke_failed(status);
             return;
         }
 
         char buffer[32] = {};
         const size_t expected_len = strlen(FS_SMOKE_PAYLOAD);
-        bigos::fs::ReadResult result = bigos::fs::read_file(&mount, &file, 0, buffer, expected_len, sizeof(buffer));
-        if (result.status != bigos::fs::FsStatus::Success || result.bytes_read != expected_len ||
+        size_t bytes_read = 0;
+        status = bigos::vfs::read(file, buffer, expected_len, &bytes_read);
+        if (status != bigos::vfs::Status::Success || bytes_read != expected_len ||
             !bytes_equal(buffer, FS_SMOKE_PAYLOAD, expected_len)) {
-            fs_smoke_failed(result.status == bigos::fs::FsStatus::Success ? bigos::fs::FsStatus::MalformedFilesystem
-                                                                          : result.status);
+            fs_smoke_failed(status == bigos::vfs::Status::Success ? bigos::vfs::Status::Unsupported : status);
+            bigos::vfs::release(file);
             return;
         }
 
+        status = bigos::vfs::read(file, buffer, 1, &bytes_read);
+        if (status != bigos::vfs::Status::Success || bytes_read != 0) {
+            fs_smoke_failed(status == bigos::vfs::Status::Success ? bigos::vfs::Status::Unsupported : status);
+            bigos::vfs::release(file);
+            return;
+        }
+
+        bigos::vfs::release(file);
         bigos::serial_puts("BIGOS_FS_EXFAT_READ_PASSED\n");
     }
 }   // namespace
@@ -234,46 +231,39 @@ namespace {
     }
 
     void user_elf_smoke_entry(void *) noexcept {
-        driver::block::AtaPioDevice ata = {};
-        driver::block::ata_pio_primary_master_init(&ata);
-
-        bigos::fs::Partition partition = {};
-        bigos::fs::FsStatus status = bigos::fs::find_exfat_partition(&ata.block, &partition);
-        if (status != bigos::fs::FsStatus::Success) {
-            user_elf_smoke_failed(bigos::fs::status_name(status));
+        bigos::vfs::Status status = bigos::vfs::init();
+        if (status != bigos::vfs::Status::Success) {
+            user_elf_smoke_failed(bigos::vfs::status_name(status));
             return;
         }
 
-        bigos::fs::ExfatMount mount = {};
-        status = bigos::fs::mount_exfat(&ata.block, &partition, &mount);
-        if (status != bigos::fs::FsStatus::Success) {
-            user_elf_smoke_failed(bigos::fs::status_name(status));
+        bigos::vfs::File *file = nullptr;
+        status = bigos::vfs::open_absolute(bigos::proc::USER_ELF_SMOKE_PATH, bigos::vfs::OPEN_RDONLY, &file);
+        if (status != bigos::vfs::Status::Success) {
+            user_elf_smoke_failed(bigos::vfs::status_name(status));
             return;
         }
 
-        bigos::fs::FileMetadata file = {};
-        status = bigos::fs::lookup(&mount, bigos::proc::USER_ELF_SMOKE_PATH, &file);
-        if (status != bigos::fs::FsStatus::Success) {
-            user_elf_smoke_failed(bigos::fs::status_name(status));
-            return;
-        }
-        if (file.data_length == 0 || file.data_length > bigos::proc::USER_ELF_MAX_FILE_BYTES) {
+        const uint64_t file_size = file->vnode != nullptr ? file->vnode->size : 0;
+        if (file_size == 0 || file_size > bigos::proc::USER_ELF_MAX_FILE_BYTES) {
+            bigos::vfs::release(file);
             user_elf_smoke_failed("file-size");
             return;
         }
 
-        void *image = bigos::kmalloc((size_t)file.data_length);
+        void *image = bigos::kmalloc((size_t)file_size);
         if (image == nullptr) {
+            bigos::vfs::release(file);
             user_elf_smoke_failed("buffer");
             return;
         }
 
-        bigos::fs::ReadResult read = bigos::fs::read_file(
-            &mount, &file, 0, image, (size_t)file.data_length, (size_t)file.data_length);
-        if (read.status != bigos::fs::FsStatus::Success || read.bytes_read != file.data_length) {
+        size_t bytes_read = 0;
+        status = bigos::vfs::read(file, image, (size_t)file_size, &bytes_read);
+        bigos::vfs::release(file);
+        if (status != bigos::vfs::Status::Success || bytes_read != file_size) {
             bigos::free(image);
-            user_elf_smoke_failed(read.status == bigos::fs::FsStatus::Success ? "short-read"
-                                                                              : bigos::fs::status_name(read.status));
+            user_elf_smoke_failed(status == bigos::vfs::Status::Success ? "short-read" : bigos::vfs::status_name(status));
             return;
         }
 
@@ -281,7 +271,7 @@ namespace {
         const bigos::proc::ExecArgs args = {argv, 1, nullptr, 0};
         static bigos::proc::Process elf_process;
         const bigos::proc::UserElfLoadError load_status =
-            bigos::proc::create_elf_user_process(&elf_process, image, file.data_length, &args);
+            bigos::proc::create_elf_user_process(&elf_process, image, file_size, &args);
         bigos::free(image);
         if (load_status != bigos::proc::UserElfLoadError::Success) {
             user_elf_smoke_failed(bigos::proc::user_elf_load_error_name(load_status));

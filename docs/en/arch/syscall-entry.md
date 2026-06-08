@@ -4,11 +4,11 @@ BigOS stage 6 uses a controlled software-triggered kernel entry path and a minim
 
 ## Entry Mechanism: `int 0x80` Software Interrupt Gate
 
-This stage uses an `int 0x80` software interrupt gate rather than the `syscall`/`sysret` fast-syscall path:
+This stage uses an `int 0x80` software gate rather than the `syscall`/`sysret` fast-syscall path:
 
 - It reuses the existing kernel-owned static IDT plus `interrupt.s` `isr_common` plus `irq_dispatch` framework. The `isr_entry` stub and dispatch framework for vector `0x80` already exist, so the entry is almost a zero-new-assembly path: `irq_dispatch` only needs to identify the syscall vector and route to the syscall dispatcher.
 - Trade-off: `syscall`/`sysret` would require configuring `IA32_STAR/LSTAR/FMASK` MSRs, defining kernel/user segment ordering constraints, and preparing `swapgs`/kernel-stack policy. This change keeps the more explainable interrupt-gate + TSS/RSP0 path.
-- DPL: only the `VECTOR_SYSCALL` gate is configured with DPL=3. Other CPU exception and i8259 IRQ gates remain ring0-only. Syscall is not an external IRQ, and the dispatch path does not send i8259 EOI.
+- DPL: only the `VECTOR_SYSCALL` gate is configured with DPL=3. It is a trap gate so ordinary process syscalls preserve IF and fd/VFS syscalls can pass `sched::can_block()`. Other CPU exception and i8259 IRQ gates remain ring0-only interrupt gates. Syscall is not an external IRQ, and the dispatch path does not send i8259 EOI.
 - The vector is fixed by the named constant `VECTOR_SYSCALL = 0x80` declared centrally in `include/irq/interrupt.h`, avoiding scattered magic numbers.
 
 ## Minimal Syscall ABI
@@ -47,8 +47,12 @@ The mapping of syscall number, arguments, return value, and `InterruptFrame` fie
 - `SYS_GET_TICK` (number=1): returns `bigos::timer::ticks()` monotonic tick to validate the return-register path. `timer::ticks()` is stably exposed by `include/bigos/timer.h` and is a context-agnostic bounded read, so it is used instead of `SYS_DEBUG_NOOP`.
 - `SYS_WRITE` (number=2): supports only the early console sink (currently fixed `fd=1`). Before reading the user buffer, it checks low-half range, page-table present/user bits, and maximum length `SYS_WRITE_MAX_LEN`; then it writes bounded content to serial/VGA and returns a deterministic byte count or `SYS_EFAULT`.
 - `SYS_EXIT` (number=3): records the current user process exit code, marks it terminated, restores the kernel address space, and enters the scheduler's deferred-reclamation exit path. This syscall does not return to terminated user instructions.
+- `SYS_WAIT` (number=4): waits for child process state when the caller can block, or returns the deterministic wait error for unsupported/nonblocking contexts.
+- `SYS_OPEN` (number=5): copies a bounded NUL-terminated user path, accepts only read-only flags, opens through the VFS shell, and returns a process-local fd.
+- `SYS_READ` (number=6): validates the user destination range, reads through the process fd table and VFS file offset into a bounded kernel buffer, copies out, and returns the byte count.
+- `SYS_CLOSE` (number=7): closes the process-local fd and drops the open-file reference.
 
-The syscall dispatcher follows the stage 3 interrupt-context contract: `int 0x80` context performs only bounded output/reads, current process state updates, and CR3 restoration. It does not dynamically allocate, and it does not call non-IRQ-safe allocators (`kmalloc`/`free`/`alloc_kernel_pages`/`free_pages`/global `new/delete`).
+The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 
 ## Validation: Default-Off Build Switches And Deterministic Markers
 
@@ -57,8 +61,8 @@ The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) conti
 ## Non-Goals For This Stage
 
 - Do not switch to the `syscall`/`sysret` MSR fast path.
-- Do not implement fork/exec/wait, signals, user threads, or a full file-descriptor table.
-- Do not implement a complete syscall table or POSIX semantics; do not implement demand paging / COW. `#PF` remains diagnostic-only.
+- Do not implement fork, signals, user threads, POSIX-wide syscall semantics, writable files, or fd duplication.
+- Do not implement demand paging / COW. `#PF` remains diagnostic-only.
 - Do not relax DPL for IDT gates other than syscall; do not send i8259 EOI from the syscall path.
 
 ## Cross-Cutting Engineering Items

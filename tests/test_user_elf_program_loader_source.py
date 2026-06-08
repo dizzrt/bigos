@@ -21,7 +21,8 @@ def test_user_elf_smoke_is_default_off_and_separate_from_embedded_smoke() -> Non
     assert 'if has_config("user_program_smoke") then\n        add_defines("BIGOS_USER_PROGRAM_SMOKE")' in xmake
     assert 'BIGOS_USER_ELF_LOAD_PASSED' in kernel
     assert 'bigos::proc::USER_ELF_SMOKE_PATH' in kernel
-    assert 'bigos::kmalloc((size_t)file.data_length)' in kernel
+    assert 'bigos::vfs::open_absolute(bigos::proc::USER_ELF_SMOKE_PATH' in kernel
+    assert 'bigos::kmalloc((size_t)file_size)' in kernel
     assert 'constexpr const char *USER_ELF_SMOKE_PATH = "/boot/user/init.elf";' in proc_h
 
 

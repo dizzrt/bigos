@@ -152,9 +152,10 @@ def test_stage_does_not_change_idt_dpl_or_add_user_gdt_tss_or_syscall_msr() -> N
     interrupt = read_source('src/kernel/irq/interrupt.cc')
     syscall = read_source('src/kernel/syscall/syscall.cc')
 
-    # Only syscall vector gets the DPL=3 interrupt gate.
+    # Only syscall vector gets the DPL=3 trap gate, preserving IF for fd/VFS
+    # syscalls that pass sched::can_block() in ordinary process context.
     assert 'PRESENT_RING0_INTERRUPT_GATE = 0x8e00' in interrupt
-    assert 'PRESENT_RING3_INTERRUPT_GATE = 0xee00' in interrupt
+    assert 'PRESENT_RING3_TRAP_GATE = 0xef00' in interrupt
     assert 'if (i == VECTOR_SYSCALL)' in interrupt
 
     # No syscall/sysret MSR configuration introduced.

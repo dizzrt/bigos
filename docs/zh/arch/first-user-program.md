@@ -73,7 +73,7 @@ x86_64 运行期 user mode 支持由 `src/kernel/proc/user_mode.cc` / `user_mode
 - `VECTOR_SYSCALL = 0x80` 是唯一放宽为 DPL=3 的 IDT gate；exception/IRQ gates 不放宽。
 - `SYS_WRITE` 验证用户 buffer 范围、present/user bit 和最大长度，然后输出 `BIGOS_USER_WRITE_SYSCALL`；非法用户 buffer 会 fault 当前进程，并使用同一个 safe reaper 边界。
 - `SYS_EXIT` 标记当前进程 terminated/reap-pending、记录 exit code、恢复 kernel root，并进入 scheduler 延后回收退出路径。
-- `SYS_WAIT` 暴露最小 wait ABI。当前 `int 0x80` dispatch path 是 nonblocking context，因此阻塞等待在该路径返回确定性的 `WAIT_EWOULDBLOCK`；当 `sched::can_block()` 为 true 时，kernel-context lifecycle 调用者可使用 wait queue。
+- `SYS_WAIT` 暴露最小 wait ABI，并与其它可阻塞 syscall 路径使用同一个 `sched::can_block()` guard。普通用户进程 syscall 在 scheduler context 和 IF 状态允许时可以阻塞；不支持的上下文返回确定性 wait 错误。
 - 用户态 `#PF` 通过 saved `CS` 的 CPL 识别，输出 `BIGOS_USER_PAGE_FAULT`，标记进程 faulted/reap-pending，并不做 demand paging。
 - 内核态 `#PF` 保持既有 `BIGOS_PAGE_FAULT` 诊断-only 语义。
 - idle-loop reaper 在 active stack/root 检查通过后释放用户地址空间和 kernel stack，然后输出 `BIGOS_USER_RECLAIMED`。

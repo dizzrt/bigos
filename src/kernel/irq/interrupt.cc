@@ -17,7 +17,7 @@ namespace irq {
 
         constexpr uint16_t KERNEL_CODE_SELECTOR = 0x08;
         constexpr uint16_t PRESENT_RING0_INTERRUPT_GATE = 0x8e00;
-        constexpr uint16_t PRESENT_RING3_INTERRUPT_GATE = 0xee00;
+        constexpr uint16_t PRESENT_RING3_TRAP_GATE = 0xef00;
 
         INTRDescriptor kernel_idt[IRQ_COUNT];
         IRQHandler isr_list[IRQ_COUNT];
@@ -111,7 +111,7 @@ namespace irq {
             id.selector = KERNEL_CODE_SELECTOR;
             id.attributes_brief = PRESENT_RING0_INTERRUPT_GATE;
             if (i == VECTOR_SYSCALL)
-                id.attributes_brief = PRESENT_RING3_INTERRUPT_GATE;
+                id.attributes_brief = PRESENT_RING3_TRAP_GATE;
             id.reserved = 0;
             kernel_idt[i] = id;
 
@@ -132,9 +132,9 @@ namespace irq {
     extern "C" void irq_dispatch(InterruptFrame *__frame) {
         if (__frame == nullptr)
             return;
-        __detail::NonblockingContextGuard nonblocking_guard;
 
         if (__detail::is_cpu_exception(__frame->vector)) {
+            __detail::NonblockingContextGuard nonblocking_guard;
             // CPU exceptions never send an i8259 EOI.
             if (__frame->vector == VECTOR_PAGE_FAULT)
                 __detail::page_fault_handler(__frame);
@@ -144,6 +144,7 @@ namespace irq {
         }
 
         if (__detail::is_i8259_external_irq(__frame->vector)) {
+            __detail::NonblockingContextGuard nonblocking_guard;
             const uint8_t irq_line = __detail::vector_to_i8259_irq(__frame->vector);
             if (driver::irqchip::i8259::is_spurious_irq(irq_line)) {
                 driver::irqchip::i8259::acknowledge_spurious_irq(irq_line);
@@ -169,11 +170,13 @@ namespace irq {
             // MUST NOT send an i8259 EOI. It routes into the syscall dispatcher
             // and returns through the shared isr_common iretq path, leaving the
             // exception and external-IRQ branches (and their EOI semantics)
-            // unchanged.
+            // unchanged. The DPL=3 trap gate preserves IF so fd/VFS syscalls can
+            // pass sched::can_block() in ordinary user process context.
             bigos::sys::dispatch(__frame);
             return;
         }
 
+        __detail::NonblockingContextGuard nonblocking_guard;
         __detail::unknown_vector_handler(__frame);
     }
 

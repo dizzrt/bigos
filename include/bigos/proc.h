@@ -2,6 +2,7 @@
 #define _BIG_PROC_H
 
 #include <bigos/types.h>
+#include <bigos/fs/vfs.h>
 
 namespace bigos::proc {
     constexpr uint64_t USER_CODE_BASE = 0x0000000000400000ull;
@@ -21,6 +22,16 @@ namespace bigos::proc {
     constexpr int64_t WAIT_EINVAL = -22;
     constexpr int64_t WAIT_EWOULDBLOCK = -11;
     constexpr int64_t EXEC_FAILURE_STATUS = -126;
+    constexpr uint32_t MAX_FDS = 16;
+    constexpr int64_t FD_EBADF = -9;
+    constexpr int64_t FD_EMFILE = -24;
+    constexpr int64_t FD_EWOULDBLOCK = -11;
+
+    struct FdEntry {
+        bigos::vfs::File *file;
+        bool close_on_exec;
+        bool readable;
+    };
 
     enum class ProcessState : uint8_t {
         Empty = 0,
@@ -65,6 +76,7 @@ namespace bigos::proc {
         bool parent_waiting;
         int64_t exit_code;
         int64_t fault_reason;
+        FdEntry fd_table[MAX_FDS];
     };
 
     struct ExecArgs {
@@ -100,7 +112,14 @@ namespace bigos::proc {
     Process *current_process() noexcept;
     void init() noexcept;
     bool validate_user_buffer(uint64_t __addr, uint64_t __len) noexcept;
+    bool validate_user_io_buffer(uint64_t __addr, uint64_t __len) noexcept;
     bool copy_current_user_buffer(uint64_t __addr, void *__dst, uint64_t __len) noexcept;
+    bool copy_to_current_user_buffer(uint64_t __addr, const void *__src, uint64_t __len) noexcept;
+    int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec = false) noexcept;
+    bigos::vfs::Status read_fd_current(uint32_t __fd, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
+    int64_t close_fd_current(uint32_t __fd) noexcept;
+    void close_all_fds(Process *__process) noexcept;
+    void close_on_exec_fds(Process *__process) noexcept;
     int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept;
     void mark_current_faulted(int64_t __reason) noexcept;
     [[noreturn]] void fault_current_and_exit(int64_t __reason) noexcept;

@@ -4,11 +4,11 @@ BigOS 阶段 6 使用一条受控的“软件主动进入内核”路径与最�
 
 ## 入口机制选择：`int 0x80` 软件中断门
 
-本阶段采用 `int 0x80` 软件中断门，而非 `syscall`/`sysret` 快速系统调用：
+本阶段采用 `int 0x80` 软件 gate，而非 `syscall`/`sysret` 快速系统调用：
 
 - 复用既有 kernel-owned 静态 IDT + `interrupt.s` 的 `isr_common` + `irq_dispatch` 框架。vector `0x80` 的 `isr_entry` stub 与 dispatch 框架已存在，因此几乎是“零新增汇编”的入口：只需在 `irq_dispatch` 中识别 syscall vector 并路由到 syscall dispatcher。
-- 取舍：`syscall`/`sysret` 需要配置 `IA32_STAR/LSTAR/FMASK` MSR、定义内核/用户段排列约束、并准备 `swapgs`/内核栈策略；当前 change 继续使用更可解释的 interrupt gate + TSS/RSP0。
-- DPL：仅 `VECTOR_SYSCALL` gate 配置为 DPL=3，其它 CPU exception 与 i8259 IRQ gate 保持 ring0-only。syscall 仍不是外部 IRQ，dispatch 路径不发送 i8259 EOI。
+- 取舍：`syscall`/`sysret` 需要配置 `IA32_STAR/LSTAR/FMASK` MSR、定义内核/用户段排列约束、并准备 `swapgs`/内核栈策略；当前 change 继续使用更可解释的 IDT gate + TSS/RSP0。
+- DPL：仅 `VECTOR_SYSCALL` gate 配置为 DPL=3。它是 trap gate，使普通进程 syscall 保留 IF，fd/VFS syscall 可以通过 `sched::can_block()`。其它 CPU exception 与 i8259 IRQ gate 保持 ring0-only interrupt gate。syscall 仍不是外部 IRQ，dispatch 路径不发送 i8259 EOI。
 - vector 用具名常量 `VECTOR_SYSCALL = 0x80` 固定，集中声明在 `include/irq/interrupt.h`，避免散落魔数。
 
 ## 最小 syscall ABI
@@ -47,8 +47,12 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_GET_TICK`（number=1）：返回 `bigos::timer::ticks()` 单调 tick，验证返回值寄存器路径。`timer::ticks()` 已通过 `include/bigos/timer.h` 稳定暴露，是 context-agnostic bounded read，故选用它而非 `SYS_DEBUG_NOOP`。
 - `SYS_WRITE`（number=2）：仅支持早期 console sink（当前固定 `fd=1`），在读取用户 buffer 前检查低半区范围、页表 present/user bit 和最大长度 `SYS_WRITE_MAX_LEN`，再把 bounded 内容输出到 serial/VGA，并返回确定性字节数或 `SYS_EFAULT`。
 - `SYS_EXIT`（number=3）：记录当前用户进程 exit code，标记 terminated，恢复内核地址空间并转入 scheduler 的延后回收退出路径；该 syscall 不返回到已终止用户指令流。
+- `SYS_WAIT`（number=4）：在调用方可阻塞时等待子进程状态；不支持或不可阻塞上下文返回确定性 wait 错误。
+- `SYS_OPEN`（number=5）：复制有界 NUL 结尾用户 path，只接受 read-only flags，经 VFS 壳层 open，并返回 process-local fd。
+- `SYS_READ`（number=6）：验证用户目标 range，经进程 fd table 与 VFS file offset 读取到有界 kernel buffer，再 copy out，并返回 byte count。
+- `SYS_CLOSE`（number=7）：关闭 process-local fd 并 drop open-file reference。
 
-syscall dispatcher 遵守阶段 3 中断上下文契约：`int 0x80` 上下文只做 bounded 输出/读取、当前进程状态更新和 CR3 恢复，不做动态分配、不在该路径调用 non-IRQ-safe allocator（`kmalloc`/`free`/`alloc_kernel_pages`/`free_pages`/global `new/delete`）。
+syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
 
 ## 验证：默认关闭构建开关 + 确定性 marker
 
@@ -57,8 +61,8 @@ syscall dispatcher 遵守阶段 3 中断上下文契约：`int 0x80` 上下文�
 ## 本阶段非目标
 
 - 不切换到 `syscall`/`sysret` MSR 快速路径。
-- 不实现 fork/exec/wait、signal、用户线程或完整文件描述符表。
-- 不实现完整 syscall 表与 POSIX 语义；不实现 demand paging / COW，`#PF` 保持诊断-only。
+- 不实现 fork、signal、用户线程、POSIX-wide syscall 语义、可写文件或 fd duplication。
+- 不实现 demand paging / COW，`#PF` 保持诊断-only。
 - 不对 syscall 以外的 IDT gate 放宽 DPL；不从 syscall path 发送 i8259 EOI。
 
 ## 横切工程化项

@@ -29,8 +29,9 @@ def test_flat_embedded_image_has_no_fs_or_block_dependency() -> None:
     assert 'Flat embedded image' in proc
     assert 'BIGOS_USER_WRITE' in proc
     assert 'flat blob' in doc
+    blob_section = proc[proc.index('constexpr uint8_t FIRST_USER_CODE') : proc.index('bigos::proc::Process *g_current_process')]
     for token in ('open(', 'read(', 'exfat', 'block-device'):
-        assert token not in proc
+        assert token not in blob_section
 
 
 def test_process_model_records_identity_address_space_stack_and_exit_state() -> None:
@@ -91,7 +92,7 @@ def test_syscall_gate_user_buffer_exit_and_fault_boundaries() -> None:
     syscall = read_source('src/kernel/syscall/syscall.cc')
     proc = read_source('src/kernel/proc/proc.cc')
 
-    assert 'PRESENT_RING3_INTERRUPT_GATE = 0xee00' in interrupt
+    assert 'PRESENT_RING3_TRAP_GATE = 0xef00' in interrupt
     assert 'if (i == VECTOR_SYSCALL)' in interrupt
     assert 'driver::irqchip::i8259::send_eoi' in interrupt
 
