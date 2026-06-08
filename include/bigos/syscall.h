@@ -36,6 +36,8 @@ namespace bigos::sys {
         SYS_OPEN = 5,          // user path, read-only flags -> process-local fd
         SYS_READ = 6,          // fd, user buffer, bounded length -> deterministic read result
         SYS_CLOSE = 7,         // fd -> close current process descriptor
+        SYS_BRK = 8,           // requested break -> committed heap break or deterministic negative error
+        SYS_MAP_ANON = 9,      // length, permissions, flags -> restricted anonymous user mapping
     };
 
     // Deterministic error code for unknown syscall numbers or invalid requests.

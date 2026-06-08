@@ -129,6 +129,14 @@ namespace sys {
         static int64_t sys_close(uint64_t __fd) noexcept {
             return bigos::proc::close_fd_current((uint32_t)__fd);
         }
+
+        static int64_t sys_brk(uint64_t __new_break) noexcept {
+            return bigos::proc::brk_current(__new_break);
+        }
+
+        static int64_t sys_map_anon(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept {
+            return bigos::proc::map_anonymous_current(__len, __permissions, __flags);
+        }
 #endif
     }   // namespace __detail
 
@@ -165,6 +173,12 @@ namespace sys {
                 break;
             case SYS_CLOSE:
                 result = __detail::sys_close(__frame->rdi);
+                break;
+            case SYS_BRK:
+                result = __detail::sys_brk(__frame->rdi);
+                break;
+            case SYS_MAP_ANON:
+                result = __detail::sys_map_anon(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
 #endif
             default:

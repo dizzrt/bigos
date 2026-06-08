@@ -34,10 +34,12 @@ BigOS 已完成早期 bring-up，并形成一个带 smoke 验证的单核内核�
 - 阻塞模型：已在单核调度边界内实现线程等待状态、wait queue、wake-one/wake-all、
   timeout wait、阻塞上下文保护、timer-backed sleep 和阻塞式 TTY consumer 路径。
 - Memory: buddy, slab/kmalloc, kernel virtual memory, direct map, user
-  address-space derivation, safe user teardown, and owned empty PT/PD/PDPT
-  reclamation are implemented.
+  address-space derivation, safe user teardown, owned empty PT/PD/PDPT
+  reclamation, VMA tracking, `brk`, restricted anonymous mappings,
+  stack-growth policy, and VMA-backed user range validation are implemented.
 - 内存：已实现 buddy、slab/kmalloc、内核虚拟内存、direct map、用户地址空间派生、
-  安全用户态 teardown，以及 owned 空 PT/PD/PDPT 回收。
+  安全用户态 teardown、owned 空 PT/PD/PDPT 回收、VMA 跟踪、`brk`、受限匿名映射、
+  用户栈增长策略和基于 VMA 的用户地址范围验证。
 - Storage/FS: synchronous read-only ATA PIO reads, MBR exFAT partition discovery,
   read-only exFAT mount/path lookup, bounded file reads, a minimal read-only
   fd/VFS shell, `open`/`read`/`close` syscalls, and `fs_smoke` are implemented.
@@ -96,7 +98,7 @@ BIOS boot
 Missing general OS layer / 尚缺通用 OS 层
 
 page cache
-  -> VMA/demand paging/COW
+  -> demand paging/COW
   -> libc/userland
   -> CI/release-grade validation
 ```
@@ -215,6 +217,10 @@ page cache.
 
 ### Stage 14: VMA And User Memory API / 阶段 14：VMA 与用户内存 API
 
+Status: completed and archived as `introduce-vma-user-memory-api`.
+
+状态：已完成，并以 `introduce-vma-user-memory-api` 归档。
+
 Goal: introduce user virtual-memory policy before demand paging and COW.
 
 目标：在 demand paging 和 COW 前，引入用户虚拟内存策略。
@@ -275,27 +281,27 @@ Goal: introduce user virtual-memory policy before demand paging and COW.
 
 ## Near-Term Recommendation / 近期建议
 
-With process lifecycle and fd/VFS archived, the next change should broaden VM
-policy before userland runtime expectations:
+With process lifecycle, fd/VFS, and VMA user memory archived, the VM policy
+boundary is now explicit enough to make userland runtime planning the next
+candidate area when work resumes:
 
-随着进程生命周期和 fd/VFS 均已归档，下一项 change 应先扩展 VM 策略，再提高用户态
-runtime 期望：
+随着进程生命周期、fd/VFS 和 VMA 用户内存均已归档，VM 策略边界已足够明确；后续恢复
+规划时，用户态 runtime 可作为下一项候选方向：
 
 1. `introduce-vma-user-memory-api`
-   - Choose this after process lifecycle and early file-descriptor ownership are
-     stable enough to define `brk`, anonymous mappings, stack-growth policy, and
-     VMA-backed user range validation.
-   - 当进程生命周期和早期文件描述符所有权足够稳定后，再选择它来定义 `brk`、匿名映射、
-     用户栈增长策略和基于 VMA 的用户地址范围验证。
+   - Completed and archived after defining `brk`, anonymous mappings,
+     stack-growth policy, and VMA-backed user range validation.
+   - 已完成并归档，内容包括 `brk`、匿名映射、用户栈增长策略和基于 VMA 的用户地址范围
+     验证。
 2. `plan-userland-runtime`
    - Choose this after fd/VFS and VMA basics are explicit enough to define the
      smallest libc-adjacent startup, syscall wrappers, and user test binaries.
    - 在 fd/VFS 与 VMA 基础足够明确后，再选择它来定义最小 libc-adjacent 启动流程、
      syscall wrapper 和用户态测试二进制。
 
-VMA and demand-paging work remain safer after lifecycle and I/O ownership rules
-are stable, and userland runtime work should wait until both boundaries are
-explicit.
+Demand-paging work remains safer after lifecycle, I/O ownership, and VMA policy
+rules stay stable, and userland runtime work can now build on those explicit
+boundaries.
 
-生命周期与 I/O 所有权规则稳定后，再推进 VMA/demand paging 会更安全；userland
-runtime 应等两个边界都明确后再启动。
+生命周期、I/O 所有权和 VMA 策略规则保持稳定后，再推进 demand paging 会更安全；
+userland runtime 现在可以建立在这些明确边界之上。

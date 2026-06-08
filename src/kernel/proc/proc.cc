@@ -172,6 +172,155 @@ namespace {
         return end <= bigos::proc::USER_LOW_HALF_LIMIT;
     }
 
+    bool page_aligned(uint64_t __value) noexcept {
+        return (__value & (PAGE_SIZE - 1)) == 0;
+    }
+
+    uint8_t permissions_value(bigos::proc::VmaPermission __perm) noexcept {
+        return (uint8_t)__perm;
+    }
+
+    bool permissions_include(bigos::proc::VmaPermission __have, bigos::proc::VmaPermission __need) noexcept {
+        return (permissions_value(__have) & permissions_value(__need)) == permissions_value(__need);
+    }
+
+    bool permissions_wx(bigos::proc::VmaPermission __perm) noexcept {
+        return permissions_include(__perm, bigos::proc::VmaPermission::Write) &&
+               permissions_include(__perm, bigos::proc::VmaPermission::Execute);
+    }
+
+    bigos::proc::VmaPermission segment_permissions(uint32_t __flags) noexcept {
+        uint8_t perm = permissions_value(bigos::proc::VmaPermission::Read);
+        if ((__flags & PF_W) != 0)
+            perm |= permissions_value(bigos::proc::VmaPermission::Write);
+        if ((__flags & PF_X) != 0)
+            perm |= permissions_value(bigos::proc::VmaPermission::Execute);
+        return (bigos::proc::VmaPermission)perm;
+    }
+
+    bool vma_range_bounds(uint64_t __start, uint64_t __end) noexcept {
+        return __start < __end && page_aligned(__start) && page_aligned(__end) &&
+               __end <= bigos::proc::USER_LOW_HALF_LIMIT;
+    }
+
+    void internal_init_vmas(bigos::proc::VmaCollection *__vmas) noexcept {
+        if (__vmas == nullptr)
+            return;
+        memset(__vmas, 0, sizeof(*__vmas));
+        __vmas->anon_next = bigos::proc::USER_ANON_BASE;
+    }
+
+    bool internal_add_vma(bigos::proc::VmaCollection *__vmas, const bigos::proc::VmaEntry &__entry) noexcept {
+        if (__vmas == nullptr || !vma_range_bounds(__entry.start, __entry.end) || permissions_wx(__entry.permissions) ||
+            __vmas->count >= bigos::proc::MAX_VMAS)
+            return false;
+
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            const bigos::proc::VmaEntry &existing = __vmas->entries[i];
+            if (existing.used && __entry.start < existing.end && existing.start < __entry.end)
+                return false;
+        }
+
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            if (!__vmas->entries[i].used) {
+                __vmas->entries[i] = __entry;
+                __vmas->entries[i].used = true;
+                __vmas->count++;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool internal_remove_vma(bigos::proc::VmaCollection *__vmas, uint64_t __start, uint64_t __end) noexcept {
+        if (__vmas == nullptr)
+            return false;
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            bigos::proc::VmaEntry &entry = __vmas->entries[i];
+            if (entry.used && entry.start == __start && entry.end == __end) {
+                memset(&entry, 0, sizeof(entry));
+                __vmas->count--;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    const bigos::proc::VmaEntry *internal_find_vma(const bigos::proc::VmaCollection *__vmas, uint64_t __addr) noexcept {
+        if (__vmas == nullptr || __addr >= bigos::proc::USER_LOW_HALF_LIMIT)
+            return nullptr;
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            const bigos::proc::VmaEntry &entry = __vmas->entries[i];
+            if (entry.used && __addr >= entry.start && __addr < entry.end)
+                return &entry;
+        }
+        return nullptr;
+    }
+
+    bigos::proc::VmaEntry *internal_find_vma_mut(bigos::proc::VmaCollection *__vmas, uint64_t __addr) noexcept {
+        return (bigos::proc::VmaEntry *)internal_find_vma(__vmas, __addr);
+    }
+
+    bool internal_vma_range_allowed(const bigos::proc::VmaCollection *__vmas, uint64_t __addr, uint64_t __len,
+        bigos::proc::VmaPermission __perm) noexcept {
+        if (__len == 0 || !user_range_valid(__addr, __len))
+            return false;
+
+        uint64_t end = 0;
+        if (add_overflow(__addr, __len, &end))
+            return false;
+
+        uint64_t cursor = __addr;
+        while (cursor < end) {
+            const bigos::proc::VmaEntry *entry = internal_find_vma(__vmas, cursor);
+            if (entry == nullptr || !permissions_include(entry->permissions, __perm))
+                return false;
+            if (entry->end <= cursor)
+                return false;
+            cursor = entry->end < end ? entry->end : end;
+        }
+        return true;
+    }
+
+    bool internal_vma_attr_allowed(const bigos::proc::VmaEntry *__vma, bigos::mm::PageAttr __attr) noexcept {
+        if (__vma == nullptr || (__attr & bigos::mm::page_attr::PRESENT) == 0 ||
+            (__attr & bigos::mm::page_attr::USER) == 0)
+            return false;
+        if ((__attr & bigos::mm::page_attr::WRITABLE) != 0 &&
+            !permissions_include(__vma->permissions, bigos::proc::VmaPermission::Write))
+            return false;
+        if ((__attr & bigos::mm::page_attr::NO_EXECUTE) == 0 &&
+            !permissions_include(__vma->permissions, bigos::proc::VmaPermission::Execute))
+            return false;
+        return true;
+    }
+
+    bool map_user_page_for_process(bigos::proc::Process *__process, uint64_t __vaddr, uint64_t __phys,
+        bigos::mm::PageAttr __attr, bool __also_map_active_root) noexcept {
+        if (__process == nullptr || !page_aligned(__vaddr) || !page_aligned(__phys))
+            return false;
+        const bigos::proc::VmaEntry *vma = internal_find_vma(&__process->vmas, __vaddr);
+        if (!internal_vma_range_allowed(&__process->vmas, __vaddr, PAGE_SIZE, bigos::proc::VmaPermission::Read) ||
+            !internal_vma_attr_allowed(vma, __attr))
+            return false;
+        if (!bigos::mm::map_page_in_root(__process->address_space_root, __vaddr, __phys, __attr))
+            return false;
+        if (__also_map_active_root &&
+            (bigos::mm::read_cr3() & 0x000ffffffffff000ull) != __process->address_space_root &&
+            !bigos::mm::map_page(__vaddr, __phys, __attr))
+            return false;
+        return true;
+    }
+
+    void unmap_and_free_user_page(bigos::proc::Process *__process, uint64_t __vaddr) noexcept {
+        if (__process == nullptr)
+            return;
+        uint64_t phys = bigos::mm::INVALID_PHYS_ADDR;
+        if (bigos::mm::__detail::unmap_user_page_in_root(__process->address_space_root, __vaddr, &phys) &&
+            phys != bigos::mm::INVALID_PHYS_ADDR)
+            free_user_frame(phys);
+    }
+
     bigos::proc::Process *lookup_process(uint32_t __pid) noexcept {
         if (__pid == 0)
             return nullptr;
@@ -416,7 +565,7 @@ namespace {
     }
 
     bigos::proc::UserElfLoadError map_segment(
-        uint64_t __root, const uint8_t *__image, const LoadSegment &__segment) noexcept {
+        bigos::proc::Process *__process, const uint8_t *__image, const LoadSegment &__segment) noexcept {
         for (uint64_t page = __segment.map_base; page < __segment.map_base + __segment.map_len; page += PAGE_SIZE) {
             const uint64_t phys = alloc_user_frame();
             bool mapped = false;
@@ -440,9 +589,7 @@ namespace {
                 memcpy((uint8_t *)direct + page_offset, __image + file_offset, copy_end - copy_vaddr);
             }
 
-            if (!bigos::mm::map_page_in_root(__root, page, phys, __segment.attr))
-                goto fail;
-            if (!bigos::mm::map_page(page, phys, __segment.attr))
+            if (!map_user_page_for_process(__process, page, phys, __segment.attr, true))
                 goto fail;
             mapped = true;
             (void)mapped;
@@ -636,6 +783,32 @@ namespace bigos::proc {
             goto fail;
         if (!clone_process_kernel_stack_mapping(__process))
             goto fail;
+        internal_init_vmas(&__process->vmas);
+        if (!internal_add_vma(&__process->vmas,
+                {USER_CODE_BASE, USER_CODE_BASE + PAGE_SIZE, USER_CODE_BASE, USER_CODE_BASE + PAGE_SIZE,
+                    (VmaPermission)(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Execute)),
+                    VmaPurpose::Code, VmaBacking::Anonymous, VmaGrowth::None, true}) ||
+            !internal_add_vma(&__process->vmas,
+                {USER_DATA_BASE, USER_DATA_BASE + PAGE_SIZE, USER_DATA_BASE, USER_DATA_BASE + PAGE_SIZE,
+                    (VmaPermission)(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Write)),
+                    VmaPurpose::Data, VmaBacking::Anonymous, VmaGrowth::None, true}) ||
+            !internal_add_vma(&__process->vmas,
+                {USER_DATA_BASE + PAGE_SIZE, USER_DATA_BASE + PAGE_SIZE + USER_HEAP_MAX_PAGES * PAGE_SIZE,
+                    USER_DATA_BASE + PAGE_SIZE, USER_DATA_BASE + PAGE_SIZE,
+                    (VmaPermission)(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Write)),
+                    VmaPurpose::Heap, VmaBacking::Anonymous, VmaGrowth::Up, true}) ||
+            !internal_add_vma(&__process->vmas,
+                {stack_base - (USER_STACK_GROWTH_PAGES + USER_STACK_GUARD_PAGES) * PAGE_SIZE,
+                    stack_base - USER_STACK_GROWTH_PAGES * PAGE_SIZE, stack_base, stack_base, VmaPermission::None,
+                    VmaPurpose::StackGuard, VmaBacking::Guard, VmaGrowth::None, true}) ||
+            !internal_add_vma(&__process->vmas,
+                {stack_base - USER_STACK_GROWTH_PAGES * PAGE_SIZE, USER_STACK_TOP, stack_base, USER_STACK_TOP,
+                    (VmaPermission)(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Write)),
+                    VmaPurpose::Stack, VmaBacking::Anonymous, VmaGrowth::Down, true}))
+            goto fail;
+        __process->vmas.heap_base = USER_DATA_BASE + PAGE_SIZE;
+        __process->vmas.heap_break = __process->vmas.heap_base;
+        __process->vmas.heap_limit = __process->vmas.heap_base + USER_HEAP_MAX_PAGES * PAGE_SIZE;
 
         code_phys = alloc_user_frame();
         data_phys = alloc_user_frame();
@@ -646,22 +819,13 @@ namespace bigos::proc {
             !zero_frame(stack_phys))
             goto fail;
 
-        if (!bigos::mm::map_page_in_root(
-                __process->address_space_root, USER_CODE_BASE, code_phys, bigos::mm::page_attr::USER_CODE))
-            goto fail;
-        if (!bigos::mm::map_page(USER_CODE_BASE, code_phys, bigos::mm::page_attr::USER_CODE))
+        if (!map_user_page_for_process(__process, USER_CODE_BASE, code_phys, bigos::mm::page_attr::USER_CODE, true))
             goto fail;
         code_mapped = true;
-        if (!bigos::mm::map_page_in_root(
-                __process->address_space_root, USER_DATA_BASE, data_phys, bigos::mm::page_attr::USER_DATA))
-            goto fail;
-        if (!bigos::mm::map_page(USER_DATA_BASE, data_phys, bigos::mm::page_attr::USER_DATA))
+        if (!map_user_page_for_process(__process, USER_DATA_BASE, data_phys, bigos::mm::page_attr::USER_DATA, true))
             goto fail;
         data_mapped = true;
-        if (!bigos::mm::map_page_in_root(
-                __process->address_space_root, stack_base, stack_phys, bigos::mm::page_attr::USER_DATA))
-            goto fail;
-        if (!bigos::mm::map_page(stack_base, stack_phys, bigos::mm::page_attr::USER_DATA))
+        if (!map_user_page_for_process(__process, stack_base, stack_phys, bigos::mm::page_attr::USER_DATA, true))
             goto fail;
         stack_mapped = true;
 
@@ -742,6 +906,8 @@ namespace bigos::proc {
         LoadSegment segments[ELF_MAX_LOAD_SEGMENTS] = {};
         uint32_t segment_count = 0;
         uint64_t entry = 0;
+        uint64_t image_high = 0;
+        uint64_t heap_base = 0;
         UserElfLoadError error = validate_elf((const uint8_t *)__image, __image_len, segments, &segment_count, &entry);
         if (error != UserElfLoadError::Success)
             return error;
@@ -760,9 +926,36 @@ namespace bigos::proc {
             error = UserElfLoadError::MapFailed;
             goto fail;
         }
+        internal_init_vmas(&__process->vmas);
+        for (uint32_t i = 0; i < segment_count; i++) {
+            const VmaPurpose purpose = (segments[i].flags & PF_X) != 0 ? VmaPurpose::Code : VmaPurpose::Data;
+            if (!internal_add_vma(&__process->vmas,
+                    {segments[i].map_base, segments[i].map_base + segments[i].map_len, segments[i].map_base,
+                        segments[i].map_base + segments[i].map_len, segment_permissions(segments[i].flags), purpose,
+                        VmaBacking::ElfSegment, VmaGrowth::None, true})) {
+                error = UserElfLoadError::MapFailed;
+                goto fail;
+            }
+            if (segments[i].map_base + segments[i].map_len > image_high)
+                image_high = segments[i].map_base + segments[i].map_len;
+        }
+        if (!page_up(image_high, &heap_base)) {
+            error = UserElfLoadError::AddressOutOfRange;
+            goto fail;
+        }
+        __process->vmas.heap_base = heap_base;
+        __process->vmas.heap_break = heap_base;
+        __process->vmas.heap_limit = heap_base + USER_HEAP_MAX_PAGES * PAGE_SIZE;
+        if (!internal_add_vma(&__process->vmas,
+                {heap_base, __process->vmas.heap_limit, heap_base, heap_base,
+                    (VmaPermission)(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Write)),
+                    VmaPurpose::Heap, VmaBacking::Anonymous, VmaGrowth::Up, true})) {
+            error = UserElfLoadError::MapFailed;
+            goto fail;
+        }
 
         for (uint32_t i = 0; i < segment_count; i++) {
-            error = map_segment(__process->address_space_root, (const uint8_t *)__image, segments[i]);
+            error = map_segment(__process, (const uint8_t *)__image, segments[i]);
             if (error != UserElfLoadError::Success)
                 goto fail;
         }
@@ -771,6 +964,18 @@ namespace bigos::proc {
             const uint64_t stack_base = USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE;
             const uint64_t stack_phys = alloc_user_frame();
             uint64_t initial_sp = 0;
+            if (!internal_add_vma(&__process->vmas,
+                    {stack_base - (USER_STACK_GROWTH_PAGES + USER_STACK_GUARD_PAGES) * PAGE_SIZE,
+                        stack_base - USER_STACK_GROWTH_PAGES * PAGE_SIZE, stack_base, stack_base, VmaPermission::None,
+                        VmaPurpose::StackGuard, VmaBacking::Guard, VmaGrowth::None, true}) ||
+                !internal_add_vma(&__process->vmas,
+                    {stack_base - USER_STACK_GROWTH_PAGES * PAGE_SIZE, USER_STACK_TOP, stack_base, USER_STACK_TOP,
+                        (VmaPermission)(permissions_value(VmaPermission::Read) |
+                                        permissions_value(VmaPermission::Write)),
+                        VmaPurpose::Stack, VmaBacking::Anonymous, VmaGrowth::Down, true})) {
+                error = UserElfLoadError::MapFailed;
+                goto fail;
+            }
             if (stack_phys == 0) {
                 error = UserElfLoadError::OutOfMemory;
                 goto fail;
@@ -785,13 +990,8 @@ namespace bigos::proc {
                 error = UserElfLoadError::CopyFailed;
                 goto fail;
             }
-            if (!bigos::mm::map_page_in_root(
-                    __process->address_space_root, stack_base, stack_phys, bigos::mm::page_attr::USER_DATA)) {
+            if (!map_user_page_for_process(__process, stack_base, stack_phys, bigos::mm::page_attr::USER_DATA, true)) {
                 free_user_frame(stack_phys);
-                error = UserElfLoadError::MapFailed;
-                goto fail;
-            }
-            if (!bigos::mm::map_page(stack_base, stack_phys, bigos::mm::page_attr::USER_DATA)) {
                 error = UserElfLoadError::MapFailed;
                 goto fail;
             }
@@ -857,6 +1057,7 @@ namespace bigos::proc {
         const UserRange old_code = process->code;
         const UserRange old_data = process->data;
         const UserRange old_stack = process->stack;
+        const VmaCollection old_vmas = process->vmas;
         const uint64_t old_code_phys = process->code_phys;
         const uint64_t old_data_phys = process->data_phys;
         const uint64_t old_stack_phys = process->stack_phys;
@@ -866,6 +1067,7 @@ namespace bigos::proc {
         process->code = prepared.code;
         process->data = prepared.data;
         process->stack = prepared.stack;
+        process->vmas = prepared.vmas;
         process->initial_stack = prepared.initial_stack;
         process->code_phys = prepared.code_phys;
         process->data_phys = prepared.data_phys;
@@ -886,6 +1088,7 @@ namespace bigos::proc {
         (void)old_code;
         (void)old_data;
         (void)old_stack;
+        (void)old_vmas;
         (void)old_code_phys;
         (void)old_data_phys;
         (void)old_stack_phys;
@@ -916,23 +1119,52 @@ namespace bigos::proc {
         return g_current_process;
     }
 
+    void init_vmas(VmaCollection *__vmas) noexcept {
+        internal_init_vmas(__vmas);
+    }
+
+    bool add_vma(VmaCollection *__vmas, const VmaEntry &__entry) noexcept {
+        return internal_add_vma(__vmas, __entry);
+    }
+
+    bool remove_vma(VmaCollection *__vmas, uint64_t __start, uint64_t __end) noexcept {
+        return internal_remove_vma(__vmas, __start, __end);
+    }
+
+    const VmaEntry *find_vma(const VmaCollection *__vmas, uint64_t __addr) noexcept {
+        return internal_find_vma(__vmas, __addr);
+    }
+
+    bool vma_range_allowed(
+        const VmaCollection *__vmas, uint64_t __addr, uint64_t __len, VmaPermission __perm) noexcept {
+        return internal_vma_range_allowed(__vmas, __addr, __len, __perm);
+    }
+
+    bool vma_attr_allowed(const VmaEntry *__vma, bigos::mm::PageAttr __attr) noexcept {
+        return internal_vma_attr_allowed(__vma, __attr);
+    }
+
     bool validate_user_buffer(uint64_t __addr, uint64_t __len) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_WRITE_MAX_LEN)
             return false;
-        return bigos::mm::user_range_mapped(process->address_space_root, __addr, __len);
+        return internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Read) &&
+               bigos::mm::user_range_mapped(process->address_space_root, __addr, __len);
     }
 
     bool validate_user_io_buffer(uint64_t __addr, uint64_t __len) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_IO_MAX_LEN)
             return false;
-        return bigos::mm::__detail::user_range_writable(process->address_space_root, __addr, __len);
+        return internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Write) &&
+               bigos::mm::__detail::user_range_writable(process->address_space_root, __addr, __len);
     }
 
     bool copy_current_user_buffer(uint64_t __addr, void *__dst, uint64_t __len) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_WRITE_MAX_LEN)
+            return false;
+        if (!internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Read))
             return false;
         return bigos::mm::__detail::copy_from_user_root(process->address_space_root, __addr, __dst, __len);
     }
@@ -941,7 +1173,143 @@ namespace bigos::proc {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_IO_MAX_LEN)
             return false;
+        if (!internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Write))
+            return false;
         return bigos::mm::__detail::copy_to_user_root(process->address_space_root, __addr, __src, __len);
+    }
+
+    int64_t brk_current(uint64_t __new_break) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+            return bigos::sys::SYS_EWOULDBLOCK;
+        if (__new_break == 0)
+            return (int64_t)process->vmas.heap_break;
+        if (__new_break < process->vmas.heap_base || __new_break > process->vmas.heap_limit)
+            return bigos::sys::SYS_EINVAL;
+
+        VmaEntry *heap = internal_find_vma_mut(&process->vmas, process->vmas.heap_base);
+        if (heap == nullptr || heap->purpose != VmaPurpose::Heap)
+            return bigos::sys::SYS_EFAULT;
+
+        const uint64_t old_break = process->vmas.heap_break;
+        uint64_t old_page_end = 0;
+        uint64_t new_page_end = 0;
+        if (!page_up(old_break, &old_page_end) || !page_up(__new_break, &new_page_end))
+            return bigos::sys::SYS_EINVAL;
+
+        if (new_page_end > old_page_end) {
+            uint64_t mapped_phys[USER_HEAP_MAX_PAGES] = {};
+            uint32_t mapped_count = 0;
+            for (uint64_t page = old_page_end; page < new_page_end; page += PAGE_SIZE) {
+                const uint64_t phys = alloc_user_frame();
+                if (phys == 0 || !zero_frame(phys) ||
+                    !map_user_page_for_process(process, page, phys, bigos::mm::page_attr::USER_DATA, false)) {
+                    free_user_frame(phys);
+                    for (uint32_t i = 0; i < mapped_count; i++)
+                        unmap_and_free_user_page(process, old_page_end + (uint64_t)i * PAGE_SIZE);
+                    return bigos::sys::SYS_EFAULT;
+                }
+                mapped_phys[mapped_count++] = phys;
+            }
+            (void)mapped_phys;
+        } else if (new_page_end < old_page_end) {
+            for (uint64_t page = new_page_end; page < old_page_end; page += PAGE_SIZE)
+                unmap_and_free_user_page(process, page);
+        }
+
+        process->vmas.heap_break = __new_break;
+        heap->materialized_end = new_page_end;
+        return (int64_t)process->vmas.heap_break;
+    }
+
+    int64_t map_anonymous_current(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+            return bigos::sys::SYS_EWOULDBLOCK;
+        if (__flags != 0 || __len == 0 || __len > USER_ANON_MAX_PAGES * PAGE_SIZE)
+            return bigos::sys::SYS_EINVAL;
+        uint64_t len = 0;
+        if (!page_up(__len, &len))
+            return bigos::sys::SYS_EINVAL;
+
+        const auto permissions = (VmaPermission)(uint8_t)__permissions;
+        if ((permissions_value(permissions) &
+                ~(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Write) |
+                    permissions_value(VmaPermission::Execute))) != 0 ||
+            permissions_wx(permissions))
+            return bigos::sys::SYS_EINVAL;
+
+        uint64_t base = process->vmas.anon_next;
+        uint64_t end = 0;
+        while (!add_overflow(base, len, &end) && end <= USER_ANON_BASE + USER_ANON_MAX_PAGES * PAGE_SIZE) {
+            bool overlaps = false;
+            for (uint32_t i = 0; i < MAX_VMAS; i++) {
+                const VmaEntry &entry = process->vmas.entries[i];
+                if (entry.used && base < entry.end && entry.start < end)
+                    overlaps = true;
+            }
+            if (!overlaps)
+                break;
+            base += PAGE_SIZE;
+        }
+        if (add_overflow(base, len, &end) || end > USER_ANON_BASE + USER_ANON_MAX_PAGES * PAGE_SIZE)
+            return bigos::sys::SYS_EINVAL;
+
+        if (!internal_add_vma(&process->vmas, {base, end, base, base, permissions, VmaPurpose::Anonymous,
+                                                  VmaBacking::Anonymous, VmaGrowth::None, true}))
+            return bigos::sys::SYS_EFAULT;
+
+        uint64_t mapped_pages = 0;
+        bigos::mm::PageAttr attr = bigos::mm::page_attr::PRESENT | bigos::mm::page_attr::USER;
+        if (permissions_include(permissions, VmaPermission::Write))
+            attr |= bigos::mm::page_attr::WRITABLE | bigos::mm::page_attr::NO_EXECUTE;
+        else if (!permissions_include(permissions, VmaPermission::Execute))
+            attr |= bigos::mm::page_attr::NO_EXECUTE;
+
+        for (uint64_t page = base; page < end; page += PAGE_SIZE) {
+            const uint64_t phys = alloc_user_frame();
+            if (phys == 0 || !zero_frame(phys) || !map_user_page_for_process(process, page, phys, attr, false)) {
+                free_user_frame(phys);
+                for (uint64_t rollback = base; rollback < base + mapped_pages * PAGE_SIZE; rollback += PAGE_SIZE)
+                    unmap_and_free_user_page(process, rollback);
+                (void)internal_remove_vma(&process->vmas, base, end);
+                return bigos::sys::SYS_EFAULT;
+            }
+            mapped_pages++;
+        }
+
+        VmaEntry *anon = internal_find_vma_mut(&process->vmas, base);
+        if (anon != nullptr)
+            anon->materialized_end = end;
+        process->vmas.anon_next = end;
+        return (int64_t)base;
+    }
+
+    bool try_handle_current_stack_fault(uint64_t __fault_address, uint64_t __error_code) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+            return false;
+        if ((__error_code & 0x1) != 0 || (__error_code & (1ull << 4)) != 0)
+            return false;
+
+        const uint64_t page = page_down(__fault_address);
+        VmaEntry *stack = internal_find_vma_mut(&process->vmas, page);
+        if (stack == nullptr || stack->purpose != VmaPurpose::Stack || stack->growth != VmaGrowth::Down ||
+            page < stack->start || page >= stack->materialized_start)
+            return false;
+        if ((__error_code & 0x2) != 0 && !permissions_include(stack->permissions, VmaPermission::Write))
+            return false;
+
+        const uint64_t phys = alloc_user_frame();
+        if (phys == 0)
+            return false;
+        if (!zero_frame(phys) ||
+            !map_user_page_for_process(process, page, phys, bigos::mm::page_attr::USER_DATA, false)) {
+            free_user_frame(phys);
+            return false;
+        }
+        stack->materialized_start = page;
+        return true;
     }
 
     int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec) noexcept {

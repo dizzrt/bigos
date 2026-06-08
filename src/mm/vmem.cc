@@ -952,6 +952,42 @@ namespace mm {
             }
             return true;
         }
+
+        bool unmap_user_page_in_root(uint64_t __root_phys, uint64_t __vaddr, uint64_t *__phys) noexcept {
+            if (__phys != nullptr)
+                *__phys = INVALID_PHYS_ADDR;
+            if (__root_phys == INVALID_PHYS_ADDR || (__vaddr & (PAGE_SIZE - 1)) != 0)
+                return false;
+
+            uint64_t *pte = root_pte(__root_phys, __vaddr);
+            if (pte == nullptr || !paging_present(*pte) || (*pte & page_attr::USER) == 0)
+                return false;
+
+            const uint64_t phys = *pte & PAGING_DESCRIPTOR_ADDR_MASK;
+            const uint64_t root = __root_phys & PAGING_DESCRIPTOR_ADDR_MASK;
+            uint64_t *pml4 = direct_table(root);
+            if (pml4 == nullptr)
+                return false;
+            uint64_t *pdpt = direct_table(pml4[get_pml4_index(__vaddr)]);
+            if (pdpt == nullptr)
+                return false;
+            uint64_t *pd = direct_table(pdpt[get_pdpt_index(__vaddr)]);
+            if (pd == nullptr)
+                return false;
+            const uint64_t pt_phys = pd[get_pd_index(__vaddr)] & PAGING_DESCRIPTOR_ADDR_MASK;
+
+            {
+                bigos::irq::InterruptGuard guard;
+                *pte = 0;
+                if ((__root_phys & PAGING_DESCRIPTOR_ADDR_MASK) == (read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK))
+                    flush_kernel_tlb_page(__vaddr);
+            }
+            if (!decrement_present_entry(pt_phys))
+                return false;
+            if (__phys != nullptr)
+                *__phys = phys;
+            return true;
+        }
     }   // namespace __detail
 
     bool is_direct_mapped_phys(uint64_t __phys, uint64_t __len) noexcept {
