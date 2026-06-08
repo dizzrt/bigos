@@ -21,9 +21,9 @@ namespace irq::isr {
             // and does not send i8259 EOI here; EOI stays owned by irq_dispatch.
             bigos::timer::on_tick();
 
-            // Bounded IRQ-context-safe hook: records reschedule intent only.
-            // Stage 4 performs no IRQ-return preemption, no allocation, and no
-            // thread switch from this path.
+            // Bounded IRQ-context-safe hook: accounts the current time slice,
+            // records reschedule intent, and wakes deadline waiters. It never
+            // allocates, blocks, sends EOI, or switches directly from this path.
             bigos::sched::on_timer_tick();
 
 #ifdef BIGOS_TIMER_SMOKE

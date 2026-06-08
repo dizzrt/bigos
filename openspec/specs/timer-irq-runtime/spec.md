@@ -73,7 +73,7 @@ BigOS SHALL validate the hardened timer/IRQ runtime path with source-level check
 
 ### Requirement: Timer tick may record scheduler intent without violating IRQ contracts
 
-BigOS SHALL allow the early timer runtime path to interact with the single-core scheduler only through bounded IRQ-context-safe accounting or reschedule intent, while preserving the existing timer tick ownership and `on_tick()` context contract. Stage 4 SHALL NOT implement IRQ-return preemptive context switching.
+BigOS SHALL allow the early timer runtime path to interact with the single-core scheduler through bounded IRQ-context-safe accounting, reschedule intent, and stage 11 IRQ-return scheduling while preserving timer tick ownership and the `on_tick()` context contract.
 
 #### Scenario: Timer IRQ keeps tick ownership in timer API
 
@@ -89,9 +89,15 @@ BigOS SHALL allow the early timer runtime path to interact with the single-core 
 
 #### Scenario: Reschedule intent is separated from ordinary allocation
 
-- **WHEN** the timer tick marks that the current thread should yield at a later cooperative or future scheduling boundary
+- **WHEN** the timer tick marks that the current thread should yield at a later cooperative or preemptive scheduling boundary
 - **THEN** the decision state MUST be represented without ordinary dynamic allocation in the IRQ handler
-- **AND** stage 4 MUST preserve the current single-core interrupt, EOI, and return-state contracts by not switching threads on IRQ return
+- **AND** the timer path MUST preserve the current single-core interrupt, EOI, and return-state contracts
+
+#### Scenario: Stage 11 may preempt on eligible IRQ return
+
+- **WHEN** timer IRQ0 expires the current thread's time slice and the interrupt dispatch path reaches a documented safe return boundary
+- **THEN** BigOS MAY perform a scheduler-owned context switch before returning to the interrupted kernel thread
+- **AND** it MUST do so only when preemption is enabled, the current thread is eligible to be preempted, and the interrupt frame ABI and EOI ordering remain valid
 
 ### Requirement: Timer supports cooperative sleep and timeout waits
 BigOS SHALL provide timer-backed sleep or timeout wait primitives that use the monotonic tick to wake blocked threads under the single-core cooperative scheduler model.
@@ -119,3 +125,21 @@ BigOS SHALL keep timer IRQ0 handling bounded and IRQ-context safe while supporti
 - **THEN** the IRQ path MAY mark or wake the expired thread through a bounded IRQ-safe path
 - **AND** it MUST NOT perform a full context switch on IRQ return in stage 10
 - **AND** external IRQ EOI and `iretq` return semantics MUST remain unchanged
+
+### Requirement: Timer preemption accounting is deterministic
+BigOS SHALL make timer-driven scheduler accounting deterministic enough for source-level checks and bounded runtime smoke validation.
+
+#### Scenario: Time slice accounting uses monotonic tick
+- **WHEN** scheduler preemption accounting is enabled
+- **THEN** BigOS MUST base slice expiry on the existing monotonic PIT tick or an equivalent timer-owned tick event
+- **AND** it MUST NOT introduce a separate unsynchronized timer source for scheduler slices
+
+#### Scenario: Disabled preemption records pending intent
+- **WHEN** timer IRQ0 observes slice expiry while preemption is disabled or the current context is not eligible for IRQ-return switching
+- **THEN** BigOS MUST record pending reschedule intent or an equivalent bounded state
+- **AND** it MUST NOT perform the context switch from inside the protected region
+
+#### Scenario: Timer smoke markers remain bounded
+- **WHEN** timer-driven preemption smoke emits validation markers
+- **THEN** marker emission MUST be bounded and default-off through the relevant smoke configuration
+- **AND** the normal timer smoke marker semantics MUST remain unchanged outside scheduler semantics validation

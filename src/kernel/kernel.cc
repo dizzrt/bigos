@@ -48,6 +48,49 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_SCHEDULER_SEMANTICS_SMOKE
+namespace {
+    constexpr bigos::timer::tick_t SCHED_SEMANTICS_PENDING_TIMEOUT_TICKS = 8;
+    constexpr bigos::timer::tick_t SCHED_SEMANTICS_PREEMPT_TIMEOUT_TICKS = 20;
+    volatile bool g_sched_semantics_delayed = false;
+    volatile bool g_sched_semantics_preempted = false;
+
+    void scheduler_semantics_worker_a(void *) noexcept {
+        bigos::serial_puts("BIGOS_SCHED_SEMANTICS_START\n");
+
+        bigos::sched::disable_preemption();
+        const bigos::timer::tick_t pending_start = bigos::timer::ticks();
+        while (!bigos::sched::reschedule_pending() &&
+               bigos::timer::ticks() - pending_start < SCHED_SEMANTICS_PENDING_TIMEOUT_TICKS) {
+        }
+
+        if (bigos::sched::reschedule_pending()) {
+            g_sched_semantics_delayed = true;
+            bigos::serial_puts("BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED\n");
+        } else {
+            bigos::serial_puts("BIGOS_SCHED_SEMANTICS_FAILED pending\n");
+        }
+        bigos::sched::enable_preemption();
+
+        const bigos::timer::tick_t preempt_start = bigos::timer::ticks();
+        while (!g_sched_semantics_preempted &&
+               bigos::timer::ticks() - preempt_start < SCHED_SEMANTICS_PREEMPT_TIMEOUT_TICKS) {
+        }
+        if (!g_sched_semantics_preempted)
+            bigos::serial_puts("BIGOS_SCHED_SEMANTICS_FAILED preempt\n");
+    }
+
+    void scheduler_semantics_worker_b(void *) noexcept {
+        g_sched_semantics_preempted = true;
+        bigos::serial_puts("BIGOS_SCHED_SEMANTICS_PREEMPTED\n");
+        if (g_sched_semantics_delayed)
+            bigos::serial_puts("BIGOS_SCHED_SEMANTICS_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_SCHED_SEMANTICS_FAILED delayed\n");
+    }
+}   // namespace
+#endif
+
 #ifdef BIGOS_BLOCKING_SMOKE
 namespace {
     constexpr char BLOCKING_SMOKE_CHAR = 'Z';
@@ -288,6 +331,10 @@ void kernel(const BootInfoHeader *boot_info) {
 #ifdef BIGOS_SCHEDULER_SMOKE
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_a, nullptr);
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_b, nullptr);
+#endif
+#ifdef BIGOS_SCHEDULER_SEMANTICS_SMOKE
+    bigos::sched::create_kernel_thread(&scheduler_semantics_worker_a, nullptr);
+    bigos::sched::create_kernel_thread(&scheduler_semantics_worker_b, nullptr);
 #endif
 #ifdef BIGOS_BLOCKING_SMOKE
     bigos::sched::create_kernel_thread(&blocking_smoke_reader, nullptr);

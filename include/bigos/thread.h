@@ -11,7 +11,7 @@ namespace sched {
 
     // Kernel thread entry function. Runs in ring0 on its own kernel stack with
     // maskable interrupts enabled. There is no user-mode context, no syscall
-    // boundary, and no address-space switch in stage 4.
+    // boundary, and no address-space switch for ordinary kernel threads.
     using ThreadEntry = void (*)(void *__arg);
 
     // Bounded early-kernel thread lifecycle state. Blocked/Sleeping are

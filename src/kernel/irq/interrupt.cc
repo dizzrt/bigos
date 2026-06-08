@@ -155,9 +155,12 @@ namespace irq {
                 handler = &__detail::default_external_irq_handler;
 
             // External IRQs (including timer vector 0x20) send exactly one EOI
-            // here, after the registered handler returns, then iretq via isr_common.
+            // here, after the registered handler returns. Only after that EOI may
+            // the scheduler-owned IRQ-return bridge switch to another runnable
+            // kernel thread; exceptions and syscalls never enter this bridge.
             handler(__frame);
             driver::irqchip::i8259::send_eoi(irq_line);
+            bigos::sched::maybe_preempt_on_irq_return(__frame);
             return;
         }
 

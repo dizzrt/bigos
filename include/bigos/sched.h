@@ -6,6 +6,9 @@
 #include <bigos/timer.h>
 
 NAMESPACE_BIGOS_BEG
+namespace irq {
+    struct InterruptFrame;
+}
 namespace sched {
     // Invalid/unassigned thread id sentinel.
     constexpr ThreadId INVALID_THREAD_ID = 0;
@@ -42,8 +45,7 @@ namespace sched {
     // If at least one other non-idle runnable thread exists, the current thread
     // is placed back on the run queue and the scheduler switches to the next
     // runnable thread in round-robin order. Otherwise the current thread keeps
-    // running (or the idle thread runs) without corrupting the run queue. Stage 4
-    // performs NO IRQ-return preemption: switching only happens here.
+    // running (or the idle thread runs) without corrupting the run queue.
     void yield() noexcept;
 
     // Terminate the current thread. Non-interrupt-context only.
@@ -69,6 +71,10 @@ namespace sched {
     bool can_block() noexcept;
     void enter_nonblocking_context() noexcept;
     void leave_nonblocking_context() noexcept;
+    void disable_preemption() noexcept;
+    void enable_preemption() noexcept;
+    bool preemption_enabled() noexcept;
+    bool reschedule_pending() noexcept;
 
     void init_wait_queue(WaitQueue *__queue) noexcept;
     bool wait_queue_empty(const WaitQueue *__queue) noexcept;
@@ -91,11 +97,15 @@ namespace sched {
 
     // IRQ-context-safe bounded scheduler tick hook.
     //
-    // Called from the timer IRQ0 path after on_tick(). It only records a bounded
-    // reschedule intent for later cooperative/future scheduling. It MUST NOT
-    // allocate, free, block, do IO, or switch threads. Stage 4 never preempts on
-    // IRQ return.
+    // Called from the timer IRQ0 path after on_tick(). It performs bounded
+    // time-slice accounting, records reschedule intent, and wakes sleepers. It
+    // MUST NOT allocate, free, block, do bulk IO, or switch threads directly.
     void on_timer_tick() noexcept;
+
+    // External IRQ-return bridge. irq_dispatch calls this only after the
+    // registered handler completes and the single i8259 EOI has been sent.
+    // Exceptions and int 0x80 syscalls do not enter this path.
+    void maybe_preempt_on_irq_return(irq::InterruptFrame *__frame) noexcept;
 }   // namespace sched
 NAMESPACE_BIGOS_END
 

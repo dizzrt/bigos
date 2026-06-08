@@ -107,6 +107,17 @@ namespace irq {
         uint64_t rflags;
     } __attribute__((packed));
 
+    static_assert(sizeof(InterruptFrame) == 176);
+    static_assert(__builtin_offsetof(InterruptFrame, r15) == 0);
+    static_assert(__builtin_offsetof(InterruptFrame, rax) == 112);
+    static_assert(__builtin_offsetof(InterruptFrame, rsp) == 120);
+    static_assert(__builtin_offsetof(InterruptFrame, ss) == 128);
+    static_assert(__builtin_offsetof(InterruptFrame, vector) == 136);
+    static_assert(__builtin_offsetof(InterruptFrame, error_code) == 144);
+    static_assert(__builtin_offsetof(InterruptFrame, rip) == 152);
+    static_assert(__builtin_offsetof(InterruptFrame, cs) == 160);
+    static_assert(__builtin_offsetof(InterruptFrame, rflags) == 168);
+
     inline void enableIRQ() noexcept {
         // Only early registered IRQ smoke handlers are enabled; kernel APIs are not IRQ-context safe yet.
         asm volatile("sti");

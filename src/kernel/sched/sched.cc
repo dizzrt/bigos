@@ -24,6 +24,12 @@ namespace sched {
         // Stage 4 fixes the default normal kernel thread stack at one page. No
         // smoke/debug build switch changes this page count.
         constexpr uint32_t KERNEL_THREAD_STACK_PAGES = 1;
+        constexpr uint32_t DEFAULT_TIME_SLICE_TICKS = 2;
+        constexpr int32_t DEFAULT_STATIC_PRIORITY = 0;
+        constexpr uint32_t DEFAULT_POLICY_SLOT = 0;
+
+        static_assert(KERNEL_THREAD_STACK_PAGES > 0);
+        static_assert(DEFAULT_TIME_SLICE_TICKS > 0);
 
         struct TCB {
             ThreadId id;
@@ -46,6 +52,11 @@ namespace sched {
             TCB *sleep_next;
             timer::tick_t deadline_tick;
             int wait_result;
+            // Stage 11 bounded scheduling metadata. Priority/policy are reserved
+            // hooks; default selection remains single-core round-robin.
+            uint32_t time_slice_remaining;
+            int32_t static_priority;
+            uint32_t policy_slot;
             // Intrusive terminated-list node; deferred reclamation only.
             TCB *term_next;
         };
@@ -62,11 +73,15 @@ namespace sched {
         bool g_scheduler_started = false;
         volatile uint32_t g_nonblocking_depth = 0;
         volatile uint32_t g_scheduler_critical_depth = 0;
+        volatile uint32_t g_preemption_disable_depth = 0;
 
-        // Bounded reschedule intent recorded by the timer IRQ. Stage 4 never acts
-        // on it from IRQ return; it is only readable state for cooperative or
-        // future scheduling paths.
+        // Bounded reschedule intent recorded by the timer IRQ. The intent is
+        // consumed only at explicit scheduler-owned safe boundaries.
         volatile uint64_t g_reschedule_intent = 0;
+        volatile bool g_reschedule_pending = false;
+        volatile uint64_t g_slice_expired_events = 0;
+        volatile uint64_t g_deferred_preemption_events = 0;
+        volatile uint64_t g_irq_return_preemptions = 0;
 
         // The boot/main thread storage. After start() the boot context becomes
         // the scheduler-owned idle thread and reuses its existing kernel stack.
@@ -84,12 +99,49 @@ namespace sched {
         }
 
         void enter_scheduler_critical() noexcept {
+            ++g_preemption_disable_depth;
             ++g_scheduler_critical_depth;
         }
 
         void leave_scheduler_critical() noexcept {
             if (g_scheduler_critical_depth > 0)
                 --g_scheduler_critical_depth;
+            if (g_preemption_disable_depth > 0)
+                --g_preemption_disable_depth;
+        }
+
+        void request_reschedule() noexcept {
+            ++g_reschedule_intent;
+            g_reschedule_pending = true;
+            if (g_preemption_disable_depth > 0)
+                ++g_deferred_preemption_events;
+        }
+
+        bool has_runnable_peer() noexcept {
+            TCB *cur = g_run_head;
+            while (cur != nullptr) {
+                if (cur->state == ThreadState::Runnable)
+                    return true;
+                cur = cur->rq_next;
+            }
+            return false;
+        }
+
+        bool is_ordinary_running_thread(TCB *__t) noexcept {
+            return __t != nullptr && __t != g_idle && __t->state == ThreadState::Running;
+        }
+
+        void refresh_time_slice(TCB *__t) noexcept {
+            if (__t != nullptr && __t != g_idle)
+                __t->time_slice_remaining = DEFAULT_TIME_SLICE_TICKS;
+        }
+
+        bool can_preempt_from_irq_return(const irq::InterruptFrame *__frame) noexcept {
+            constexpr uint64_t RPL_MASK = 0x3;
+            return __frame != nullptr && (__frame->cs & RPL_MASK) == 0 && g_scheduler_started &&
+                   is_ordinary_running_thread(g_current) && g_reschedule_pending &&
+                   g_preemption_disable_depth == 0 && g_scheduler_critical_depth == 0 &&
+                   g_nonblocking_depth <= 1 && has_runnable_peer();
         }
 
         void rq_push(TCB *__t) noexcept {
@@ -188,6 +240,7 @@ namespace sched {
             sleep_remove_locked(__t);
             __t->wait_result = __result;
             __t->state = ThreadState::Runnable;
+            refresh_time_slice(__t);
             rq_push(__t);
             return true;
         }
@@ -196,8 +249,10 @@ namespace sched {
             TCB *next = rq_pop();
             if (next == nullptr)
                 next = g_idle;
-            else
+            else {
                 next->state = ThreadState::Running;
+                refresh_time_slice(next);
+            }
 
             g_current = next;
             switch_context(&__prev->saved_sp, next->saved_sp);
@@ -244,6 +299,9 @@ namespace sched {
         tcb->sleep_next = nullptr;
         tcb->deadline_tick = 0;
         tcb->wait_result = WAIT_OK;
+        tcb->time_slice_remaining = __detail::DEFAULT_TIME_SLICE_TICKS;
+        tcb->static_priority = __detail::DEFAULT_STATIC_PRIORITY;
+        tcb->policy_slot = __detail::DEFAULT_POLICY_SLOT;
         tcb->term_next = nullptr;
 
         // Build the initial stack frame so the first switch_context resume lands
@@ -293,6 +351,8 @@ namespace sched {
         }
 
         next->state = ThreadState::Running;
+        __detail::refresh_time_slice(next);
+        __detail::g_reschedule_pending = false;
         __detail::g_current = next;
         __detail::leave_scheduler_critical();
         switch_context(&prev->saved_sp, next->saved_sp);
@@ -318,8 +378,10 @@ namespace sched {
         __detail::TCB *next = __detail::rq_pop();
         if (next == nullptr)
             next = __detail::g_idle;
-        else
+        else {
             next->state = ThreadState::Running;
+            __detail::refresh_time_slice(next);
+        }
 
         __detail::g_current = next;
         __detail::leave_scheduler_critical();
@@ -347,6 +409,9 @@ namespace sched {
         __detail::g_boot_tcb.sleep_next = nullptr;
         __detail::g_boot_tcb.deadline_tick = 0;
         __detail::g_boot_tcb.wait_result = WAIT_OK;
+        __detail::g_boot_tcb.time_slice_remaining = 0;
+        __detail::g_boot_tcb.static_priority = __detail::DEFAULT_STATIC_PRIORITY;
+        __detail::g_boot_tcb.policy_slot = __detail::DEFAULT_POLICY_SLOT;
         __detail::g_boot_tcb.term_next = nullptr;
 
         __detail::g_idle = &__detail::g_boot_tcb;
@@ -378,6 +443,23 @@ namespace sched {
     void leave_nonblocking_context() noexcept {
         if (__detail::g_nonblocking_depth > 0)
             --__detail::g_nonblocking_depth;
+    }
+
+    void disable_preemption() noexcept {
+        ++__detail::g_preemption_disable_depth;
+    }
+
+    void enable_preemption() noexcept {
+        if (__detail::g_preemption_disable_depth > 0)
+            --__detail::g_preemption_disable_depth;
+    }
+
+    bool preemption_enabled() noexcept {
+        return __detail::g_preemption_disable_depth == 0;
+    }
+
+    bool reschedule_pending() noexcept {
+        return __detail::g_reschedule_pending;
     }
 
     void init_wait_queue(WaitQueue *__queue) noexcept {
@@ -488,11 +570,38 @@ namespace sched {
         return self->wait_result;
     }
 
-    void on_timer_tick() noexcept {
-        // IRQ-context-safe and bounded: record reschedule intent only. No
-        // allocation, no IO, no blocking, and no thread switch on IRQ return.
-        ++__detail::g_reschedule_intent;
+    void maybe_preempt_on_irq_return(irq::InterruptFrame *__frame) noexcept {
+        if (!__detail::can_preempt_from_irq_return(__frame))
+            return;
 
+        __detail::enter_scheduler_critical();
+        __detail::TCB *prev = __detail::g_current;
+        __detail::TCB *next = __detail::rq_pop();
+        if (next == nullptr) {
+            __detail::leave_scheduler_critical();
+            return;
+        }
+
+        if (prev->state == ThreadState::Running) {
+            prev->state = ThreadState::Runnable;
+            __detail::rq_push(prev);
+        }
+
+        next->state = ThreadState::Running;
+        __detail::refresh_time_slice(next);
+        __detail::g_current = next;
+        __detail::g_reschedule_pending = false;
+        ++__detail::g_irq_return_preemptions;
+        __detail::leave_scheduler_critical();
+
+        switch_context(&prev->saved_sp, next->saved_sp);
+    }
+
+    void on_timer_tick() noexcept {
+        // IRQ-context-safe and bounded: no allocation, no IO, no blocking, and
+        // no direct thread switch. Context switching is deferred to explicit
+        // scheduler-owned return boundaries after EOI. Slice expiry updates
+        // g_reschedule_intent through request_reschedule().
         const timer::tick_t now = timer::ticks();
         __detail::TCB *prev = nullptr;
         __detail::TCB *cur = __detail::g_sleep_head;
@@ -514,6 +623,18 @@ namespace sched {
                 prev = cur;
             }
             cur = next;
+        }
+
+        __detail::TCB *current = __detail::g_current;
+        if (!__detail::is_ordinary_running_thread(current))
+            return;
+
+        if (current->time_slice_remaining > 0)
+            --current->time_slice_remaining;
+
+        if (current->time_slice_remaining == 0) {
+            ++__detail::g_slice_expired_events;
+            __detail::request_reschedule();
         }
     }
 }   // namespace sched

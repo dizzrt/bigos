@@ -174,6 +174,7 @@ SMOKE_OPTIONS = (
     'timer_smoke',
     'keyboard_smoke',
     'scheduler_smoke',
+    'scheduler_semantics_smoke',
     'blocking_smoke',
     'user_vmem_smoke',
     'syscall_smoke',
@@ -205,6 +206,20 @@ RUNTIME_SMOKE_MATRIX = (
         expected_marker='BIGOS_SCHED_THREAD_B',
         timeout_seconds=10.0,
         risk_area='cooperative kernel-thread scheduling and context switching',
+    ),
+    RuntimeSmokeCase(
+        case_id='scheduler-semantics',
+        title='Scheduler semantics',
+        switches=('scheduler_semantics_smoke',),
+        expected_marker='BIGOS_SCHED_SEMANTICS_PASSED',
+        timeout_seconds=15.0,
+        risk_area='timer slice expiry, preemption-disable deferral, and IRQ-return scheduling',
+        validation_markers=(
+            'BIGOS_SCHED_SEMANTICS_START',
+            'BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED',
+            'BIGOS_SCHED_SEMANTICS_PREEMPTED',
+            'BIGOS_SCHED_SEMANTICS_PASSED',
+        ),
     ),
     RuntimeSmokeCase(
         case_id='blocking-primitives',
