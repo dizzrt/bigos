@@ -47,6 +47,13 @@ BigOS 已完成早期 bring-up，并形成一个带 smoke 验证的单核内核�
   `tools/boot_debug.py`.
 - 构建/运行：`xmake` 是主构建路径；通过 `xmake f ...=y` 配置 smoke 选项；
   QEMU/Bochs helper 路径由 `xmake run` 和 `tools/boot_debug.py` 提供。
+- Validation: the stage 9 runtime smoke validation matrix is productized with
+  QEMU headless serial-marker checks, per-case timeouts, structured validation
+  artifacts, explicit skip/block reasons, and scenario-specific Bochs or
+  QEMU+Bochs cross-validation guidance.
+- 验证：阶段 9 runtime smoke 验证矩阵已产品化，包含 QEMU headless 串口 marker
+  检查、按 case 配置的 timeout、结构化验证 artifact、明确的 skipped/blocked
+  原因，以及面向特定场景的 Bochs 或 QEMU+Bochs 交叉验证指引。
 
 ## Current Boundary / 当前边界
 
@@ -84,10 +91,14 @@ blocking/sleep
 
 ### Stage 9: Productize Runtime Validation / 阶段 9：运行时验证产品化
 
-Goal: turn the existing smoke switches and helper scripts into a repeatable
-validation matrix.
+Status: completed and archived as `productize-runtime-smoke-validation`.
 
-目标：将现有 smoke 开关和 helper 脚本整理成可重复执行的验证矩阵。
+状态：已完成，并以 `productize-runtime-smoke-validation` 归档。
+
+Goal: keep the existing smoke switches and helper scripts organized as a
+repeatable validation matrix.
+
+目标：将现有 smoke 开关和 helper 脚本保持为可重复执行的验证矩阵。
 
 - Add a smoke matrix for the narrowest useful combinations of memory, timer,
   scheduler, syscall, filesystem, user program, and user ELF checks.
@@ -234,19 +245,30 @@ Goal: introduce user virtual-memory policy before demand paging and COW.
 
 ## Near-Term Recommendation / 近期建议
 
-The next two changes should focus on validation and blocking semantics:
+With runtime smoke validation productized, the next change should focus on the
+kernel waiting model:
 
-近期最建议先做两个 change，分别聚焦验证和阻塞语义：
+随着 runtime smoke 验证产品化完成，下一项 change 应聚焦内核等待模型：
 
-1. `productize-runtime-smoke-validation`
-   - Build the smoke matrix and structured validation output.
-   - 构建 smoke 矩阵和结构化验证输出。
-2. `introduce-kernel-blocking-primitives`
+1. `introduce-kernel-blocking-primitives`
    - Add thread wait states, sleep queues, wakeups, and timeout semantics without
      full preemption or SMP.
    - 增加线程等待状态、sleep queue、wakeup 和超时语义，但不引入完整抢占或 SMP。
+   - Use the stage 9 smoke matrix to protect memory, timer, scheduler, syscall,
+     filesystem, and user-mode smoke boundaries while changing scheduler-adjacent
+     code.
+   - 修改调度相关代码时，使用阶段 9 smoke 矩阵保护 memory、timer、scheduler、
+     syscall、filesystem 和 user-mode smoke 边界。
+2. `upgrade-scheduler-semantics` or `introduce-process-lifecycle`
+   - Choose scheduler preemption first if timer-driven reschedule rules and
+     critical-section semantics are the highest risk.
+   - 如果 timer 驱动重调度规则和临界区语义风险最高，则优先推进调度器抢占。
+   - Choose process lifecycle first if `wait`/`exit`, PID ownership, and normal
+     process builds are needed before broader userland work.
+   - 如果更需要先具备 `wait`/`exit`、PID 所有权和常规进程构建能力，则优先推进进程生命周期。
 
-After those land, the project can safely choose between scheduler preemption,
-process lifecycle, or VFS/file-descriptor work with lower regression risk.
+After blocking primitives land, the project can choose between scheduler
+preemption, process lifecycle, or VFS/file-descriptor work with lower regression
+risk.
 
-在这两项完成后，项目再选择推进调度器抢占、进程生命周期或 VFS/文件描述符，回归风险会更低。
+在阻塞原语落地后，项目再选择推进调度器抢占、进程生命周期或 VFS/文件描述符，回归风险会更低。

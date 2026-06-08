@@ -237,6 +237,156 @@ def test_run_parser_accepts_skip_build() -> None:
     assert args.display == 'none'
 
 
+def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() -> None:
+    case_ids = {case.case_id for case in boot_debug.RUNTIME_SMOKE_MATRIX}
+
+    assert {
+        'memory-self-test',
+        'timer-irq',
+        'scheduler',
+        'syscall',
+        'filesystem-read',
+        'first-user-program',
+        'filesystem-user-elf',
+    } <= case_ids
+    for case in boot_debug.RUNTIME_SMOKE_MATRIX:
+        assert case.switches
+        assert len(case.switches) == 1
+        assert case.expected_marker
+    assert (
+        boot_debug.case_by_id('filesystem-read').timeout_seconds
+        > boot_debug.case_by_id('memory-self-test').timeout_seconds
+    )
+    assert 'src/kernel/proc/**' in boot_debug.case_by_id('first-user-program').proc_boundary
+    assert 'src/kernel/proc/**' in boot_debug.case_by_id('filesystem-user-elf').proc_boundary
+
+
+def test_runtime_smoke_xmake_config_explicitly_sets_all_smoke_options() -> None:
+    command = boot_debug.runtime_smoke_xmake_config(boot_debug.case_by_id('syscall'))
+
+    assert command[0:2] == ['xmake', 'f']
+    assert '--syscall_smoke=y' in command
+    assert '--timer_smoke=n' in command
+    assert '--user_program_smoke=n' in command
+    assert len(command) == 2 + len(boot_debug.SMOKE_OPTIONS)
+
+
+def test_runtime_smoke_run_args_use_qemu_headless_marker_path(tmp_path: Path) -> None:
+    case = boot_debug.case_by_id('memory-self-test')
+    serial_log = tmp_path / 'serial.log'
+    image = tmp_path / 'os.raw'
+
+    args = boot_debug.runtime_smoke_run_args(case, image, serial_log, '64M')
+
+    assert args.emulator == 'qemu'
+    assert args.display == 'none'
+    assert args.expect_serial_marker == 'BIGOS_MM_SELF_TEST_PASSED'
+    assert args.serial_log == str(serial_log)
+    assert args.smoke_timeout == case.timeout_seconds
+
+
+def test_read_observed_marker_prefers_expected_marker(tmp_path: Path) -> None:
+    serial_log = tmp_path / 'serial.log'
+    serial_log.write_text('BIGOS_TIMER_IRQ\nBIGOS_MM_SELF_TEST_PASSED\n', encoding='utf-8')
+
+    observed = boot_debug.read_observed_marker(serial_log, 'BIGOS_MM_SELF_TEST_PASSED')
+
+    assert observed == 'BIGOS_MM_SELF_TEST_PASSED'
+
+
+def test_read_observed_marker_records_failure_marker_when_expected_is_missing(tmp_path: Path) -> None:
+    serial_log = tmp_path / 'serial.log'
+    serial_log.write_text('BIGOS_MM_SELF_TEST_FAILED stage=kernel-pages-prime\n', encoding='utf-8')
+
+    observed = boot_debug.read_observed_marker(serial_log, 'BIGOS_MM_SELF_TEST_PASSED')
+
+    assert observed == 'BIGOS_MM_SELF_TEST_FAILED'
+
+
+def test_runtime_smoke_artifact_records_blocked_tools_and_case_fields(tmp_path: Path) -> None:
+    case = boot_debug.case_by_id('filesystem-user-elf')
+    result = boot_debug.blocked_runtime_smoke_result(case, tmp_path / 'serial.log', 'missing required tool(s): uv')
+    artifact = boot_debug.format_runtime_smoke_artifact(
+        [result],
+        [boot_debug.ToolAvailability('uv', False, 'missing')],
+        [case],
+        stopped_after_failure=False,
+        bochs_note='not checked',
+    )
+
+    assert '`schema_version`: `runtime-smoke-validation/v1`' in artifact
+    assert '| `uv` | `false` | `missing` |' in artifact
+    assert '| `filesystem-user-elf` | `blocked` | `BIGOS_USER_EXIT` |' in artifact
+    assert 'packages /boot/user/init.elf' in artifact
+    assert 'missing required tool(s): uv' in artifact
+
+
+def test_runtime_smoke_matrix_blocks_when_required_tool_missing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(boot_debug.shutil, 'which', lambda tool: None if tool == 'uv' else f'/usr/bin/{tool}')
+    parser = boot_debug.make_parser()
+    args = parser.parse_args(
+        [
+            'runtime-smoke-matrix',
+            '--case',
+            'memory-self-test',
+            '--output',
+            str(tmp_path / 'validation.md'),
+            '--serial-log-dir',
+            str(tmp_path / 'serial'),
+            '--image-dir',
+            str(tmp_path / 'image'),
+        ]
+    )
+
+    exit_code = args.func(args)
+
+    artifact = (tmp_path / 'validation.md').read_text(encoding='utf-8')
+    assert exit_code == 1
+    assert '| `memory-self-test` | `blocked` | `BIGOS_MM_SELF_TEST_PASSED` |' in artifact
+    assert 'missing required tool(s): uv' in artifact
+
+
+def test_runtime_smoke_matrix_runs_selected_case_and_writes_artifact(tmp_path: Path, monkeypatch) -> None:
+    commands: list[list[str]] = []
+    run_args: list[object] = []
+
+    def fake_run_command(stage, command, cwd, **kwargs):
+        _ = stage, cwd, kwargs
+        commands.append(list(command))
+
+    def fake_run(args):
+        run_args.append(args)
+        Path(args.serial_log).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.serial_log).write_text('BIGOS_MM_SELF_TEST_PASSED\n', encoding='utf-8')
+        return 0
+
+    monkeypatch.setattr(boot_debug.shutil, 'which', lambda tool: f'/usr/bin/{tool}')
+    monkeypatch.setattr(boot_debug, 'run_command', fake_run_command)
+    monkeypatch.setattr(boot_debug, 'run', fake_run)
+    parser = boot_debug.make_parser()
+    args = parser.parse_args(
+        [
+            'runtime-smoke-matrix',
+            '--case',
+            'memory-self-test',
+            '--output',
+            str(tmp_path / 'validation.md'),
+            '--serial-log-dir',
+            str(tmp_path / 'serial'),
+            '--image-dir',
+            str(tmp_path / 'image'),
+        ]
+    )
+
+    exit_code = args.func(args)
+
+    artifact = (tmp_path / 'validation.md').read_text(encoding='utf-8')
+    assert exit_code == 0
+    assert commands == [boot_debug.runtime_smoke_xmake_config(boot_debug.case_by_id('memory-self-test'))]
+    assert len(run_args) == 1
+    assert '| `memory-self-test` | `passed` | `BIGOS_MM_SELF_TEST_PASSED` | `BIGOS_MM_SELF_TEST_PASSED` |' in artifact
+
+
 def test_display_resolution_uses_backend_defaults() -> None:
     assert boot_debug.resolve_display('bochs', None) == 'sdl2'
     assert boot_debug.resolve_display('qemu', None) == 'graphical'

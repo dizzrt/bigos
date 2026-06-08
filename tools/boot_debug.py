@@ -31,6 +31,7 @@ MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'
 EMULATORS = ('bochs', 'qemu', 'qemu-gdb')
 BOCHS_DISPLAYS = ('sdl2', 'none')
 QEMU_DISPLAYS = ('graphical', 'none')
+RUNTIME_SMOKE_STATUS_VALUES = ('passed', 'failed', 'skipped', 'blocked')
 
 SECTOR_SIZE = 512
 MBR_PARTITION_TABLE_OFFSET = 0x1BE
@@ -130,6 +131,113 @@ class PreparedArtifacts:
     exdbr: Path
     boot: Path
     user_init_elf: Path | None = None
+
+
+@dataclass(frozen=True)
+class RuntimeSmokeCase:
+    case_id: str
+    title: str
+    switches: tuple[str, ...]
+    expected_marker: str
+    timeout_seconds: float
+    risk_area: str
+    proc_boundary: str = ''
+
+
+@dataclass(frozen=True)
+class ToolAvailability:
+    tool: str
+    available: bool
+    detail: str
+
+
+@dataclass
+class RuntimeSmokeResult:
+    case: RuntimeSmokeCase
+    status: str
+    expected_marker: str
+    observed_marker: str
+    serial_log: Path
+    timeout_seconds: float
+    exit_status: str
+    failed_stage: str
+    skip_reason: str
+    alternative_checks: str
+    residual_risk: str
+
+
+SMOKE_OPTIONS = (
+    'mm_self_test',
+    'page_fault_smoke',
+    'timer_smoke',
+    'keyboard_smoke',
+    'scheduler_smoke',
+    'user_vmem_smoke',
+    'syscall_smoke',
+    'user_program_smoke',
+    'fs_smoke',
+    'user_elf_smoke',
+)
+RUNTIME_SMOKE_MATRIX = (
+    RuntimeSmokeCase(
+        case_id='memory-self-test',
+        title='Memory self-test',
+        switches=('mm_self_test',),
+        expected_marker=MM_SELF_TEST_SUCCESS_MARKER,
+        timeout_seconds=10.0,
+        risk_area='early memory allocator and direct-map runtime self-test',
+    ),
+    RuntimeSmokeCase(
+        case_id='timer-irq',
+        title='Timer IRQ',
+        switches=('timer_smoke',),
+        expected_marker='BIGOS_TIMER_IRQ',
+        timeout_seconds=10.0,
+        risk_area='PIC/PIT IRQ0 dispatch and COM1/VGA marker emission',
+    ),
+    RuntimeSmokeCase(
+        case_id='scheduler',
+        title='Cooperative scheduler',
+        switches=('scheduler_smoke',),
+        expected_marker='BIGOS_SCHED_THREAD_B',
+        timeout_seconds=10.0,
+        risk_area='cooperative kernel-thread scheduling and context switching',
+    ),
+    RuntimeSmokeCase(
+        case_id='syscall',
+        title='Syscall entry',
+        switches=('syscall_smoke',),
+        expected_marker='BIGOS_SYSCALL_SMOKE_PASSED',
+        timeout_seconds=10.0,
+        risk_area='int 0x80 entry and minimal syscall ABI',
+    ),
+    RuntimeSmokeCase(
+        case_id='filesystem-read',
+        title='Read-only filesystem',
+        switches=('fs_smoke',),
+        expected_marker='BIGOS_FS_EXFAT_READ_PASSED',
+        timeout_seconds=20.0,
+        risk_area='Legacy BIOS raw image, IDE disk, ATA PIO, and read-only exFAT path',
+    ),
+    RuntimeSmokeCase(
+        case_id='first-user-program',
+        title='First user program',
+        switches=('user_program_smoke',),
+        expected_marker='BIGOS_USER_EXIT',
+        timeout_seconds=20.0,
+        risk_area='smoke-only ring3 entry, syscall write path, and process teardown',
+        proc_boundary='compiles src/kernel/proc/** and is not part of a normal boot configuration',
+    ),
+    RuntimeSmokeCase(
+        case_id='filesystem-user-elf',
+        title='Filesystem-backed user ELF',
+        switches=('user_elf_smoke',),
+        expected_marker='BIGOS_USER_EXIT',
+        timeout_seconds=30.0,
+        risk_area='read-only exFAT user ELF load plus smoke-only ring3 execution',
+        proc_boundary='compiles src/kernel/proc/** and packages /boot/user/init.elf; not a normal boot configuration',
+    ),
+)
 
 
 def log_stage(message: str) -> None:
@@ -838,6 +946,21 @@ def launch_qemu_until_serial_marker(
         stop_process_group(process)
 
 
+def read_observed_marker(serial_log: Path, expected_marker: str) -> str:
+    if not serial_log.is_file():
+        return ''
+    contents = serial_log.read_text(encoding='utf-8', errors='replace')
+    if expected_marker in contents:
+        return expected_marker
+    for case in RUNTIME_SMOKE_MATRIX:
+        if case.expected_marker in contents:
+            return case.expected_marker
+    for token in contents.split():
+        if token.startswith('BIGOS_'):
+            return token
+    return ''
+
+
 def default_serial_log_for(emulator: str) -> Path | None:
     if emulator == 'qemu':
         return DEFAULT_QEMU_SERIAL_LOG
@@ -927,6 +1050,325 @@ def validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def case_by_id(case_id: str) -> RuntimeSmokeCase:
+    for case in RUNTIME_SMOKE_MATRIX:
+        if case.case_id == case_id:
+            return case
+    raise StageError('runtime smoke matrix', f'unknown runtime smoke case: {case_id}')
+
+
+def selected_runtime_smoke_cases(case_ids: Sequence[str]) -> list[RuntimeSmokeCase]:
+    if not case_ids or 'all' in case_ids:
+        return list(RUNTIME_SMOKE_MATRIX)
+    seen: set[str] = set()
+    cases: list[RuntimeSmokeCase] = []
+    for case_id in case_ids:
+        if case_id in seen:
+            continue
+        seen.add(case_id)
+        cases.append(case_by_id(case_id))
+    return cases
+
+
+def runtime_smoke_xmake_config(case: RuntimeSmokeCase) -> list[str]:
+    enabled = set(case.switches)
+    return ['xmake', 'f', *(f'--{option}={"y" if option in enabled else "n"}' for option in SMOKE_OPTIONS)]
+
+
+def runtime_smoke_serial_log(case: RuntimeSmokeCase, serial_log_dir: Path) -> Path:
+    return serial_log_dir / f'{case.case_id}.serial.log'
+
+
+def runtime_smoke_run_args(
+    case: RuntimeSmokeCase,
+    image_path: Path,
+    serial_log: Path,
+    image_size: str,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        image=str(image_path),
+        image_size=image_size,
+        emulator='qemu',
+        display='none',
+        keep_image=True,
+        bochsrc=None,
+        romimage=None,
+        vgaromimage=None,
+        skip_build=False,
+        serial_log=str(serial_log),
+        expect_serial_marker=case.expected_marker,
+        smoke_timeout=case.timeout_seconds,
+        bochs_extra=[],
+        qemu_extra=[],
+        no_launch=False,
+    )
+
+
+def collect_tool_availability(include_bochs: bool) -> list[ToolAvailability]:
+    tools = ['uv', *BUILD_TOOLS, 'qemu-system-x86_64']
+    if include_bochs:
+        tools.append('bochs')
+    availability: list[ToolAvailability] = []
+    for tool in tools:
+        resolved = shutil.which(tool)
+        availability.append(ToolAvailability(tool=tool, available=resolved is not None, detail=resolved or 'missing'))
+    return availability
+
+
+def missing_required_tools(availability: Sequence[ToolAvailability]) -> list[str]:
+    required = {
+        'uv',
+        'xmake',
+        'x86_64-elf-gcc',
+        'x86_64-elf-g++',
+        'x86_64-elf-ld',
+        'x86_64-elf-as',
+        'qemu-system-x86_64',
+    }
+    return [item.tool for item in availability if item.tool in required and not item.available]
+
+
+def markdown_escape(value: str) -> str:
+    return value.replace('|', r'\|').replace('\n', '<br>')
+
+
+def format_runtime_smoke_artifact(
+    results: Sequence[RuntimeSmokeResult],
+    availability: Sequence[ToolAvailability],
+    selected_cases: Sequence[RuntimeSmokeCase],
+    *,
+    stopped_after_failure: bool,
+    bochs_note: str,
+) -> str:
+    lines = [
+        '# Runtime Smoke Validation',
+        '',
+        '## Schema Fields',
+        '',
+        '- `schema_version`: `runtime-smoke-validation/v1`',
+        '- `preferred_emulator`: `qemu`',
+        '- `preferred_display`: `none`',
+        '- `image_path`: existing Legacy BIOS/MBR/exFAT raw image path generated by `tools/boot_debug.py`',
+        '- `case.status`: one of `passed`, `failed`, `skipped`, or `blocked`',
+        '',
+        '## Tool Availability',
+        '',
+        '| Tool | Available | Detail |',
+        '| --- | --- | --- |',
+    ]
+    for item in availability:
+        lines.append(f'| `{item.tool}` | `{str(item.available).lower()}` | `{markdown_escape(item.detail)}` |')
+
+    lines.extend(
+        [
+            '',
+            '## Runtime Smoke Matrix',
+            '',
+            '| Case | Switches | Expected marker | Timeout | Preferred path | Proc boundary |',
+            '| --- | --- | --- | ---: | --- | --- |',
+        ]
+    )
+    for case in selected_cases:
+        switches = ' '.join(f'--{switch}=y' for switch in case.switches)
+        boundary = case.proc_boundary or 'normal default-off smoke boundary'
+        lines.append(
+            '| '
+            + ' | '.join(
+                [
+                    f'`{case.case_id}`',
+                    f'`xmake f {switches}`',
+                    f'`{case.expected_marker}`',
+                    f'`{case.timeout_seconds:g}s`',
+                    '`tools/boot_debug.py run --emulator qemu --display none`',
+                    markdown_escape(boundary),
+                ]
+            )
+            + ' |'
+        )
+
+    lines.extend(
+        [
+            '',
+            '## Case Results',
+            '',
+            '| Case | Status | Expected marker | Observed marker | Serial log | Timeout | Exit status | Failed stage |',
+            '| --- | --- | --- | --- | --- | ---: | --- | --- |',
+        ]
+    )
+    for result in results:
+        lines.append(
+            '| '
+            + ' | '.join(
+                [
+                    f'`{result.case.case_id}`',
+                    f'`{result.status}`',
+                    f'`{result.expected_marker}`',
+                    f'`{result.observed_marker or ""}`',
+                    f'`{result.serial_log}`',
+                    f'`{result.timeout_seconds:g}s`',
+                    markdown_escape(result.exit_status),
+                    markdown_escape(result.failed_stage),
+                ]
+            )
+            + ' |'
+        )
+
+    lines.extend(['', '## Skips Blocks And Risks', ''])
+    for result in results:
+        lines.extend(
+            [
+                f'### `{result.case.case_id}`',
+                '',
+                f'- `status`: `{result.status}`',
+                f'- `skip_reason`: {result.skip_reason or "none"}',
+                f'- `alternative_checks`: {result.alternative_checks or "none"}',
+                f'- `residual_risk`: {result.residual_risk or "none"}',
+                f'- `risk_area`: {result.case.risk_area}',
+                '',
+            ]
+        )
+
+    lines.extend(
+        [
+            '## Low-Level Cross-Validation',
+            '',
+            '- Bochs or QEMU+Bochs cross-validation remains scenario-specific for boot, IRQ, timer, '
+            'ATA PIO, port IO, and hardware-behavior changes.',
+            f'- Bochs status: {bochs_note}',
+            '- If Bochs, ROM paths, display configuration, or host setup are unavailable, record the skipped '
+            'backend, substitute QEMU/build/source checks, and residual hardware-behavior risk.',
+            '',
+            '## Non-Goals',
+            '',
+            '- This validation productization does not add OS runtime features, CI platform integration, UEFI '
+            'support, storage drivers, or new smoke marker ABI.',
+            '- Existing smoke switches remain default-off outside explicit `xmake f ...=y` configuration.',
+            '- Existing boot layout, disk image layout, interrupt ABI, syscall ABI, and smoke-only user process '
+            'boundaries remain unchanged.',
+        ]
+    )
+    if stopped_after_failure:
+        lines.extend(['', '> Matrix stopped after the first failed case because `--keep-going` was not set.'])
+    return '\n'.join(lines) + '\n'
+
+
+def write_runtime_smoke_artifact(
+    path: Path,
+    results: Sequence[RuntimeSmokeResult],
+    availability: Sequence[ToolAvailability],
+    selected_cases: Sequence[RuntimeSmokeCase],
+    *,
+    stopped_after_failure: bool,
+    bochs_note: str,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        format_runtime_smoke_artifact(
+            results,
+            availability,
+            selected_cases,
+            stopped_after_failure=stopped_after_failure,
+            bochs_note=bochs_note,
+        ),
+        encoding='utf-8',
+    )
+
+
+def blocked_runtime_smoke_result(case: RuntimeSmokeCase, serial_log: Path, reason: str) -> RuntimeSmokeResult:
+    return RuntimeSmokeResult(
+        case=case,
+        status='blocked',
+        expected_marker=case.expected_marker,
+        observed_marker='',
+        serial_log=serial_log,
+        timeout_seconds=case.timeout_seconds,
+        exit_status='not run',
+        failed_stage='preflight',
+        skip_reason=reason,
+        alternative_checks='tool availability was recorded in the validation artifact',
+        residual_risk='runtime marker was not observed',
+    )
+
+
+def run_runtime_smoke_case(case: RuntimeSmokeCase, args: argparse.Namespace) -> RuntimeSmokeResult:
+    serial_log_dir = Path(args.serial_log_dir).resolve()
+    serial_log = runtime_smoke_serial_log(case, serial_log_dir)
+    image_path = Path(args.image_dir).resolve() / f'{case.case_id}.raw'
+
+    try:
+        run_command('runtime smoke config', runtime_smoke_xmake_config(case), PROJECT_ROOT)
+        run(runtime_smoke_run_args(case, image_path, serial_log, args.image_size))
+    except StageError as error:
+        observed_marker = read_observed_marker(serial_log, case.expected_marker)
+        return RuntimeSmokeResult(
+            case=case,
+            status='failed',
+            expected_marker=case.expected_marker,
+            observed_marker=observed_marker,
+            serial_log=serial_log,
+            timeout_seconds=case.timeout_seconds,
+            exit_status=error.message,
+            failed_stage=error.stage,
+            skip_reason='',
+            alternative_checks=(
+                'inspect xmake output and serial log; rerun this single case manually after fixing the failure'
+            ),
+            residual_risk='expected serial marker was not observed',
+        )
+
+    return RuntimeSmokeResult(
+        case=case,
+        status='passed',
+        expected_marker=case.expected_marker,
+        observed_marker=read_observed_marker(serial_log, case.expected_marker),
+        serial_log=serial_log,
+        timeout_seconds=case.timeout_seconds,
+        exit_status='0',
+        failed_stage='',
+        skip_reason='',
+        alternative_checks='',
+        residual_risk='',
+    )
+
+
+def runtime_smoke_matrix(args: argparse.Namespace) -> int:
+    selected_cases = selected_runtime_smoke_cases(args.case)
+    output_path = Path(args.output).resolve()
+    availability = collect_tool_availability(include_bochs=args.record_bochs)
+    missing_tools = missing_required_tools(availability)
+    bochs = next((item for item in availability if item.tool == 'bochs'), None)
+    bochs_note = 'available' if bochs and bochs.available else 'not checked'
+    if bochs and not bochs.available:
+        bochs_note = 'unavailable; cross-validation should record substitute checks and residual hardware risk'
+
+    results: list[RuntimeSmokeResult] = []
+    stopped_after_failure = False
+    if missing_tools:
+        reason = 'missing required tool(s): ' + ', '.join(missing_tools)
+        for case in selected_cases:
+            serial_log = runtime_smoke_serial_log(case, Path(args.serial_log_dir))
+            results.append(blocked_runtime_smoke_result(case, serial_log, reason))
+    else:
+        for case in selected_cases:
+            log_stage(f'runtime smoke matrix: {case.case_id}')
+            result = run_runtime_smoke_case(case, args)
+            results.append(result)
+            if result.status == 'failed' and not args.keep_going:
+                stopped_after_failure = True
+                break
+
+    write_runtime_smoke_artifact(
+        output_path,
+        results,
+        availability,
+        selected_cases,
+        stopped_after_failure=stopped_after_failure,
+        bochs_note=bochs_note,
+    )
+    print(f'runtime_smoke_validation: {output_path}')
+    return 1 if any(result.status in ('failed', 'blocked') for result in results) else 0
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest='command', required=True)
@@ -1000,6 +1442,45 @@ def make_parser() -> argparse.ArgumentParser:
     validate_parser = subparsers.add_parser('validate-image', help='validate a generated raw image layout offline')
     validate_parser.add_argument('--image', required=True, help='raw image path to validate')
     validate_parser.set_defaults(func=validate)
+
+    matrix_parser = subparsers.add_parser(
+        'runtime-smoke-matrix',
+        help='run the stage 9 runtime smoke matrix through QEMU headless serial-marker checks',
+    )
+    matrix_parser.add_argument(
+        '--case',
+        action='append',
+        default=[],
+        choices=('all', *(case.case_id for case in RUNTIME_SMOKE_MATRIX)),
+        help='matrix case id to run; may be repeated; defaults to all cases',
+    )
+    matrix_parser.add_argument(
+        '--output',
+        default=str(BUILD_DIR / 'test' / 'runtime-smoke-validation.md'),
+        help='Markdown validation artifact path',
+    )
+    matrix_parser.add_argument(
+        '--serial-log-dir',
+        default=str(BUILD_DIR / 'test' / 'runtime-smoke'),
+        help='directory for per-case serial logs',
+    )
+    matrix_parser.add_argument(
+        '--image-dir',
+        default=str(BUILD_DIR / 'test' / 'runtime-smoke'),
+        help='directory for per-case raw disk images',
+    )
+    matrix_parser.add_argument('--image-size', default='64M', help='raw image size for each case')
+    matrix_parser.add_argument(
+        '--keep-going',
+        action='store_true',
+        help='continue after a failed case instead of stopping at the first failure',
+    )
+    matrix_parser.add_argument(
+        '--record-bochs',
+        action='store_true',
+        help='include Bochs availability in the artifact for scenario-specific cross-validation notes',
+    )
+    matrix_parser.set_defaults(func=runtime_smoke_matrix)
     return parser
 
 
