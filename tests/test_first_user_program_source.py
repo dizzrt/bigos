@@ -39,16 +39,22 @@ def test_process_model_records_identity_address_space_stack_and_exit_state() -> 
 
     for token in (
         'uint32_t pid;',
+        'uint32_t parent_pid;',
+        'uint32_t first_child_pid;',
         'uint64_t address_space_root;',
         'uint64_t kernel_address_space_root;',
         'uint64_t entry;',
         'UserRange stack;',
+        'uint64_t initial_stack;',
         'ProcessState state;',
+        'bool table_published;',
         'int64_t exit_code;',
     ):
         assert token in proc_h
 
-    assert '__process->pid = FIRST_PID;' in proc
+    assert 'alloc_pid()' in proc
+    assert 'g_process_table[bigos::proc::MAX_PROCESSES]' in proc
+    assert 'publish_process(__process, ROOT_PARENT_PID)' in proc
     assert '__process->state = ProcessState::Created;' in proc
     assert 'process->state = ProcessState::Terminated;' in proc
     assert 'process->exit_code = __code;' in proc

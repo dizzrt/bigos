@@ -277,9 +277,11 @@ namespace {
             return;
         }
 
+        const char *argv[] = {bigos::proc::USER_ELF_SMOKE_PATH};
+        const bigos::proc::ExecArgs args = {argv, 1, nullptr, 0};
         static bigos::proc::Process elf_process;
         const bigos::proc::UserElfLoadError load_status =
-            bigos::proc::create_elf_user_process(&elf_process, image, file.data_length);
+            bigos::proc::create_elf_user_process(&elf_process, image, file.data_length, &args);
         bigos::free(image);
         if (load_status != bigos::proc::UserElfLoadError::Success) {
             user_elf_smoke_failed(bigos::proc::user_elf_load_error_name(load_status));
@@ -327,6 +329,8 @@ void kernel(const BootInfoHeader *boot_info) {
     // Runs from ring0 only; does not enter ring3 or switch CR3.
     syscall_smoke();
 #endif
+
+    bigos::proc::init();
 
 #ifdef BIGOS_SCHEDULER_SMOKE
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_a, nullptr);

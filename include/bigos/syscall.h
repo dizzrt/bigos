@@ -9,8 +9,8 @@ namespace bigos::irq {
 
 namespace bigos::sys {
     // Minimal syscall ABI (int 0x80 software-interrupt entry; ring0 self-tests and
-    // the default-off first user program use the same register ABI). The mapping below is fixed by source-level checks and documented in
-    // docs/en/arch/syscall-entry.md:
+    // the default-off first user program use the same register ABI). The mapping below is fixed by source-level checks
+    // and documented in docs/en/arch/syscall-entry.md:
     //
     //   syscall number -> rax           (InterruptFrame.rax on entry)
     //   argument 0     -> rdi           (InterruptFrame.rdi)
@@ -32,6 +32,7 @@ namespace bigos::sys {
         SYS_GET_TICK = 1,      // return the monotonic kernel tick via rax
         SYS_WRITE = 2,         // fd, user buffer, bounded length -> deterministic write result
         SYS_EXIT = 3,          // exit code -> terminate current user process, does not return
+        SYS_WAIT = 4,          // pid or WAIT_ANY -> child pid, or deterministic negative wait error
     };
 
     // Deterministic error code for unknown syscall numbers or invalid requests.

@@ -43,11 +43,17 @@ BigOS 已完成早期 bring-up，并形成一个带 smoke 验证的单核内核�
   implemented.
 - 存储/文件系统：已实现同步只读 ATA PIO 读取、MBR exFAT 分区发现、只读 exFAT
   mount/path lookup、bounded file read 和 `fs_smoke`。
-- User mode: default-off flat first-user-program smoke and bounded
-  filesystem-backed ELF64 `ET_EXEC` user loader are implemented behind
-  `user_program_smoke` and `user_elf_smoke`.
-- 用户态：已在默认关闭的 `user_program_smoke` 与 `user_elf_smoke` 后实现 flat
-  首个用户程序 smoke 和基于文件系统的 bounded ELF64 `ET_EXEC` 用户加载器。
+- User mode: the normal process lifecycle core is buildable outside smoke-only
+  configurations, with bounded PID allocation, process table ownership,
+  parent/child linkage, `wait`/`exit`, safe zombie/reaper teardown, and a general
+  bounded ELF64 `exec` path with basic `argv`/`envp`. The flat first-user-program
+  smoke and filesystem-backed ELF64 `ET_EXEC` smoke remain default-off consumers
+  behind `user_program_smoke` and `user_elf_smoke`.
+- 用户态：常规进程生命周期核心已可在非 smoke 配置下构建，包含 bounded PID 分配、
+  进程表所有权、父子关系、`wait`/`exit`、安全 zombie/reaper teardown，以及带基础
+  `argv`/`envp` 的通用 bounded ELF64 `exec` 路径。flat 首个用户程序 smoke 和基于
+  文件系统的 ELF64 `ET_EXEC` smoke 仍是默认关闭的 `user_program_smoke` 与
+  `user_elf_smoke` 消费者。
 - Build/run: `xmake` is the primary build path; smoke options are configured with
   `xmake f ...=y`; QEMU/Bochs helper paths are available through `xmake run` and
   `tools/boot_debug.py`.
@@ -87,8 +93,7 @@ BIOS boot
 
 Missing general OS layer / 尚缺通用 OS 层
 
-process lifecycle
-  -> fd/VFS/page cache
+fd/VFS/page cache
   -> VMA/demand paging/COW
   -> libc/userland
   -> CI/release-grade validation
@@ -165,6 +170,10 @@ timer 驱动抢占。
 
 ### Stage 12: Process Lifecycle / 阶段 12：进程生命周期
 
+Status: completed and archived as `introduce-process-lifecycle`.
+
+状态：已完成，并以 `introduce-process-lifecycle` 归档。
+
 Goal: promote the smoke-only user process path into a normal kernel subsystem.
 
 目标：把 smoke-only 用户进程路径提升为常规内核子系统。
@@ -182,6 +191,10 @@ Goal: promote the smoke-only user process path into a normal kernel subsystem.
 - 在 VM 与生命周期规则稳定前，暂缓 `fork`、COW、signal 和广泛 POSIX 策略。
 
 ### Stage 13: File Descriptors And VFS Shell / 阶段 13：文件描述符与 VFS 壳层
+
+Status: recommended next OpenSpec change `introduce-fd-vfs-shell`.
+
+状态：推荐作为下一项 OpenSpec change `introduce-fd-vfs-shell`。
 
 Goal: provide a stable kernel/user I/O boundary before writable filesystems and
 page cache.
@@ -260,35 +273,33 @@ Goal: introduce user virtual-memory policy before demand paging and COW.
 
 ## Near-Term Recommendation / 近期建议
 
-With blocking primitives and scheduler semantics landed, the next change should
-stabilize the normal process boundary before broadening user-visible I/O or VM
-policy:
+With process lifecycle now archived, the next change should stabilize the
+kernel/user I/O boundary before broadening VM policy or userland expectations:
 
-随着阻塞原语和调度语义落地，下一项 change 应先稳定常规进程边界，再扩展用户可见的
-I/O 或 VM 策略：
+随着进程生命周期已归档，下一项 change 应先稳定内核/用户 I/O 边界，再扩展 VM 策略
+或用户态期望：
 
-1. `introduce-process-lifecycle`
-   - Choose this first to make normal process builds, PID ownership,
-     parent/child relationships, `wait`/`exit`, and general `exec argv/envp`
-     semantics available before broader userland work.
-   - 优先选择它，让常规进程构建、PID 所有权、父子关系、`wait`/`exit` 和通用
-     `exec argv/envp` 语义先于更广泛的 userland 工作稳定下来。
-2. `introduce-fd-vfs-shell`
-   - Choose this after process lifecycle starts to need stable
-     `open`/`read`/`close` semantics or when read-only exFAT needs to sit behind
-     a minimal VFS boundary.
-   - 当进程生命周期开始需要稳定的 `open`/`read`/`close` 语义，或只读 exFAT 需要接入
-     最小 VFS 边界后，再选择它。
-3. `introduce-vma-user-memory-api`
+1. `introduce-fd-vfs-shell`
+   - Choose this next to give process `exec` and future userland code stable
+     `open`/`read`/`close` semantics and place read-only exFAT behind a minimal
+     VFS boundary.
+   - 下一步优先选择它，为进程 `exec` 与未来 userland 代码提供稳定的
+     `open`/`read`/`close` 语义，并将只读 exFAT 接入最小 VFS 边界。
+2. `introduce-vma-user-memory-api`
    - Choose this after process lifecycle and early file-descriptor ownership are
      stable enough to define `brk`, anonymous mappings, stack-growth policy, and
      VMA-backed user range validation.
    - 当进程生命周期和早期文件描述符所有权足够稳定后，再选择它来定义 `brk`、匿名映射、
      用户栈增长策略和基于 VMA 的用户地址范围验证。
+3. `plan-userland-runtime`
+   - Choose this after fd/VFS and VMA basics are explicit enough to define the
+     smallest libc-adjacent startup, syscall wrappers, and user test binaries.
+   - 在 fd/VFS 与 VMA 基础足够明确后，再选择它来定义最小 libc-adjacent 启动流程、
+     syscall wrapper 和用户态测试二进制。
 
-Process lifecycle is now the highest-leverage next stage. VFS/file-descriptor
-work is safer once process ownership is explicit, and VMA/demand-paging work is
-safer after lifecycle and I/O ownership rules are stable.
+VFS/file-descriptor work is now the highest-leverage next stage. VMA and
+demand-paging work remain safer after lifecycle and I/O ownership rules are
+stable, and userland runtime work should wait until both boundaries are explicit.
 
-进程生命周期现在是收益最高的下一阶段。进程所有权明确后，VFS/文件描述符工作更安全；
-生命周期与 I/O 所有权规则稳定后，再推进 VMA/demand paging 会更安全。
+VFS/文件描述符工作现在是收益最高的下一阶段。生命周期与 I/O 所有权规则稳定后，再推进
+VMA/demand paging 会更安全；userland runtime 应等两个边界都明确后再启动。

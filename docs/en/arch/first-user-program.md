@@ -2,9 +2,11 @@
 
 Stage 6 `user_program_smoke` is a default-off validation path that proves BigOS can create a minimal user process, load an embedded user program, enter CPL3, and return to the kernel through `write` / `exit` syscalls.
 
-Stage 8 adds a separate default-off `user_elf_smoke` path. It reuses the same
-minimal process runtime, syscall gate, user fault path, and deferred reaper, but
-loads `/boot/user/init.elf` from the kernel read-only exFAT stack instead of the
+Stage 8 adds a separate default-off `user_elf_smoke` path. Stage 12 promotes the
+shared process runtime into a normally compiled lifecycle core while keeping both
+smoke entries default-off. The ELF smoke reuses the lifecycle core, syscall gate,
+user fault path, bounded `argv`/`envp` stack setup, and deferred reaper, but loads
+`/boot/user/init.elf` from the kernel read-only exFAT stack instead of the
 embedded flat blob.
 
 ## Image Format
@@ -21,15 +23,22 @@ The ELF smoke uses a static freestanding ELF64 `ET_EXEC` image built by
 `/boot/user/init.elf`. The ELF image writes `BIGOS_USER_ELF_WRITE\n` with
 `SYS_WRITE`, then calls `SYS_EXIT(0)`.
 
-## Process Model
+## Process Lifecycle
 
-`bigos::proc::Process` is a bounded single-core, single-process abstraction. It records:
+`bigos::proc::Process` is a bounded single-core lifecycle record. The core is
+compiled in normal builds even when `user_program_smoke` and `user_elf_smoke`
+are disabled; those switches only control smoke entry threads and the user ELF
+artifact. Each process records:
 
-- `pid`, user page-table root, pre-entry kernel CR3, user entry, and user code/data/stack ranges.
+- Stable PID, parent PID, child/sibling links, process-table publication state, user page-table root, pre-entry kernel CR3, user entry, and user code/data/stack ranges.
 - Dedicated syscall/exception kernel stack top for TSS/RSP0.
-- Lifecycle state `Created` / `Running` / `Terminated` / `Faulted` / `Reaped`, exit code, fault reason, owned user frames, and kernel stack range.
+- Lifecycle state `Created` / `Running` / `Terminated` / `Faulted` / `Zombie` / `ReapPending` / `Reaped`, exit code, fault reason, owned user frames, and kernel stack range.
+- Wait-status consumption and safe reaper metadata so PID reuse waits until a zombie has been consumed or is otherwise eligible for final reaping.
 
-The process object and current kernel stack are not freed immediately from the `exit` or fault return path. Reclamation is handed to a safe reaper after execution has switched to a non-target kernel stack.
+The process object and current kernel stack are not freed immediately from the
+`exit` or fault return path. Termination records status, wakes eligible parent
+waiters, and hands reclamation to a safe reaper after execution has switched to a
+non-target kernel stack and non-active CR3 root.
 
 ## Loading And Address Space
 
@@ -45,7 +54,14 @@ programs. It rejects unsupported program headers, W+X segments, overlapping
 segments, entries outside executable segments, ranges outside the low-half user
 window, and ranges colliding with the one-page stack at `USER_STACK_TOP`.
 Successful ELF preparation emits `BIGOS_USER_ELF_LOAD_PASSED`; bounded load
-failures emit `BIGOS_USER_ELF_LOAD_FAILED <reason>` and do not enter ring3.
+failures emit `BIGOS_USER_ELF_LOAD_FAILED <reason>` and do not enter ring3. The
+general exec primitive prepares a new image before commit, rolls back failures
+before publication, and uses deterministic exec-failure status if the old image
+cannot be resumed after commit.
+
+The initial ELF user stack uses a minimal libc-like shape: `argc`, `argv[]`,
+`envp[]`, and bounded strings. It intentionally omits auxv, TLS, dynamic linker
+state, file descriptors, VFS, and user-space libc startup.
 
 ## Ring3 Entry
 
@@ -61,6 +77,7 @@ x86_64 runtime user-mode support is provided by `src/kernel/proc/user_mode.cc` /
 - `VECTOR_SYSCALL = 0x80` is the only IDT gate relaxed to DPL=3; exception/IRQ gates are not relaxed.
 - `SYS_WRITE` validates the user buffer range, present/user bits, and maximum length, then emits `BIGOS_USER_WRITE_SYSCALL`; invalid user buffers fault the process and use the same safe reaper boundary.
 - `SYS_EXIT` marks the current process terminated/reap-pending, records the exit code, restores the kernel root, and enters the scheduler's deferred-reclamation exit path.
+- `SYS_WAIT` exposes the minimal wait ABI. The current `int 0x80` dispatch path is a nonblocking context, so blocking waits return a deterministic `WAIT_EWOULDBLOCK` result there; kernel-context lifecycle callers may use the wait queue when `sched::can_block()` is true.
 - User-mode `#PF` is identified from the saved `CS` CPL, emits `BIGOS_USER_PAGE_FAULT`, marks the process faulted/reap-pending, and does not implement demand paging.
 - Kernel-mode `#PF` keeps the existing diagnostic-only `BIGOS_PAGE_FAULT` semantics.
 - The idle-loop reaper releases the user address space and kernel stack once the active stack/root checks pass, then emits `BIGOS_USER_RECLAIMED`.

@@ -83,6 +83,9 @@ namespace sys {
                 break;
             case SYS_EXIT:
                 bigos::proc::exit_current((int64_t)__frame->rdi);
+            case SYS_WAIT:
+                result = bigos::proc::wait_current((uint32_t)__frame->rdi, nullptr);
+                break;
 #endif
             default:
                 // Unknown number: deterministic negative error code, no crash, no

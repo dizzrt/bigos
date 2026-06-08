@@ -88,13 +88,16 @@ def test_process_exit_fault_and_reaper_are_safe_boundaries() -> None:
     for token in (
         'bool reap_pending;',
         'bool resources_reclaimed;',
+        'bool wait_status_consumed;',
         'int64_t fault_reason;',
         'uint64_t kernel_stack_len;',
         'void reap_pending_processes() noexcept;',
     ):
         assert token in proc_h
 
-    assert 'mark_reap_pending(process);' in proc
+    assert 'mark_zombie_or_reap_pending(process);' in proc
+    assert 'g_reap_head_pid' in proc
+    assert 'while (*link != 0)' in proc
     assert 'BIGOS_USER_RECLAIMED' in proc
     assert 'BIGOS_USER_REAP_DEFERRED active-stack' in proc
     assert 'teardown_user_address_space(process->address_space_root)' in proc

@@ -13,11 +13,10 @@
 #include "../../mm/vmem.h"
 
 namespace {
-    constexpr uint32_t FIRST_PID = 1;
-    constexpr uint32_t ELF_PID = 2;
     constexpr uint32_t PROCESS_KERNEL_STACK_PAGES = 1;
     constexpr uint32_t ELF_MAX_LOAD_SEGMENTS = 8;
     constexpr uint32_t ELF_MAX_TRACKED_PAGES = 32;
+    constexpr uint64_t USER_INITIAL_STACK_ALIGN = 16;
     constexpr uint64_t ELF_MAGIC = 0x464c457full;
     constexpr uint16_t ELF_TYPE_EXEC = 2;
     constexpr uint16_t ELF_MACHINE_X86_64 = 62;
@@ -34,22 +33,77 @@ namespace {
     // dependency and still exercises code, data/BSS, stack, syscall write, exit.
     // The inline payload writes the deterministic BIGOS_USER_WRITE marker.
     constexpr uint8_t FIRST_USER_CODE[] = {
-        0x48, 0xc7, 0xc0, 0x02, 0x00, 0x00, 0x00,               // mov $SYS_WRITE,%rax
-        0x48, 0xc7, 0xc7, 0x01, 0x00, 0x00, 0x00,               // mov $1,%rdi
-        0x48, 0x8d, 0x35, 0x18, 0x00, 0x00, 0x00,               // lea message(%rip),%rsi
-        0x48, 0xc7, 0xc2, 0x11, 0x00, 0x00, 0x00,               // mov $17,%rdx
-        0xcd, 0x80,                                             // int $0x80
-        0x48, 0xc7, 0xc0, 0x03, 0x00, 0x00, 0x00,               // mov $SYS_EXIT,%rax
-        0x48, 0x31, 0xff,                                       // xor %rdi,%rdi
-        0xcd, 0x80,                                             // int $0x80
-        0xf4, 0xeb, 0xfd,                                       // hlt; jmp .
-        'B',  'I',  'G',  'O',  'S',  '_',  'U',  'S',  'E',
-        'R',  '_',  'W',  'R',  'I',  'T',  'E',  '\n',
+        0x48,
+        0xc7,
+        0xc0,
+        0x02,
+        0x00,
+        0x00,
+        0x00,   // mov $SYS_WRITE,%rax
+        0x48,
+        0xc7,
+        0xc7,
+        0x01,
+        0x00,
+        0x00,
+        0x00,   // mov $1,%rdi
+        0x48,
+        0x8d,
+        0x35,
+        0x18,
+        0x00,
+        0x00,
+        0x00,   // lea message(%rip),%rsi
+        0x48,
+        0xc7,
+        0xc2,
+        0x11,
+        0x00,
+        0x00,
+        0x00,   // mov $17,%rdx
+        0xcd,
+        0x80,   // int $0x80
+        0x48,
+        0xc7,
+        0xc0,
+        0x03,
+        0x00,
+        0x00,
+        0x00,   // mov $SYS_EXIT,%rax
+        0x48,
+        0x31,
+        0xff,   // xor %rdi,%rdi
+        0xcd,
+        0x80,   // int $0x80
+        0xf4,
+        0xeb,
+        0xfd,   // hlt; jmp .
+        'B',
+        'I',
+        'G',
+        'O',
+        'S',
+        '_',
+        'U',
+        'S',
+        'E',
+        'R',
+        '_',
+        'W',
+        'R',
+        'I',
+        'T',
+        'E',
+        '\n',
     };
 
     bigos::proc::Process *g_current_process = nullptr;
-    bigos::proc::Process *g_reap_pending_process = nullptr;
+    bigos::proc::Process *g_process_table[bigos::proc::MAX_PROCESSES] = {};
+    uint32_t g_reap_head_pid = 0;
+    uint32_t g_next_pid = 1;
     bool g_user_mode_initialized = false;
+    bigos::sched::WaitQueue g_process_wait_queue = {};
+    bool g_proc_initialized = false;
 
     uint64_t alloc_user_frame() noexcept {
         return (uint64_t)bigos::mm::__detail::alloc_physical_order(0, 0);
@@ -118,6 +172,98 @@ namespace {
         return end <= bigos::proc::USER_LOW_HALF_LIMIT;
     }
 
+    bigos::proc::Process *lookup_process(uint32_t __pid) noexcept {
+        if (__pid == 0)
+            return nullptr;
+        for (uint32_t i = 0; i < bigos::proc::MAX_PROCESSES; i++) {
+            bigos::proc::Process *process = g_process_table[i];
+            if (process != nullptr && process->pid == __pid)
+                return process;
+        }
+        return nullptr;
+    }
+
+    uint32_t alloc_pid() noexcept {
+        for (uint32_t attempt = 0; attempt < bigos::proc::MAX_PROCESSES * 2; attempt++) {
+            const uint32_t pid = g_next_pid++;
+            if (g_next_pid == 0 || g_next_pid == bigos::proc::WAIT_ANY)
+                g_next_pid = 1;
+            if (pid != 0 && pid != bigos::proc::WAIT_ANY && lookup_process(pid) == nullptr)
+                return pid;
+        }
+        return 0;
+    }
+
+    bool publish_process(bigos::proc::Process *__process, uint32_t __parent_pid) noexcept {
+        if (__process == nullptr || __process->table_published)
+            return false;
+
+        uint32_t slot = bigos::proc::MAX_PROCESSES;
+        for (uint32_t i = 0; i < bigos::proc::MAX_PROCESSES; i++) {
+            if (g_process_table[i] == nullptr) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot == bigos::proc::MAX_PROCESSES)
+            return false;
+
+        const uint32_t pid = alloc_pid();
+        if (pid == 0)
+            return false;
+
+        __process->pid = pid;
+        __process->parent_pid = __parent_pid;
+        __process->first_child_pid = 0;
+        __process->next_sibling_pid = 0;
+        __process->next_reap_pid = 0;
+        __process->table_published = true;
+        __process->wait_status_consumed = false;
+        __process->parent_waiting = false;
+        g_process_table[slot] = __process;
+
+        bigos::proc::Process *parent = lookup_process(__parent_pid);
+        if (parent != nullptr) {
+            __process->next_sibling_pid = parent->first_child_pid;
+            parent->first_child_pid = pid;
+        }
+        return true;
+    }
+
+    void unpublish_process(bigos::proc::Process *__process) noexcept {
+        if (__process == nullptr || !__process->table_published)
+            return;
+
+        for (uint32_t i = 0; i < bigos::proc::MAX_PROCESSES; i++) {
+            if (g_process_table[i] == __process) {
+                g_process_table[i] = nullptr;
+                break;
+            }
+        }
+
+        bigos::proc::Process *parent = lookup_process(__process->parent_pid);
+        if (parent != nullptr) {
+            uint32_t *link = &parent->first_child_pid;
+            while (*link != 0) {
+                bigos::proc::Process *child = lookup_process(*link);
+                if (child == nullptr)
+                    break;
+                if (child == __process) {
+                    *link = child->next_sibling_pid;
+                    break;
+                }
+                link = &child->next_sibling_pid;
+            }
+        }
+
+        __process->table_published = false;
+        __process->pid = 0;
+        __process->parent_pid = 0;
+        __process->first_child_pid = 0;
+        __process->next_sibling_pid = 0;
+        __process->next_reap_pid = 0;
+    }
+
     struct Elf64Header {
         uint8_t ident[16];
         uint16_t type;
@@ -175,8 +321,7 @@ namespace {
         return (__flags & PF_W) != 0 && (__flags & PF_X) != 0;
     }
 
-    bool track_page(
-        TrackedPage *__pages, uint32_t *__count, uint64_t __vaddr, bigos::mm::PageAttr __attr) noexcept {
+    bool track_page(TrackedPage *__pages, uint32_t *__count, uint64_t __vaddr, bigos::mm::PageAttr __attr) noexcept {
         for (uint32_t i = 0; i < *__count; i++) {
             if (__pages[i].vaddr == __vaddr)
                 return __pages[i].attr == __attr;
@@ -188,9 +333,8 @@ namespace {
         return true;
     }
 
-    bigos::proc::UserElfLoadError validate_elf(
-        const uint8_t *__image, uint64_t __image_len, LoadSegment *__segments, uint32_t *__segment_count,
-        uint64_t *__entry) noexcept {
+    bigos::proc::UserElfLoadError validate_elf(const uint8_t *__image, uint64_t __image_len, LoadSegment *__segments,
+        uint32_t *__segment_count, uint64_t *__entry) noexcept {
         if (__image == nullptr || __image_len < sizeof(Elf64Header) ||
             __image_len > bigos::proc::USER_ELF_MAX_FILE_BYTES)
             return bigos::proc::UserElfLoadError::InvalidArgument;
@@ -201,8 +345,7 @@ namespace {
             return bigos::proc::UserElfLoadError::UnsupportedElf;
         if (ehdr->type != ELF_TYPE_EXEC || ehdr->machine != ELF_MACHINE_X86_64 ||
             ehdr->version != ELF_VERSION_CURRENT || ehdr->ehsize != sizeof(Elf64Header) ||
-            ehdr->phentsize != sizeof(Elf64ProgramHeader) || ehdr->phnum == 0 ||
-            ehdr->phnum > ELF_MAX_LOAD_SEGMENTS)
+            ehdr->phentsize != sizeof(Elf64ProgramHeader) || ehdr->phnum == 0 || ehdr->phnum > ELF_MAX_LOAD_SEGMENTS)
             return bigos::proc::UserElfLoadError::BadHeader;
 
         uint64_t ph_table_bytes = 0;
@@ -254,8 +397,8 @@ namespace {
             }
 
             LoadSegment &segment = __segments[*__segment_count];
-            segment = {phdr->vaddr, phdr->memsz, phdr->filesz, phdr->offset, map_base, map_end - map_base,
-                       phdr->flags, attr};
+            segment = {
+                phdr->vaddr, phdr->memsz, phdr->filesz, phdr->offset, map_base, map_end - map_base, phdr->flags, attr};
             (*__segment_count)++;
             has_load = true;
             if ((phdr->flags & PF_X) != 0 && ehdr->entry >= phdr->vaddr && ehdr->entry < mem_end)
@@ -333,8 +476,27 @@ namespace {
     }
 
     void mark_reap_pending(bigos::proc::Process *process) noexcept {
+        if (process == nullptr || process->reap_pending)
+            return;
         process->reap_pending = true;
-        g_reap_pending_process = process;
+        process->state = bigos::proc::ProcessState::ReapPending;
+        process->next_reap_pid = g_reap_head_pid;
+        g_reap_head_pid = process->pid;
+    }
+
+    void mark_zombie_or_reap_pending(bigos::proc::Process *process) noexcept {
+        if (process == nullptr)
+            return;
+
+        bigos::proc::Process *parent = lookup_process(process->parent_pid);
+        if (parent != nullptr && !process->wait_status_consumed) {
+            process->state = bigos::proc::ProcessState::Zombie;
+            (void)bigos::sched::wake_all(&g_process_wait_queue);
+            return;
+        }
+
+        process->wait_status_consumed = true;
+        mark_reap_pending(process);
     }
 
     bool clone_process_kernel_stack_mapping(bigos::proc::Process *__process) noexcept {
@@ -350,15 +512,103 @@ namespace {
         }
         return true;
     }
+
+    uint64_t bounded_strlen(const char *__value, uint64_t __limit) noexcept {
+        if (__value == nullptr)
+            return UINT64_MAX;
+        uint64_t len = 0;
+        while (len <= __limit) {
+            if (__value[len] == 0)
+                return len;
+            len++;
+        }
+        return UINT64_MAX;
+    }
+
+    bool copy_exec_args_to_stack(uint64_t __stack_phys, uint64_t __stack_base, const bigos::proc::ExecArgs *__args,
+        uint64_t *__initial_sp) noexcept {
+        if (__initial_sp == nullptr)
+            return false;
+        uint8_t *direct = (uint8_t *)bigos::mm::phys_to_direct(__stack_phys);
+        if (direct == nullptr)
+            return false;
+
+        const char *empty_argv[] = {nullptr};
+        bigos::proc::ExecArgs empty_args = {empty_argv, 0, nullptr, 0};
+        const bigos::proc::ExecArgs *args = __args == nullptr ? &empty_args : __args;
+        if (args->argc > bigos::proc::EXEC_MAX_ARGC || args->envc > bigos::proc::EXEC_MAX_ENVC)
+            return false;
+        if ((args->argc != 0 && args->argv == nullptr) || (args->envc != 0 && args->envp == nullptr))
+            return false;
+
+        uint64_t sp = PAGE_SIZE;
+        uint64_t argv_user[bigos::proc::EXEC_MAX_ARGC] = {};
+        uint64_t envp_user[bigos::proc::EXEC_MAX_ENVC] = {};
+
+        for (uint32_t i = 0; i < args->envc; i++) {
+            const uint64_t len = bounded_strlen(args->envp[i], bigos::proc::EXEC_MAX_STRING_BYTES);
+            if (len == UINT64_MAX || len + 1 > sp)
+                return false;
+            sp -= len + 1;
+            memcpy(direct + sp, args->envp[i], len + 1);
+            envp_user[i] = __stack_base + sp;
+        }
+        for (uint32_t i = 0; i < args->argc; i++) {
+            const uint64_t len = bounded_strlen(args->argv[i], bigos::proc::EXEC_MAX_STRING_BYTES);
+            if (len == UINT64_MAX || len + 1 > sp)
+                return false;
+            sp -= len + 1;
+            memcpy(direct + sp, args->argv[i], len + 1);
+            argv_user[i] = __stack_base + sp;
+        }
+
+        sp &= ~(USER_INITIAL_STACK_ALIGN - 1);
+        const uint64_t envp_bytes = (uint64_t)(args->envc + 1) * sizeof(uint64_t);
+        const uint64_t argv_bytes = (uint64_t)(args->argc + 1) * sizeof(uint64_t);
+        const uint64_t frame_bytes = sizeof(uint64_t) + argv_bytes + envp_bytes;
+        if (frame_bytes > sp)
+            return false;
+
+        sp -= envp_bytes;
+        uint64_t *envp_table = (uint64_t *)(direct + sp);
+        for (uint32_t i = 0; i < args->envc; i++)
+            envp_table[i] = envp_user[i];
+        envp_table[args->envc] = 0;
+
+        sp -= argv_bytes;
+        uint64_t *argv_table = (uint64_t *)(direct + sp);
+        for (uint32_t i = 0; i < args->argc; i++)
+            argv_table[i] = argv_user[i];
+        argv_table[args->argc] = 0;
+
+        sp -= sizeof(uint64_t);
+        *(uint64_t *)(direct + sp) = args->argc;
+        *__initial_sp = __stack_base + sp;
+        return true;
+    }
 }   // namespace
 
 namespace bigos::proc {
+    void init() noexcept {
+        if (g_proc_initialized)
+            return;
+        for (uint32_t i = 0; i < MAX_PROCESSES; i++)
+            g_process_table[i] = nullptr;
+        g_current_process = nullptr;
+        g_reap_head_pid = 0;
+        g_next_pid = 1;
+        bigos::sched::init_wait_queue(&g_process_wait_queue);
+        g_proc_initialized = true;
+        bigos::serial_puts("BIGOS_PROC_INIT\n");
+    }
+
     bool create_first_user_process(Process *__process) noexcept {
         if (__process == nullptr || sizeof(FIRST_USER_CODE) > PAGE_SIZE)
             return false;
 
+        if (!g_proc_initialized)
+            init();
         memset(__process, 0, sizeof(*__process));
-        __process->pid = FIRST_PID;
         uint64_t code_phys = 0;
         uint64_t data_phys = 0;
         uint64_t stack_phys = 0;
@@ -409,17 +659,19 @@ namespace bigos::proc {
         __process->data_phys = data_phys;
         __process->stack_phys = stack_phys;
         __process->kernel_stack_len = (uint64_t)PROCESS_KERNEL_STACK_PAGES * PAGE_SIZE;
-        __process->kernel_stack_top =
-            (uint64_t)__process->kernel_stack_base + __process->kernel_stack_len;
+        __process->kernel_stack_top = (uint64_t)__process->kernel_stack_base + __process->kernel_stack_len;
         __process->entry = USER_CODE_BASE;
         __process->code = {USER_CODE_BASE, PAGE_SIZE};
         __process->data = {USER_DATA_BASE, PAGE_SIZE};
         __process->stack = {stack_base, USER_STACK_PAGES * PAGE_SIZE};
+        __process->initial_stack = USER_STACK_TOP;
         __process->state = ProcessState::Created;
         __process->reap_pending = false;
         __process->resources_reclaimed = false;
         __process->exit_code = 0;
         __process->fault_reason = 0;
+        if (!publish_process(__process, ROOT_PARENT_PID))
+            goto fail;
         return true;
 
     fail:
@@ -433,6 +685,8 @@ namespace bigos::proc {
             free_user_frame(data_phys);
         if (!stack_mapped)
             free_user_frame(stack_phys);
+        if (__process->table_published)
+            unpublish_process(__process);
         memset(__process, 0, sizeof(*__process));
         __process->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
         return false;
@@ -440,37 +694,40 @@ namespace bigos::proc {
 
     const char *user_elf_load_error_name(UserElfLoadError __error) noexcept {
         switch (__error) {
-        case UserElfLoadError::Success:
-            return "success";
-        case UserElfLoadError::InvalidArgument:
-            return "invalid-argument";
-        case UserElfLoadError::UnsupportedElf:
-            return "unsupported-elf";
-        case UserElfLoadError::BadHeader:
-            return "bad-header";
-        case UserElfLoadError::BadProgramHeader:
-            return "bad-program-header";
-        case UserElfLoadError::AddressOutOfRange:
-            return "address-out-of-range";
-        case UserElfLoadError::SegmentOverlap:
-            return "segment-overlap";
-        case UserElfLoadError::UnsafePermissions:
-            return "unsafe-permissions";
-        case UserElfLoadError::EntryNotExecutable:
-            return "entry-not-executable";
-        case UserElfLoadError::OutOfMemory:
-            return "out-of-memory";
-        case UserElfLoadError::MapFailed:
-            return "map-failed";
-        case UserElfLoadError::CopyFailed:
-            return "copy-failed";
+            case UserElfLoadError::Success:
+                return "success";
+            case UserElfLoadError::InvalidArgument:
+                return "invalid-argument";
+            case UserElfLoadError::UnsupportedElf:
+                return "unsupported-elf";
+            case UserElfLoadError::BadHeader:
+                return "bad-header";
+            case UserElfLoadError::BadProgramHeader:
+                return "bad-program-header";
+            case UserElfLoadError::AddressOutOfRange:
+                return "address-out-of-range";
+            case UserElfLoadError::SegmentOverlap:
+                return "segment-overlap";
+            case UserElfLoadError::UnsafePermissions:
+                return "unsafe-permissions";
+            case UserElfLoadError::EntryNotExecutable:
+                return "entry-not-executable";
+            case UserElfLoadError::OutOfMemory:
+                return "out-of-memory";
+            case UserElfLoadError::MapFailed:
+                return "map-failed";
+            case UserElfLoadError::CopyFailed:
+                return "copy-failed";
         }
         return "unknown";
     }
 
-    UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len) noexcept {
+    UserElfLoadError create_elf_user_process(
+        Process *__process, const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept {
         if (__process == nullptr)
             return UserElfLoadError::InvalidArgument;
+        if (!g_proc_initialized)
+            init();
         LoadSegment segments[ELF_MAX_LOAD_SEGMENTS] = {};
         uint32_t segment_count = 0;
         uint64_t entry = 0;
@@ -479,7 +736,6 @@ namespace bigos::proc {
             return error;
 
         memset(__process, 0, sizeof(*__process));
-        __process->pid = ELF_PID;
         __process->kernel_stack_base = bigos::alloc_kernel_pages(PROCESS_KERNEL_STACK_PAGES, _GFM_PRE_PAGING);
         if (__process->kernel_stack_base == nullptr)
             return UserElfLoadError::OutOfMemory;
@@ -503,11 +759,17 @@ namespace bigos::proc {
         {
             const uint64_t stack_base = USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE;
             const uint64_t stack_phys = alloc_user_frame();
+            uint64_t initial_sp = 0;
             if (stack_phys == 0) {
                 error = UserElfLoadError::OutOfMemory;
                 goto fail;
             }
             if (!zero_frame(stack_phys)) {
+                free_user_frame(stack_phys);
+                error = UserElfLoadError::CopyFailed;
+                goto fail;
+            }
+            if (!copy_exec_args_to_stack(stack_phys, stack_base, __args, &initial_sp)) {
                 free_user_frame(stack_phys);
                 error = UserElfLoadError::CopyFailed;
                 goto fail;
@@ -524,11 +786,11 @@ namespace bigos::proc {
             }
             __process->stack_phys = stack_phys;
             __process->stack = {stack_base, USER_STACK_PAGES * PAGE_SIZE};
+            __process->initial_stack = initial_sp;
         }
 
         __process->kernel_stack_len = (uint64_t)PROCESS_KERNEL_STACK_PAGES * PAGE_SIZE;
-        __process->kernel_stack_top =
-            (uint64_t)__process->kernel_stack_base + __process->kernel_stack_len;
+        __process->kernel_stack_top = (uint64_t)__process->kernel_stack_base + __process->kernel_stack_len;
         __process->entry = entry;
         __process->code = {segments[0].map_base, segments[0].map_len};
         __process->data = {0, 0};
@@ -543,6 +805,10 @@ namespace bigos::proc {
         __process->resources_reclaimed = false;
         __process->exit_code = 0;
         __process->fault_reason = 0;
+        if (!publish_process(__process, g_current_process != nullptr ? g_current_process->pid : ROOT_PARENT_PID)) {
+            error = UserElfLoadError::OutOfMemory;
+            goto fail;
+        }
         return UserElfLoadError::Success;
 
     fail:
@@ -550,9 +816,67 @@ namespace bigos::proc {
             bigos::free_pages(__process->kernel_stack_base);
         if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             (void)bigos::mm::teardown_user_address_space(__process->address_space_root);
+        if (__process->table_published)
+            unpublish_process(__process);
         memset(__process, 0, sizeof(*__process));
         __process->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
         return error;
+    }
+
+    UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len) noexcept {
+        return create_elf_user_process(__process, __image, __image_len, nullptr);
+    }
+
+    UserElfLoadError exec_current_from_elf_image(
+        const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running)
+            return UserElfLoadError::InvalidArgument;
+        if (process->address_space_root == (bigos::mm::read_cr3() & 0x000ffffffffff000ull))
+            return UserElfLoadError::MapFailed;
+
+        Process prepared = {};
+        UserElfLoadError error = create_elf_user_process(&prepared, __image, __image_len, __args);
+        if (error != UserElfLoadError::Success)
+            return error;
+
+        unpublish_process(&prepared);
+        const uint64_t old_root = process->address_space_root;
+        const UserRange old_code = process->code;
+        const UserRange old_data = process->data;
+        const UserRange old_stack = process->stack;
+        const uint64_t old_code_phys = process->code_phys;
+        const uint64_t old_data_phys = process->data_phys;
+        const uint64_t old_stack_phys = process->stack_phys;
+
+        process->address_space_root = prepared.address_space_root;
+        process->entry = prepared.entry;
+        process->code = prepared.code;
+        process->data = prepared.data;
+        process->stack = prepared.stack;
+        process->initial_stack = prepared.initial_stack;
+        process->code_phys = prepared.code_phys;
+        process->data_phys = prepared.data_phys;
+        process->stack_phys = prepared.stack_phys;
+
+        if (prepared.kernel_stack_base != nullptr)
+            bigos::free_pages(prepared.kernel_stack_base);
+        prepared.address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+        prepared.kernel_stack_base = nullptr;
+
+        if (old_root != bigos::mm::INVALID_PHYS_ADDR && !bigos::mm::teardown_user_address_space(old_root)) {
+            process->exit_code = EXEC_FAILURE_STATUS;
+            process->fault_reason = EXEC_FAILURE_STATUS;
+            mark_zombie_or_reap_pending(process);
+            return UserElfLoadError::MapFailed;
+        }
+        (void)old_code;
+        (void)old_data;
+        (void)old_stack;
+        (void)old_code_phys;
+        (void)old_data_phys;
+        (void)old_stack_phys;
+        return UserElfLoadError::Success;
     }
 
     [[noreturn]] void run_user_process(Process *__process) noexcept {
@@ -569,7 +893,10 @@ namespace bigos::proc {
         __process->kernel_address_space_root = bigos::mm::read_cr3();
         bigos::arch::x86::set_tss_rsp0(__process->kernel_stack_top);
         bigos::serial_puts("BIGOS_USER_ENTER\n");
-        bigos::arch::x86::enter_user_mode(__process->entry, __process->stack.base + __process->stack.len);
+        const uint64_t stack =
+            __process->initial_stack != 0 ? __process->initial_stack : __process->stack.base + __process->stack.len;
+        bigos::mm::activate_address_space_root(__process->address_space_root);
+        bigos::arch::x86::enter_user_mode(__process->entry, stack);
     }
 
     Process *current_process() noexcept {
@@ -597,7 +924,7 @@ namespace bigos::proc {
         process->state = ProcessState::Faulted;
         process->exit_code = __reason;
         process->fault_reason = __reason;
-        mark_reap_pending(process);
+        mark_zombie_or_reap_pending(process);
         bigos::serial_puts("BIGOS_USER_PAGE_FAULT\n");
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::mm::activate_address_space_root(process->kernel_address_space_root);
@@ -620,7 +947,7 @@ namespace bigos::proc {
 
         process->state = ProcessState::Terminated;
         process->exit_code = __code;
-        mark_reap_pending(process);
+        mark_zombie_or_reap_pending(process);
         bigos::serial_puts("BIGOS_USER_EXIT\n");
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::mm::activate_address_space_root(process->kernel_address_space_root);
@@ -628,37 +955,101 @@ namespace bigos::proc {
         bigos::sched::thread_exit();
     }
 
+    int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept {
+        Process *parent = g_current_process;
+        if (parent == nullptr)
+            return WAIT_ECHILD;
+        if (!bigos::sched::can_block())
+            return WAIT_EWOULDBLOCK;
+
+        Process *match = nullptr;
+        for (;;) {
+            uint32_t child_pid = parent->first_child_pid;
+            bool has_matching_child = false;
+            while (child_pid != 0) {
+                Process *child = lookup_process(child_pid);
+                if (child == nullptr)
+                    break;
+                if (__pid == WAIT_ANY || child->pid == __pid) {
+                    has_matching_child = true;
+                    if (child->state == ProcessState::Zombie || child->state == ProcessState::Terminated ||
+                        child->state == ProcessState::Faulted) {
+                        match = child;
+                        break;
+                    }
+                }
+                child_pid = child->next_sibling_pid;
+            }
+
+            if (match != nullptr)
+                break;
+            if (!has_matching_child)
+                return WAIT_ECHILD;
+
+            parent->parent_waiting = true;
+            const int wait_result = bigos::sched::wait_queue_wait_until(&g_process_wait_queue, nullptr, nullptr, 0);
+            parent->parent_waiting = false;
+            if (wait_result == bigos::sched::WAIT_BLOCK_FORBIDDEN)
+                return WAIT_EWOULDBLOCK;
+            if (wait_result != bigos::sched::WAIT_OK)
+                return WAIT_EINVAL;
+        }
+
+        if (__status != nullptr)
+            *__status = match->exit_code;
+        const uint32_t waited_pid = match->pid;
+        match->wait_status_consumed = true;
+        mark_reap_pending(match);
+        return (int64_t)waited_pid;
+    }
+
     void reap_pending_processes() noexcept {
-        Process *process = g_reap_pending_process;
-        if (process == nullptr || !process->reap_pending || process->resources_reclaimed)
-            return;
-        if (stack_is_active(process)) {
-            bigos::serial_puts("BIGOS_USER_REAP_DEFERRED active-stack\n");
-            return;
-        }
-        if (process->address_space_root == (bigos::mm::read_cr3() & 0x000ffffffffff000ull)) {
-            bigos::serial_puts("BIGOS_USER_REAP_DEFERRED active-root\n");
-            return;
-        }
+        uint32_t *link = &g_reap_head_pid;
+        while (*link != 0) {
+            Process *process = lookup_process(*link);
+            if (process == nullptr) {
+                *link = 0;
+                continue;
+            }
+            if (!process->reap_pending || process->resources_reclaimed) {
+                link = &process->next_reap_pid;
+                continue;
+            }
+            if (stack_is_active(process)) {
+                bigos::serial_puts("BIGOS_USER_REAP_DEFERRED active-stack\n");
+                link = &process->next_reap_pid;
+                continue;
+            }
+            if (process->address_space_root == (bigos::mm::read_cr3() & 0x000ffffffffff000ull)) {
+                bigos::serial_puts("BIGOS_USER_REAP_DEFERRED active-root\n");
+                link = &process->next_reap_pid;
+                continue;
+            }
 
-        if (!bigos::mm::teardown_user_address_space(process->address_space_root)) {
-            bigos::serial_puts("BIGOS_USER_REAP_FAILED address-space\n");
-            return;
-        }
-        process->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+            if (process->address_space_root != bigos::mm::INVALID_PHYS_ADDR) {
+                if (!bigos::mm::teardown_user_address_space(process->address_space_root)) {
+                    bigos::serial_puts("BIGOS_USER_REAP_FAILED address-space\n");
+                    link = &process->next_reap_pid;
+                    continue;
+                }
+                process->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+            }
 
-        if (process->kernel_stack_base != nullptr) {
-            bigos::free_pages(process->kernel_stack_base);
-            process->kernel_stack_base = nullptr;
-            process->kernel_stack_len = 0;
-            process->kernel_stack_top = 0;
-        }
+            if (process->kernel_stack_base != nullptr) {
+                bigos::free_pages(process->kernel_stack_base);
+                process->kernel_stack_base = nullptr;
+                process->kernel_stack_len = 0;
+                process->kernel_stack_top = 0;
+            }
 
-        process->resources_reclaimed = true;
-        process->reap_pending = false;
-        process->state = ProcessState::Reaped;
-        g_reap_pending_process = nullptr;
-        bigos::serial_puts("BIGOS_USER_RECLAIMED\n");
+            process->resources_reclaimed = true;
+            process->reap_pending = false;
+            process->state = ProcessState::Reaped;
+            *link = process->next_reap_pid;
+            process->next_reap_pid = 0;
+            unpublish_process(process);
+            bigos::serial_puts("BIGOS_USER_RECLAIMED\n");
+        }
     }
 
 #ifdef BIGOS_USER_PROGRAM_SMOKE

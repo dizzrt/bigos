@@ -446,19 +446,23 @@ A cooperative, single-core kernel-thread scheduler.
 - `src/kernel/syscall/syscall.cc` / `include/bigos/syscall.h`: the `int 0x80`
   dispatcher and minimal register ABI (number in `rax`, args in
   `rdi/rsi/rdx/r10/r8/r9`, return in `rax`). Implements `SYS_DEBUG_WRITE`,
-  `SYS_GET_TICK`, `SYS_WRITE`, and `SYS_EXIT`; unknown numbers return
+  `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, and deterministic `SYS_WAIT`
+  reporting for nonblocking syscall contexts; unknown numbers return
   `SYS_ENOSYS`. The `syscall_smoke` switch exercises this from ring0.
 
 ### Process And User Mode
 
-Compiled only under `user_program_smoke` or `user_elf_smoke`, and not part of a
-normal boot.
+The lifecycle core is compiled as a normal kernel subsystem. The
+`user_program_smoke` and `user_elf_smoke` switches only control default-off smoke
+entry threads and the user ELF artifact.
 
-- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a minimal `Process`,
-  user address-space derivation, safe teardown/reaping, mapping of a flat
-  embedded user image, and a bounded ELF64 `ET_EXEC` loader for
-  `/boot/user/init.elf`. Both smoke paths exercise the `SYS_WRITE`/`SYS_EXIT`
-  closed loop (`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`).
+- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a minimal bounded
+  process table, PID allocation, parent/child linkage, wait status,
+  zombie/reap-pending lifecycle, user address-space derivation, safe
+  teardown/reaping, mapping of a flat embedded user image, and a bounded ELF64
+  `ET_EXEC` prepare/exec path for `/boot/user/init.elf`. Both smoke paths
+  exercise the `SYS_WRITE`/`SYS_EXIT` closed loop (`BIGOS_USER_ENTER` /
+  `BIGOS_USER_EXIT`).
 - `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
   `include/bigos/user_mode.h`: GDT/TSS/RSP0 setup and the `iretq` ring3 entry.
 - Demand paging is not implemented; the `#PF` handler records a controlled

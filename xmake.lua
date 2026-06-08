@@ -288,11 +288,9 @@ target("kernel")
         add_defines("BIGOS_SYSCALL_SMOKE")
     end
 
-    if has_config("user_program_smoke") or has_config("user_elf_smoke") then
-        add_defines("BIGOS_USER_PROCESS")
-        add_files("src/kernel/proc/**.cc")
-        add_files("src/kernel/proc/**.s")
-    end
+    add_defines("BIGOS_USER_PROCESS")
+    add_files("src/kernel/proc/**.cc")
+    add_files("src/kernel/proc/**.s")
 
     if has_config("user_program_smoke") then
         add_defines("BIGOS_USER_PROGRAM_SMOKE")

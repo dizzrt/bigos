@@ -3,9 +3,11 @@
 阶段 6 的 `user_program_smoke` 是默认关闭的验证路径，用来证明 BigOS 可以创建一个最小用户进程、
 加载内嵌用户程序、进入 CPL3，并通过 `write` / `exit` syscall 回到内核。
 
-阶段 8 新增独立的默认关闭 `user_elf_smoke` 路径。它复用同一个最小进程运行时、
-syscall gate、用户 fault 路径和延后 reaper，但用户程序来自内核只读 exFAT 栈读取的
-`/boot/user/init.elf`，而不是内嵌 flat blob。
+阶段 8 新增独立的默认关闭 `user_elf_smoke` 路径。阶段 12 将共享进程运行时提升为
+常规编译的 lifecycle core，同时保持两个 smoke entry 默认关闭。ELF smoke 复用
+lifecycle core、syscall gate、用户 fault 路径、bounded `argv`/`envp` 栈布置和延后
+reaper，但用户程序来自内核只读 exFAT 栈读取的 `/boot/user/init.elf`，而不是内嵌
+flat blob。
 
 ## 镜像格式
 
@@ -21,15 +23,20 @@ ELF smoke 使用 `xmake build user-init-elf` 构建的静态 freestanding ELF64
 该 ELF 镜像通过 `SYS_WRITE` 输出 `BIGOS_USER_ELF_WRITE\n`，随后执行
 `SYS_EXIT(0)`。
 
-## 进程模型
+## 进程生命周期
 
-`bigos::proc::Process` 是单核、单进程 bounded 抽象，记录：
+`bigos::proc::Process` 是单核 bounded lifecycle 记录。即使
+`user_program_smoke` 和 `user_elf_smoke` 都关闭，核心也会在 normal build 中编译；
+这些开关只控制 smoke entry 线程和 user ELF artifact。每个进程记录：
 
-- `pid`、用户页表根、进入前的 kernel CR3、用户入口、用户 code/data/stack 范围。
+- 稳定 PID、parent PID、child/sibling 链接、process-table 发布状态、用户页表根、进入前的 kernel CR3、用户入口、用户 code/data/stack 范围。
 - 专用 syscall/exception kernel stack top，用于 TSS/RSP0。
-- 生命周期状态 `Created` / `Running` / `Terminated` / `Faulted` / `Reaped`、exit code、fault reason、owned 用户帧和 kernel stack 范围。
+- 生命周期状态 `Created` / `Running` / `Terminated` / `Faulted` / `Zombie` / `ReapPending` / `Reaped`、exit code、fault reason、owned 用户帧和 kernel stack 范围。
+- wait status 消费状态和 safe reaper 元数据，确保 zombie 被父进程消费或按策略进入最终回收前不会复用 PID。
 
-进程对象和当前 kernel stack 不在 `exit` 或 fault 返回路径立即释放；资源回收会在执行已切换到非目标 kernel stack 后交给 safe reaper。
+进程对象和当前 kernel stack 不在 `exit` 或 fault 返回路径立即释放；termination 只记录
+status、唤醒可等待的 parent，并在执行已切换到非目标 kernel stack 且 CR3 root 不活跃后
+交给 safe reaper。
 
 ## 加载与地址空间
 
@@ -44,7 +51,13 @@ ELF loader 只接受 bounded x86_64 little-endian ELF64 `ET_EXEC`。它会拒绝
 program header、W+X segment、重叠 segment、入口点不在 executable segment 内、越过
 低半区用户窗口的范围，以及与 `USER_STACK_TOP` 处单页用户栈碰撞的范围。ELF 准备成功
 输出 `BIGOS_USER_ELF_LOAD_PASSED`；bounded 加载失败输出
-`BIGOS_USER_ELF_LOAD_FAILED <reason>`，且不会进入 ring3。
+`BIGOS_USER_ELF_LOAD_FAILED <reason>`，且不会进入 ring3。general exec primitive 在
+commit 前准备新 image，发布前失败会 rollback；若 commit 后旧 image 已无法恢复，则通过
+确定性的 exec failure status 终止当前进程。
+
+ELF 初始用户栈使用最小 libc-like 形状：`argc`、`argv[]`、`envp[]` 和 bounded 字符串。
+它刻意省略 auxv、TLS、dynamic linker 状态、file descriptor、VFS 和 user-space libc
+startup。
 
 ## ring3 进入
 
@@ -60,6 +73,7 @@ x86_64 运行期 user mode 支持由 `src/kernel/proc/user_mode.cc` / `user_mode
 - `VECTOR_SYSCALL = 0x80` 是唯一放宽为 DPL=3 的 IDT gate；exception/IRQ gates 不放宽。
 - `SYS_WRITE` 验证用户 buffer 范围、present/user bit 和最大长度，然后输出 `BIGOS_USER_WRITE_SYSCALL`；非法用户 buffer 会 fault 当前进程，并使用同一个 safe reaper 边界。
 - `SYS_EXIT` 标记当前进程 terminated/reap-pending、记录 exit code、恢复 kernel root，并进入 scheduler 延后回收退出路径。
+- `SYS_WAIT` 暴露最小 wait ABI。当前 `int 0x80` dispatch path 是 nonblocking context，因此阻塞等待在该路径返回确定性的 `WAIT_EWOULDBLOCK`；当 `sched::can_block()` 为 true 时，kernel-context lifecycle 调用者可使用 wait queue。
 - 用户态 `#PF` 通过 saved `CS` 的 CPL 识别，输出 `BIGOS_USER_PAGE_FAULT`，标记进程 faulted/reap-pending，并不做 demand paging。
 - 内核态 `#PF` 保持既有 `BIGOS_PAGE_FAULT` 诊断-only 语义。
 - idle-loop reaper 在 active stack/root 检查通过后释放用户地址空间和 kernel stack，然后输出 `BIGOS_USER_RECLAIMED`。

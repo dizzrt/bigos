@@ -16,8 +16,8 @@ def test_user_elf_smoke_is_default_off_and_separate_from_embedded_smoke() -> Non
     default_index = xmake.index('set_default(false)', option_index)
     define_index = xmake.index('add_defines("BIGOS_USER_ELF_SMOKE")')
     assert option_index < default_index < define_index
-    assert 'has_config("user_program_smoke") or has_config("user_elf_smoke")' in xmake
     assert 'add_defines("BIGOS_USER_PROCESS")' in xmake
+    assert 'add_files("src/kernel/proc/**.cc")' in xmake
     assert 'if has_config("user_program_smoke") then\n        add_defines("BIGOS_USER_PROGRAM_SMOKE")' in xmake
     assert 'BIGOS_USER_ELF_LOAD_PASSED' in kernel
     assert 'bigos::proc::USER_ELF_SMOKE_PATH' in kernel
@@ -79,3 +79,28 @@ def test_user_elf_failure_paths_release_owned_resources_and_keep_reaper_boundary
     assert 'BIGOS_USER_REAP_DEFERRED active-root' in proc
     assert 'BIGOS_USER_REAP_DEFERRED active-stack' in proc
     assert 'bigos::proc::reap_pending_processes();' in sched
+
+
+def test_user_elf_exec_prepare_commit_and_argv_envp_bounds_are_source_checked() -> None:
+    proc_h = read_source('include/bigos/proc.h')
+    proc = read_source('src/kernel/proc/proc.cc')
+    kernel = read_source('src/kernel/kernel.cc')
+
+    for token in (
+        'constexpr uint32_t EXEC_MAX_ARGC = 8;',
+        'constexpr uint32_t EXEC_MAX_ENVC = 8;',
+        'constexpr uint64_t EXEC_MAX_STRING_BYTES = 256;',
+        'struct ExecArgs',
+        'exec_current_from_elf_image',
+        'EXEC_FAILURE_STATUS',
+    ):
+        assert token in proc_h
+
+    assert 'copy_exec_args_to_stack' in proc
+    assert 'args->argc > bigos::proc::EXEC_MAX_ARGC' in proc
+    assert 'args->envc > bigos::proc::EXEC_MAX_ENVC' in proc
+    assert 'bounded_strlen(args->argv[i], bigos::proc::EXEC_MAX_STRING_BYTES)' in proc
+    assert 'create_elf_user_process(&prepared, __image, __image_len, __args)' in proc
+    assert 'unpublish_process(&prepared)' in proc
+    assert 'process->exit_code = EXEC_FAILURE_STATUS;' in proc
+    assert 'bigos::proc::ExecArgs args = {argv, 1, nullptr, 0};' in kernel
