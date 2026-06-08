@@ -166,19 +166,24 @@ xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 ELF smoke 还会构建 `build/bin/user/init.elf` 并打包为 `/boot/user/init.elf`。
 这些 smoke 默认不参与普通启动。所有标记都写到 COM1 串口和 VGA。
 
-当前 Legacy BIOS/MBR/exFAT 路径的本地 Bochs 运行入口：
+当前 Legacy BIOS/MBR/exFAT 路径的本地 emulator 运行入口：
 
 ```bash
+xmake run qemu
+xmake run qemu-gdb
 xmake run bochs-sdl2
 xmake run bochs
 ```
 
-`xmake run bochs-sdl2` 启动 SDL2 Bochs 流程；`xmake run bochs` 是非 SDL2 后备入口。
-两个 target 都通过 xmake 构建 kernel 和 boot artifacts，然后以 `--skip-build` 调用
-Python 镜像/Bochs 辅助脚本。
+`xmake run qemu` 使用图形 QEMU 启动生成的 raw image，并把 COM1 输出写入
+`build/test/qemu.serial.log`。`xmake run qemu-gdb` 会让 QEMU 在启动前暂停并开启
+默认 GDB stub（`target remote localhost:1234`），COM1 输出写入
+`build/test/qemu-gdb.serial.log`。`xmake run bochs-sdl2` 启动 SDL2 Bochs 流程；
+`xmake run bochs` 是非 SDL2 后备入口。这些 target 都通过 xmake 构建 kernel 和
+boot artifacts，然后以 `--skip-build` 调用 Python 镜像辅助脚本。
 
-Python helper 仍用于 raw image 生成、Bochs 配置生成、serial marker 检查和
-no-launch/offline validation：
+Python helper 仍用于 raw image 生成、Bochs 配置生成、QEMU 启动命令查看、
+serial marker 检查和 no-launch/offline validation：
 
 ```bash
 uv run python tools/boot_debug.py run
@@ -187,13 +192,15 @@ uv run python tools/boot_debug.py run
 helper 会执行 preflight 检查；如果不是从 xmake run target 调用，也可以构建 kernel
 和 boot artifacts。随后它在用户态生成 raw 磁盘镜像，写入 MBR、exFAT boot
 region、`/boot/boot.bin`、根目录 `kernel`、`/boot/fs_smoke.txt` 和可选
-`/boot/user/init.elf`，并在未指定 `--no-launch` 时启动 Bochs。它不会构建 UEFI
-loader、ESP 镜像或 OVMF 配置。
+`/boot/user/init.elf`，并在未指定 `--no-launch` 时启动选定 emulator。它不会构建
+UEFI loader、ESP 镜像、OVMF 配置或新存储驱动路径。
 
 默认生成物均位于 `build/` 下：
 
 - raw 磁盘镜像：`build/test/os.raw`。
 - 生成的 Bochs 配置：`build/test/bochsrc.bxrc`。
+- QEMU 串口日志：`build/test/qemu.serial.log` 和
+  `build/test/qemu-gdb.serial.log`。
 - boot 产物：`build/bin/x86/boot/`。
 - 内核 ELF：`build/kernel`。
 
@@ -202,6 +209,8 @@ loader、ESP 镜像或 OVMF 配置。
 ```bash
 uv run python tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
 uv run python tools/boot_debug.py run --no-launch
+uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python tools/boot_debug.py run --emulator qemu-gdb
 uv run python tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
 uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
 uv run python tools/boot_debug.py validate-image --image build/test/os.raw
@@ -215,18 +224,22 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
 
 当前范围：
 
-- 该流程仅支持 Bochs。
+- 该流程支持 QEMU 与 Bochs。
+- QEMU 使用 Legacy BIOS 默认路径，并用 `-drive file=<image>,format=raw,if=ide`
+  把 raw image 暴露为 IDE disk，保持当前 ATA PIO 路径。
+- QEMU headless automation 通过 helper 的 display 参数实现，例如
+  `--emulator qemu --display none`；不新增独立 `qemu-headless` xmake target。
 - `xmake run bochs-sdl2` 是 SDL2 Legacy BIOS 调试入口，`xmake run bochs` 是非
-  SDL2 后备入口。未来 UEFI workflow 会作为独立路径引入，使用隔离的 ESP/FAT
-  镜像产物，并以 QEMU + OVMF 作为首选 smoke test 路径。
-- QEMU/headless、串口日志自动判定和 CI smoke test 留给后续阶段。
+  SDL2 后备入口。Bochs 仍适合早期 boot、BIOS、ATA PIO、中断和硬件行为差异排查。
+- 未来 UEFI workflow 会作为独立路径引入，使用隔离的 ESP/FAT 镜像产物，并以
+  QEMU + OVMF 作为首选 smoke test 路径。
 - 该流程不修改 `boot.s`、`boot.cc`、`BootInfo`、`link.lds`、高半区内核地址或
   内核运行时初始化顺序。
 
 常见失败原因：
 
-- 缺少 `xmake`、`bochs`、`python3` 或 `x86_64-elf-*` 工具时，会在 preflight
-  阶段失败，且不会生成或覆盖镜像。
+- 缺少 `xmake`、选定 emulator（`qemu-system-x86_64` 或 `bochs`）、`python3`
+  或 `x86_64-elf-*` 工具时，会在 preflight 阶段按需失败，且不会生成或覆盖镜像。
 - 内核或 boot 构建失败时会停止流程，不会继续使用 stale 产物启动。
 - 如果 Bochs 安装需要宿主机特定 BIOS/VGA BIOS 路径，可以使用 `--romimage`、
   `--vgaromimage`、`--bochsrc` 或 `--bochs-extra` 指定。
@@ -237,6 +250,8 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
 运行生成的 Bochs 流程：
 
 ```bash
+xmake run qemu
+xmake run qemu-gdb
 xmake run bochs-sdl2
 xmake run bochs
 ```
@@ -245,7 +260,8 @@ xmake run bochs
 
 - 构建前请安装或暴露 `x86_64-elf-gcc`、`x86_64-elf-g++`、
   `x86_64-elf-ld` 以及相关 binutils。
-- 在模拟器中运行内核前请安装 Bochs。
+- 使用 `xmake run qemu` 或 `xmake run qemu-gdb` 前请安装 QEMU；使用 Bochs
+  target 前请安装 Bochs。
 - `test/bochsrc.bxrc` 可能包含与主机相关的路径。请根据本机环境更新
   BIOS、VGA BIOS 和磁盘镜像路径。
 - `bigos.py` 中的一些 Python 辅助命令仍是占位内容，不应视为完整自动化。

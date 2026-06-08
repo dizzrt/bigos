@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Prepare a bootable BigOS raw image and launch it in Bochs."""
+"""Prepare a bootable BigOS raw image and launch it in an emulator."""
 
 from __future__ import annotations
 
 import argparse
 import math
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -24,7 +25,11 @@ DEFAULT_BOCHSRC = BUILD_DIR / 'test' / 'bochsrc.bxrc'
 DEFAULT_KERNEL = BUILD_DIR / 'kernel'
 DEFAULT_CPU_MODEL = 'corei7_haswell_4770'
 DEFAULT_SERIAL_LOG = BUILD_DIR / 'test' / 'serial.log'
+DEFAULT_QEMU_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu.serial.log'
+DEFAULT_QEMU_GDB_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu-gdb.serial.log'
 MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'
+EMULATORS = ('bochs', 'bochs-sdl2', 'qemu', 'qemu-gdb')
+QEMU_DISPLAYS = ('graphical', 'none')
 
 SECTOR_SIZE = 512
 MBR_PARTITION_TABLE_OFFSET = 0x1BE
@@ -191,10 +196,21 @@ def run_command(
         raise StageError(stage, f'command failed with exit code {result.returncode}: {printable}')
 
 
-def check_tools(need_bochs: bool, need_build: bool) -> None:
+def is_bochs_backend(emulator: str) -> bool:
+    return emulator in ('bochs', 'bochs-sdl2')
+
+
+def is_qemu_backend(emulator: str) -> bool:
+    return emulator in ('qemu', 'qemu-gdb')
+
+
+def check_tools(emulator: str, need_emulator: bool, need_build: bool) -> None:
     missing = [tool for tool in BUILD_TOOLS if need_build and shutil.which(tool) is None]
-    if need_bochs and shutil.which('bochs') is None:
-        missing.append('bochs')
+    if need_emulator:
+        if is_bochs_backend(emulator) and shutil.which('bochs') is None:
+            missing.append('bochs')
+        if is_qemu_backend(emulator) and shutil.which('qemu-system-x86_64') is None:
+            missing.append('qemu-system-x86_64')
     if missing:
         raise StageError('preflight', 'missing required tool(s): ' + ', '.join(missing))
 
@@ -657,6 +673,26 @@ def is_bochs_user_shutdown(
     return result.returncode == 1 and 'User requested shutdown.' in output
 
 
+def stop_process_group(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    process.wait(timeout=5)
+
+
 def launch_bochs(bochsrc: Path) -> None:
     run_command(
         'bochs launch',
@@ -670,25 +706,6 @@ def launch_bochs(bochsrc: Path) -> None:
 def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: str, timeout_seconds: float) -> None:
     if serial_log.exists():
         serial_log.unlink()
-
-    def stop_process_group(process: subprocess.Popen[str]) -> None:
-        if process.poll() is not None:
-            return
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=5)
-            return
-        except subprocess.TimeoutExpired:
-            pass
-
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-        process.wait(timeout=5)
 
     printable = f'bochs -f {bochsrc} -q'
     log_stage(f'bochs smoke: {printable}')
@@ -720,15 +737,105 @@ def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: st
         stop_process_group(process)
 
 
+def split_extra_args(extra_args: Sequence[str]) -> list[str]:
+    result: list[str] = []
+    for item in extra_args:
+        result.extend(shlex.split(item))
+    return result
+
+
+def qemu_command(
+    image_path: Path,
+    serial_log: Path,
+    display: str,
+    *,
+    gdb: bool = False,
+    extra_args: Sequence[str] = (),
+) -> list[str]:
+    command = [
+        'qemu-system-x86_64',
+        '-drive',
+        f'file={image_path},format=raw,if=ide',
+        '-boot',
+        'c',
+        '-serial',
+        f'file:{serial_log}',
+        '-no-reboot',
+        '-no-shutdown',
+    ]
+    if display == 'none':
+        command.extend(['-display', 'none'])
+    if gdb:
+        command.extend(['-S', '-s'])
+    command.extend(split_extra_args(extra_args))
+    return command
+
+
+def launch_qemu(command: Sequence[str], *, gdb: bool = False) -> None:
+    if gdb:
+        print('qemu gdb stub: target remote localhost:1234')
+    run_command('qemu launch', command, PROJECT_ROOT)
+
+
+def launch_qemu_until_serial_marker(
+    command: Sequence[str],
+    serial_log: Path,
+    marker: str,
+    timeout_seconds: float,
+) -> None:
+    if serial_log.exists():
+        serial_log.unlink()
+    serial_log.parent.mkdir(parents=True, exist_ok=True)
+
+    printable = ' '.join(command)
+    log_stage(f'qemu smoke: {printable}')
+    process = subprocess.Popen(
+        command,
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        while time.monotonic() < deadline:
+            if serial_log.exists() and marker in serial_log.read_text(encoding='utf-8', errors='replace'):
+                stop_process_group(process)
+                print(f'serial marker observed: {marker}')
+                return
+
+            if process.poll() is not None:
+                output = process.stdout.read() if process.stdout is not None else ''
+                raise StageError('qemu smoke', f'QEMU exited before marker {marker!r}\n{output}')
+
+            time.sleep(0.1)
+
+        stop_process_group(process)
+        raise StageError('qemu smoke', f'timed out waiting for serial marker {marker!r} in {serial_log}')
+    finally:
+        stop_process_group(process)
+
+
+def default_serial_log_for(emulator: str) -> Path | None:
+    if emulator == 'qemu':
+        return DEFAULT_QEMU_SERIAL_LOG
+    if emulator == 'qemu-gdb':
+        return DEFAULT_QEMU_GDB_SERIAL_LOG
+    return None
+
+
 def run(args: argparse.Namespace) -> int:
     image_path = Path(args.image).resolve()
     bochsrc_path = Path(args.bochsrc).resolve() if args.bochsrc else DEFAULT_BOCHSRC
     image_size = parse_size(args.image_size)
     should_launch = not args.no_launch
-    serial_log = Path(args.serial_log).resolve() if args.serial_log else None
+    emulator = args.emulator
+    default_serial_log = default_serial_log_for(emulator)
+    serial_log = Path(args.serial_log).resolve() if args.serial_log else default_serial_log
     marker = args.expect_serial_marker
 
-    check_tools(need_bochs=should_launch, need_build=not args.skip_build)
+    check_tools(emulator, need_emulator=should_launch, need_build=not args.skip_build)
     if not args.skip_build:
         build_current_artifacts()
     artifacts = get_artifacts(DEFAULT_KERNEL)
@@ -737,26 +844,60 @@ def run(args: argparse.Namespace) -> int:
     layout = create_image(image_path, image_size, artifacts)
     validate_image(image_path)
 
-    if args.bochsrc:
-        log_stage(f'using custom Bochs config: {bochsrc_path}')
-    else:
-        render_bochsrc(image_path, bochsrc_path, args.romimage, args.vgaromimage, serial_log, args.bochs_extra)
+    if is_bochs_backend(emulator):
+        bochs_extra = list(args.bochs_extra)
+        if emulator == 'bochs-sdl2' and 'display_library: sdl2' not in bochs_extra:
+            bochs_extra.append('display_library: sdl2')
+        if args.bochsrc:
+            log_stage(f'using custom Bochs config: {bochsrc_path}')
+        else:
+            render_bochsrc(image_path, bochsrc_path, args.romimage, args.vgaromimage, serial_log, bochs_extra)
 
     print(f'image: {image_path}')
-    print(f'bochsrc: {bochsrc_path}')
+    print(f'emulator: {emulator}')
+    if is_bochs_backend(emulator):
+        print(f'bochsrc: {bochsrc_path}')
     if serial_log:
         print(f'serial_log: {serial_log}')
+    if is_qemu_backend(emulator) and serial_log:
+        print(
+            'qemu_command: '
+            + ' '.join(
+                qemu_command(
+                    image_path,
+                    serial_log,
+                    args.display,
+                    gdb=emulator == 'qemu-gdb',
+                    extra_args=args.qemu_extra,
+                )
+            )
+        )
     print(f'partition_lba: {layout.partition_lba}')
     print(f'cluster_heap_lba: {layout.cluster_heap_lba}')
 
     if should_launch:
-        cleanup_image_lock(image_path)
-        if marker and serial_log:
-            launch_bochs_until_serial_marker(bochsrc_path, serial_log, marker, args.smoke_timeout)
+        if is_bochs_backend(emulator):
+            cleanup_image_lock(image_path)
+            if marker and serial_log:
+                launch_bochs_until_serial_marker(bochsrc_path, serial_log, marker, args.smoke_timeout)
+            else:
+                launch_bochs(bochsrc_path)
         else:
-            launch_bochs(bochsrc_path)
+            assert serial_log is not None
+            serial_log.parent.mkdir(parents=True, exist_ok=True)
+            command = qemu_command(
+                image_path,
+                serial_log,
+                args.display,
+                gdb=emulator == 'qemu-gdb',
+                extra_args=args.qemu_extra,
+            )
+            if marker:
+                launch_qemu_until_serial_marker(command, serial_log, marker, args.smoke_timeout)
+            else:
+                launch_qemu(command, gdb=emulator == 'qemu-gdb')
     else:
-        log_stage('bochs launch skipped by --no-launch')
+        log_stage(f'{emulator} launch skipped by --no-launch')
     return 0
 
 
@@ -772,7 +913,7 @@ def make_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser(
         'run',
-        help='build artifacts, prepare a raw image, and launch Bochs',
+        help='build artifacts, prepare a raw image, and launch an emulator',
     )
     run_parser.add_argument(
         '--image',
@@ -780,6 +921,18 @@ def make_parser() -> argparse.ArgumentParser:
         help='raw disk image path under build/test by default',
     )
     run_parser.add_argument('--image-size', default='64M', help='raw image size, e.g. 64M, 128M, or bytes')
+    run_parser.add_argument(
+        '--emulator',
+        choices=EMULATORS,
+        default='bochs',
+        help='emulator backend to launch after image generation',
+    )
+    run_parser.add_argument(
+        '--display',
+        choices=QEMU_DISPLAYS,
+        default='graphical',
+        help='QEMU display mode; use none for headless serial-marker smoke',
+    )
     run_parser.add_argument(
         '--keep-image',
         action='store_true',
@@ -795,11 +948,11 @@ def make_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         '--serial-log',
-        help='COM1 output file for generated Bochs config; defaults under build/test for memory self-test',
+        help='COM1 output file; QEMU defaults under build/test when omitted',
     )
     run_parser.add_argument(
         '--expect-serial-marker',
-        help='when launching Bochs, wait until this marker appears in --serial-log',
+        help='when launching an emulator, wait until this marker appears in --serial-log',
     )
     run_parser.add_argument(
         '--smoke-timeout',
@@ -814,9 +967,15 @@ def make_parser() -> argparse.ArgumentParser:
         help='extra line appended to the generated Bochs config; may be repeated',
     )
     run_parser.add_argument(
+        '--qemu-extra',
+        action='append',
+        default=[],
+        help='extra QEMU argument string appended after stable helper-managed arguments; may be repeated',
+    )
+    run_parser.add_argument(
         '--no-launch',
         action='store_true',
-        help='prepare and validate the image without starting Bochs',
+        help='prepare and validate the image without starting an emulator',
     )
     run_parser.set_defaults(func=run)
 

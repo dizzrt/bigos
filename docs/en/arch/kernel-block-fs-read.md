@@ -10,8 +10,8 @@ that later stages can reuse after memory management is initialized.
 
 - Block reads use a synchronous, read-only `BlockDevice` contract over whole
   512-byte sectors with caller-owned buffers.
-- The first backend is ATA PIO for the Bochs raw image: primary master, LBA48,
-  synchronous polling, and bounded timeouts.
+- The first backend is ATA PIO for the Legacy BIOS raw image used by Bochs and
+  QEMU IDE: primary master, LBA48, synchronous polling, and bounded timeouts.
 - The filesystem layer discovers the first valid MBR exFAT partition, validates
   the exFAT boot region, and mounts a single read-only volume.
 - exFAT support covers absolute path lookup, regular file metadata, bounded

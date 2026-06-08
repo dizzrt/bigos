@@ -6,7 +6,7 @@ BigOS currently uses the Legacy BIOS path:
 BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel
 ```
 
-This path remains the currently runnable boot backend and the producer of the kernel handoff data used by the existing kernel. The UEFI plan in `docs/en/arch/uefi-boot-blueprint.md` treats it as the Legacy backend for a future unified handoff model. It does not replace the MBR/DBR/exDBR/`boot.bin` flow; the active Legacy debug entries are `xmake run bochs-sdl2` and `xmake run bochs`.
+This path remains the currently runnable boot backend and the producer of the kernel handoff data used by the existing kernel. The UEFI plan in `docs/en/arch/uefi-boot-blueprint.md` treats it as the Legacy backend for a future unified handoff model. It does not replace the MBR/DBR/exDBR/`boot.bin` flow; the active Legacy debug entries are `xmake run qemu`, `xmake run qemu-gdb`, `xmake run bochs-sdl2`, and `xmake run bochs`.
 
 The early boot path depends on these fixed physical and virtual addresses:
 
@@ -82,4 +82,4 @@ The first direct-map version does not cover MMIO, framebuffer, ACPI reclaim/NVS,
 
 The protected-mode extended DBR stage reads `boot.bin` through ATA primary-master PIO. Therefore it requires BIOS boot drive `0x80`; other BIOS drive numbers halt the system and display a visible `U` code in VGA text memory.
 
-`xmake run bochs-sdl2` and `xmake run bochs` keep the existing Legacy BIOS/MBR/exFAT/Bochs meaning. These entries do not switch to `BOOTX64.EFI`, an ESP/FAT image, or QEMU/OVMF.
+`xmake run qemu` and `xmake run qemu-gdb` use the same Legacy BIOS/MBR/exFAT raw image through QEMU's IDE disk path (`-drive file=<image>,format=raw,if=ide`). `xmake run bochs-sdl2` and `xmake run bochs` keep the existing Bochs debug entries. These entries do not switch to `BOOTX64.EFI`, an ESP/FAT image, QEMU/OVMF, virtio, AHCI/SATA, NVMe, or a new storage driver.

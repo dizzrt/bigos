@@ -181,19 +181,26 @@ xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 `build/bin/user/init.elf` as `/boot/user/init.elf`. These smokes are not part of
 a normal boot. All markers are written to COM1 serial and VGA.
 
-Local Bochs runs for the current Legacy BIOS/MBR/exFAT path:
+Local emulator runs for the current Legacy BIOS/MBR/exFAT path:
 
 ```bash
+xmake run qemu
+xmake run qemu-gdb
 xmake run bochs-sdl2
 xmake run bochs
 ```
 
-`xmake run bochs-sdl2` launches the SDL2 Bochs flow. `xmake run bochs` is the
-non-SDL2 fallback. Both targets build the kernel and boot artifacts through
-xmake, then call the Python image/Bochs helper with `--skip-build`.
+`xmake run qemu` launches graphical QEMU against the generated raw image and
+writes COM1 output to `build/test/qemu.serial.log`. `xmake run qemu-gdb` starts
+QEMU paused with the default GDB stub (`target remote localhost:1234`) and writes
+COM1 output to `build/test/qemu-gdb.serial.log`. `xmake run bochs-sdl2` launches
+the SDL2 Bochs flow. `xmake run bochs` is the non-SDL2 fallback. These targets
+build the kernel and boot artifacts through xmake, then call the Python image
+helper with `--skip-build`.
 
 The Python helper remains useful for raw-image generation, generated Bochs
-configuration, serial-marker checks, and no-launch/offline validation:
+configuration, QEMU launch command inspection, serial-marker checks, and
+no-launch/offline validation:
 
 ```bash
 uv run python tools/boot_debug.py run
@@ -202,14 +209,16 @@ uv run python tools/boot_debug.py run
 The helper runs preflight checks, can build the kernel and boot artifacts when
 not called from an xmake run target, creates a raw disk image entirely in user
 space, writes the MBR, exFAT boot regions, `/boot/boot.bin`, root `kernel`,
-`/boot/fs_smoke.txt`, and optional `/boot/user/init.elf`, then launches Bochs
-unless `--no-launch` is supplied. It does not build a UEFI loader, ESP image, or
-OVMF configuration.
+`/boot/fs_smoke.txt`, and optional `/boot/user/init.elf`, then launches the
+selected emulator unless `--no-launch` is supplied. It does not build a UEFI
+loader, ESP image, OVMF configuration, or new storage-driver path.
 
 Generated boot-debug artifacts are isolated under `build/` by default:
 
 - Raw disk image: `build/test/os.raw`.
 - Generated Bochs config: `build/test/bochsrc.bxrc`.
+- QEMU serial logs: `build/test/qemu.serial.log` and
+  `build/test/qemu-gdb.serial.log`.
 - Boot artifacts: `build/bin/x86/boot/`.
 - Kernel ELF: `build/kernel`.
 
@@ -218,6 +227,8 @@ Useful options:
 ```bash
 uv run python tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
 uv run python tools/boot_debug.py run --no-launch
+uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python tools/boot_debug.py run --emulator qemu-gdb
 uv run python tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
 uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
 uv run python tools/boot_debug.py validate-image --image build/test/os.raw
@@ -233,20 +244,25 @@ a hand-prepared exFAT image.
 
 Current scope:
 
-- Bochs is the only supported emulator in this workflow.
+- QEMU and Bochs are supported emulators in this workflow.
+- QEMU uses Legacy BIOS defaults and exposes the raw image as an IDE disk with
+  `-drive file=<image>,format=raw,if=ide`, preserving the current ATA PIO path.
+- QEMU headless automation uses the helper display selector, for example
+  `--emulator qemu --display none`; no separate `qemu-headless` xmake target is
+  provided.
 - `xmake run bochs-sdl2` is the SDL2 Legacy BIOS debug entry, and
-  `xmake run bochs` is the non-SDL2 fallback. A future UEFI workflow is planned
-  as a separate path with isolated ESP/FAT image artifacts and QEMU + OVMF as
-  the preferred smoke-test path.
-- QEMU/headless mode, serial-log auto-detection, and CI smoke-test decisions are
-  intentionally left for later changes.
+  `xmake run bochs` is the non-SDL2 fallback. Bochs remains useful for early
+  boot, BIOS, ATA PIO, interrupt, and hardware-behavior investigations.
+- A future UEFI workflow is planned as a separate path with isolated ESP/FAT
+  image artifacts and QEMU + OVMF as the preferred smoke-test path.
 - The workflow does not change `boot.s`, `boot.cc`, `BootInfo`, `link.lds`, the
   higher-half kernel address, or kernel runtime initialization.
 
 Common failures:
 
-- Missing `xmake`, `bochs`, `python3`, or `x86_64-elf-*` tools are reported in
-  the preflight stage before image generation.
+- Missing `xmake`, selected emulator (`qemu-system-x86_64` or `bochs`),
+  `python3`, or `x86_64-elf-*` tools are reported in the preflight stage before
+  image generation or launch as appropriate.
 - Kernel or boot build failures stop the workflow instead of continuing with
   stale artifacts.
 - Bochs installations that require host-specific BIOS or VGA BIOS paths may need
@@ -258,6 +274,8 @@ Common failures:
 Run the generated Bochs flows:
 
 ```bash
+xmake run qemu
+xmake run qemu-gdb
 xmake run bochs-sdl2
 xmake run bochs
 ```
@@ -266,7 +284,8 @@ Notes:
 
 - Install or expose `x86_64-elf-gcc`, `x86_64-elf-g++`, `x86_64-elf-ld`, and
   related binutils before building.
-- Install Bochs before running the kernel in an emulator.
+- Install QEMU before using `xmake run qemu` or `xmake run qemu-gdb`; install
+  Bochs before using the Bochs targets.
 - `test/bochsrc.bxrc` may contain host-specific paths. Update the BIOS, VGA BIOS,
   and disk-image paths for your local machine.
 - Some Python helper commands in `bigos.py` are placeholders and should not be

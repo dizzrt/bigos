@@ -8,7 +8,7 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
 - BigOS is written primarily in C++17, C17, and x86/x86_64 assembly.
 - xmake is the primary build system.
 - `x86_64-elf-gcc` is the expected cross toolchain.
-- Bochs is used for local emulation.
+- QEMU and Bochs are supported local emulators for the Legacy BIOS/MBR/exFAT path.
 - Python files are helper scripts unless explicitly stated otherwise.
 - Run Python-related commands through `uv run` by default, including `pytest`,
   helper scripts, linting, formatting, and type checks.
@@ -76,6 +76,8 @@ Common commands:
 
 ```bash
 xmake
+xmake run qemu
+xmake run qemu-gdb
 xmake run bochs-sdl2
 xmake run bochs
 ```
@@ -106,21 +108,32 @@ For bounded emulator smoke against memory markers:
 
 ```bash
 xmake f --mm_self_test=y
-uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
 ```
 
 The self-test emits `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED`,
 the `#PF` handler emits `BIGOS_PAGE_FAULT`, and the unified panic path emits
 `BIGOS_PANIC code=<code> source=<source>` on COM1 and VGA. Configure smoke
-options with `xmake f ...`; `xmake run bochs-sdl2` launches the SDL2 Bochs
-flow and `xmake run bochs` launches the non-SDL2 fallback.
+options with `xmake f ...`; `xmake run qemu` launches the graphical QEMU flow,
+`xmake run qemu-gdb` starts QEMU paused with the default GDB stub, `xmake run
+bochs-sdl2` launches the SDL2 Bochs flow, and `xmake run bochs` launches the
+non-SDL2 fallback.
 
 Notes:
 
 - Verify that `x86_64-elf-gcc`, `x86_64-elf-g++`, `x86_64-elf-ld`, and related
   binutils are installed before building.
-- Generated Bochs configuration is written under `build/test/`. Check local Bochs
-  ROM/display availability before assuming emulator runs are portable.
+- Generated emulator outputs are written under `build/test/`. QEMU uses the
+  current Legacy BIOS/IDE raw image path; this does not implement UEFI, OVMF,
+  ESP/FAT images, virtio, AHCI/SATA, NVMe, or new storage drivers.
+- Prefer QEMU with `--display none` for automated smoke tests, serial marker
+  checks, and CI-like local validation. Prefer graphical QEMU for quick local
+  boot validation when Bochs-specific debugging is not required.
+- Use Bochs, or Bochs/QEMU cross-validation when available, for early boot,
+  BIOS, real-mode/protected-mode/long-mode transition, ATA PIO, interrupt, port
+  IO, or hardware-behavior investigations.
+- Check local QEMU, Bochs ROM/display, and cross-toolchain availability before
+  assuming emulator runs are portable.
 - `bigos.py` contains placeholder tasks. Do not assume it provides complete
   build/install automation.
 
@@ -129,8 +142,18 @@ Notes:
 - For source changes, run the narrowest useful build or static check available.
 - For boot, linker, memory, IRQ, or driver changes, prefer an emulator smoke test
   when the environment is configured.
-- If Bochs or the cross toolchain is unavailable, report that clearly instead of
-  claiming runtime validation.
+- For automated emulator smoke, serial marker checks, and CI-like local
+  validation, prefer the QEMU headless helper path, for example `uv run python
+  tools/boot_debug.py run --emulator qemu --display none ...`.
+- For quick local boot validation, prefer `xmake run qemu` or the equivalent
+  graphical QEMU helper path unless Bochs-specific debugging is needed.
+- For early boot, BIOS, real-mode/protected-mode/long-mode transition, ATA PIO,
+  IRQ/timer/syscall, port IO, or low-level driver behavior, use Bochs review or
+  Bochs/QEMU cross-validation when the environment supports it.
+- If QEMU, Bochs, cross-binutils, display/ROM dependencies, disk image paths, or
+  local emulator configuration are unavailable, explicitly record the missing
+  tool or configuration, skipped validation, substitute checks, and residual
+  risk instead of claiming runtime validation.
 - After documentation-only changes, syntax checks are enough when applicable.
 - For Python-related validation or helper execution, use `uv run ...` such as
   `uv run pytest`, `uv run python <script>`, `uv run ruff check`, and

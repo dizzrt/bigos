@@ -5,9 +5,10 @@ BigOS 可以在 `init_mem()` 之后、IRQ/PIC 设置之前运行一个可选的�
 
 ## 启用方式
 
-- 使用 `xmake f --mm_self_test=y` 配置，然后运行 `xmake` 或 `xmake run bochs-sdl2`。
-- 如需只生成并校验 raw image 而不启动 Bochs，运行 `uv run python tools/boot_debug.py run --no-launch --serial-log build/test/serial.log`。
-- 如需运行有界的 Bochs 冒烟验证，执行 `uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`。
+- 使用 `xmake f --mm_self_test=y` 配置，然后运行 `xmake` 或本地 emulator target，例如 `xmake run qemu`。
+- 如需只生成并校验 raw image 而不启动 emulator，运行 `uv run python tools/boot_debug.py run --no-launch --serial-log build/test/serial.log`。
+- 如需运行有界的自动化 smoke validation，优先使用 QEMU headless helper 路径：`uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`。
+- 如需 Bochs 交叉验证，在本机 Bochs ROM/display 配置可用时运行 `uv run python tools/boot_debug.py run --emulator bochs --serial-log build/test/bochs.serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`。
 
 ## 标记
 
@@ -37,4 +38,4 @@ allocator 内部只在 buddy free list/`PageBlock` accounting、slab cache list/
 
 源码级验证覆盖 API 标注、interrupt guard IF 保存/恢复、ISR allocator 禁止 token 和 `mm_self_test()` 初始化顺序。交叉构建或 `-fsyntax-only` 检查用于确认 freestanding C++/assembly 改动可由目标配置解析。
 
-Bochs runtime smoke 依赖本机 ROM、磁盘 image lock、serial oracle 和交互能力；若这些依赖不可用，validation 需要记录未运行原因、已通过的替代检查和剩余 bootability 风险。
+QEMU headless runtime smoke 是当前 Legacy BIOS/MBR/exFAT image 的首选自动化 serial-marker 路径。Bochs 仍适合早期 boot、BIOS、ATA PIO、中断和硬件行为差异交叉验证。若 QEMU、Bochs、cross-binutils、ROM/display 配置、disk image path 或 serial-marker 观测不可用，validation 需要记录未运行原因、已通过的替代检查和剩余 bootability 风险。

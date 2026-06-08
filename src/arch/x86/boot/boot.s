@@ -136,7 +136,9 @@ long_mode:
     lidt (idt_attribute)
 
     # prepare registers and stack for long mode
-    mov $SELECTOR_STACK, %ax
+    # Long mode ignores most segmentation, but QEMU still faults stack writes
+    # when SS is loaded from the legacy expand-down stack descriptor.
+    mov $SELECTOR_DATA, %ax
     mov %ax, %ss
     movq $0x9fbff, %rsp
 

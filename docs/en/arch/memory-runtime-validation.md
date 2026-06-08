@@ -4,9 +4,10 @@ BigOS can run an optional early memory runtime self-test after `init_mem()` and 
 
 ## Enabling
 
-- Configure with `xmake f --mm_self_test=y`, then run `xmake` or `xmake run bochs-sdl2`.
-- To generate and validate a raw image without launching Bochs, run `uv run python tools/boot_debug.py run --no-launch --serial-log build/test/serial.log`.
-- For bounded Bochs smoke validation, run `uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`.
+- Configure with `xmake f --mm_self_test=y`, then run `xmake` or a local emulator target such as `xmake run qemu`.
+- To generate and validate a raw image without launching an emulator, run `uv run python tools/boot_debug.py run --no-launch --serial-log build/test/serial.log`.
+- For bounded automated smoke validation, prefer the QEMU headless helper path: `uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`.
+- For Bochs cross-checking, run `uv run python tools/boot_debug.py run --emulator bochs --serial-log build/test/bochs.serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED` when local Bochs ROM/display configuration is available.
 
 ## Markers
 
@@ -36,4 +37,4 @@ Allocator internals use guarded regions only around metadata boundaries such as 
 
 Source-level validation covers API annotations, interrupt guard IF save/restore, forbidden ISR allocator tokens, and `mm_self_test()` initialization order. Cross builds or `-fsyntax-only` checks confirm freestanding C++/assembly changes are accepted by the target configuration.
 
-Bochs runtime smoke depends on local ROMs, disk image locks, serial oracle, and interactive capability. If those dependencies are unavailable, validation needs to record why it was not run, which substitute checks passed, and the remaining bootability risk.
+QEMU headless runtime smoke is the preferred automated serial-marker path for this Legacy BIOS/MBR/exFAT image. Bochs remains useful for early boot, BIOS, ATA PIO, interrupt, and hardware-behavior cross-checking. If QEMU, Bochs, cross-binutils, ROM/display configuration, disk image paths, or serial-marker observation are unavailable, validation needs to record why it was not run, which substitute checks passed, and the remaining bootability risk.

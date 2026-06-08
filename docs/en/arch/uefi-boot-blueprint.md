@@ -184,11 +184,12 @@ Candidate follow-up changes:
 
 ## Debug Entry And Image Plan
 
-`xmake run bochs-sdl2` is the SDL2 Legacy BIOS/MBR/exFAT/Bochs debug path, and `xmake run bochs` is the non-SDL2 fallback:
+`xmake run qemu`, `xmake run qemu-gdb`, `xmake run bochs-sdl2`, and `xmake run bochs` are Legacy BIOS/MBR/exFAT debug paths:
 
 - Build MBR, DBR, extended DBR, `boot.bin`, and root `kernel`.
 - Generate a raw exFAT disk image.
-- Use Bochs as the Legacy BIOS local debug entry.
+- Use QEMU with an IDE disk path for quick local boot, headless serial-marker smoke, or GDB-stub debugging.
+- Keep Bochs as a supported Legacy BIOS local debug entry for early boot and hardware-behavior cross-checking.
 - Do not implicitly switch to a UEFI loader, ESP image, or OVMF configuration.
 
 Future UEFI debug entries must use separate names and separate artifacts, for example:
@@ -200,9 +201,9 @@ Future UEFI artifact isolation policy:
 
 - BIOS path continues using raw exFAT images and artifacts such as `build/test/os.raw`.
 - UEFI path uses an ESP/FAT image containing `EFI/BOOT/BOOTX64.EFI` and the kernel ELF.
-- UEFI firmware configuration, temporary directories, and emulator configuration must not overwrite Bochs artifacts used by `xmake run bochs-sdl2` or `xmake run bochs`.
+- UEFI firmware configuration, temporary directories, and emulator configuration must not overwrite Legacy BIOS artifacts used by `xmake run qemu`, `xmake run qemu-gdb`, `xmake run bochs-sdl2`, or `xmake run bochs`.
 - UEFI smoke tests should primarily use QEMU + OVMF. Bochs UEFI is optional.
-- Legacy BIOS continues to use Bochs.
+- Legacy BIOS continues to use the current raw exFAT image with QEMU IDE or Bochs.
 
 ## ELF64 Loading Rules
 
@@ -226,4 +227,4 @@ A future UEFI loader should implement an ELF reader suited for UEFI and should n
 | 5 | GOP framebuffer, ACPI RSDP/SMBIOS handoff, and fuller UEFI validation policy | No | Stage 1 sections, Stage 3/4 UEFI smoke test | Framebuffer mapping, ACPI table lifecycle, runtime metadata misuse | `handoff-gop-acpi-firmware-tables` |
 | 6 | Shared ELF64 loading rule specification for BIOS and UEFI, without requiring shared loader code soon | No | Current BIOS ELF loading behavior documented | Rule/implementation drift, inconsistent error handling | `document-common-elf64-loader-rules` |
 
-Each stage is a candidate for a later change and is not runtime implementation work for this change. Future implementation must keep the Legacy BIOS path available as fallback and continue using `xmake run bochs-sdl2` or `xmake run bochs` to validate the existing debug entry.
+Each stage is a candidate for a later change and is not runtime implementation work for this change. Future implementation must keep the Legacy BIOS path available as fallback and continue using `xmake run qemu`, `xmake run qemu-gdb`, `xmake run bochs-sdl2`, or `xmake run bochs` to validate the existing debug entries.

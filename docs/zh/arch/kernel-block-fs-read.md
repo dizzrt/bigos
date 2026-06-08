@@ -9,8 +9,8 @@ BIOS bootloader 的 exFAT 辅助逻辑分离：bootloader 仍使用固定低地�
 
 - 块读取使用同步只读 `BlockDevice` 契约，按完整 512-byte sector 读取到调用方
   自有缓冲区。
-- 首个后端面向 Bochs raw image：ATA PIO primary master、LBA48、同步 polling
-  与 bounded timeout。
+- 首个后端面向 Bochs 和 QEMU IDE 共用的 Legacy BIOS raw image：ATA PIO primary
+  master、LBA48、同步 polling 与 bounded timeout。
 - 文件系统层自动发现第一个有效 MBR exFAT 分区，校验 exFAT boot region，并
   挂载单个只读 volume。
 - exFAT 支持绝对路径查找、普通文件元数据、bounded read、`NoFatChain` 连续

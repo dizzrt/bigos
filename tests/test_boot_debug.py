@@ -1,6 +1,9 @@
 import importlib.util
 import sys
+from io import StringIO
 from pathlib import Path
+
+import pytest
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / 'tools' / 'boot_debug.py'
 PROJECT_ROOT = MODULE_PATH.parents[1]
@@ -104,6 +107,38 @@ def test_generated_bochsrc_can_inject_sdl2_display(tmp_path: Path) -> None:
     assert 'display_library: sdl2' in contents
 
 
+def test_qemu_command_uses_legacy_bios_ide_disk_and_headless_serial(tmp_path: Path) -> None:
+    image = tmp_path / 'os.raw'
+    serial_log = tmp_path / 'qemu.serial.log'
+
+    command = boot_debug.qemu_command(image, serial_log, 'none')
+
+    assert command[0] == 'qemu-system-x86_64'
+    assert '-drive' in command
+    assert f'file={image},format=raw,if=ide' in command
+    assert command[command.index('-boot') + 1] == 'c'
+    assert command[command.index('-serial') + 1] == f'file:{serial_log}'
+    assert command[command.index('-display') + 1] == 'none'
+    assert '-no-reboot' in command
+    assert '-no-shutdown' in command
+    assert not any('virtio' in part or 'ahci' in part or 'ovmf' in part.lower() for part in command)
+
+
+def test_qemu_gdb_command_pauses_before_boot_and_keeps_graphical_default(tmp_path: Path) -> None:
+    command = boot_debug.qemu_command(
+        tmp_path / 'os.raw',
+        tmp_path / 'qemu-gdb.serial.log',
+        'graphical',
+        gdb=True,
+        extra_args=['-d int'],
+    )
+
+    assert '-S' in command
+    assert '-s' in command
+    assert '-display' not in command
+    assert command[-2:] == ['-d', 'int']
+
+
 def test_cleanup_image_lock_removes_image_sidecar_lock(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', b'image')
     lock = tmp_path / 'os.raw.lock'
@@ -148,9 +183,103 @@ def test_run_parser_rejects_smoke_shortcuts() -> None:
 def test_run_parser_accepts_skip_build() -> None:
     parser = boot_debug.make_parser()
 
-    args = parser.parse_args(['run', '--skip-build'])
+    args = parser.parse_args(['run', '--skip-build', '--emulator', 'qemu', '--display', 'none'])
 
     assert args.skip_build is True
+    assert args.emulator == 'qemu'
+    assert args.display == 'none'
+
+
+def test_preflight_requires_only_selected_emulator(monkeypatch) -> None:
+    def fake_which(tool: str) -> str | None:
+        if tool == 'qemu-system-x86_64':
+            return None
+        return f'/usr/bin/{tool}'
+
+    monkeypatch.setattr(boot_debug.shutil, 'which', fake_which)
+
+    with pytest.raises(boot_debug.StageError, match='qemu-system-x86_64'):
+        boot_debug.check_tools('qemu', need_emulator=True, need_build=False)
+    boot_debug.check_tools('bochs', need_emulator=True, need_build=False)
+    boot_debug.check_tools('qemu', need_emulator=False, need_build=False)
+
+
+def test_preflight_requires_bochs_only_for_bochs_backend(monkeypatch) -> None:
+    def fake_which(tool: str) -> str | None:
+        if tool == 'bochs':
+            return None
+        return f'/usr/bin/{tool}'
+
+    monkeypatch.setattr(boot_debug.shutil, 'which', fake_which)
+
+    with pytest.raises(boot_debug.StageError, match='bochs'):
+        boot_debug.check_tools('bochs', need_emulator=True, need_build=False)
+    boot_debug.check_tools('qemu', need_emulator=True, need_build=False)
+
+
+class FakeProcess:
+    pid = 4242
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.stdout = StringIO('')
+        self.wait_calls = 0
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        _ = timeout
+        self.wait_calls += 1
+        self.returncode = -15
+        return self.returncode
+
+
+def test_qemu_serial_marker_success_stops_process_group(tmp_path: Path, monkeypatch) -> None:
+    serial_log = tmp_path / 'qemu.serial.log'
+    process = FakeProcess()
+    killed: list[tuple[int, int]] = []
+
+    def fake_popen(*args, **kwargs):
+        _ = args, kwargs
+        serial_log.write_text('BIGOS_MM_SELF_TEST_PASSED\n', encoding='utf-8')
+        return process
+
+    monkeypatch.setattr(boot_debug.subprocess, 'Popen', fake_popen)
+    monkeypatch.setattr(boot_debug.os, 'killpg', lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(boot_debug.time, 'sleep', lambda seconds: None)
+
+    boot_debug.launch_qemu_until_serial_marker(
+        ['qemu-system-x86_64', '-serial', f'file:{serial_log}'],
+        serial_log,
+        'BIGOS_MM_SELF_TEST_PASSED',
+        1.0,
+    )
+
+    assert killed == [(process.pid, boot_debug.signal.SIGTERM)]
+    assert process.wait_calls == 1
+
+
+def test_qemu_serial_marker_timeout_cleans_process_group(tmp_path: Path, monkeypatch) -> None:
+    serial_log = tmp_path / 'qemu.serial.log'
+    process = FakeProcess()
+    killed: list[tuple[int, int]] = []
+    monotonic_values = iter([0.0, 1.0])
+
+    monkeypatch.setattr(boot_debug.subprocess, 'Popen', lambda *args, **kwargs: process)
+    monkeypatch.setattr(boot_debug.os, 'killpg', lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(boot_debug.time, 'monotonic', lambda: next(monotonic_values))
+
+    with pytest.raises(boot_debug.StageError, match='qemu smoke'):
+        boot_debug.launch_qemu_until_serial_marker(
+            ['qemu-system-x86_64', '-serial', f'file:{serial_log}'],
+            serial_log,
+            'MISSING_MARKER',
+            0.1,
+        )
+
+    assert killed == [(process.pid, boot_debug.signal.SIGTERM)]
+    assert process.wait_calls == 1
 
 
 def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
@@ -158,6 +287,9 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
 
     assert 'target("bochs-sdl2")' in xmake
     assert 'target("bochs")' in xmake
+    assert 'target("qemu")' in xmake
+    assert 'target("qemu-gdb")' in xmake
+    assert 'target("qemu-headless")' not in xmake
     assert 'target("boot-artifacts")' in xmake
     assert 'build/bin/x86/boot' not in xmake
     assert 'path.join(boot_bindir, "mbr.bin")' in xmake and 'bytes > 512 bytes' in xmake
@@ -165,4 +297,6 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     assert 'path.join(boot_bindir, "exdbr.bin")' in xmake and 'bytes > 4096 bytes' in xmake
     assert 'path.join(boot_bindir, "boot.bin")' in xmake and 'bytes > 524288 bytes' in xmake
     assert '--skip-build' in xmake
-    assert 'display_library: sdl2' in xmake
+    assert '--emulator bochs-sdl2' in xmake
+    assert '--emulator qemu' in xmake
+    assert '--emulator qemu-gdb' in xmake

@@ -397,6 +397,10 @@ no_remainder:
     mov $0x01f7, %dx
     outb %al, %dx
 
+    pop %ebp
+    mov $BOOTOFFSET32, %edi
+
+read_sector_loop:
     mov $ATA_POLL_LIMIT, %esi
 wait_disk:
     call wait_nops
@@ -412,20 +416,17 @@ wait_disk:
     jmp ata_timeout
 
 disk_ready:
-
-    # nr of sectors
-    pop %eax
-    mov $0x100, %ebx
-    mul %ebx
-    mov %eax, %ecx
-
-    mov $BOOTOFFSET32, %edi
+    # ATA PIO asserts DRQ per sector on QEMU, so wait before each 512-byte read.
+    mov $0x100, %ecx
     mov $0x01f0, %dx
 pio_loop:
     inw %dx, %ax
     movw %ax, (%edi)
     add $0x02, %edi
     loop pio_loop
+
+    decl %ebp
+    jnz read_sector_loop
 
     # jmp to bootloader
     ljmp $SELECTOR_CODE_32, $BOOTOFFSET32
