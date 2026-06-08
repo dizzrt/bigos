@@ -14,6 +14,7 @@
 #include <bigos/proc.h>
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
+#include <bigos/timer.h>
 #include <bigos/tty.h>
 #include <drivers/block/ata_pio.h>
 #include <irq/interrupt.h>
@@ -43,6 +44,42 @@ namespace {
             bigos::serial_puts("BIGOS_SCHED_THREAD_B\n");
             bigos::sched::yield();
         }
+    }
+}   // namespace
+#endif
+
+#ifdef BIGOS_BLOCKING_SMOKE
+namespace {
+    constexpr char BLOCKING_SMOKE_CHAR = 'Z';
+
+    void blocking_smoke_reader(void *) noexcept {
+        char ch = 0;
+        bigos::serial_puts("BIGOS_BLOCKING_WAIT_BLOCKED\n");
+        const int read_result = bigos::terminal::read_char_blocking(&ch, 50);
+        if (read_result == 1 && ch == BLOCKING_SMOKE_CHAR)
+            bigos::serial_puts("BIGOS_BLOCKING_WAIT_RESUMED\n");
+        else {
+            bigos::serial_puts("BIGOS_BLOCKING_SMOKE_FAILED\n");
+            return;
+        }
+
+        bigos::serial_puts("BIGOS_BLOCKING_TIMEOUT_BLOCKED\n");
+        const int sleep_result = bigos::timer::sleep_for(2);
+        if (sleep_result == bigos::sched::WAIT_TIMEOUT)
+            bigos::serial_puts("BIGOS_BLOCKING_TIMEOUT_EXPIRED\n");
+        else {
+            bigos::serial_puts("BIGOS_BLOCKING_SMOKE_FAILED\n");
+            return;
+        }
+
+        bigos::serial_puts("BIGOS_BLOCKING_SMOKE_PASSED\n");
+    }
+
+    void blocking_smoke_producer(void *) noexcept {
+        bigos::serial_puts("BIGOS_BLOCKING_WAKE_SENT\n");
+        if (!bigos::terminal::enqueue_input(BLOCKING_SMOKE_CHAR))
+            bigos::serial_puts("BIGOS_BLOCKING_SMOKE_FAILED\n");
+        bigos::sched::yield();
     }
 }   // namespace
 #endif
@@ -251,6 +288,10 @@ void kernel(const BootInfoHeader *boot_info) {
 #ifdef BIGOS_SCHEDULER_SMOKE
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_a, nullptr);
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_b, nullptr);
+#endif
+#ifdef BIGOS_BLOCKING_SMOKE
+    bigos::sched::create_kernel_thread(&blocking_smoke_reader, nullptr);
+    bigos::sched::create_kernel_thread(&blocking_smoke_producer, nullptr);
 #endif
 #ifdef BIGOS_USER_PROGRAM_SMOKE
     if (bigos::sched::create_kernel_thread(&bigos::proc::user_program_smoke_entry, nullptr) ==

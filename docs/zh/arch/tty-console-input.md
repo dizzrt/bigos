@@ -13,9 +13,10 @@ keyboard IRQ1
   -> PS/2 set-1 bounded decode
   -> terminal::enqueue_input()
   -> non-interrupt consumer read_char()/drain()
+  -> optional blocking consumer read_char_blocking()
 ```
 
-keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并在产生受支持字符时入队到 TTY 输入缓冲。ISR 不调用 `kprintf()`、`kput()`、VGA/serial 输出、动态分配、阻塞等待、`mdelay()`、filesystem、scheduler、syscall 或用户态相关路径。
+keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并在产生受支持字符时入队到 TTY 输入缓冲。成功入队后，TTY 层可以通过 bounded scheduler wakeup helper 唤醒一个 blocked reader。ISR 不调用 `kprintf()`、`kput()`、VGA/serial 输出、动态分配、阻塞等待、`mdelay()`、filesystem、syscall、用户态相关路径或直接 context switch。
 
 ## Scancode 策略
 
@@ -33,6 +34,14 @@ keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并�
 TTY 输入缓冲是静态固定容量 ring buffer，容量为 `TTY_INPUT_CAPACITY`。IRQ producer 使用 `terminal::enqueue_input()` 写入，非中断 consumer 使用 `terminal::read_char()` 或 `terminal::drain()` 读取。
 
 Overflow 策略是确定性的：当 ring buffer 满时丢弃新输入并递增 drop counter，不覆盖 unread input。空 buffer 读取返回 `false` 或 `0`，不 sleep、不等待 scheduler，也不依赖进程或用户态。
+
+## Blocking Consumer
+
+阶段 10 以 additive 方式增加 `terminal::read_char_blocking()` 非中断 API。它会先尝试既有 non-blocking `read_char()` 路径；如果输入缓冲为空，则通过 `sched::wait_queue_wait_until()` 挂入 TTY input wait queue，并在 IRQ disabled 状态下检查 predicate，避免 empty check 和入队之间漏掉 producer wakeup。
+
+blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-thread 上下文调用。成功写出字符时返回 `1`，否则返回 timeout、invalid argument 或 forbidden blocking context 等确定性负 wait error。既有 `read_char()` 与 `drain()` 仍保持非阻塞，不依赖 scheduler 进度。
+
+自动化 blocking smoke 使用 synthetic producer 调用 `terminal::enqueue_input()`，因此不依赖手工键盘输入也能覆盖同一 TTY wakeup 路径。手工键盘验证仍是可选项，使用时需要记录 emulator input capability。
 
 ## Console 输出边界
 
@@ -71,4 +80,4 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 ## 非目标
 
-本阶段不实现 scheduler、阻塞读、wait queue、多 TTY、完整 ANSI/VT 终端、行编辑、历史记录、shell、syscall、用户态、USB HID、APIC/IOAPIC、SMP 或国际化 keyboard layout。
+阶段 10 只新增上述最小 kernel-thread blocking consumer；仍不实现 line discipline、POSIX terminal read、fd/VFS 集成、用户可见 blocking IO、取消语义或完整 process lifecycle ownership，也不实现多 TTY、完整 ANSI/VT 终端、行编辑、历史记录、shell、USB HID、APIC/IOAPIC、SMP 或国际化 keyboard layout。

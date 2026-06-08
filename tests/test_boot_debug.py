@@ -244,6 +244,7 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
         'memory-self-test',
         'timer-irq',
         'scheduler',
+        'blocking-primitives',
         'syscall',
         'filesystem-read',
         'first-user-program',
@@ -259,6 +260,8 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
     )
     assert 'src/kernel/proc/**' in boot_debug.case_by_id('first-user-program').proc_boundary
     assert 'src/kernel/proc/**' in boot_debug.case_by_id('filesystem-user-elf').proc_boundary
+    assert 'synthetic TTY producer' in boot_debug.case_by_id('blocking-primitives').proc_boundary
+    assert 'BIGOS_BLOCKING_TIMEOUT_EXPIRED' in boot_debug.case_by_id('blocking-primitives').validation_markers
 
 
 def test_runtime_smoke_xmake_config_explicitly_sets_all_smoke_options() -> None:

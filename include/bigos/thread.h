@@ -14,13 +14,16 @@ namespace sched {
     // boundary, and no address-space switch in stage 4.
     using ThreadEntry = void (*)(void *__arg);
 
-    // Bounded early-kernel thread lifecycle state. No state implies blocking IO,
-    // user wait queues, process ownership, sleep queues, or SMP migration.
+    // Bounded early-kernel thread lifecycle state. Blocked/Sleeping are
+    // single-core cooperative kernel wait states only: they do not imply POSIX
+    // blocking IO, process ownership, user wait queues, or SMP migration.
     enum class ThreadState : uint32_t {
         Runnable = 0,   // on the run queue, waiting to be scheduled
         Running = 1,     // currently executing on the single core
         Idle = 2,        // scheduler-owned idle thread (halts when no work)
-        Terminated = 3,  // exited; retained for deferred reclamation
+        Blocked = 3,     // waiting on an explicit wait queue, not runnable
+        Sleeping = 4,    // waiting for a tick deadline or timeout, not runnable
+        Terminated = 5,  // exited; retained for deferred reclamation
     };
 }   // namespace sched
 NAMESPACE_BIGOS_END

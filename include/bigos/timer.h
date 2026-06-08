@@ -31,6 +31,12 @@ namespace timer {
     // coarse single-core timing. Calling it with interrupts disabled or inside an
     // IRQ handler busy-waits forever.
     void mdelay(uint64_t milliseconds) noexcept;
+
+    // Non-interrupt ordinary thread context only. Unlike mdelay(), this blocks
+    // the current kernel thread on the cooperative scheduler until the monotonic
+    // tick deadline expires. Returns sched::WAIT_TIMEOUT on expiry, or a negative
+    // scheduler wait error when called from a forbidden context.
+    int sleep_for(tick_t __ticks) noexcept;
 }   // namespace timer
 NAMESPACE_BIGOS_END
 

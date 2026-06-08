@@ -39,6 +39,13 @@ namespace sched {
             // Intrusive run-queue node; lifetime owned by this TCB so the run
             // queue never allocates in IRQ context.
             TCB *rq_next;
+            // Intrusive wait/sleep nodes. A thread may belong to at most one
+            // explicit wait queue and one timeout tracking list at a time.
+            TCB *wait_next;
+            WaitQueue *wait_queue;
+            TCB *sleep_next;
+            timer::tick_t deadline_tick;
+            int wait_result;
             // Intrusive terminated-list node; deferred reclamation only.
             TCB *term_next;
         };
@@ -49,8 +56,12 @@ namespace sched {
         TCB *g_idle = nullptr;
         TCB *g_run_head = nullptr;
         TCB *g_run_tail = nullptr;
+        TCB *g_sleep_head = nullptr;
         TCB *g_terminated_head = nullptr;
         ThreadId g_next_id = INVALID_THREAD_ID + 1;
+        bool g_scheduler_started = false;
+        volatile uint32_t g_nonblocking_depth = 0;
+        volatile uint32_t g_scheduler_critical_depth = 0;
 
         // Bounded reschedule intent recorded by the timer IRQ. Stage 4 never acts
         // on it from IRQ return; it is only readable state for cooperative or
@@ -61,7 +72,29 @@ namespace sched {
         // the scheduler-owned idle thread and reuses its existing kernel stack.
         TCB g_boot_tcb;
 
+        uint64_t read_rflags() noexcept {
+            uint64_t flags;
+            asm volatile("pushfq; popq %0" : "=r"(flags)::"memory");
+            return flags;
+        }
+
+        bool interrupts_enabled() noexcept {
+            constexpr uint64_t RFLAGS_IF = 1ull << 9;
+            return (read_rflags() & RFLAGS_IF) != 0;
+        }
+
+        void enter_scheduler_critical() noexcept {
+            ++g_scheduler_critical_depth;
+        }
+
+        void leave_scheduler_critical() noexcept {
+            if (g_scheduler_critical_depth > 0)
+                --g_scheduler_critical_depth;
+        }
+
         void rq_push(TCB *__t) noexcept {
+            if (__t == nullptr || __t->state != ThreadState::Runnable)
+                return;
             __t->rq_next = nullptr;
             if (g_run_tail == nullptr) {
                 g_run_head = __t;
@@ -73,14 +106,101 @@ namespace sched {
         }
 
         TCB *rq_pop() noexcept {
-            TCB *t = g_run_head;
-            if (t == nullptr)
-                return nullptr;
-            g_run_head = t->rq_next;
-            if (g_run_head == nullptr)
-                g_run_tail = nullptr;
-            t->rq_next = nullptr;
-            return t;
+            while (g_run_head != nullptr) {
+                TCB *t = g_run_head;
+                g_run_head = t->rq_next;
+                if (g_run_head == nullptr)
+                    g_run_tail = nullptr;
+                t->rq_next = nullptr;
+                if (t->state == ThreadState::Runnable)
+                    return t;
+            }
+            return nullptr;
+        }
+
+        void wait_queue_push_locked(WaitQueue *__queue, TCB *__t) noexcept {
+            __t->wait_next = nullptr;
+            __t->wait_queue = __queue;
+            if (__queue->tail == nullptr) {
+                __queue->head = __t;
+                __queue->tail = __t;
+            } else {
+                ((TCB *)__queue->tail)->wait_next = __t;
+                __queue->tail = __t;
+            }
+        }
+
+        void wait_queue_remove_locked(TCB *__t) noexcept {
+            WaitQueue *queue = __t->wait_queue;
+            if (queue == nullptr)
+                return;
+
+            TCB *prev = nullptr;
+            TCB *cur = (TCB *)queue->head;
+            while (cur != nullptr) {
+                if (cur == __t) {
+                    if (prev == nullptr)
+                        queue->head = cur->wait_next;
+                    else
+                        prev->wait_next = cur->wait_next;
+                    if (queue->tail == cur)
+                        queue->tail = prev;
+                    cur->wait_next = nullptr;
+                    cur->wait_queue = nullptr;
+                    return;
+                }
+                prev = cur;
+                cur = cur->wait_next;
+            }
+            __t->wait_queue = nullptr;
+            __t->wait_next = nullptr;
+        }
+
+        void sleep_push_locked(TCB *__t) noexcept {
+            __t->sleep_next = g_sleep_head;
+            g_sleep_head = __t;
+        }
+
+        void sleep_remove_locked(TCB *__t) noexcept {
+            TCB *prev = nullptr;
+            TCB *cur = g_sleep_head;
+            while (cur != nullptr) {
+                if (cur == __t) {
+                    if (prev == nullptr)
+                        g_sleep_head = cur->sleep_next;
+                    else
+                        prev->sleep_next = cur->sleep_next;
+                    cur->sleep_next = nullptr;
+                    return;
+                }
+                prev = cur;
+                cur = cur->sleep_next;
+            }
+            __t->sleep_next = nullptr;
+        }
+
+        bool wake_thread_locked(TCB *__t, int __result) noexcept {
+            if (__t == nullptr || __t->state == ThreadState::Terminated || __t->state == ThreadState::Runnable ||
+                __t->state == ThreadState::Running || __t->state == ThreadState::Idle)
+                return false;
+
+            wait_queue_remove_locked(__t);
+            sleep_remove_locked(__t);
+            __t->wait_result = __result;
+            __t->state = ThreadState::Runnable;
+            rq_push(__t);
+            return true;
+        }
+
+        void schedule_blocked_current_locked(TCB *__prev) noexcept {
+            TCB *next = rq_pop();
+            if (next == nullptr)
+                next = g_idle;
+            else
+                next->state = ThreadState::Running;
+
+            g_current = next;
+            switch_context(&__prev->saved_sp, next->saved_sp);
         }
 
         // New-thread startup path. Entered for the first time through the prepared
@@ -119,6 +239,11 @@ namespace sched {
         tcb->entry = __entry;
         tcb->arg = __arg;
         tcb->rq_next = nullptr;
+        tcb->wait_next = nullptr;
+        tcb->wait_queue = nullptr;
+        tcb->sleep_next = nullptr;
+        tcb->deadline_tick = 0;
+        tcb->wait_result = WAIT_OK;
         tcb->term_next = nullptr;
 
         // Build the initial stack frame so the first switch_context resume lands
@@ -139,7 +264,9 @@ namespace sched {
         tcb->saved_sp = (uint64_t)sp;
 
         bigos::irq::disableIRQ();
+        __detail::enter_scheduler_critical();
         __detail::rq_push(tcb);
+        __detail::leave_scheduler_critical();
         bigos::irq::enableIRQ();
 
         return tcb->id;
@@ -147,6 +274,7 @@ namespace sched {
 
     void yield() noexcept {
         bigos::irq::disableIRQ();
+        __detail::enter_scheduler_critical();
 
         __detail::TCB *prev = __detail::g_current;
         __detail::TCB *next = __detail::rq_pop();
@@ -154,6 +282,7 @@ namespace sched {
         if (next == nullptr) {
             // No peer runnable thread: keep running the current thread (or idle)
             // without corrupting the run queue.
+            __detail::leave_scheduler_critical();
             bigos::irq::enableIRQ();
             return;
         }
@@ -165,6 +294,7 @@ namespace sched {
 
         next->state = ThreadState::Running;
         __detail::g_current = next;
+        __detail::leave_scheduler_critical();
         switch_context(&prev->saved_sp, next->saved_sp);
 
         // Resumed: the thread that switched back to us left interrupts masked.
@@ -173,8 +303,11 @@ namespace sched {
 
     void thread_exit() noexcept {
         bigos::irq::disableIRQ();
+        __detail::enter_scheduler_critical();
 
         __detail::TCB *prev = __detail::g_current;
+        __detail::wait_queue_remove_locked(prev);
+        __detail::sleep_remove_locked(prev);
         prev->state = ThreadState::Terminated;
         // Remove from runnable scheduling and retain on the terminated list.
         // The current TCB and kernel stack are NOT freed on this exit stack;
@@ -189,6 +322,7 @@ namespace sched {
             next->state = ThreadState::Running;
 
         __detail::g_current = next;
+        __detail::leave_scheduler_critical();
         switch_context(&prev->saved_sp, next->saved_sp);
 
         // Unreachable: a terminated thread is never scheduled again.
@@ -208,10 +342,16 @@ namespace sched {
         __detail::g_boot_tcb.entry = nullptr;
         __detail::g_boot_tcb.arg = nullptr;
         __detail::g_boot_tcb.rq_next = nullptr;
+        __detail::g_boot_tcb.wait_next = nullptr;
+        __detail::g_boot_tcb.wait_queue = nullptr;
+        __detail::g_boot_tcb.sleep_next = nullptr;
+        __detail::g_boot_tcb.deadline_tick = 0;
+        __detail::g_boot_tcb.wait_result = WAIT_OK;
         __detail::g_boot_tcb.term_next = nullptr;
 
         __detail::g_idle = &__detail::g_boot_tcb;
         __detail::g_current = &__detail::g_boot_tcb;
+        __detail::g_scheduler_started = true;
 
         // Idle thread owns halt behavior: run any runnable thread, otherwise
         // hlt until an IRQ wakes the CPU, then re-evaluate.
@@ -224,10 +364,157 @@ namespace sched {
         }
     }
 
+    bool can_block() noexcept {
+        return __detail::g_scheduler_started && __detail::g_current != nullptr &&
+               __detail::g_current != __detail::g_idle && __detail::g_current->state == ThreadState::Running &&
+               __detail::g_nonblocking_depth == 0 && __detail::g_scheduler_critical_depth == 0 &&
+               __detail::interrupts_enabled();
+    }
+
+    void enter_nonblocking_context() noexcept {
+        ++__detail::g_nonblocking_depth;
+    }
+
+    void leave_nonblocking_context() noexcept {
+        if (__detail::g_nonblocking_depth > 0)
+            --__detail::g_nonblocking_depth;
+    }
+
+    void init_wait_queue(WaitQueue *__queue) noexcept {
+        if (__queue == nullptr)
+            return;
+        __queue->head = nullptr;
+        __queue->tail = nullptr;
+    }
+
+    bool wait_queue_empty(const WaitQueue *__queue) noexcept {
+        return __queue == nullptr || __queue->head == nullptr;
+    }
+
+    int wait_queue_wait_until(WaitQueue *__queue, WaitPredicate __predicate, void *__arg,
+                              timer::tick_t __timeout_ticks) noexcept {
+        if (__queue == nullptr)
+            return WAIT_INVALID;
+        if (!can_block())
+            return WAIT_BLOCK_FORBIDDEN;
+
+        bigos::irq::disableIRQ();
+        __detail::enter_scheduler_critical();
+
+        if (__predicate != nullptr && __predicate(__arg)) {
+            __detail::leave_scheduler_critical();
+            bigos::irq::enableIRQ();
+            return WAIT_OK;
+        }
+
+        __detail::TCB *self = __detail::g_current;
+        self->wait_result = WAIT_OK;
+        __detail::wait_queue_push_locked(__queue, self);
+        if (__timeout_ticks > 0) {
+            self->deadline_tick = timer::ticks() + __timeout_ticks;
+            self->state = ThreadState::Sleeping;
+            __detail::sleep_push_locked(self);
+        } else {
+            self->deadline_tick = 0;
+            self->state = ThreadState::Blocked;
+        }
+
+        __detail::leave_scheduler_critical();
+        __detail::schedule_blocked_current_locked(self);
+
+        // Resumed by wakeup or timeout. The switcher left IRQs masked.
+        bigos::irq::enableIRQ();
+        return self->wait_result;
+    }
+
+    uint32_t wake_one(WaitQueue *__queue) noexcept {
+        if (__queue == nullptr)
+            return 0;
+
+        bigos::irq::InterruptGuard guard;
+        __detail::enter_scheduler_critical();
+
+        __detail::TCB *t = (__detail::TCB *)__queue->head;
+        while (t != nullptr && t->state == ThreadState::Terminated) {
+            __detail::TCB *next = t->wait_next;
+            __detail::wait_queue_remove_locked(t);
+            t = next;
+        }
+
+        const uint32_t woke = __detail::wake_thread_locked(t, WAIT_OK) ? 1u : 0u;
+        __detail::leave_scheduler_critical();
+        return woke;
+    }
+
+    uint32_t wake_all(WaitQueue *__queue) noexcept {
+        if (__queue == nullptr)
+            return 0;
+
+        bigos::irq::InterruptGuard guard;
+        __detail::enter_scheduler_critical();
+
+        uint32_t count = 0;
+        while (__queue->head != nullptr) {
+            __detail::TCB *t = (__detail::TCB *)__queue->head;
+            if (__detail::wake_thread_locked(t, WAIT_OK))
+                ++count;
+            else
+                __detail::wait_queue_remove_locked(t);
+        }
+
+        __detail::leave_scheduler_critical();
+        return count;
+    }
+
+    int sleep_for(timer::tick_t __ticks) noexcept {
+        if (__ticks == 0)
+            return WAIT_OK;
+        if (!can_block())
+            return WAIT_BLOCK_FORBIDDEN;
+
+        bigos::irq::disableIRQ();
+        __detail::enter_scheduler_critical();
+
+        __detail::TCB *self = __detail::g_current;
+        self->wait_result = WAIT_TIMEOUT;
+        self->deadline_tick = timer::ticks() + __ticks;
+        self->state = ThreadState::Sleeping;
+        __detail::sleep_push_locked(self);
+
+        __detail::leave_scheduler_critical();
+        __detail::schedule_blocked_current_locked(self);
+
+        bigos::irq::enableIRQ();
+        return self->wait_result;
+    }
+
     void on_timer_tick() noexcept {
         // IRQ-context-safe and bounded: record reschedule intent only. No
         // allocation, no IO, no blocking, and no thread switch on IRQ return.
         ++__detail::g_reschedule_intent;
+
+        const timer::tick_t now = timer::ticks();
+        __detail::TCB *prev = nullptr;
+        __detail::TCB *cur = __detail::g_sleep_head;
+        while (cur != nullptr) {
+            __detail::TCB *next = cur->sleep_next;
+            if (now >= cur->deadline_tick) {
+                if (prev == nullptr)
+                    __detail::g_sleep_head = next;
+                else
+                    prev->sleep_next = next;
+                cur->sleep_next = nullptr;
+                __detail::wait_queue_remove_locked(cur);
+                if (cur->state == ThreadState::Sleeping) {
+                    cur->wait_result = WAIT_TIMEOUT;
+                    cur->state = ThreadState::Runnable;
+                    __detail::rq_push(cur);
+                }
+            } else {
+                prev = cur;
+            }
+            cur = next;
+        }
     }
 }   // namespace sched
 NAMESPACE_BIGOS_END

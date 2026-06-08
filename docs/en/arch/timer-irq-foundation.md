@@ -13,6 +13,8 @@ source on the current BIOS + i8259 path.
 - Maintains a single-core early-kernel tick counter exposed through
   `bigos::timer::ticks()`.
 - Provides `bigos::timer::mdelay()` as a coarse busy-wait helper.
+- Provides `bigos::timer::sleep_for()` as a cooperative scheduler sleep helper
+  for ordinary non-interrupt kernel threads.
 
 ## Tick Ownership And API Context Contract
 
@@ -22,7 +24,7 @@ the IRQ layer interacts with it only through the timer API. The IRQ0 handler in
 `src/kernel/irq/isr.cc` advances the tick by calling the timer-owned
 `bigos::timer::on_tick()`; it does not mutate `g_ticks` directly.
 
-The three early timer APIs have explicit execution-context contracts:
+The early timer APIs have explicit execution-context contracts:
 
 - `on_tick()` is IRQ-context only. It is called from the timer IRQ0 handler and
   only increments the monotonic tick. It does not allocate, block, do IO, call
@@ -35,9 +37,26 @@ The three early timer APIs have explicit execution-context contracts:
 - `mdelay()` is non-interrupt context only. It must run with maskable interrupts
   enabled so that IRQ0 keeps advancing ticks. Calling it with interrupts disabled
   or inside an IRQ handler busy-waits forever.
+- `sleep_for()` is ordinary thread context only. It delegates to the scheduler
+  wait model, blocks the current kernel thread until a tick deadline expires, and
+  returns the scheduler timeout result. It rejects IRQ/exception/syscall/fatal
+  and interrupts-disabled contexts through the scheduler blocking guard.
 
 Source-level checks confirm that `mdelay()` and tick polling never appear inside
 any ISR handler body.
+
+## Cooperative Timeout Sleep
+
+Stage 10 keeps tick ownership in the timer subsystem: IRQ0 advances time only by
+calling `bigos::timer::on_tick()`, and timeout waits read the monotonic tick
+through `bigos::timer::ticks()`. The scheduler owns waiter state and deadline
+tracking through intrusive TCB links.
+
+Expired sleepers are processed by the bounded IRQ-context-safe
+`bigos::sched::on_timer_tick()` hook. The hook may make expired threads runnable
+for a later cooperative scheduling point, but it does not allocate, free, block,
+call `mdelay()`, access filesystem services, print bulk output, or switch
+threads from IRQ return.
 
 ## ISR ABI Runtime Invariants
 
@@ -57,9 +76,9 @@ invariants without changing the `InterruptFrame` layout or register-save order:
 
 ## Non-Goals
 
-This foundation does not introduce a scheduler, preemption, blocking sleep,
-timer queues, APIC/IOAPIC, HPET, TSC calibration, SMP tick accounting, or
-user-visible time APIs.
+This foundation does not introduce preemption, IRQ-return context switching,
+SMP tick accounting, APIC/IOAPIC, HPET, TSC calibration, user-visible time APIs,
+or POSIX sleep policy.
 
 `mdelay()` is not scheduler sleep. It does not yield, does not block on a wait
 queue, and only has coarse timing semantics after PIT IRQ0 delivery is enabled.

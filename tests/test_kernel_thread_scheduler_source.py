@@ -139,7 +139,7 @@ def test_idle_thread_replaces_naked_kernel_halt_loop() -> None:
 
     # idle thread owns halt behavior.
     start_start = sched.index('void start()')
-    start_body = sched[start_start:sched.index('void on_timer_tick()')]
+    start_body = sched[start_start : sched.index('void on_timer_tick()')]
     assert 'ThreadState::Idle' in start_body
     assert 'sched::yield();' in start_body
     assert 'asm volatile("hlt")' in start_body
@@ -161,7 +161,7 @@ def test_timer_irq_records_bounded_intent_without_preemption() -> None:
     isr = read_source('src/kernel/irq/isr.cc')
     sched = read_source('src/kernel/sched/sched.cc')
 
-    timer_body = isr[isr.index('implement_isr(timer)'):isr.index('implement_isr(keyboard)')]
+    timer_body = isr[isr.index('implement_isr(timer)') : isr.index('implement_isr(keyboard)')]
     assert 'bigos::timer::on_tick();' in timer_body
     assert 'bigos::sched::on_timer_tick();' in timer_body
 
@@ -177,10 +177,11 @@ def test_irq_paths_do_not_allocate_scheduler_objects() -> None:
     isr = read_source('src/kernel/irq/isr.cc')
     interrupt = read_source('src/kernel/irq/interrupt.cc')
 
-    timer_body = isr[isr.index('implement_isr(timer)'):isr.index('implement_isr(keyboard)')]
-    keyboard_body = isr[isr.index('implement_isr(keyboard)'):isr.index('void init_isr_timer()')]
-    page_fault_body = interrupt[interrupt.index('static void page_fault_handler'):
-                                interrupt.index('static void default_external_irq_handler')]
+    timer_body = isr[isr.index('implement_isr(timer)') : isr.index('implement_isr(keyboard)')]
+    keyboard_body = isr[isr.index('implement_isr(keyboard)') : isr.index('void init_isr_timer()')]
+    page_fault_body = interrupt[
+        interrupt.index('static void page_fault_handler') : interrupt.index('static void default_external_irq_handler')
+    ]
 
     forbidden = (
         'kmalloc',
@@ -214,3 +215,73 @@ def test_scheduler_smoke_is_default_off_and_bounded() -> None:
     assert 'create_kernel_thread(&scheduler_smoke_worker_b, nullptr);' in kernel
     assert 'BIGOS_SCHED_THREAD_A' in kernel
     assert 'BIGOS_SCHED_THREAD_B' in kernel
+
+
+def test_blocking_primitives_are_intrusive_and_context_guarded() -> None:
+    thread_h = read_source('include/bigos/thread.h')
+    sched_h = read_source('include/bigos/sched.h')
+    sched = read_source('src/kernel/sched/sched.cc')
+    interrupt = read_source('src/kernel/irq/interrupt.cc')
+
+    assert 'Blocked' in thread_h
+    assert 'Sleeping' in thread_h
+    assert 'struct WaitQueue' in sched_h
+    assert 'using WaitPredicate' in sched_h
+    assert 'WAIT_TIMEOUT = -110' in sched_h
+    for token in ('wait_next', 'wait_queue', 'sleep_next', 'deadline_tick', 'wait_result'):
+        assert token in sched
+
+    assert 'bool can_block() noexcept' in sched_h
+    assert 'g_nonblocking_depth' in sched
+    assert 'g_scheduler_critical_depth' in sched
+    assert 'interrupts_enabled()' in sched
+    assert 'NonblockingContextGuard nonblocking_guard' in interrupt
+
+
+def test_wait_queue_wakeup_and_timeout_paths_are_allocation_free() -> None:
+    sched = read_source('src/kernel/sched/sched.cc')
+
+    wait_start = sched.index('int wait_queue_wait_until')
+    wake_start = sched.index('uint32_t wake_one')
+    tick_start = sched.index('void on_timer_tick()')
+    wait_body = sched[wait_start:wake_start]
+    wake_body = sched[wake_start:tick_start]
+    tick_body = sched[tick_start:]
+
+    assert 'wait_queue_push_locked(__queue, self);' in wait_body
+    assert 'ThreadState::Blocked' in wait_body
+    assert 'ThreadState::Sleeping' in wait_body
+    assert 'sleep_push_locked(self);' in wait_body
+    assert 'schedule_blocked_current_locked(self);' in wait_body
+    assert 'wake_thread_locked(t, WAIT_OK)' in wake_body
+    assert 'wait_queue_remove_locked(cur);' in tick_body
+    assert 'cur->wait_result = WAIT_TIMEOUT;' in tick_body
+    assert 'cur->state = ThreadState::Runnable;' in tick_body
+
+    for body in (wait_body, wake_body, tick_body):
+        for token in ('kmalloc', 'alloc_kernel_pages', 'free(', 'kprintf', 'serial_puts', 'mdelay'):
+            assert token not in body
+
+
+def test_blocking_smoke_is_default_off_and_deterministic() -> None:
+    xmake = read_source('xmake.lua')
+    kernel = read_source('src/kernel/kernel.cc')
+
+    option_index = xmake.index('option("blocking_smoke")')
+    default_index = xmake.index('set_default(false)', option_index)
+    define_index = xmake.index('add_defines("BIGOS_BLOCKING_SMOKE")')
+    assert option_index < default_index < define_index
+
+    assert '#ifdef BIGOS_BLOCKING_SMOKE' in kernel
+    assert 'blocking_smoke_reader' in kernel
+    assert 'blocking_smoke_producer' in kernel
+    assert 'terminal::enqueue_input(BLOCKING_SMOKE_CHAR)' in kernel
+    for marker in (
+        'BIGOS_BLOCKING_WAIT_BLOCKED',
+        'BIGOS_BLOCKING_WAKE_SENT',
+        'BIGOS_BLOCKING_WAIT_RESUMED',
+        'BIGOS_BLOCKING_TIMEOUT_BLOCKED',
+        'BIGOS_BLOCKING_TIMEOUT_EXPIRED',
+        'BIGOS_BLOCKING_SMOKE_PASSED',
+    ):
+        assert marker in kernel

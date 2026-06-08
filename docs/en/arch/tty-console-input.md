@@ -13,9 +13,10 @@ keyboard IRQ1
   -> PS/2 set-1 bounded decode
   -> terminal::enqueue_input()
   -> non-interrupt consumer read_char()/drain()
+  -> optional blocking consumer read_char_blocking()
 ```
 
-The keyboard ISR reads one scancode byte, updates fixed decoder state, and enqueues supported characters into the TTY input buffer. The ISR does not call `kprintf()`, `kput()`, VGA/serial output, dynamic allocation, blocking waits, `mdelay()`, filesystem, scheduler, syscall, or user-mode paths.
+The keyboard ISR reads one scancode byte, updates fixed decoder state, and enqueues supported characters into the TTY input buffer. On a successful enqueue, the TTY layer may wake one blocked reader through the bounded scheduler wakeup helper. The ISR does not call `kprintf()`, `kput()`, VGA/serial output, dynamic allocation, blocking waits, `mdelay()`, filesystem, syscall, user-mode paths, or direct context switching.
 
 ## Scancode Policy
 
@@ -33,6 +34,14 @@ Extended scancode prefixes `0xe0`/`0xe1` and unmapped scancodes are counted as u
 The TTY input buffer is a static fixed-capacity ring buffer with capacity `TTY_INPUT_CAPACITY`. The IRQ producer writes through `terminal::enqueue_input()`; non-interrupt consumers read through `terminal::read_char()` or `terminal::drain()`.
 
 Overflow is deterministic: when the ring buffer is full, new input is dropped and the drop counter increments; unread input is not overwritten. Empty-buffer reads return `false` or `0` and do not sleep, wait for the scheduler, or depend on processes or user mode.
+
+## Blocking Consumer
+
+Stage 10 adds `terminal::read_char_blocking()` as an additive non-interrupt API. It first tries the existing non-blocking `read_char()` path. If the input buffer is empty, it waits on the TTY input wait queue through `sched::wait_queue_wait_until()`, using a predicate checked with IRQs disabled so a producer wakeup cannot be missed between the empty check and enqueue.
+
+The blocking API is valid only from ordinary running kernel-thread context where `sched::can_block()` succeeds. It returns `1` when it writes a character to the caller buffer, or a deterministic negative wait error such as timeout, invalid argument, or forbidden blocking context. Existing `read_char()` and `drain()` behavior remains non-blocking and does not depend on scheduler progress.
+
+The automated blocking smoke uses a synthetic producer that calls `terminal::enqueue_input()` and therefore exercises the same TTY wakeup path without requiring manual keyboard input. Manual keyboard validation remains optional and should record emulator input capability when used.
 
 ## Console Output Boundary
 
@@ -72,3 +81,4 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 ## Non-Goals
 
 This stage does not implement a scheduler, blocking reads, wait queues, multiple TTYs, full ANSI/VT terminal behavior, line editing, command history, shell, syscall, user mode, USB HID, APIC/IOAPIC, SMP, or internationalized keyboard layouts.
+Stage 10 adds only the minimal kernel-thread blocking consumer described above; it still does not implement line discipline, POSIX terminal reads, fd/VFS integration, user-visible blocking IO, cancellation, or full process lifecycle ownership.

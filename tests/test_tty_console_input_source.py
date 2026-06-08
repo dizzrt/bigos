@@ -103,9 +103,23 @@ def test_tty_ring_buffer_is_fixed_capacity_fifo_and_drops_new_input() -> None:
     assert '*out = g_input.buffer[tail];' in tty
     assert 'while (count < capacity && read_char(&out[count]))' in tty
 
-    forbidden_tokens = ('kmalloc', 'alloc_kernel_pages', 'while (true)', 'sleep', 'wait')
+    enqueue_body = tty[tty.index('bool enqueue_input') : tty.index('bool read_char')]
+    forbidden_tokens = ('kmalloc', 'alloc_kernel_pages', 'while (true)', 'sleep_for', 'read_char_blocking')
     for token in forbidden_tokens:
-        assert token not in tty
+        assert token not in enqueue_body
+
+
+def test_tty_blocking_consumer_is_additive_and_uses_wait_queue() -> None:
+    tty_h = read_source('include/bigos/tty.h')
+    tty = read_source('src/kernel/terminal/tty.cc')
+
+    assert 'bool read_char(char *out) noexcept;' in tty_h
+    assert 'size_t drain(char *out, size_t capacity) noexcept;' in tty_h
+    assert 'int read_char_blocking(char *out, timer::tick_t timeout_ticks = 0) noexcept;' in tty_h
+    assert 'sched::WaitQueue g_input_wait;' in tty
+    assert 'sched::init_wait_queue(&g_input_wait);' in tty
+    assert 'sched::wake_one(&g_input_wait);' in tty
+    assert 'sched::wait_queue_wait_until(&g_input_wait, &input_available, nullptr, timeout_ticks)' in tty
 
 
 def test_console_api_wraps_vga_without_serial_mirroring() -> None:

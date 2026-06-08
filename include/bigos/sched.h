@@ -3,11 +3,27 @@
 
 #include <bigos/types.h>
 #include <bigos/thread.h>
+#include <bigos/timer.h>
 
 NAMESPACE_BIGOS_BEG
 namespace sched {
     // Invalid/unassigned thread id sentinel.
     constexpr ThreadId INVALID_THREAD_ID = 0;
+
+    constexpr int WAIT_OK = 0;
+    constexpr int WAIT_TIMEOUT = -110;
+    constexpr int WAIT_INVALID = -22;
+    constexpr int WAIT_BLOCK_FORBIDDEN = -1;
+
+    using WaitPredicate = bool (*)(void *__arg) noexcept;
+
+    // Intrusive single-core wait queue. The opaque links point at scheduler-owned
+    // TCBs; callers own only the queue head/tail storage and never allocate nodes
+    // on the sleep/wakeup fast path.
+    struct WaitQueue {
+        void *head;
+        void *tail;
+    };
 
     // Create a kernel thread.
     //
@@ -46,6 +62,32 @@ namespace sched {
     // thread's hlt. This is single-core only and does not return to its caller in
     // the normal sense; the boot thread becomes a scheduled thread.
     void start() noexcept;
+
+    // Context guard used by blocking APIs. Blocking is allowed only from ordinary
+    // running kernel-thread context after sched::start(), with maskable IRQs
+    // enabled and outside IRQ/exception/syscall/fatal/scheduler critical paths.
+    bool can_block() noexcept;
+    void enter_nonblocking_context() noexcept;
+    void leave_nonblocking_context() noexcept;
+
+    void init_wait_queue(WaitQueue *__queue) noexcept;
+    bool wait_queue_empty(const WaitQueue *__queue) noexcept;
+
+    // Wait until predicate is true or the queue is woken. timeout_ticks == 0
+    // means no timeout. A positive timeout returns WAIT_TIMEOUT when the deadline
+    // expires. The predicate is checked with maskable IRQs disabled to avoid a
+    // missed producer wakeup between the caller's empty check and enqueue.
+    int wait_queue_wait_until(WaitQueue *__queue, WaitPredicate __predicate, void *__arg,
+                              timer::tick_t __timeout_ticks = 0) noexcept;
+
+    // Allocation-free wakeups. IRQ handlers may call these bounded helpers, but
+    // they only make waiters runnable for a later cooperative scheduling point.
+    uint32_t wake_one(WaitQueue *__queue) noexcept;
+    uint32_t wake_all(WaitQueue *__queue) noexcept;
+
+    // Cooperative scheduler sleep. The current thread becomes non-runnable until
+    // the monotonic tick deadline expires. It returns WAIT_TIMEOUT on expiry.
+    int sleep_for(timer::tick_t __ticks) noexcept;
 
     // IRQ-context-safe bounded scheduler tick hook.
     //

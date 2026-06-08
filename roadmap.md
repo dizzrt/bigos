@@ -23,10 +23,16 @@ BigOS 已完成早期 bring-up，并形成一个带 smoke 验证的单核内核�
   `kernel` 的高半区 ELF64 内核。
 - Runtime core: VGA/COM1 output, kernel-owned IDT, exception/IRQ/syscall
   dispatch, i8259 PIC, PIT IRQ0 tick, keyboard IRQ1 to TTY/console, cooperative
-  scheduler, and `int 0x80` syscall dispatch are implemented.
+  scheduler, explicit blocking primitives, and `int 0x80` syscall dispatch are
+  implemented.
 - 运行时核心：已实现 VGA/COM1 输出、内核自有 IDT、exception/IRQ/syscall 分发、
-  i8259 PIC、PIT IRQ0 tick、键盘 IRQ1 到 TTY/console、协作式调度器和
+  i8259 PIC、PIT IRQ0 tick、键盘 IRQ1 到 TTY/console、协作式调度器、显式阻塞原语和
   `int 0x80` syscall 分发。
+- Blocking model: thread wait states, wait queues, wake-one/wake-all, timeout
+  waits, blocking-context guards, timer-backed sleep, and blocking TTY consumer
+  paths are implemented under the single-core cooperative boundary.
+- 阻塞模型：已在单核协作式边界内实现线程等待状态、wait queue、wake-one/wake-all、
+  timeout wait、阻塞上下文保护、timer-backed sleep 和阻塞式 TTY consumer 路径。
 - Memory: buddy, slab/kmalloc, kernel virtual memory, direct map, user
   address-space derivation, safe user teardown, and owned empty PT/PD/PDPT
   reclamation are implemented.
@@ -49,11 +55,12 @@ BigOS 已完成早期 bring-up，并形成一个带 smoke 验证的单核内核�
   QEMU/Bochs helper 路径由 `xmake run` 和 `tools/boot_debug.py` 提供。
 - Validation: the stage 9 runtime smoke validation matrix is productized with
   QEMU headless serial-marker checks, per-case timeouts, structured validation
-  artifacts, explicit skip/block reasons, and scenario-specific Bochs or
-  QEMU+Bochs cross-validation guidance.
+  artifacts, explicit skip/block reasons, blocking primitive smoke coverage, and
+  scenario-specific Bochs or QEMU+Bochs cross-validation guidance.
 - 验证：阶段 9 runtime smoke 验证矩阵已产品化，包含 QEMU headless 串口 marker
   检查、按 case 配置的 timeout、结构化验证 artifact、明确的 skipped/blocked
-  原因，以及面向特定场景的 Bochs 或 QEMU+Bochs 交叉验证指引。
+  原因、blocking primitive smoke 覆盖，以及面向特定场景的 Bochs 或 QEMU+Bochs
+  交叉验证指引。
 
 ## Current Boundary / 当前边界
 
@@ -72,14 +79,14 @@ BIOS boot
   -> memory/runtime init
   -> IRQ/timer/TTY
   -> cooperative scheduler
+  -> blocking/sleep primitives
   -> int 0x80 syscall
   -> optional ring3 smoke
   -> optional exFAT-backed ELF smoke
 
 Missing general OS layer / 尚缺通用 OS 层
 
-blocking/sleep
-  -> preemptive scheduler
+preemptive scheduler
   -> process lifecycle
   -> fd/VFS/page cache
   -> VMA/demand paging/COW
@@ -113,6 +120,10 @@ repeatable validation matrix.
 - 结构化记录工具可用性、跳过的验证、串口 marker、日志路径和剩余风险。
 
 ### Stage 10: Blocking And Sleep Primitives / 阶段 10：阻塞与睡眠原语
+
+Status: completed and archived as `introduce-kernel-blocking-primitives`.
+
+状态：已完成，并以 `introduce-kernel-blocking-primitives` 归档。
 
 Goal: define the kernel waiting model before expanding process, filesystem, or
 device-driver behavior.
@@ -245,30 +256,32 @@ Goal: introduce user virtual-memory policy before demand paging and COW.
 
 ## Near-Term Recommendation / 近期建议
 
-With runtime smoke validation productized, the next change should focus on the
-kernel waiting model:
+With blocking primitives landed, the next change should choose the highest-risk
+runtime boundary to stabilize first:
 
-随着 runtime smoke 验证产品化完成，下一项 change 应聚焦内核等待模型：
+随着阻塞原语落地，下一项 change 应选择当前风险最高的 runtime 边界优先稳定：
 
-1. `introduce-kernel-blocking-primitives`
-   - Add thread wait states, sleep queues, wakeups, and timeout semantics without
-     full preemption or SMP.
-   - 增加线程等待状态、sleep queue、wakeup 和超时语义，但不引入完整抢占或 SMP。
-   - Use the stage 9 smoke matrix to protect memory, timer, scheduler, syscall,
-     filesystem, and user-mode smoke boundaries while changing scheduler-adjacent
-     code.
-   - 修改调度相关代码时，使用阶段 9 smoke 矩阵保护 memory、timer、scheduler、
-     syscall、filesystem 和 user-mode smoke 边界。
-2. `upgrade-scheduler-semantics` or `introduce-process-lifecycle`
-   - Choose scheduler preemption first if timer-driven reschedule rules and
-     critical-section semantics are the highest risk.
-   - 如果 timer 驱动重调度规则和临界区语义风险最高，则优先推进调度器抢占。
-   - Choose process lifecycle first if `wait`/`exit`, PID ownership, and normal
-     process builds are needed before broader userland work.
-   - 如果更需要先具备 `wait`/`exit`、PID 所有权和常规进程构建能力，则优先推进进程生命周期。
+1. `upgrade-scheduler-semantics`
+   - Choose this first if timer-driven preemption, reschedule-on-IRQ-return,
+     preemption-disable rules, and scheduler critical-section behavior are the
+     most important risks before expanding process or file I/O behavior.
+   - 如果在扩展进程或文件 I/O 行为前，timer 驱动抢占、IRQ return 重调度、
+     preemption-disable 规则和 scheduler 临界区行为是最高风险，则优先选择它。
+2. `introduce-process-lifecycle`
+   - Choose this first if normal process builds, PID ownership, parent/child
+     relationships, `wait`/`exit`, and general `exec argv/envp` semantics are
+     needed before broader userland work.
+   - 如果更需要先具备常规进程构建、PID 所有权、父子关系、`wait`/`exit` 和通用
+     `exec argv/envp` 语义，再推进更广泛 userland，则优先选择它。
+3. `introduce-fd-vfs-shell`
+   - Choose this after process lifecycle starts to need stable `open`/`read`/`close`
+     semantics or when read-only exFAT needs to sit behind a minimal VFS boundary.
+   - 当进程生命周期开始需要稳定的 `open`/`read`/`close` 语义，或只读 exFAT 需要接入
+     最小 VFS 边界后，再选择它。
 
-After blocking primitives land, the project can choose between scheduler
-preemption, process lifecycle, or VFS/file-descriptor work with lower regression
-risk.
+Scheduler preemption and process lifecycle remain the most likely next major
+stages; VFS/file-descriptor work is safer once process ownership and blocking
+semantics are both stable.
 
-在阻塞原语落地后，项目再选择推进调度器抢占、进程生命周期或 VFS/文件描述符，回归风险会更低。
+调度器抢占和进程生命周期仍是最可能的下一批主要阶段；当进程所有权和阻塞语义都稳定后，
+VFS/文件描述符工作会更安全。

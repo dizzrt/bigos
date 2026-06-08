@@ -1,5 +1,6 @@
 #include <bigos/console.h>
 #include <bigos/keyboard.h>
+#include <bigos/sched.h>
 #include <bigos/tty.h>
 
 namespace bigos::terminal {
@@ -12,9 +13,14 @@ namespace bigos::terminal {
         };
 
         InputRing g_input;
+        sched::WaitQueue g_input_wait;
 
         size_t next_index(size_t index) noexcept {
             return (index + 1) % TTY_INPUT_CAPACITY;
+        }
+
+        bool input_available(void *) noexcept {
+            return g_input.tail != g_input.head;
         }
     }   // namespace
 
@@ -22,6 +28,7 @@ namespace bigos::terminal {
         g_input.head = 0;
         g_input.tail = 0;
         g_input.dropped = 0;
+        sched::init_wait_queue(&g_input_wait);
         init_console();
         input::init_keyboard_decoder();
     }
@@ -36,6 +43,7 @@ namespace bigos::terminal {
 
         g_input.buffer[head] = ch;
         g_input.head = next;
+        sched::wake_one(&g_input_wait);
         return true;
     }
 
@@ -60,6 +68,20 @@ namespace bigos::terminal {
         while (count < capacity && read_char(&out[count]))
             ++count;
         return count;
+    }
+
+    int read_char_blocking(char *out, timer::tick_t timeout_ticks) noexcept {
+        if (out == nullptr)
+            return sched::WAIT_INVALID;
+
+        while (true) {
+            if (read_char(out))
+                return 1;
+
+            const int wait = sched::wait_queue_wait_until(&g_input_wait, &input_available, nullptr, timeout_ticks);
+            if (wait < 0)
+                return wait;
+        }
     }
 
     TTYInputStats input_stats() noexcept {

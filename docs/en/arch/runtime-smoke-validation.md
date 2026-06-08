@@ -19,12 +19,15 @@ The runner explicitly configures each case through `xmake f`, builds through the
 | `memory-self-test` | `--mm_self_test=y` | `BIGOS_MM_SELF_TEST_PASSED` | 10s | Early allocator and direct-map self-test. |
 | `timer-irq` | `--timer_smoke=y` | `BIGOS_TIMER_IRQ` | 10s | PIC/PIT IRQ0 marker path. |
 | `scheduler` | `--scheduler_smoke=y` | `BIGOS_SCHED_THREAD_B` | 10s | Cooperative kernel-thread context switch path. |
+| `blocking-primitives` | `--blocking_smoke=y` | `BIGOS_BLOCKING_SMOKE_PASSED` | 15s | Synthetic TTY producer plus wait queue wakeup and timeout sleep. |
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` minimal syscall ABI path. |
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO plus read-only exFAT file read path. |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | Compiles `src/kernel/proc/**`; not part of normal boot. |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | Compiles `src/kernel/proc/**` and packages `/boot/user/init.elf`; not part of normal boot. |
 
 Each case enables only the listed smoke switch and explicitly disables the other smoke switches before building. Outside the runner, all runtime smoke options remain default-off unless a developer explicitly configures them with `xmake f ...=y`.
+
+The `blocking-primitives` case emits intermediate markers `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, and `BIGOS_BLOCKING_TIMEOUT_EXPIRED` before the final pass marker. It uses a synthetic TTY producer, so automated QEMU headless validation does not require manual keyboard input; optional manual keyboard validation should be recorded separately when performed.
 
 ## Manual Single-Case Flow
 
@@ -51,6 +54,7 @@ The runner writes a Markdown-first validation artifact to `build/test/runtime-sm
 - `case id`: stable matrix case identifier.
 - `xmake configuration`: explicit smoke switches used for the case.
 - `expected marker` and `observed marker`: COM1 marker comparison.
+- `blocking markers`: for the blocking case, intermediate wait/wake/timeout markers when present in the serial log.
 - `serial log path`: generated log used as the source of truth.
 - `timeout` and `exit status`: bounded wait and failure context.
 - `status`: `passed`, `failed`, `skipped`, or `blocked`.
@@ -61,7 +65,7 @@ Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, o
 
 ## Cross-Validation
 
-QEMU headless is the preferred automated serial-marker path for the matrix. Bochs or QEMU+Bochs cross-validation remains scenario-specific for changes that affect boot, real-mode/protected-mode/long-mode transition, interrupt dispatch, timer IRQ, ATA PIO, port IO, or low-level driver behavior.
+QEMU headless is the preferred automated serial-marker path for the matrix. Bochs or QEMU+Bochs cross-validation remains scenario-specific for changes that affect boot, real-mode/protected-mode/long-mode transition, interrupt dispatch, timer IRQ, keyboard IRQ, ATA PIO, port IO, or low-level driver behavior.
 
 When Bochs cross-validation is unavailable, record why it was skipped, which QEMU, build, source-level, or manual checks were used instead, and what residual hardware-behavior risk remains.
 

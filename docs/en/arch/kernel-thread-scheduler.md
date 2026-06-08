@@ -4,24 +4,38 @@ BigOS stage 4 introduces a minimal kernel-thread model and single-core round-rob
 
 ## Scope
 
-- Define a kernel thread control block (TCB): thread ID, lifecycle state, saved stack pointer, kernel stack range, entry function and argument, intrusive run queue node, and terminated-list node.
+- Define a kernel thread control block (TCB): thread ID, lifecycle state, saved stack pointer, kernel stack range, entry function and argument, intrusive run queue node, intrusive wait/sleep nodes, and terminated-list node.
 - Provide an x86_64 cooperative context switch (`switch_context`) that saves/restores System V callee-saved registers (`rbp`, `rbx`, `r12`-`r15`) and stack pointer.
 - Provide single-core round-robin `yield()`, `sched::start()` entry, and scheduler-owned idle thread.
 - Replace the bare `hlt` loop at the end of `kernel()` with the idle thread.
-- Let timer IRQ0 only record reschedule intent through bounded, IRQ-context-safe `sched::on_timer_tick()`.
+- Let timer IRQ0 only record reschedule intent and wake expired sleepers through bounded, IRQ-context-safe `sched::on_timer_tick()`.
 
 ## Non-Goals And Boundaries
 
 - **Single-core**: no SMP balancing, per-CPU run queues, IPI, affinity, or cross-CPU synchronization.
 - **No user mode**: no ring3 transition, process model, syscall ABI, address-space switch, or user-program loading.
-- **No blocking sleep**: no priority scheduling, CFS, real-time scheduling, wait queues, sleep queues, blocking IO, or scheduler sleep. Thread states are only runnable, running, idle, or terminated.
+- **Stage 10 blocking only**: wait queues and tick-based sleep are single-core cooperative kernel-thread primitives. There is still no priority scheduling, CFS, real-time scheduling, POSIX blocking IO, SMP, process wait ownership, or user-visible blocking policy.
 - Does not change fixed boot addresses, higher-half base, kernel load base, BootInfo ABI, direct map, `KVMEM_BASE`, IDT vector allocation, or `InterruptFrame` ABI.
 
 ## Thread Model And State
 
-Each kernel thread is represented by a TCB that records a stable thread ID, `ThreadState`, saved stack pointer (cooperative context pointer), kernel stack base/size, entry function, and argument. `ThreadState` is limited to `Runnable`, `Running`, `Idle`, and `Terminated`; no state implies blocking IO, user wait queues, process ownership, or SMP migration.
+Each kernel thread is represented by a TCB that records a stable thread ID, `ThreadState`, saved stack pointer (cooperative context pointer), kernel stack base/size, entry function, and argument. `ThreadState` now includes `Runnable`, `Running`, `Idle`, `Blocked`, `Sleeping`, and `Terminated`. `Blocked` and `Sleeping` are bounded non-runnable kernel wait states only; they do not imply POSIX blocking IO, user wait queues, process ownership, cancellation policy, or SMP migration.
 
-Both the run queue and terminated list are intrusive lists. Their nodes (`rq_next`, `term_next`) are owned by the TCB itself and share its lifetime. The scheduler path therefore does not depend on ordinary heap containers and does not need to allocate queue nodes in IRQ handlers.
+The run queue, wait queues, sleep list, and terminated list are intrusive lists. Their nodes (`rq_next`, `wait_next`, `sleep_next`, `term_next`) are owned by the TCB itself and share its lifetime. The scheduler path therefore does not depend on ordinary heap containers and does not allocate queue nodes in IRQ handlers. A thread may belong to at most one explicit wait queue and one timeout tracking list at a time.
+
+## Blocking Context Contract
+
+`sched::can_block()` permits blocking only after `sched::start()` from an ordinary running kernel thread with maskable IRQs enabled, outside IRQ/exception/syscall dispatch, fatal diagnostics, and scheduler critical sections. Blocking APIs return deterministic negative wait errors when this contract is violated; they do not silently busy-wait or enqueue the current thread from a forbidden context.
+
+`sched::enter_nonblocking_context()` / `sched::leave_nonblocking_context()` mark the shared interrupt/syscall dispatch path as nonblocking. The guard protects timer IRQ0, keyboard IRQ1, CPU exceptions, and `int 0x80` dispatch from calling wait APIs. Stage 10 keeps syscall dispatch bounded and nonblocking.
+
+## Wait Queues And Sleep
+
+`sched::WaitQueue` is a small owner-supplied head/tail object whose members point at scheduler-owned TCBs. `sched::wait_queue_wait_until()` checks an optional predicate with IRQs disabled, records queue membership before transitioning the current thread to `Blocked` or `Sleeping`, and switches cooperatively to another runnable thread or the idle thread. This predicate check avoids a missed wakeup between an empty-buffer check and enqueue.
+
+`sched::wake_one()` and `sched::wake_all()` are allocation-free and may be called from bounded IRQ-safe producer paths. Wakeup removes the selected waiter from its wait queue and timeout tracking exactly once, changes it back to `Runnable`, and appends it to the run queue for a later cooperative scheduling point. Wakeup does not perform IRQ-return preemption.
+
+`sched::sleep_for()` and `timer::sleep_for()` use the existing monotonic PIT tick to block the current thread until a deadline expires. Expired sleepers are scanned by `sched::on_timer_tick()` through a bounded intrusive list; the IRQ path does not allocate, free, block, print bulk output, access filesystem services, or switch threads.
 
 ## Allocator Context Contract
 
@@ -39,18 +53,20 @@ Callers execute `cli` before `switch_context`, and each resume point executes `s
 
 ## Scheduling Policy And Idle
 
-`yield()` is a single-core round-robin cooperative switch. If another runnable thread exists, the current thread is pushed to the tail of the run queue and the next runnable thread is selected. If no other runnable thread exists, the current thread or idle keeps running without corrupting the run queue.
+`yield()` is a single-core round-robin cooperative switch. If another runnable thread exists, the current thread is pushed to the tail of the run queue and the next runnable thread is selected. Blocked, sleeping, idle, and terminated threads are not eligible for normal runnable selection. If no other runnable thread exists, the current thread or idle keeps running without corrupting the run queue.
 
 `sched::start()` adopts the boot/main execution context as the scheduler-owned idle thread, reusing the existing boot stack. It then enters an idle loop: first `yield()` to runnable threads, otherwise execute `hlt` and wait for an IRQ before reevaluating. Idle `hlt` must run with IRQs enabled, so `start()` is called after `irq::enableIRQ()`, allowing timer IRQ0 to wake the CPU.
 
 ## Thread Exit And Deferred Reclamation
 
-`thread_exit()` marks the current thread `Terminated`, removes it from runnable scheduling, and links it into the scheduler-owned terminated list. It **does not** immediately free the current thread's TCB or kernel stack on the exiting stack. Safe reclamation is deferred to a later lifecycle change; this stage only guarantees terminated threads are never reinserted into the runnable queue and the stage 4 thread count is bounded.
+`thread_exit()` removes any stale wait/sleep membership, marks the current thread `Terminated`, removes it from runnable scheduling, and links it into the scheduler-owned terminated list. It **does not** immediately free the current thread's TCB or kernel stack on the exiting stack. Safe reclamation is deferred to a later lifecycle change; this stage only guarantees terminated threads are never reinserted into the runnable queue and the stage 4 thread count is bounded.
 
 ## Timer And IRQ Boundary
 
-The timer IRQ0 handler continues to advance ticks through `bigos::timer::on_tick()`, then calls bounded IRQ-context-safe `bigos::sched::on_timer_tick()`. The latter only increments a reschedule-intent counter; it does not allocate, free, block, perform IO, or switch threads. Stage 4 does not preempt on IRQ return. Thread switches happen only in non-interrupt context through `yield()`/`thread_exit()`. IRQ dispatch keeps the existing EOI, saved-frame, register-restore, and `iretq` semantics. CPU exceptions remain diagnostic-only and are not wired into thread recovery, wakeup, or retry.
+The timer IRQ0 handler continues to advance ticks through `bigos::timer::on_tick()`, then calls bounded IRQ-context-safe `bigos::sched::on_timer_tick()`. The latter increments a reschedule-intent counter and wakes expired sleepers through allocation-free intrusive state; it does not allocate, free, block, perform IO, or switch threads. Stage 10 does not preempt on IRQ return. Thread switches happen only in non-interrupt context through `yield()`, wait/sleep APIs, or `thread_exit()`. IRQ dispatch keeps the existing EOI, saved-frame, register-restore, and `iretq` semantics. CPU exceptions remain diagnostic-only and are not wired into thread recovery, wakeup, or retry.
 
 ## Validation Smoke
 
 `scheduler_smoke` is default off. When `BIGOS_SCHEDULER_SMOKE` is enabled, `kernel()` creates two worker threads. Each emits fixed-count `BIGOS_SCHED_THREAD_A` / `BIGOS_SCHED_THREAD_B` markers and calls `yield()`, proving two kernel threads can switch cooperatively. Ordinary boot does not create smoke threads and does not emit scheduler markers.
+
+`blocking_smoke` is also default off. When `BIGOS_BLOCKING_SMOKE` is enabled, `kernel()` creates a blocking reader and a synthetic TTY producer. The smoke emits `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, `BIGOS_BLOCKING_TIMEOUT_EXPIRED`, and `BIGOS_BLOCKING_SMOKE_PASSED` to validate wait queue wakeup, timeout sleep, and cooperative resume without manual keyboard input.

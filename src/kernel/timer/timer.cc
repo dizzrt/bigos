@@ -1,6 +1,7 @@
 #include <bigos/timer.h>
 
 #include <bigos/io.h>
+#include <bigos/sched.h>
 
 NAMESPACE_BIGOS_BEG
 namespace timer::__detail {
@@ -27,6 +28,10 @@ namespace timer {
         while (ticks() < target) {
             asm volatile("pause");
         }
+    }
+
+    int sleep_for(tick_t __ticks) noexcept {
+        return bigos::sched::sleep_for(__ticks);
     }
 }   // namespace timer
 NAMESPACE_BIGOS_END

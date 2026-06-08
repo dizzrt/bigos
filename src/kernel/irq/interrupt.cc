@@ -1,5 +1,6 @@
 #include <bigos/io.h>
 #include <bigos/panic.h>
+#include <bigos/sched.h>
 #include <bigos/syscall.h>
 #ifdef BIGOS_USER_PROCESS
 #include <bigos/proc.h>
@@ -88,6 +89,20 @@ namespace irq {
         static void load_idt(const IDTPointer *__ptr) noexcept {
             asm volatile("lidt (%0)" : : "r"(__ptr) : "memory");
         }
+
+        class NonblockingContextGuard {
+        public:
+            NonblockingContextGuard() noexcept {
+                bigos::sched::enter_nonblocking_context();
+            }
+
+            NonblockingContextGuard(const NonblockingContextGuard &) = delete;
+            NonblockingContextGuard &operator=(const NonblockingContextGuard &) = delete;
+
+            ~NonblockingContextGuard() noexcept {
+                bigos::sched::leave_nonblocking_context();
+            }
+        };
     }   // namespace __detail
 
     void __detail::initIDT() noexcept {
@@ -117,6 +132,7 @@ namespace irq {
     extern "C" void irq_dispatch(InterruptFrame *__frame) {
         if (__frame == nullptr)
             return;
+        __detail::NonblockingContextGuard nonblocking_guard;
 
         if (__detail::is_cpu_exception(__frame->vector)) {
             // CPU exceptions never send an i8259 EOI.

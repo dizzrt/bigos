@@ -47,6 +47,12 @@ option("scheduler_smoke")
     set_description("enable validation-only scheduler two-thread smoke")
 option_end()
 
+option("blocking_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only blocking primitive smoke")
+option_end()
+
 option("user_vmem_smoke")
     set_default(false)
     set_showmenu(true)
@@ -258,6 +264,10 @@ target("kernel")
 
     if has_config("scheduler_smoke") then
         add_defines("BIGOS_SCHEDULER_SMOKE")
+    end
+
+    if has_config("blocking_smoke") then
+        add_defines("BIGOS_BLOCKING_SMOKE")
     end
 
     if has_config("user_vmem_smoke") then
