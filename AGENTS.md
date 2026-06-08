@@ -77,9 +77,11 @@ Common commands:
 ```bash
 xmake
 xmake run qemu
+xmake run qemu -- --display none
 xmake run qemu-gdb
-xmake run bochs-sdl2
 xmake run bochs
+xmake run bochs -- --display sdl2
+xmake run bochs -- --display none
 ```
 
 Validation build switches (all off by default, see `xmake.lua`):
@@ -115,9 +117,10 @@ The self-test emits `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED`,
 the `#PF` handler emits `BIGOS_PAGE_FAULT`, and the unified panic path emits
 `BIGOS_PANIC code=<code> source=<source>` on COM1 and VGA. Configure smoke
 options with `xmake f ...`; `xmake run qemu` launches the graphical QEMU flow,
-`xmake run qemu-gdb` starts QEMU paused with the default GDB stub, `xmake run
-bochs-sdl2` launches the SDL2 Bochs flow, and `xmake run bochs` launches the
-non-SDL2 fallback.
+`xmake run qemu -- --display none` launches the QEMU headless flow, `xmake run
+qemu-gdb` starts QEMU paused with the default GDB stub, and `xmake run bochs`
+launches the SDL2 Bochs flow by default. Use `xmake run bochs -- --display none`
+for Bochs no-GUI mode.
 
 Notes:
 
@@ -127,8 +130,9 @@ Notes:
   current Legacy BIOS/IDE raw image path; this does not implement UEFI, OVMF,
   ESP/FAT images, virtio, AHCI/SATA, NVMe, or new storage drivers.
 - Prefer QEMU with `--display none` for automated smoke tests, serial marker
-  checks, and CI-like local validation. Prefer graphical QEMU for quick local
-  boot validation when Bochs-specific debugging is not required.
+  checks, and CI-like local validation, using either the `xmake run qemu -- --display none`
+  wrapper or the equivalent Python helper path. Prefer graphical QEMU for quick
+  local boot validation when Bochs-specific debugging is not required.
 - Use Bochs, or Bochs/QEMU cross-validation when available, for early boot,
   BIOS, real-mode/protected-mode/long-mode transition, ATA PIO, interrupt, port
   IO, or hardware-behavior investigations.

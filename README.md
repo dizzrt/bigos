@@ -185,18 +185,22 @@ Local emulator runs for the current Legacy BIOS/MBR/exFAT path:
 
 ```bash
 xmake run qemu
+xmake run qemu -- --display none
 xmake run qemu-gdb
-xmake run bochs-sdl2
 xmake run bochs
+xmake run bochs -- --display sdl2
+xmake run bochs -- --display none
 ```
 
 `xmake run qemu` launches graphical QEMU against the generated raw image and
-writes COM1 output to `build/test/qemu.serial.log`. `xmake run qemu-gdb` starts
+writes COM1 output to `build/test/qemu.serial.log`. `xmake run qemu -- --display
+none` launches QEMU without an interactive display. `xmake run qemu-gdb` starts
 QEMU paused with the default GDB stub (`target remote localhost:1234`) and writes
-COM1 output to `build/test/qemu-gdb.serial.log`. `xmake run bochs-sdl2` launches
-the SDL2 Bochs flow. `xmake run bochs` is the non-SDL2 fallback. These targets
+COM1 output to `build/test/qemu-gdb.serial.log`. `xmake run bochs` defaults to
+the SDL2 Bochs flow, `xmake run bochs -- --display sdl2` selects it explicitly,
+and `xmake run bochs -- --display none` selects Bochs no-GUI mode. These targets
 build the kernel and boot artifacts through xmake, then call the Python image
-helper with `--skip-build`.
+helper with `--skip-build` and forward target arguments after `--`.
 
 The Python helper remains useful for raw-image generation, generated Bochs
 configuration, QEMU launch command inspection, serial-marker checks, and
@@ -250,9 +254,10 @@ Current scope:
 - QEMU headless automation uses the helper display selector, for example
   `--emulator qemu --display none`; no separate `qemu-headless` xmake target is
   provided.
-- `xmake run bochs-sdl2` is the SDL2 Legacy BIOS debug entry, and
-  `xmake run bochs` is the non-SDL2 fallback. Bochs remains useful for early
-  boot, BIOS, ATA PIO, interrupt, and hardware-behavior investigations.
+- `xmake run bochs` is the SDL2-by-default Legacy BIOS debug entry; use
+  `xmake run bochs -- --display sdl2` for explicit SDL2 or `xmake run bochs --
+  --display none` for Bochs no-GUI mode. Bochs remains useful for early boot,
+  BIOS, ATA PIO, interrupt, and hardware-behavior investigations.
 - A future UEFI workflow is planned as a separate path with isolated ESP/FAT
   image artifacts and QEMU + OVMF as the preferred smoke-test path.
 - The workflow does not change `boot.s`, `boot.cc`, `BootInfo`, `link.lds`, the
@@ -275,9 +280,11 @@ Run the generated Bochs flows:
 
 ```bash
 xmake run qemu
+xmake run qemu -- --display none
 xmake run qemu-gdb
-xmake run bochs-sdl2
 xmake run bochs
+xmake run bochs -- --display sdl2
+xmake run bochs -- --display none
 ```
 
 Notes:

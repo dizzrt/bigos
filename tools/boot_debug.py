@@ -28,7 +28,8 @@ DEFAULT_SERIAL_LOG = BUILD_DIR / 'test' / 'serial.log'
 DEFAULT_QEMU_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu.serial.log'
 DEFAULT_QEMU_GDB_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu-gdb.serial.log'
 MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'
-EMULATORS = ('bochs', 'bochs-sdl2', 'qemu', 'qemu-gdb')
+EMULATORS = ('bochs', 'qemu', 'qemu-gdb')
+BOCHS_DISPLAYS = ('sdl2', 'none')
 QEMU_DISPLAYS = ('graphical', 'none')
 
 SECTOR_SIZE = 512
@@ -197,11 +198,29 @@ def run_command(
 
 
 def is_bochs_backend(emulator: str) -> bool:
-    return emulator in ('bochs', 'bochs-sdl2')
+    return emulator == 'bochs'
 
 
 def is_qemu_backend(emulator: str) -> bool:
     return emulator in ('qemu', 'qemu-gdb')
+
+
+def resolve_display(emulator: str, display: str | None) -> str:
+    if is_bochs_backend(emulator):
+        resolved = display or 'sdl2'
+        allowed = BOCHS_DISPLAYS
+    elif is_qemu_backend(emulator):
+        resolved = display or 'graphical'
+        allowed = QEMU_DISPLAYS
+    else:
+        raise StageError('argument validation', f'unsupported emulator backend: {emulator}')
+    if resolved not in allowed:
+        allowed_values = ', '.join(allowed)
+        raise StageError(
+            'argument validation',
+            f'unsupported display {resolved!r} for {emulator}; expected one of: {allowed_values}',
+        )
+    return resolved
 
 
 def check_tools(emulator: str, need_emulator: bool, need_build: bool) -> None:
@@ -621,6 +640,7 @@ def render_bochsrc(
     romimage: str | None,
     vgaromimage: str | None,
     serial_log: Path | None,
+    display: str,
     extra_lines: Sequence[str],
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -633,6 +653,7 @@ def render_bochsrc(
     lines = [
         'memory: host=32, guest=32',
         f'cpu: model={DEFAULT_CPU_MODEL}, count=1',
+        f'display_library: {"nogui" if display == "none" else display}',
         'boot: disk',
         'ata0: enabled=1, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14',
         f'ata0-master: type=disk, path="{image_path}", mode=flat, '
@@ -831,6 +852,7 @@ def run(args: argparse.Namespace) -> int:
     image_size = parse_size(args.image_size)
     should_launch = not args.no_launch
     emulator = args.emulator
+    display = resolve_display(emulator, args.display)
     default_serial_log = default_serial_log_for(emulator)
     serial_log = Path(args.serial_log).resolve() if args.serial_log else default_serial_log
     marker = args.expect_serial_marker
@@ -846,12 +868,10 @@ def run(args: argparse.Namespace) -> int:
 
     if is_bochs_backend(emulator):
         bochs_extra = list(args.bochs_extra)
-        if emulator == 'bochs-sdl2' and 'display_library: sdl2' not in bochs_extra:
-            bochs_extra.append('display_library: sdl2')
         if args.bochsrc:
             log_stage(f'using custom Bochs config: {bochsrc_path}')
         else:
-            render_bochsrc(image_path, bochsrc_path, args.romimage, args.vgaromimage, serial_log, bochs_extra)
+            render_bochsrc(image_path, bochsrc_path, args.romimage, args.vgaromimage, serial_log, display, bochs_extra)
 
     print(f'image: {image_path}')
     print(f'emulator: {emulator}')
@@ -866,7 +886,7 @@ def run(args: argparse.Namespace) -> int:
                 qemu_command(
                     image_path,
                     serial_log,
-                    args.display,
+                    display,
                     gdb=emulator == 'qemu-gdb',
                     extra_args=args.qemu_extra,
                 )
@@ -888,7 +908,7 @@ def run(args: argparse.Namespace) -> int:
             command = qemu_command(
                 image_path,
                 serial_log,
-                args.display,
+                display,
                 gdb=emulator == 'qemu-gdb',
                 extra_args=args.qemu_extra,
             )
@@ -929,9 +949,7 @@ def make_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         '--display',
-        choices=QEMU_DISPLAYS,
-        default='graphical',
-        help='QEMU display mode; use none for headless serial-marker smoke',
+        help='display mode selected by emulator: bochs=sdl2|none, qemu/qemu-gdb=graphical|none',
     )
     run_parser.add_argument(
         '--keep-image',

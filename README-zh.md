@@ -170,17 +170,21 @@ ELF smoke 还会构建 `build/bin/user/init.elf` 并打包为 `/boot/user/init.e
 
 ```bash
 xmake run qemu
+xmake run qemu -- --display none
 xmake run qemu-gdb
-xmake run bochs-sdl2
 xmake run bochs
+xmake run bochs -- --display sdl2
+xmake run bochs -- --display none
 ```
 
 `xmake run qemu` 使用图形 QEMU 启动生成的 raw image，并把 COM1 输出写入
-`build/test/qemu.serial.log`。`xmake run qemu-gdb` 会让 QEMU 在启动前暂停并开启
-默认 GDB stub（`target remote localhost:1234`），COM1 输出写入
-`build/test/qemu-gdb.serial.log`。`xmake run bochs-sdl2` 启动 SDL2 Bochs 流程；
-`xmake run bochs` 是非 SDL2 后备入口。这些 target 都通过 xmake 构建 kernel 和
-boot artifacts，然后以 `--skip-build` 调用 Python 镜像辅助脚本。
+`build/test/qemu.serial.log`。`xmake run qemu -- --display none` 以无交互显示模式
+启动 QEMU。`xmake run qemu-gdb` 会让 QEMU 在启动前暂停并开启默认 GDB stub
+（`target remote localhost:1234`），COM1 输出写入 `build/test/qemu-gdb.serial.log`。
+`xmake run bochs` 默认启动 SDL2 Bochs 流程；`xmake run bochs -- --display sdl2`
+显式选择 SDL2，`xmake run bochs -- --display none` 选择 Bochs no-GUI 模式。这些
+target 都通过 xmake 构建 kernel 和 boot artifacts，然后以 `--skip-build` 调用
+Python 镜像辅助脚本，并转发 `--` 后的 target arguments。
 
 Python helper 仍用于 raw image 生成、Bochs 配置生成、QEMU 启动命令查看、
 serial marker 检查和 no-launch/offline validation：
@@ -229,8 +233,9 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
   把 raw image 暴露为 IDE disk，保持当前 ATA PIO 路径。
 - QEMU headless automation 通过 helper 的 display 参数实现，例如
   `--emulator qemu --display none`；不新增独立 `qemu-headless` xmake target。
-- `xmake run bochs-sdl2` 是 SDL2 Legacy BIOS 调试入口，`xmake run bochs` 是非
-  SDL2 后备入口。Bochs 仍适合早期 boot、BIOS、ATA PIO、中断和硬件行为差异排查。
+- `xmake run bochs` 是默认 SDL2 的 Legacy BIOS 调试入口；使用 `xmake run
+  bochs -- --display sdl2` 可显式选择 SDL2，使用 `xmake run bochs -- --display
+  none` 可选择 Bochs no-GUI 模式。Bochs 仍适合早期 boot、BIOS、ATA PIO、中断和硬件行为差异排查。
 - 未来 UEFI workflow 会作为独立路径引入，使用隔离的 ESP/FAT 镜像产物，并以
   QEMU + OVMF 作为首选 smoke test 路径。
 - 该流程不修改 `boot.s`、`boot.cc`、`BootInfo`、`link.lds`、高半区内核地址或
@@ -251,9 +256,11 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
 
 ```bash
 xmake run qemu
+xmake run qemu -- --display none
 xmake run qemu-gdb
-xmake run bochs-sdl2
 xmake run bochs
+xmake run bochs -- --display sdl2
+xmake run bochs -- --display none
 ```
 
 注意事项：

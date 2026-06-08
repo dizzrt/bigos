@@ -33,7 +33,7 @@ MBR -> DBR -> exDBR -> boot.bin          BOOTX64.EFI
 本阶段的非目标：
 
 - 不实现 `BOOTX64.EFI`。
-- 不改变 `xmake run bochs-sdl2` 或 `xmake run bochs` 的 Legacy BIOS/MBR/exFAT/Bochs 语义。
+- 不改变 `xmake run bochs` 及其 `--display sdl2|none` target arguments 的 Legacy BIOS/MBR/exFAT/Bochs 语义。
 - 不替换 MBR、DBR、extended DBR、`boot.bin` 或现有 raw exFAT image。
 - 不实现 `BOOTX64.EFI`、ESP/FAT UEFI image、QEMU/OVMF UEFI 入口或 UEFI Runtime Services。
 - 不要求 kernel 调用 BIOS interrupt、UEFI Boot Services 或 UEFI Runtime Services。
@@ -196,7 +196,7 @@ UEFI `GetMemoryMap` 初步映射方向：
 
 ## 调试入口与镜像规划
 
-`xmake run qemu`、`xmake run qemu-gdb`、`xmake run bochs-sdl2` 和 `xmake run bochs` 是 Legacy BIOS/MBR/exFAT 调试路径：
+`xmake run qemu`、`xmake run qemu -- --display none`、`xmake run qemu-gdb` 和带 `--display sdl2|none` 的 `xmake run bochs` 是 Legacy BIOS/MBR/exFAT 调试路径：
 
 - 构建 MBR、DBR、extended DBR、`boot.bin` 和 root `kernel`。
 - 生成 raw exFAT disk image。
@@ -213,7 +213,7 @@ UEFI `GetMemoryMap` 初步映射方向：
 
 - BIOS 路径继续使用 raw exFAT image 和 `build/test/os.raw` 一类产物。
 - UEFI 路径使用 ESP/FAT image，包含 `EFI/BOOT/BOOTX64.EFI` 和 kernel ELF。
-- UEFI 固件配置、临时目录和 emulator 配置不得覆盖 `xmake run qemu`、`xmake run qemu-gdb`、`xmake run bochs-sdl2` 或 `xmake run bochs` 使用的 Legacy BIOS 产物。
+- UEFI 固件配置、临时目录和 emulator 配置不得覆盖 `xmake run qemu`、`xmake run qemu-gdb` 或 `xmake run bochs` 使用的 Legacy BIOS 产物。
 - UEFI smoke test 正式首选 QEMU + OVMF；Bochs UEFI 仅作为可选验证路径。
 - Legacy BIOS 继续使用当前 raw exFAT image，并通过 QEMU IDE 或 Bochs 启动。
 
@@ -241,4 +241,4 @@ exFAT、固定低地址和页表准备的实现。BIOS 与 UEFI loader 需要共
 | 6 | BIOS 与 UEFI 共享 ELF64 加载规则规范，但不要求近期共享 loader 代码 | 否 | 当前 BIOS ELF 加载行为文档化 | 规则与实现漂移、错误处理不一致 | `document-common-elf64-loader-rules` |
 
 每个阶段都是后续 change 候选项，不属于本 change 的运行时代码实现任务。后续实现必须保持
-Legacy BIOS 路径可回退，并用 `xmake run qemu`、`xmake run qemu-gdb`、`xmake run bochs-sdl2` 或 `xmake run bochs` 继续验证现有调试入口。
+Legacy BIOS 路径可回退，并用 `xmake run qemu`、`xmake run qemu -- --display none`、`xmake run qemu-gdb` 或 `xmake run bochs` 继续验证现有调试入口。

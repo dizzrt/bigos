@@ -85,7 +85,7 @@ def test_generated_bochsrc_is_sanitized(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
     bochsrc = tmp_path / 'bochsrc.bxrc'
 
-    boot_debug.render_bochsrc(image, bochsrc, None, None, None, [])
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, 'sdl2', [])
 
     contents = bochsrc.read_text(encoding='utf-8')
     assert f'path="{image}"' in contents
@@ -97,14 +97,52 @@ def test_generated_bochsrc_is_sanitized(tmp_path: Path) -> None:
     assert 'C:\\' not in contents
 
 
-def test_generated_bochsrc_can_inject_sdl2_display(tmp_path: Path) -> None:
+def test_generated_bochsrc_defaults_to_sdl2_display(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
     bochsrc = tmp_path / 'bochsrc.bxrc'
 
-    boot_debug.render_bochsrc(image, bochsrc, None, None, None, ['display_library: sdl2'])
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', None), [])
 
     contents = bochsrc.read_text(encoding='utf-8')
     assert 'display_library: sdl2' in contents
+
+
+def test_generated_bochsrc_can_select_sdl2_display_explicitly(tmp_path: Path) -> None:
+    image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
+    bochsrc = tmp_path / 'bochsrc.bxrc'
+
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', 'sdl2'), [])
+
+    contents = bochsrc.read_text(encoding='utf-8')
+    assert 'display_library: sdl2' in contents
+
+
+def test_generated_bochsrc_can_select_no_gui_display(tmp_path: Path) -> None:
+    image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
+    bochsrc = tmp_path / 'bochsrc.bxrc'
+
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', 'none'), [])
+
+    contents = bochsrc.read_text(encoding='utf-8')
+    assert 'display_library: nogui' in contents
+
+
+def test_bochs_extra_can_override_generated_display(tmp_path: Path) -> None:
+    image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
+    bochsrc = tmp_path / 'bochsrc.bxrc'
+
+    boot_debug.render_bochsrc(
+        image,
+        bochsrc,
+        None,
+        None,
+        None,
+        boot_debug.resolve_display('bochs', 'sdl2'),
+        ['display_library: nogui'],
+    )
+
+    contents = bochsrc.read_text(encoding='utf-8')
+    assert contents.index('display_library: sdl2') < contents.index('display_library: nogui')
 
 
 def test_qemu_command_uses_legacy_bios_ide_disk_and_headless_serial(tmp_path: Path) -> None:
@@ -180,6 +218,15 @@ def test_run_parser_rejects_smoke_shortcuts() -> None:
             raise AssertionError(f'{shortcut} should be rejected')
 
 
+def test_run_parser_rejects_removed_bochs_sdl2_backend() -> None:
+    parser = boot_debug.make_parser()
+
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args(['run', '--emulator', 'bochs-sdl2'])
+
+    assert error.value.code == 2
+
+
 def test_run_parser_accepts_skip_build() -> None:
     parser = boot_debug.make_parser()
 
@@ -188,6 +235,19 @@ def test_run_parser_accepts_skip_build() -> None:
     assert args.skip_build is True
     assert args.emulator == 'qemu'
     assert args.display == 'none'
+
+
+def test_display_resolution_uses_backend_defaults() -> None:
+    assert boot_debug.resolve_display('bochs', None) == 'sdl2'
+    assert boot_debug.resolve_display('qemu', None) == 'graphical'
+    assert boot_debug.resolve_display('qemu-gdb', None) == 'graphical'
+
+
+def test_display_resolution_rejects_invalid_backend_combinations() -> None:
+    with pytest.raises(boot_debug.StageError, match='unsupported display'):
+        boot_debug.resolve_display('qemu', 'sdl2')
+    with pytest.raises(boot_debug.StageError, match='unsupported display'):
+        boot_debug.resolve_display('bochs', 'graphical')
 
 
 def test_preflight_requires_only_selected_emulator(monkeypatch) -> None:
@@ -285,7 +345,7 @@ def test_qemu_serial_marker_timeout_cleans_process_group(tmp_path: Path, monkeyp
 def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     xmake = (PROJECT_ROOT / 'xmake.lua').read_text(encoding='utf-8')
 
-    assert 'target("bochs-sdl2")' in xmake
+    assert 'target("bochs-sdl2")' not in xmake
     assert 'target("bochs")' in xmake
     assert 'target("qemu")' in xmake
     assert 'target("qemu-gdb")' in xmake
@@ -297,6 +357,8 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     assert 'path.join(boot_bindir, "exdbr.bin")' in xmake and 'bytes > 4096 bytes' in xmake
     assert 'path.join(boot_bindir, "boot.bin")' in xmake and 'bytes > 524288 bytes' in xmake
     assert '--skip-build' in xmake
-    assert '--emulator bochs-sdl2' in xmake
-    assert '--emulator qemu' in xmake
-    assert '--emulator qemu-gdb' in xmake
+    assert 'process.openv("python3", args)' in xmake
+    assert 'option.get("arguments")' in xmake
+    assert 'run_boot_debug("bochs", "build/test/bochs.serial.log",' in xmake
+    assert 'run_boot_debug("qemu", "build/test/qemu.serial.log",' in xmake
+    assert 'run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log",' in xmake

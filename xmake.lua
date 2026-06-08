@@ -89,6 +89,21 @@ local boot_srcdir = path.join("$(projectdir)", "src", "arch", "x86", "boot")
 local boot_bindir = path.join("$(builddir)", "bin", "x86", "boot")
 local boot_tempdir = path.join("$(builddir)", "temp", "x86", "boot")
 
+local function run_boot_debug(emulator, serial_log, target_args, process)
+    local args = {"tools/boot_debug.py", "run", "--emulator", emulator, "--skip-build", "--serial-log", serial_log}
+    local first_arg = target_args[1] == "--" and 2 or 1
+    for index = first_arg, #target_args do
+        local arg = target_args[index]
+        table.insert(args, arg)
+    end
+    local proc = process.openv("python3", args)
+    local _, status = proc:wait()
+    proc:close()
+    if status ~= 0 then
+        error(string.format("boot_debug.py failed with exit code %d", status))
+    end
+end
+
 target("boot-mbr")
     set_kind("phony")
     set_default(false)
@@ -316,15 +331,9 @@ target("bochs")
     set_default(false)
     add_deps("kernel", "boot-artifacts")
     on_run(function (target)
-        os.exec("python3 tools/boot_debug.py run --emulator bochs --skip-build --serial-log build/test/bochs.serial.log")
-    end)
-
-target("bochs-sdl2")
-    set_kind("phony")
-    set_default(false)
-    add_deps("kernel", "boot-artifacts")
-    on_run(function (target)
-        os.exec("python3 tools/boot_debug.py run --emulator bochs-sdl2 --skip-build --serial-log build/test/bochs-sdl2.serial.log")
+        import("core.base.option")
+        import("core.base.process")
+        run_boot_debug("bochs", "build/test/bochs.serial.log", option.get("arguments") or {}, process)
     end)
 
 target("qemu")
@@ -332,7 +341,9 @@ target("qemu")
     set_default(false)
     add_deps("kernel", "boot-artifacts")
     on_run(function (target)
-        os.exec("python3 tools/boot_debug.py run --emulator qemu --skip-build --serial-log build/test/qemu.serial.log")
+        import("core.base.option")
+        import("core.base.process")
+        run_boot_debug("qemu", "build/test/qemu.serial.log", option.get("arguments") or {}, process)
     end)
 
 target("qemu-gdb")
@@ -340,5 +351,7 @@ target("qemu-gdb")
     set_default(false)
     add_deps("kernel", "boot-artifacts")
     on_run(function (target)
-        os.exec("python3 tools/boot_debug.py run --emulator qemu-gdb --skip-build --serial-log build/test/qemu-gdb.serial.log")
+        import("core.base.option")
+        import("core.base.process")
+        run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log", option.get("arguments") or {}, process)
     end)

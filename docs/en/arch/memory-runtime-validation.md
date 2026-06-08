@@ -7,7 +7,7 @@ BigOS can run an optional early memory runtime self-test after `init_mem()` and 
 - Configure with `xmake f --mm_self_test=y`, then run `xmake` or a local emulator target such as `xmake run qemu`.
 - To generate and validate a raw image without launching an emulator, run `uv run python tools/boot_debug.py run --no-launch --serial-log build/test/serial.log`.
 - For bounded automated smoke validation, prefer the QEMU headless helper path: `uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`.
-- For Bochs cross-checking, run `uv run python tools/boot_debug.py run --emulator bochs --serial-log build/test/bochs.serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED` when local Bochs ROM/display configuration is available.
+- For Bochs cross-checking, run `uv run python tools/boot_debug.py run --emulator bochs --display none --serial-log build/test/bochs.serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED` when local Bochs ROM/display configuration is available.
 
 ## Markers
 
