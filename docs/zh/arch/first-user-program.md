@@ -56,8 +56,8 @@ commit 前准备新 image，发布前失败会 rollback；若 commit 后旧 imag
 确定性的 exec failure status 终止当前进程。
 
 ELF 初始用户栈使用最小 libc-like 形状：`argc`、`argv[]`、`envp[]` 和 bounded 字符串。
-它刻意省略 auxv、TLS、dynamic linker 状态、file descriptor、VFS 和 user-space libc
-startup。
+它刻意省略 auxv、TLS、dynamic linker 状态和 user-space libc startup。Process-local
+file descriptor 与只读 VFS 壳层是内核管理的 lifecycle 状态，不由初始用户栈构造。
 
 ## ring3 进入
 

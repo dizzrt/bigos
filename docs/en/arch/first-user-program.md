@@ -61,7 +61,9 @@ cannot be resumed after commit.
 
 The initial ELF user stack uses a minimal libc-like shape: `argc`, `argv[]`,
 `envp[]`, and bounded strings. It intentionally omits auxv, TLS, dynamic linker
-state, file descriptors, VFS, and user-space libc startup.
+state, and user-space libc startup. Process-local file descriptors and the
+read-only VFS shell are kernel-managed lifecycle state, not objects constructed
+by the initial user stack.
 
 ## Ring3 Entry
 

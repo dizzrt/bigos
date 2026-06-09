@@ -15,8 +15,14 @@ BigOS stage 11 keeps the minimal kernel-thread model single-core, but extends th
 
 - **Single-core**: no SMP balancing, per-CPU run queues, IPI, affinity, or cross-CPU synchronization.
 - **No full priority scheduler**: stage 11 records bounded priority/policy metadata only. Default selection remains deterministic single-core round-robin.
-- **No process or user ABI expansion**: timer preemption does not make syscalls sleepable, process-lifecycle aware, or user-visible POSIX scheduling policy.
-- **Stage 11 blocking boundary**: wait queues and tick-based sleep remain single-core kernel-thread primitives. There is still no CFS, real-time scheduling, POSIX blocking IO, SMP, process wait ownership, or user-visible blocking policy.
+- **Bounded process and syscall integration**: timer preemption does not create
+  user-visible POSIX scheduling policy. Later process/fd/VFS syscalls may use
+  `sched::can_block()` from ordinary process syscall contexts, but only inside
+  the same single-core blocking contract.
+- **Stage 11 blocking boundary**: wait queues and tick-based sleep remain
+  single-core kernel-thread primitives. There is still no CFS, real-time
+  scheduling, POSIX blocking IO policy, SMP, or user-visible cancellation and
+  signal semantics.
 - Does not change fixed boot addresses, higher-half base, kernel load base, BootInfo ABI, direct map, `KVMEM_BASE`, IDT vector allocation, or `InterruptFrame` ABI.
 
 ## Thread Model And State
@@ -29,7 +35,7 @@ The run queue, wait queues, sleep list, and terminated list are intrusive lists.
 
 `sched::can_block()` permits blocking only after `sched::start()` from an ordinary running kernel thread with maskable IRQs enabled, outside IRQ/exception/syscall dispatch, fatal diagnostics, and scheduler critical sections. Blocking APIs return deterministic negative wait errors when this contract is violated; they do not silently busy-wait or enqueue the current thread from a forbidden context.
 
-`sched::enter_nonblocking_context()` / `sched::leave_nonblocking_context()` mark the shared interrupt/syscall dispatch path as nonblocking. The guard protects timer IRQ0, keyboard IRQ1, CPU exceptions, and `int 0x80` dispatch from calling wait APIs. `sched::disable_preemption()` / `sched::enable_preemption()` provide a separate bounded timer-preemption guard; scheduler critical sections use that guard so run queue, wait queue, sleep list, state transitions, and switch preparation cannot be interrupted by IRQ-return preemption. Syscall dispatch remains bounded and nonblocking.
+`sched::enter_nonblocking_context()` / `sched::leave_nonblocking_context()` mark forbidden dispatch regions as nonblocking. The guard protects timer IRQ0, keyboard IRQ1, CPU exceptions, and non-process or otherwise unsupported `int 0x80` contexts from calling wait APIs. `sched::disable_preemption()` / `sched::enable_preemption()` provide a separate bounded timer-preemption guard; scheduler critical sections use that guard so run queue, wait queue, sleep list, state transitions, and switch preparation cannot be interrupted by IRQ-return preemption. Ordinary process syscalls that preserve IF and run after scheduler start may pass `sched::can_block()`; unsupported contexts remain deterministic nonblocking error paths.
 
 ## Wait Queues And Sleep
 

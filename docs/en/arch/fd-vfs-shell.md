@@ -1,7 +1,9 @@
 # File Descriptors And VFS Shell
 
-BigOS stage 13 introduces a minimal read-only fd/VFS boundary before writable
-filesystems, page cache, VMA policy, or user-space libc.
+BigOS stage 13 introduced a minimal read-only fd/VFS boundary before writable
+filesystems, page cache, broad `mmap`, or user-space libc. Stage 14 builds on
+that boundary with bounded VMA metadata, `brk`, restricted anonymous mapping,
+and VMA-backed syscall-buffer validation.
 
 ## VFS Boundary
 
@@ -63,5 +65,6 @@ filesystems, page cache, VMA policy, or user-space libc.
 
 - No write syscall for regular files, directory mutation, permissions, cwd,
   relative path resolution, `dup`, `pipe`, `select`, `lseek`, `stat`, page cache,
-  async I/O, `mmap`, `brk`, demand paging, COW, user-space libc, SMP, or UEFI
-  backend is introduced in this stage.
+  async I/O, broad or file-backed `mmap`, demand paging, COW, user-space libc,
+  SMP, or UEFI backend is introduced by this fd/VFS shell. `brk` and restricted
+  anonymous mapping are covered by the later bounded VMA/user-memory API.

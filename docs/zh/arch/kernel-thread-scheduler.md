@@ -15,8 +15,8 @@ BigOS 阶段 11 仍保持最小内核线程模型的单核边界，但把调度�
 
 - **单核**：没有 SMP balancing、per-CPU run queue、IPI、affinity 或跨 CPU 同步。
 - **无完整优先级调度器**：阶段 11 只记录 bounded priority/policy metadata，默认选择策略仍是确定性的单核 round-robin。
-- **不扩展进程或用户 ABI**：timer preemption 不让 syscall 变成可睡眠、process-lifecycle aware 或用户可见 POSIX scheduling policy。
-- **阶段 11 阻塞边界**：wait queue 与 tick-based sleep 仍是单核内核线程原语。仍没有 CFS、实时调度、POSIX blocking IO、SMP、process wait ownership 或用户可见阻塞策略。
+- **Bounded process 与 syscall integration**：timer preemption 不创建用户可见的 POSIX scheduling policy。后续 process/fd/VFS syscall 可以在普通进程 syscall 上下文中使用 `sched::can_block()`，但只限同一个单核 blocking contract。
+- **阶段 11 阻塞边界**：wait queue 与 tick-based sleep 仍是单核内核线程原语。仍没有 CFS、实时调度、POSIX blocking IO policy、SMP、用户可见 cancellation 或 signal 语义。
 - 不改变 boot 固定地址、higher-half base、kernel load base、BootInfo ABI、direct map、`KVMEM_BASE`、IDT vector 分配或 `InterruptFrame` ABI。
 
 ## 线程模型与状态
@@ -29,7 +29,7 @@ run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表�
 
 `sched::can_block()` 只允许 `sched::start()` 之后的普通 running kernel thread 在 maskable IRQ enabled、且不处于 IRQ/exception/syscall dispatch、fatal diagnostic 或 scheduler critical section 时阻塞。违反契约时 blocking API 返回确定性负 wait error，不会在禁止上下文中静默 busy-wait 或把当前线程入队。
 
-`sched::enter_nonblocking_context()` / `sched::leave_nonblocking_context()` 将共享 interrupt/syscall dispatch 路径标记为 nonblocking。该 guard 覆盖 timer IRQ0、keyboard IRQ1、CPU exception 与 `int 0x80` dispatch。`sched::disable_preemption()` / `sched::enable_preemption()` 提供独立的 bounded timer-preemption guard；scheduler critical section 使用该 guard，因此 run queue、wait queue、sleep list、状态转换与 switch preparation 不会被 IRQ-return preemption 打断。syscall dispatch 仍保持 bounded 且不可阻塞。
+`sched::enter_nonblocking_context()` / `sched::leave_nonblocking_context()` 将禁止阻塞的 dispatch 区域标记为 nonblocking。该 guard 覆盖 timer IRQ0、keyboard IRQ1、CPU exception，以及非进程或不受支持的 `int 0x80` 上下文，避免它们调用 wait API。`sched::disable_preemption()` / `sched::enable_preemption()` 提供独立的 bounded timer-preemption guard；scheduler critical section 使用该 guard，因此 run queue、wait queue、sleep list、状态转换与 switch preparation 不会被 IRQ-return preemption 打断。普通进程 syscall 在保留 IF 且 scheduler 已启动时可以通过 `sched::can_block()`；不支持的上下文仍走确定性 nonblocking error path。
 
 ## Wait Queue 与 Sleep
 

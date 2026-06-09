@@ -6,10 +6,11 @@ BigOS is an early-stage x86_64 operating system kernel written mainly in
 freestanding C++17, C17, and assembly. It has grown from a boot/kernel skeleton
 into a single-core kernel with a minimal user-mode loop: bootstrapping,
 text/serial output, interrupt/exception/syscall handling, a PIT timer tick, a
-keyboard-driven TTY input path, a cooperative kernel-thread scheduler, an
-`int 0x80` syscall entry, default-off ring3 user-program smokes, a bounded
-ELF64 user-program loader, a read-only block/exFAT path, and a fairly complete
-early kernel memory-management stack.
+keyboard-driven TTY input path, a bounded timer-aware kernel-thread scheduler,
+wait queues and timeout sleep, an `int 0x80` syscall entry, process lifecycle
+core, read-only fd/VFS services, default-off ring3 user-program smokes, a
+bounded ELF64 user-program loader, VMA-backed user-memory validation, and a
+fairly complete early kernel memory-management stack.
 
 This repository is a research/toy OS kernel project, not a hosted application or
 service.
@@ -38,19 +39,25 @@ Implemented or partially implemented:
   a minimal `mdelay` busy-wait primitive.
 - Keyboard IRQ1 scancode decode (US Set 1) feeding a fixed-capacity TTY/console
   input path; console output routes through VGA.
-- Cooperative (non-preemptive) single-core kernel-thread scheduler with 1-page
-  kernel stacks, an x86_64 context switch, a round-robin `yield()`, and an idle
-  thread; the timer IRQ only records bounded reschedule intent.
-- `int 0x80` syscall entry with a minimal register ABI and a diagnostic
-  dispatcher (`SYS_DEBUG_WRITE`, `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`).
+- Single-core kernel-thread scheduler with 1-page kernel stacks, an x86_64
+  context switch, round-robin `yield()`, scheduler-owned idle thread, wait
+  queues, timeout sleep, preemption-disable guards, and bounded IRQ-return timer
+  preemption.
+- `int 0x80` syscall entry with a minimal register ABI and a bounded dispatcher:
+  `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, `SYS_WAIT`,
+  `SYS_OPEN`, `SYS_READ`, `SYS_CLOSE`, `SYS_BRK`, and `SYS_MAP_ANON`.
 - Default-off first ring3 user program smoke: a flat embedded image enters
   ring3 via TSS/RSP0 and `iretq`, then completes a `SYS_WRITE`/`SYS_EXIT` loop.
 - Default-off user ELF smoke: a bounded ELF64 `ET_EXEC` image is packaged as
   `/boot/user/init.elf`, read from exFAT, mapped into a derived user address
   space, and entered in ring3.
-- Read-only kernel block/filesystem path: synchronous ATA PIO sector reads,
-  MBR exFAT partition discovery, read-only mount, absolute path lookup, and
-  bounded file reads for controlled Bochs raw images.
+- Process lifecycle core with PID/parent-child state, wait/exit/reap semantics,
+  process-local fd table, bounded exec image replacement, and safe teardown on
+  exit or user fault.
+- Read-only kernel block/filesystem path and VFS shell: synchronous ATA PIO
+  sector reads, MBR exFAT partition discovery, read-only mount, absolute path
+  lookup, fd-backed `open`/`read`/`close`, and bounded file reads for controlled
+  raw images.
 - Buddy physical page allocator with an early metadata arena for bootstrap.
 - Slab/kmalloc allocator with size classes, dynamic slab reclaim, page-backed
   large allocations, optional debug guards, and validation statistics.
@@ -59,6 +66,9 @@ Implemented or partially implemented:
   `new`/`delete` integration.
 - User address-space teardown and empty PT/PD/PDPT reclamation for owned
   runtime-created mappings, with high-half kernel mappings kept borrowed.
+- Bounded VMA/user-memory API for stack/heap/image metadata, VMA-backed syscall
+  buffer validation, `brk`, restricted anonymous mapping, and stack-growth fault
+  hooks; this is not general demand paging.
 - Explicit allocation API: `alloc_kernel_pages(nr_pages, flags)` for kernel
   virtual pages and an internal `alloc_physical_order(order, flags)` for buddy.
 - Switchable early memory runtime self-test (`bigos::mm::self_test`).
@@ -67,13 +77,15 @@ Implemented or partially implemented:
 Not implemented or still skeletal:
 
 - UEFI bootloader, ESP image generation, and OVMF/QEMU UEFI smoke tests.
-- Preemptive scheduling, priorities, time slices, sleep queues, and blocking.
-- A full multi-process model: multi-process scheduling, fork, general exec
-  semantics with argv/envp and file descriptors, signals, and broad process
-  lifecycle policy beyond the bounded smokes.
-- Demand paging, copy-on-write, VMAs, `mmap`, `brk`, and user-space libc.
-- Writable filesystems, a VFS, page cache, and broad storage-device support
-  beyond the current synchronous read-only ATA PIO plus exFAT subset.
+- SMP, per-CPU run queues, cross-CPU migration, full priority/realtime
+  scheduling, and POSIX scheduling policy.
+- A full POSIX multi-process model: `fork`, signals, broad process policy, and
+  general exec semantics beyond the bounded argv/envp/user-ELF path.
+- General demand paging, copy-on-write, file-backed `mmap`, broad mapping
+  policy, and user-space libc.
+- Writable filesystems, page cache, async I/O, directory mutation, permissions,
+  relative paths/cwd, and broad storage-device support beyond the current
+  synchronous read-only ATA PIO plus exFAT/VFS subset.
 - Broad device-driver support.
 - Complete build/install automation and CI.
 
@@ -133,9 +145,9 @@ kernel()
     PIT timer on IRQ0, and the keyboard IRQ1 path
   - enables interrupts after early handlers are registered
   - emits the "BigOS kernel reached" marker on serial and VGA
-  - optionally runs the syscall, scheduler, block/exFAT, first-user-program, and
-    user-ELF smokes
-  - enters the cooperative scheduler via sched::start(); halt behavior is owned
+  - optionally runs the syscall, scheduler, blocking, scheduler-semantics,
+    block/exFAT, first-user-program, and user-ELF smokes
+  - enters the single-core scheduler via sched::start(); halt behavior is owned
     by the scheduler idle thread instead of a naked hlt loop
 ```
 
@@ -167,6 +179,8 @@ xmake f --page_fault_smoke=y  # BIGOS_PAGE_FAULT_SMOKE -> BIGOS_PAGE_FAULT
 xmake f --timer_smoke=y       # BIGOS_TIMER_SMOKE -> BIGOS_TIMER_IRQ
 xmake f --keyboard_smoke=y    # BIGOS_KEYBOARD_SMOKE enables the IRQ1 line
 xmake f --scheduler_smoke=y   # BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B
+xmake f --scheduler_semantics_smoke=y # BIGOS_SCHEDULER_SEMANTICS_SMOKE -> BIGOS_SCHED_SEMANTICS_PASSED
+xmake f --blocking_smoke=y    # BIGOS_BLOCKING_SMOKE -> BIGOS_BLOCKING_SMOKE_PASSED
 xmake f --user_vmem_smoke=y   # BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED
 xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
@@ -176,10 +190,11 @@ xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 
 `--mm_self_test` implies `--slab_debug`. The self-test emits the
 `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` markers on COM1 and VGA.
-`--user_program_smoke` and `--user_elf_smoke` additionally compile
-`src/kernel/proc/**`; the ELF smoke also builds and packages
-`build/bin/user/init.elf` as `/boot/user/init.elf`. These smokes are not part of
-a normal boot. All markers are written to COM1 serial and VGA.
+`--user_program_smoke` and `--user_elf_smoke` enter default-off user-program
+smoke paths; the shared process lifecycle core is compiled as a normal kernel
+subsystem. The ELF smoke also builds and packages `build/bin/user/init.elf` as
+`/boot/user/init.elf`. These smoke entry threads are not part of a normal boot.
+All markers are written to COM1 serial and VGA.
 
 Local emulator runs for the current Legacy BIOS/MBR/exFAT path:
 
@@ -358,8 +373,9 @@ parallel backend in `docs/en/arch/uefi-boot-blueprint.md`.
   timer on IRQ0, keyboard IRQ1).
 - Optionally triggers a page-fault smoke (when built with `BIGOS_PAGE_FAULT_SMOKE`).
 - Enables interrupts and emits the "BigOS kernel reached" marker.
-- Optionally runs the syscall, scheduler, and first-user-program smokes.
-- Enters the cooperative scheduler via `bigos::sched::start()`; the idle thread
+- Optionally runs the syscall, scheduler, blocking, scheduler-semantics,
+  block/exFAT, first-user-program, and user-ELF smokes.
+- Enters the single-core scheduler via `bigos::sched::start()`; the idle thread
   owns the halt behavior.
 
 ### Memory Management
@@ -431,24 +447,29 @@ fixed-capacity TTY input buffer; console output routes through VGA.
 
 ### Scheduler
 
-A cooperative, single-core kernel-thread scheduler.
+A single-core round-robin kernel-thread scheduler with cooperative switch paths,
+wait queues, timeout sleep, and guarded IRQ-return timer preemption.
 
 - `src/kernel/sched/sched.cc` / `include/bigos/sched.h`: TCBs, a round-robin run
-  queue, `create_kernel_thread()`, `yield()`, `thread_exit()`, and `start()`
+  queue, intrusive wait/sleep lists, `create_kernel_thread()`, `yield()`,
+  `thread_exit()`, `sleep_for()`, wakeup APIs, preemption guards, and `start()`
   (which adopts the boot context as the idle thread).
 - `src/kernel/sched/switch.s`: the x86_64 callee-saved context switch.
-- The timer IRQ records bounded reschedule intent only; it never preempts on IRQ
-  return. The `scheduler_smoke` switch runs two worker threads emitting
-  `BIGOS_SCHED_THREAD_A` / `BIGOS_SCHED_THREAD_B`.
+- The timer IRQ accounts ordinary-thread time slices, wakes expired sleepers,
+  and records bounded reschedule intent. External IRQ return may switch only
+  after handler completion, a single EOI, and scheduler guard approval.
+- `scheduler_smoke`, `blocking_smoke`, and `scheduler_semantics_smoke` validate
+  cooperative switching, wait/timeout behavior, and IRQ-return preemption markers.
 
 ### System Calls
 
 - `src/kernel/syscall/syscall.cc` / `include/bigos/syscall.h`: the `int 0x80`
   dispatcher and minimal register ABI (number in `rax`, args in
   `rdi/rsi/rdx/r10/r8/r9`, return in `rax`). Implements `SYS_DEBUG_WRITE`,
-  `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, and deterministic `SYS_WAIT`
-  reporting for nonblocking syscall contexts; unknown numbers return
-  `SYS_ENOSYS`. The `syscall_smoke` switch exercises this from ring0.
+  `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, `SYS_WAIT`, read-only fd/VFS
+  `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`, `SYS_BRK`, and restricted
+  `SYS_MAP_ANON`; unknown numbers return `SYS_ENOSYS`. The `syscall_smoke`
+  switch exercises diagnostic dispatch from ring0.
 
 ### Process And User Mode
 
@@ -456,17 +477,20 @@ The lifecycle core is compiled as a normal kernel subsystem. The
 `user_program_smoke` and `user_elf_smoke` switches only control default-off smoke
 entry threads and the user ELF artifact.
 
-- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a minimal bounded
-  process table, PID allocation, parent/child linkage, wait status,
-  zombie/reap-pending lifecycle, user address-space derivation, safe
-  teardown/reaping, mapping of a flat embedded user image, and a bounded ELF64
-  `ET_EXEC` prepare/exec path for `/boot/user/init.elf`. Both smoke paths
-  exercise the `SYS_WRITE`/`SYS_EXIT` closed loop (`BIGOS_USER_ENTER` /
+- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a minimal bounded process
+  table, PID allocation, parent/child linkage, wait status, zombie/reap-pending
+  lifecycle, process-local fd table, VMA/heap metadata, VMA-backed user-buffer
+  validation, `brk`, restricted anonymous mapping, user address-space
+  derivation, safe teardown/reaping, mapping of a flat embedded user image, and
+  a bounded ELF64 `ET_EXEC` prepare/exec path for `/boot/user/init.elf`. Both
+  smoke paths exercise bounded user syscall loops (`BIGOS_USER_ENTER` /
   `BIGOS_USER_EXIT`).
 - `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
   `include/bigos/user_mode.h`: GDT/TSS/RSP0 setup and the `iretq` ring3 entry.
-- Demand paging is not implemented; the `#PF` handler records a controlled
-  marker for user faults and hands process cleanup to the safe reaper.
+- Demand paging, COW, `fork`, file-backed `mmap`, and user-space libc are not
+  implemented; the `#PF` handler records a controlled marker for user faults,
+  handles only bounded stack-growth hooks where supported, and hands process
+  cleanup to the safe reaper.
 
 ### Display And IO
 
@@ -492,6 +516,9 @@ The project provides a small amount of freestanding C++ infrastructure.
   services, or dynamic allocation paths that are not initialized yet.
 - Treat boot addresses, linker addresses, page-table layout, interrupt vectors,
   and disk offsets as design-critical.
+- Keep fd/VFS, process lifecycle, and VMA/user-memory descriptions bounded:
+  read-only files, synchronous I/O, restricted anonymous mappings, no page cache,
+  no broad POSIX process model, and no general demand paging.
 - Prefer small, explicit hardware-facing code.
 - Validate initialization order carefully; many subsystems depend on memory,
   paging, or descriptor tables being available first.

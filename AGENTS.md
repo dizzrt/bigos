@@ -21,12 +21,15 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
   - `src/kernel/irq`: IDT, exception/IRQ/syscall dispatch, ISR stubs.
   - `src/kernel/timer`: monotonic tick and `mdelay`.
   - `src/kernel/terminal`: console output, keyboard scancode decode, TTY input.
-  - `src/kernel/sched`: cooperative scheduler and context-switch assembly.
+  - `src/kernel/sched`: single-core scheduler, wait queues, timeout sleep,
+    guarded IRQ-return preemption, and context-switch assembly.
   - `src/kernel/syscall`: `int 0x80` dispatcher and ABI.
-  - `src/kernel/proc`: minimal process model, ring3 user-mode entry, safe
-    teardown/reaping, and bounded ELF64 user-program loading (compiled only
-    under `user_program_smoke` or `user_elf_smoke`).
-  - `src/kernel/fs`: read-only exFAT mount, path lookup, and bounded file reads.
+  - `src/kernel/proc`: minimal process model, fd table, VMA/heap metadata,
+    ring3 user-mode entry, safe teardown/reaping, and bounded ELF64
+    user-program loading. Flat first-user-program and filesystem-backed user
+    ELF entries remain default-off smoke consumers.
+  - `src/kernel/fs`: read-only VFS shell over exFAT, path lookup, fd-backed
+    open/read/close, and bounded file reads.
   - `src/kernel/bigos`: low-level IO, panic, and utility helpers.
 - `src/mm`: buddy allocator, slab allocator, `kmalloc/free`, virtual memory, and
   the kernel direct map, including owned empty page-table reclamation.
@@ -93,6 +96,8 @@ xmake f --page_fault_smoke=y   # BIGOS_PAGE_FAULT_SMOKE -> BIGOS_PAGE_FAULT
 xmake f --timer_smoke=y        # BIGOS_TIMER_SMOKE -> BIGOS_TIMER_IRQ
 xmake f --keyboard_smoke=y     # BIGOS_KEYBOARD_SMOKE: enables the IRQ1 line
 xmake f --scheduler_smoke=y    # BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B
+xmake f --scheduler_semantics_smoke=y # BIGOS_SCHEDULER_SEMANTICS_SMOKE -> BIGOS_SCHED_SEMANTICS_PASSED
+xmake f --blocking_smoke=y     # BIGOS_BLOCKING_SMOKE -> BIGOS_BLOCKING_SMOKE_PASSED
 xmake f --user_vmem_smoke=y    # BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED
 xmake f --syscall_smoke=y      # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
@@ -100,11 +105,12 @@ xmake f --fs_smoke=y           # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FA
 xmake f --user_elf_smoke=y     # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 ```
 
-`--user_program_smoke` and `--user_elf_smoke` additionally compile
-`src/kernel/proc/**` and enter bounded ring3 user-program paths; neither is part
-of a normal boot. `--user_elf_smoke` builds `build/bin/user/init.elf`, packages
-it as `/boot/user/init.elf`, reads it through the kernel block/exFAT path, and
-loads a bounded ELF64 `ET_EXEC` image.
+`--user_program_smoke` and `--user_elf_smoke` enter default-off bounded ring3
+user-program paths; neither is part of a normal boot. `src/kernel/proc/**` is a
+normal kernel subsystem, while the smoke switches control flat/user-ELF entry
+threads and the optional user ELF artifact. `--user_elf_smoke` builds
+`build/bin/user/init.elf`, packages it as `/boot/user/init.elf`, reads it through
+the kernel VFS/exFAT path, and loads a bounded ELF64 `ET_EXEC` image.
 
 For bounded emulator smoke against memory markers:
 
@@ -159,6 +165,9 @@ Notes:
   tool or configuration, skipped validation, substitute checks, and residual
   risk instead of claiming runtime validation.
 - After documentation-only changes, syntax checks are enough when applicable.
+- For documentation-only changes, run OpenSpec parse/status checks and targeted
+  consistency searches; runtime build, clang/clangd, QEMU smoke, and Bochs
+  cross-validation are not required unless source, build, or helper files change.
 - For Python-related validation or helper execution, use `uv run ...` such as
   `uv run pytest`, `uv run python <script>`, `uv run ruff check`, and
   `uv run pyright`. If `uv` is unavailable, record that explicitly instead of
@@ -180,14 +189,21 @@ Notes:
   ring0-only; the syscall path must not send an i8259 EOI.
 - Timer and scheduler context switch: `src/kernel/timer/timer.cc`,
   `src/drivers/timer/pit.cc`, `src/kernel/sched/sched.cc`,
-  `src/kernel/sched/switch.s`. Keep `timer::on_tick()` IRQ-context-safe, keep the
-  scheduler cooperative (no preemption on IRQ return), and preserve the
+  `src/kernel/sched/switch.s`. Keep `timer::on_tick()` IRQ-context-safe, keep
+  scheduler wait/sleep lists allocation-free in IRQ context, preserve
+  preemption-disable and IRQ-return reschedule guards, and preserve the
   callee-saved context-switch frame layout and idle-thread ownership of halt.
 - Syscall entry and user mode: `src/kernel/syscall/syscall.cc`,
   `src/kernel/proc/proc.cc`, `src/kernel/proc/user_mode.cc`,
   `src/kernel/proc/user_mode.s`. Preserve the minimal syscall ABI, the GDT/TSS
   and RSP0 setup, the `iretq` ring3 entry, and explicit CR3 switching; never
   access unmapped VGA/MMIO under a user CR3.
+- Process, fd/VFS, and user-memory boundaries: `include/bigos/proc.h`,
+  `include/bigos/syscall.h`, `include/bigos/fs/vfs.h`, `src/kernel/fs/vfs.cc`,
+  and `src/kernel/proc/proc.cc`. Keep process lifecycle, fd table, `brk`,
+  restricted anonymous mapping, and VMA-backed user-buffer validation bounded;
+  do not imply POSIX `fork`, writable files, page cache, broad `mmap`, demand
+  paging, COW, or user-space libc.
 - Driver port IO and hardware state: `src/drivers/video/vga.cc`,
   `src/drivers/irqchip/i8259.cc`, `src/drivers/timer/pit.cc`,
   `src/kernel/bigos/io.cc` (VGA and COM1 serial).
@@ -202,19 +218,24 @@ Notes:
   large allocations, debug guards, stats), kernel virtual memory, owned empty
   page-table reclamation, and the kernel direct map are implemented and
   exercised by switchable runtime smokes.
-- A cooperative (non-preemptive) kernel-thread scheduler, the `int 0x80` syscall
-  entry with a minimal ABI, default-off ring3 user-program smokes, safe
-  user-process teardown/reaping, a read-only ATA PIO block plus exFAT path, and
-  a bounded filesystem-backed ELF64 user-program loader are implemented with
-  explicit smoke-only boundaries where applicable.
-- Not yet implemented: preemptive scheduling, a full multi-process model,
-  general exec semantics with argv/envp and file descriptors, demand
-  paging/COW/VMA/mmap/brk, user-space libc, writable filesystems, VFS/page cache,
-  broad storage/device drivers, a UEFI backend, and CI automation.
+- A single-core round-robin kernel-thread scheduler with cooperative switching,
+  wait queues, timeout sleep, preemption-disable depth, and guarded IRQ-return
+  timer preemption is implemented. The `int 0x80` syscall entry supports the
+  minimal diagnostic/user ABI plus bounded process `wait`, read-only fd/VFS
+  `open`/`read`/`close`, `brk`, and restricted anonymous mapping.
+- The process lifecycle core, safe user-process teardown/reaping, process-local
+  fd table, VMA-backed user-buffer validation, read-only VFS/exFAT path, flat
+  first-user-program smoke, and filesystem-backed ELF64 user-program smoke are
+  implemented with explicit bounded/default-off smoke boundaries where
+  applicable.
+- Not yet implemented: SMP, a full POSIX multi-process model, `fork`, COW,
+  general demand paging, broad `mmap` including file-backed mappings,
+  user-space libc, writable filesystems, page cache, broad storage/device
+  drivers, a UEFI backend, and release-grade CI automation.
 - Some code paths are scaffolding or TODOs. Inspect call sites before assuming a
-  subsystem is wired into `kernel()`; smokes and the proc subsystem are gated by
-  build switches (the proc subsystem only compiles under `user_program_smoke` or
-  `user_elf_smoke`).
+  subsystem is wired into the normal boot path; smoke entry threads and runtime
+  validation markers remain gated by build switches even when their shared
+  subsystems are compiled normally.
 
 ## Collaboration Guidelines
 
@@ -227,6 +248,9 @@ Notes:
   while preserving OpenSpec-required structural keywords when needed for tooling.
 - For reviews, focus on correctness, undefined behavior, bootability, memory
   safety, interrupt safety, and initialization order.
+- For documentation sync, keep Stage 9-14 bounded capabilities aligned with
+  `roadmap.md`, current source, and archived OpenSpec specs without describing
+  BigOS as a complete POSIX or general-purpose OS.
 - When editing `docs/en` or `docs/zh`, update the corresponding language mirror
   in the same change and keep the directory structures isomorphic.
 - Do not revert unrelated local changes.

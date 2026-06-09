@@ -5,9 +5,9 @@
 BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
 C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为具备最小用户态闭环的单核内核：
 引导流程、文本/串口输出、中断/异常/syscall 处理、PIT timer tick、键盘驱动的
-TTY 输入路径、协作式内核线程调度器、`int 0x80` syscall 入口、默认关闭的
-ring3 用户程序 smoke、bounded ELF64 用户程序加载器、只读 block/exFAT 路径，
-以及一套相对完整的早期内核内存管理。
+TTY 输入路径、具备 bounded timer semantics 的内核线程调度器、`int 0x80` syscall 入口、默认关闭的
+ring3 用户程序 smoke、bounded ELF64 用户程序加载器、只读 fd/VFS 服务、
+VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管理。
 
 本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
 
@@ -32,16 +32,21 @@ ring3 用户程序 smoke、bounded ELF64 用户程序加载器、只读 block/ex
   忙等原语。
 - 键盘 IRQ1 scancode 解码（US Set 1）接入定容 TTY/console 输入路径；console
   输出走 VGA。
-- 协作式（非抢占）单核内核线程调度器：1 页内核栈、x86_64 context switch、
-  round-robin `yield()` 和 idle 线程；timer IRQ 仅记录 bounded reschedule intent。
-- `int 0x80` syscall 入口、最小寄存器 ABI 和诊断 dispatcher
-  （`SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE`、`SYS_EXIT`）。
+- 单核内核线程调度器：1 页内核栈、x86_64 context switch、round-robin
+  `yield()`、scheduler-owned idle 线程、wait queue、timeout sleep、
+  preemption-disable guard，以及 bounded IRQ-return timer preemption。
+- `int 0x80` syscall 入口、最小寄存器 ABI 和 bounded dispatcher：
+  `SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE`、`SYS_EXIT`、`SYS_WAIT`、
+  `SYS_OPEN`、`SYS_READ`、`SYS_CLOSE`、`SYS_BRK` 和 `SYS_MAP_ANON`。
 - 默认关闭的首个 ring3 用户程序 smoke：flat embedded image 通过 TSS/RSP0 与
   `iretq` 进入 ring3，并完成 `SYS_WRITE`/`SYS_EXIT` 闭环。
 - 默认关闭的用户 ELF smoke：bounded ELF64 `ET_EXEC` 镜像会被打包为
   `/boot/user/init.elf`，从 exFAT 读取、映射进派生用户地址空间，并进入 ring3。
-- 只读内核 block/filesystem 路径：同步 ATA PIO sector 读取、MBR exFAT 分区发现、
-  只读 mount、绝对路径 lookup，以及面向受控 Bochs raw image 的 bounded file read。
+- 进程生命周期核心：PID/parent-child 状态、wait/exit/reap 语义、process-local
+  fd table、bounded exec image replacement，以及 exit 或 user fault 后的 safe teardown。
+- 只读内核 block/filesystem 路径和 VFS 壳层：同步 ATA PIO sector 读取、MBR exFAT
+  分区发现、只读 mount、绝对路径 lookup、fd-backed `open`/`read`/`close`，以及
+  面向受控 raw image 的 bounded file read。
 - 基于 buddy 的物理页分配器，并使用 early metadata arena 完成 bootstrap。
 - Slab/kmalloc 分配器：size class、动态 slab 回收、page-backed 大对象分配、
   可选 debug guard 和验证统计。
@@ -49,6 +54,9 @@ ring3 用户程序 smoke、bounded ELF64 用户程序加载器、只读 block/ex
   内核 direct map，以及 C++ `new`/`delete` 集成。
 - 用户地址空间 teardown 和 owned 运行时映射的空 PT/PD/PDPT 回收；高半区内核映射
   保持 borrowed。
+- Bounded VMA/user-memory API：stack/heap/image 元数据、VMA-backed syscall buffer
+  validation、`brk`、restricted anonymous mapping 和 stack-growth fault hook；这不是
+  general demand paging。
 - 显式分配 API：内核虚拟页使用 `alloc_kernel_pages(nr_pages, flags)`，
   物理 buddy 使用内部 `alloc_physical_order(order, flags)`。
 - 可切换的早期内存运行时自检（`bigos::mm::self_test`）。
@@ -57,12 +65,14 @@ ring3 用户程序 smoke、bounded ELF64 用户程序加载器、只读 block/ex
 尚未实现或仍处于骨架状态：
 
 - UEFI bootloader、ESP 镜像生成和 OVMF/QEMU UEFI smoke test。
-- 抢占调度、优先级、时间片、sleep queue 和阻塞语义。
-- 完整多进程模型：多进程调度、fork、带 argv/envp 和文件描述符的通用 exec 语义、
-  信号，以及超出 bounded smoke 的完整进程生命周期策略。
-- demand paging、copy-on-write、VMA、`mmap`、`brk` 和用户态 libc。
-- 可写文件系统、VFS、page cache，以及超出当前同步只读 ATA PIO + exFAT 子集的
-  广泛存储设备支持。
+- SMP、per-CPU run queue、跨 CPU migration、完整 priority/realtime scheduling
+  和 POSIX scheduling policy。
+- 完整 POSIX 多进程模型：`fork`、signal、广泛进程策略，以及超出 bounded
+  argv/envp/user-ELF 路径的通用 exec 语义。
+- general demand paging、copy-on-write、file-backed `mmap`、广泛 mapping policy
+  和用户态 libc。
+- 可写文件系统、page cache、async I/O、目录变更、权限、相对路径/cwd，以及超出当前
+  同步只读 ATA PIO + exFAT/VFS 子集的广泛存储设备支持。
 - 更广泛的设备驱动支持。
 - 完整的构建/安装自动化与 CI。
 
@@ -121,8 +131,8 @@ kernel()
     timer 和 keyboard IRQ1 路径
   - 在 early handler 注册完成后开启中断
   - 在串口与 VGA 输出 "BigOS kernel reached" 标记
-  - 可选运行 syscall、scheduler、block/exFAT、首个用户程序和用户 ELF smoke
-  - 通过 sched::start() 进入协作式调度器；停机行为由调度器 idle 线程拥有，
+  - 可选运行 syscall、scheduler、blocking、scheduler-semantics、block/exFAT、首个用户程序和用户 ELF smoke
+  - 通过 sched::start() 进入单核调度器；停机行为由调度器 idle 线程拥有，
     取代裸 hlt 尾循环
 ```
 
@@ -153,6 +163,8 @@ xmake f --page_fault_smoke=y  # BIGOS_PAGE_FAULT_SMOKE -> BIGOS_PAGE_FAULT
 xmake f --timer_smoke=y       # BIGOS_TIMER_SMOKE -> BIGOS_TIMER_IRQ
 xmake f --keyboard_smoke=y    # BIGOS_KEYBOARD_SMOKE 启用 IRQ1 线
 xmake f --scheduler_smoke=y   # BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B
+xmake f --scheduler_semantics_smoke=y # BIGOS_SCHEDULER_SEMANTICS_SMOKE -> BIGOS_SCHED_SEMANTICS_PASSED
+xmake f --blocking_smoke=y    # BIGOS_BLOCKING_SMOKE -> BIGOS_BLOCKING_SMOKE_PASSED
 xmake f --user_vmem_smoke=y   # BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED
 xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
@@ -162,9 +174,10 @@ xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 
 `--mm_self_test` 会自动启用 `--slab_debug`。自检会在 COM1 与 VGA 输出
 `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` 标记。
-`--user_program_smoke` 和 `--user_elf_smoke` 会额外编译 `src/kernel/proc/**`；
-ELF smoke 还会构建 `build/bin/user/init.elf` 并打包为 `/boot/user/init.elf`。
-这些 smoke 默认不参与普通启动。所有标记都写到 COM1 串口和 VGA。
+`--user_program_smoke` 和 `--user_elf_smoke` 会进入默认关闭的 user-program smoke
+路径；共享的 process lifecycle core 是常规内核子系统。ELF smoke 还会构建
+`build/bin/user/init.elf` 并打包为 `/boot/user/init.elf`。这些 smoke entry thread
+默认不参与普通启动。所有标记都写到 COM1 串口和 VGA。
 
 当前 Legacy BIOS/MBR/exFAT 路径的本地 emulator 运行入口：
 
@@ -333,8 +346,8 @@ xmake run bochs -- --display none
   timer、keyboard IRQ1）。
 - 可选触发 page-fault smoke（以 `BIGOS_PAGE_FAULT_SMOKE` 构建时）。
 - 开启中断并输出 "BigOS kernel reached" 标记。
-- 可选运行 syscall、scheduler 和首个用户程序 smoke。
-- 通过 `bigos::sched::start()` 进入协作式调度器；停机行为由 idle 线程拥有。
+- 可选运行 syscall、scheduler、blocking、scheduler-semantics、block/exFAT、首个用户程序和用户 ELF smoke。
+- 通过 `bigos::sched::start()` 进入单核调度器；停机行为由 idle 线程拥有。
 
 ### 内存管理
 
@@ -398,35 +411,45 @@ PIT 在 IRQ0 上驱动周期性 tick。
 
 ### 调度器
 
-协作式单核内核线程调度器。
+单核 round-robin 内核线程调度器，包含 cooperative switch 路径、wait queue、
+timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
 
 - `src/kernel/sched/sched.cc` / `include/bigos/sched.h`：TCB、round-robin run
-  queue、`create_kernel_thread()`、`yield()`、`thread_exit()` 和 `start()`
+  queue、intrusive wait/sleep list、`create_kernel_thread()`、`yield()`、
+  `thread_exit()`、`sleep_for()`、wakeup API、preemption guard 和 `start()`
   （将 boot 上下文收编为 idle 线程）。
 - `src/kernel/sched/switch.s`：x86_64 callee-saved context switch。
-- timer IRQ 仅记录 bounded reschedule intent，不在 IRQ 返回前抢占。
-  `scheduler_smoke` 开关运行两个 worker 线程，输出
-  `BIGOS_SCHED_THREAD_A` / `BIGOS_SCHED_THREAD_B`。
+- timer IRQ 统计普通线程 time slice、唤醒到期 sleeper，并记录 bounded reschedule
+  intent。外部 IRQ return 只有在 handler 完成、单次 EOI 已发送且 scheduler guard
+  允许后才可能切换。
+- `scheduler_smoke`、`blocking_smoke` 和 `scheduler_semantics_smoke` 分别验证
+  cooperative switching、wait/timeout 行为和 IRQ-return preemption marker。
 
 ### 系统调用
 
 - `src/kernel/syscall/syscall.cc` / `include/bigos/syscall.h`：`int 0x80`
   dispatcher 和最小寄存器 ABI（number 在 `rax`，参数在 `rdi/rsi/rdx/r10/r8/r9`，
-  返回值在 `rax`）。实现 `SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE` 和
-  `SYS_EXIT`；未知 number 返回 `SYS_ENOSYS`。`syscall_smoke` 开关从 ring0 验证。
+  返回值在 `rax`）。实现 `SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE`、
+  `SYS_EXIT`、`SYS_WAIT`、只读 fd/VFS `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`、
+  `SYS_BRK` 和 restricted `SYS_MAP_ANON`；未知 number 返回 `SYS_ENOSYS`。
+  `syscall_smoke` 开关从 ring0 验证诊断 dispatch。
 
 ### 进程与用户态
 
-仅在 `user_program_smoke` 或 `user_elf_smoke` 下编译，不参与普通启动。
+生命周期核心作为普通内核子系统编译。`user_program_smoke` 和 `user_elf_smoke`
+只控制默认关闭的 smoke entry thread 和 user ELF artifact。
 
-- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`：最小 `Process`、用户地址
-  空间派生、安全 teardown/reaper、flat embedded 用户镜像映射，以及面向
-  `/boot/user/init.elf` 的 bounded ELF64 `ET_EXEC` loader。两个 smoke 路径都验证
-  `SYS_WRITE`/`SYS_EXIT` 闭环（`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`）。
+- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`：最小 bounded process table、
+  PID 分配、parent/child 链接、wait status、zombie/reap-pending lifecycle、
+  process-local fd table、VMA/heap metadata、VMA-backed user-buffer validation、
+  `brk`、restricted anonymous mapping、用户地址空间派生、安全 teardown/reaping、
+  flat embedded 用户镜像映射，以及面向 `/boot/user/init.elf` 的 bounded ELF64
+  `ET_EXEC` prepare/exec 路径。两个 smoke 路径都验证 bounded 用户 syscall 闭环
+  （`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`）。
 - `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
   `include/bigos/user_mode.h`：GDT/TSS/RSP0 设置和 `iretq` ring3 entry。
-- 尚未实现 demand paging；`#PF` handler 对用户态页错误记录受控 marker，并把进程
-  清理交给 safe reaper。
+- 尚未实现 demand paging、COW、`fork`、file-backed `mmap` 和用户态 libc；`#PF`
+  handler 对用户态页错误记录受控 marker，仅处理受限 stack-growth hook，并把进程清理交给 safe reaper。
 
 ### 显示与 IO
 
@@ -451,6 +474,9 @@ VGA 文本模式和 COM1 串口是当前输出后端。
 - 保持代码 freestanding-safe。不要依赖托管 libc、异常、RTTI、OS 服务，
   或尚未初始化的动态分配路径。
 - 将引导地址、链接地址、页表布局、中断向量和磁盘偏移视为关键设计约束。
+- 描述 fd/VFS、process lifecycle 和 VMA/user-memory 时保持 bounded 边界：只读文件、
+  同步 I/O、restricted anonymous mapping、无 page cache、无广泛 POSIX 进程模型、
+  无 general demand paging。
 - 优先使用小而显式的硬件相关代码。
 - 仔细验证初始化顺序；许多子系统依赖内存、分页或描述符表先就绪。
 - 修改 Bochs 或磁盘镜像设置时，请记录本地路径假设。
