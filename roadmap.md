@@ -129,9 +129,9 @@ Goal: converge the per-subsystem error codes into a single source of truth.
 
 ### Stage 14.5: Default-On User-Space Init / 阶段 14.5：默认进入用户态 init
 
-Status: proposed. Prerequisite and runway for all POSIX work below.
+Status: completed (archived as `2026-06-09-default-on-user-space-init`). Prerequisite and runway for all POSIX work below.
 
-状态：建议中。是下方所有 POSIX 工作的前置起跑线。
+状态：已完成（已归档为 `2026-06-09-default-on-user-space-init`）。是下方所有 POSIX 工作的前置起跑线。
 
 Goal: make normal boot enter ring3 by default, so process/exec/VFS/ELF
 capabilities become a continuously exercised default path instead of smoke-only.

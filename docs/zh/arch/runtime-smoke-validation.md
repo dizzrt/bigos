@@ -25,8 +25,11 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO 加只读 exFAT backend 上的 VFS open/read/release 路径。 |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | 以 lifecycle-core 进程运行 embedded flat image；smoke entry 仍默认关闭。 |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | 打包 `/boot/user/init.elf` 并通过可复用 ELF exec prepare 路径运行；smoke entry 仍默认关闭。 |
+| `default-init` | _(无)_ | `BIGOS_INIT_EXIT` | 30s | 不加任何 smoke 开关的默认构建；normal boot 打包 `/boot/user/init.elf` 并通过 `launch_init` 进入 ring3。 |
 
 每个 case 只启用表中列出的 smoke 开关，并在构建前显式关闭其他 smoke 开关。runner 之外，所有 runtime smoke 选项仍保持默认关闭，除非开发者通过 `xmake f ...=y` 显式配置。
+
+`default-init` 是首个不依赖任何 smoke 开关的行为断言 case：它以默认配置（所有 smoke 选项设为 `=n`）构建，并以内核 `BIGOS_INIT_ENTER` 与 `BIGOS_INIT_EXIT` 串口 marker 作为通过判据，而非断言 C++ 源码字符串。缺失这些 marker 即判定为失败，不会被重新解读为通过。init 二进制自身的 stdout 输出断言留待后续阶段（待用户态有稳定写出路径后）引入；该 case 启动逐步替代源码字符串契约的「行为断言测试」轨道。
 
 `blocking-primitives` case 在最终 pass marker 前还会输出 `BIGOS_BLOCKING_WAIT_BLOCKED`、`BIGOS_BLOCKING_WAKE_SENT`、`BIGOS_BLOCKING_WAIT_RESUMED`、`BIGOS_BLOCKING_TIMEOUT_BLOCKED` 与 `BIGOS_BLOCKING_TIMEOUT_EXPIRED` 中间 marker。它使用 synthetic TTY producer，因此 QEMU headless 自动验证不依赖手工键盘输入；若执行可选手工键盘验证，需要单独记录。
 

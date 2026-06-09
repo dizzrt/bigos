@@ -272,6 +272,19 @@ RUNTIME_SMOKE_MATRIX = (
         risk_area='read-only exFAT user ELF load plus smoke-only ring3 execution',
         proc_boundary='compiles src/kernel/proc/** and packages /boot/user/init.elf; not a normal boot configuration',
     ),
+    RuntimeSmokeCase(
+        case_id='default-init',
+        title='Default user-space init',
+        switches=(),
+        expected_marker='BIGOS_INIT_EXIT',
+        timeout_seconds=30.0,
+        risk_area='default-on normal-boot ring3 init launch via launch_init (no smoke switch)',
+        validation_markers=(
+            'BIGOS_INIT_ENTER',
+            'BIGOS_INIT_EXIT',
+        ),
+        proc_boundary='default build (no smoke switch); packages /boot/user/init.elf and enters ring3 on normal boot',
+    ),
 )
 
 

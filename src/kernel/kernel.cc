@@ -344,6 +344,13 @@ void kernel(const BootInfoHeader *boot_info) {
         bigos::serial_puts("BIGOS_USER_ELF_LOAD_FAILED thread\n");
 #endif
 
+    // Default-on, no-#ifdef normal-boot init launch (decision 1). Runs as a
+    // kernel thread so run_user_process can enter ring3 and the deferred reaper
+    // owns teardown after init exits. Missing/invalid init halts via the unified
+    // panic path inside launch_init.
+    if (bigos::sched::create_kernel_thread(&bigos::proc::launch_init, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_INIT_LOAD_FAILED thread\n");
+
     // The post-initialization halt behavior is now owned by the scheduler idle
     // thread instead of a naked hlt loop in kernel(). Enter after IRQs are on so
     // timer IRQ0 can wake the idle hlt.

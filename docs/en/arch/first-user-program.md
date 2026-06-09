@@ -23,6 +23,32 @@ The ELF smoke uses a static freestanding ELF64 `ET_EXEC` image built by
 `/boot/user/init.elf`. The ELF image writes `BIGOS_USER_ELF_WRITE\n` with
 `SYS_WRITE`, then calls `SYS_EXIT(0)`.
 
+## Default-On Init Launch
+
+Stage 14.5 promotes ring3 entry onto the normal boot path. `kernel()` creates a
+default-on, no-`#ifdef` kernel thread running `bigos::proc::launch_init` between
+`proc::init()` and `sched::start()`. `launch_init` reuses the read-only
+VFS/exFAT path: `vfs::init` -> `open_absolute(INIT_ELF_PATH)` -> bounded read ->
+`create_elf_user_process` -> `run_user_process`. `INIT_ELF_PATH` is a
+semantically neutral constant pointing at `/boot/user/init.elf`; the existing
+`USER_ELF_SMOKE_PATH` is unchanged and shares the same packaged artifact. The
+`user-init-elf` target is now built by default, so normal boot always packages a
+runnable init image; `user_program_smoke` / `user_elf_smoke` and their
+`BIGOS_USER_*` markers are preserved as additional default-off validation paths.
+
+Init markers are distinct from the smoke `BIGOS_USER_*` markers:
+
+- The kernel emits `BIGOS_INIT_ENTER` before entering ring3.
+- A missing, oversized (over `USER_ELF_MAX_FILE_BYTES`), or invalid `init.elf`
+  emits `BIGOS_INIT_LOAD_FAILED <reason>` and then enters the unified panic path
+  (`BIGOS_PANIC ... source=launch_init`). This is a deliberate PID-1 semantics
+  prototype and a new normal-boot failure mode.
+- When init exits normally via `SYS_EXIT`, the kernel emits `BIGOS_INIT_EXIT`
+  (after the shared `BIGOS_USER_EXIT`) and falls through to the existing
+  deferred reaper and idle scheduling, rather than panicking. Reclamation reuses
+  the existing zombie/reaper teardown without leaking the address space or
+  breaking scheduler invariants. PID-1 restart/adoption is not implemented.
+
 ## Process Lifecycle
 
 `bigos::proc::Process` is a bounded single-core lifecycle record. The core is

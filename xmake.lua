@@ -200,11 +200,9 @@ target("boot-artifacts")
 
 target("user-init-elf")
     set_kind("phony")
-    if has_config("user_elf_smoke") then
-        set_default(true)
-    else
-        set_default(false)
-    end
+    -- Default-on: normal boot now packages /boot/user/init.elf for launch_init.
+    -- user_elf_smoke continues to reuse the same artifact.
+    set_default(true)
     on_build(function (target)
         local user_srcdir = path.join("$(projectdir)", "user", "init")
         local user_bindir = path.join("$(builddir)", "bin", "user")

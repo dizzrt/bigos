@@ -25,8 +25,17 @@ The runner explicitly configures each case through `xmake f`, builds through the
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO plus VFS open/read/release over the read-only exFAT backend. |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | Runs the embedded flat image as a lifecycle-core process; smoke entry remains default-off. |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | Packages `/boot/user/init.elf` and runs it through reusable ELF exec preparation; smoke entry remains default-off. |
+| `default-init` | _(none)_ | `BIGOS_INIT_EXIT` | 30s | Default build with no smoke switch; normal boot packages `/boot/user/init.elf` and enters ring3 via `launch_init`. |
 
 Each case enables only the listed smoke switch and explicitly disables the other smoke switches before building. Outside the runner, all runtime smoke options remain default-off unless a developer explicitly configures them with `xmake f ...=y`.
+
+The `default-init` case is the first behavior-assertion case driven by no smoke
+switch: it builds the default configuration (every smoke option set to `=n`) and
+asserts the kernel `BIGOS_INIT_ENTER` and `BIGOS_INIT_EXIT` serial markers rather
+than a C++ source string. Missing those markers is a failure and is not
+reinterpreted as a pass. The init binary's own stdout assertion is deferred to a
+later stage once user space has a stable write-out path; this case starts the
+behavior-assertion track that progressively replaces source string contracts.
 
 The `blocking-primitives` case emits intermediate markers `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, and `BIGOS_BLOCKING_TIMEOUT_EXPIRED` before the final pass marker. It uses a synthetic TTY producer, so automated QEMU headless validation does not require manual keyboard input; optional manual keyboard validation should be recorded separately when performed.
 

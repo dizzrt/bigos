@@ -249,11 +249,16 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
         'filesystem-read',
         'first-user-program',
         'filesystem-user-elf',
+        'default-init',
     } <= case_ids
     for case in boot_debug.RUNTIME_SMOKE_MATRIX:
-        assert case.switches
-        assert len(case.switches) == 1
         assert case.expected_marker
+        if case.case_id == 'default-init':
+            # The default init case is the only no-smoke-switch behavior case.
+            assert case.switches == ()
+        else:
+            assert case.switches
+            assert len(case.switches) == 1
     assert (
         boot_debug.case_by_id('filesystem-read').timeout_seconds
         > boot_debug.case_by_id('memory-self-test').timeout_seconds
@@ -262,6 +267,24 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
     assert 'src/kernel/proc/**' in boot_debug.case_by_id('filesystem-user-elf').proc_boundary
     assert 'synthetic TTY producer' in boot_debug.case_by_id('blocking-primitives').proc_boundary
     assert 'BIGOS_BLOCKING_TIMEOUT_EXPIRED' in boot_debug.case_by_id('blocking-primitives').validation_markers
+
+
+def test_default_init_case_uses_marker_behavior_assertion_without_smoke_switch() -> None:
+    case = boot_debug.case_by_id('default-init')
+
+    # Default build: no smoke switch, so the matrix config sets every smoke
+    # option to =n and still observes the kernel BIGOS_INIT_* markers.
+    assert case.switches == ()
+    command = boot_debug.runtime_smoke_xmake_config(case)
+    assert command[0:2] == ['xmake', 'f']
+    assert all(option.endswith('=n') for option in command[2:])
+    assert len(command) == 2 + len(boot_debug.SMOKE_OPTIONS)
+
+    # Pass criterion is the kernel BIGOS_INIT_ENTER/EXIT serial markers; the init
+    # binary stdout assertion is deferred to a later stage.
+    assert case.expected_marker == 'BIGOS_INIT_EXIT'
+    assert case.validation_markers == ('BIGOS_INIT_ENTER', 'BIGOS_INIT_EXIT')
+    assert 'no smoke switch' in case.proc_boundary
 
 
 def test_runtime_smoke_xmake_config_explicitly_sets_all_smoke_options() -> None:

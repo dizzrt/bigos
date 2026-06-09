@@ -17,6 +17,10 @@ namespace bigos::proc {
     constexpr uint64_t USER_ANON_BASE = 0x0000000001000000ull;
     constexpr uint64_t USER_ANON_MAX_PAGES = 32;
     constexpr const char *USER_ELF_SMOKE_PATH = "/boot/user/init.elf";
+    // Default-on init image path. Semantically neutral name for the normal-boot
+    // launch_init path; intentionally the same value as USER_ELF_SMOKE_PATH so
+    // the default init and the user_elf_smoke share one packaged artifact.
+    constexpr const char *INIT_ELF_PATH = "/boot/user/init.elf";
     constexpr uint64_t USER_ELF_MAX_FILE_BYTES = 64 * 1024;
     constexpr uint64_t USER_LOW_HALF_LIMIT = 0x0000800000000000ull;
     constexpr uint32_t MAX_PROCESSES = 16;
@@ -167,6 +171,11 @@ namespace bigos::proc {
     [[noreturn]] void run_user_process(Process *__process) noexcept;
     Process *current_process() noexcept;
     void init() noexcept;
+    // Default-on, no-#ifdef normal-boot init launch. Loads INIT_ELF_PATH through
+    // the read-only VFS/exFAT path and enters ring3; missing/invalid init halts
+    // via the unified panic path (PID-1 semantics prototype). Intended to run as
+    // a kernel thread created between proc::init() and sched::start().
+    void launch_init(void *) noexcept;
     void init_vmas(VmaCollection *__vmas) noexcept;
     bool add_vma(VmaCollection *__vmas, const VmaEntry &__entry) noexcept;
     bool remove_vma(VmaCollection *__vmas, uint64_t __start, uint64_t __end) noexcept;

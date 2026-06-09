@@ -23,6 +23,30 @@ ELF smoke 使用 `xmake build user-init-elf` 构建的静态 freestanding ELF64
 该 ELF 镜像通过 `SYS_WRITE` 输出 `BIGOS_USER_ELF_WRITE\n`，随后执行
 `SYS_EXIT(0)`。
 
+## 默认进入用户态 init
+
+阶段 14.5 把 ring3 进入提升为 normal boot 的固定步骤。`kernel()` 在
+`proc::init()` 与 `sched::start()` 之间创建一个默认开启、无 `#ifdef` 守卫的内核
+线程运行 `bigos::proc::launch_init`。`launch_init` 复用只读 VFS/exFAT 路径：
+`vfs::init` -> `open_absolute(INIT_ELF_PATH)` -> bounded 读入 ->
+`create_elf_user_process` -> `run_user_process`。`INIT_ELF_PATH` 是语义中性常量，
+指向 `/boot/user/init.elf`；现有 `USER_ELF_SMOKE_PATH` 保持不变并共用同一打包产物。
+`user-init-elf` target 现在默认构建，因此 normal boot 始终打包可运行的 init 镜像；
+`user_program_smoke` / `user_elf_smoke` 及其 `BIGOS_USER_*` marker 作为额外的
+默认关闭验证路径被保留。
+
+init marker 与 smoke `BIGOS_USER_*` marker 区分开：
+
+- 内核在进入 ring3 前发出 `BIGOS_INIT_ENTER`。
+- `init.elf` 缺失、超过 `USER_ELF_MAX_FILE_BYTES` 或非法时，发出
+  `BIGOS_INIT_LOAD_FAILED <reason>` 后进入统一 panic 路径
+  （`BIGOS_PANIC ... source=launch_init`）。这是有意的 PID-1 语义雏形，也是一个
+  新的 normal-boot 失败模式。
+- init 通过 `SYS_EXIT` 正常退出时，内核在共享的 `BIGOS_USER_EXIT` 之后发出
+  `BIGOS_INIT_EXIT`，并落入现有延后 reaper 与 idle 调度，而非 panic。回收复用现有
+  zombie/reaper teardown，不泄漏地址空间、不破坏调度器不变量。本阶段不实现 PID-1
+  重启/收养。
+
 ## 进程生命周期
 
 `bigos::proc::Process` 是单核 bounded lifecycle 记录。即使

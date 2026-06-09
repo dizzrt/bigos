@@ -99,6 +99,7 @@ namespace {
 
     bigos::proc::Process *g_current_process = nullptr;
     bigos::proc::Process *g_process_table[bigos::proc::MAX_PROCESSES] = {};
+    bigos::proc::Process *g_init_process = nullptr;
     uint32_t g_reap_head_pid = 0;
     uint32_t g_next_pid = 1;
     bool g_user_mode_initialized = false;
@@ -759,6 +760,60 @@ namespace bigos::proc {
         bigos::serial_puts("BIGOS_PROC_INIT\n");
     }
 
+    [[noreturn]] void launch_init_failed(const char *__reason) noexcept {
+        // Deterministic degradation (decision 5): emit a BIGOS_INIT_* marker with
+        // the failure reason, then enter the unified panic path (PID-1 prototype).
+        bigos::serial_puts("BIGOS_INIT_LOAD_FAILED ");
+        bigos::serial_puts(__reason);
+        bigos::serial_puts("\n");
+        bigos::kpanic(bigos::PanicCode::Generic, "launch_init");
+    }
+
+    void launch_init(void *) noexcept {
+        bigos::vfs::Status status = bigos::vfs::init();
+        if (status != bigos::vfs::Status::Success)
+            launch_init_failed(bigos::vfs::status_name(status));
+
+        bigos::vfs::File *file = nullptr;
+        status = bigos::vfs::open_absolute(INIT_ELF_PATH, bigos::vfs::OPEN_RDONLY, &file);
+        if (status != bigos::vfs::Status::Success)
+            launch_init_failed(bigos::vfs::status_name(status));
+
+        const uint64_t file_size = file->vnode != nullptr ? file->vnode->size : 0;
+        if (file_size == 0 || file_size > USER_ELF_MAX_FILE_BYTES) {
+            bigos::vfs::release(file);
+            launch_init_failed("file-size");
+        }
+
+        void *image = bigos::kmalloc((size_t)file_size);
+        if (image == nullptr) {
+            bigos::vfs::release(file);
+            launch_init_failed("buffer");
+        }
+
+        size_t bytes_read = 0;
+        status = bigos::vfs::read(file, image, (size_t)file_size, &bytes_read);
+        bigos::vfs::release(file);
+        if (status != bigos::vfs::Status::Success || bytes_read != file_size) {
+            const char *reason =
+                status == bigos::vfs::Status::Success ? "short-read" : bigos::vfs::status_name(status);
+            bigos::free(image);
+            launch_init_failed(reason);
+        }
+
+        const char *argv[] = {INIT_ELF_PATH};
+        const ExecArgs args = {argv, 1, nullptr, 0};
+        static Process init_process;
+        const UserElfLoadError load_status = create_elf_user_process(&init_process, image, file_size, &args);
+        bigos::free(image);
+        if (load_status != UserElfLoadError::Success)
+            launch_init_failed(user_elf_load_error_name(load_status));
+
+        g_init_process = &init_process;
+        bigos::serial_puts("BIGOS_INIT_ENTER\n");
+        run_user_process(&init_process);
+    }
+
     bool create_first_user_process(Process *__process) noexcept {
         if (__process == nullptr || sizeof(FIRST_USER_CODE) > PAGE_SIZE)
             return false;
@@ -1416,6 +1471,11 @@ namespace bigos::proc {
         process->exit_code = __code;
         mark_zombie_or_reap_pending(process);
         bigos::serial_puts("BIGOS_USER_EXIT\n");
+        // Default-on init normal exit: emit the BIGOS_INIT_EXIT marker and fall
+        // through to the existing deferred-reap/idle path (decision 5: idle, not
+        // panic). This does not implement PID-1 restart/adoption.
+        if (process == g_init_process)
+            bigos::serial_puts("BIGOS_INIT_EXIT\n");
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::mm::activate_address_space_root(process->kernel_address_space_root);
         g_current_process = nullptr;
