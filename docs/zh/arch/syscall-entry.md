@@ -37,7 +37,7 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 
 - 从 `InterruptFrame.rax` 读取 number，用 bounded switch 路由到内核实现。
 - 已知 number 调用对应实现，返回值经 `rax` 写回。
-- 未知 number 在 `rax` 写入确定性负错误码 `SYS_ENOSYS = -38`（等价 `-ENOSYS`），不崩溃、不进入 CPU 异常路径。
+- 未知 number 在 `rax` 写入确定性负错误码 `-bigos::ENOSYS`（数值 `-38`），不崩溃、不进入 CPU 异常路径。POSIX 风格错误码统一以正值集中定义于 `include/bigos/errno.h`，写入返回寄存器时取负。
 - 在 `irq_dispatch` 中通过 `is_syscall_vector(vector == VECTOR_SYSCALL)` 识别 syscall，命中后调用 `bigos::sys::dispatch` 并直接返回。该路径 **MUST NOT** 发送 i8259 EOI（syscall 不是外部 IRQ）；CPU 异常、外部 IRQ、syscall 三类入口的 EOI 语义保持分离不变。
 
 ## 诊断型 syscall
@@ -45,7 +45,7 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_DEBUG_WRITE`（number=0）：把内核内固定/受限 buffer 经现有 serial/console 输出确定性 marker `BIGOS_SYSCALL_WRITE`，并返回写出的字节数。本阶段调用方为内核态，buffer 为内核内 bounded 来源；**不做用户指针校验**。
   - **ring3 前置项**：引入 ring3 后，用户态传入的 buffer 指针与长度 **必须** 做用户地址空间范围校验与 bounded 拷贝后才能输出。
 - `SYS_GET_TICK`（number=1）：返回 `bigos::timer::ticks()` 单调 tick，验证返回值寄存器路径。`timer::ticks()` 已通过 `include/bigos/timer.h` 稳定暴露，是 context-agnostic bounded read，故选用它而非 `SYS_DEBUG_NOOP`。
-- `SYS_WRITE`（number=2）：仅支持早期 console sink（当前固定 `fd=1`），在读取用户 buffer 前检查低半区范围、页表 present/user bit 和最大长度 `SYS_WRITE_MAX_LEN`，再把 bounded 内容输出到 serial/VGA，并返回确定性字节数或 `SYS_EFAULT`。
+- `SYS_WRITE`（number=2）：仅支持早期 console sink（当前固定 `fd=1`），在读取用户 buffer 前检查低半区范围、页表 present/user bit 和最大长度 `SYS_WRITE_MAX_LEN`，再把 bounded 内容输出到 serial/VGA，并返回确定性字节数或 `-bigos::EFAULT`。
 - `SYS_EXIT`（number=3）：记录当前用户进程 exit code，标记 terminated，恢复内核地址空间并转入 scheduler 的延后回收退出路径；该 syscall 不返回到已终止用户指令流。
 - `SYS_WAIT`（number=4）：在调用方可阻塞时等待子进程状态；不支持或不可阻塞上下文返回确定性 wait 错误。
 - `SYS_OPEN`（number=5）：复制有界 NUL 结尾用户 path，只接受 read-only flags，经 VFS 壳层 open，并返回 process-local fd。

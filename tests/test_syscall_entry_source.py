@@ -17,6 +17,7 @@ def test_syscall_vector_constant_is_named_and_centralized() -> None:
 
 def test_syscall_abi_is_declared_and_documented() -> None:
     syscall_h = read_source('include/bigos/syscall.h')
+    errno_h = read_source('include/bigos/errno.h')
 
     # number / return value register convention.
     assert 'syscall number -> rax' in syscall_h
@@ -30,13 +31,16 @@ def test_syscall_abi_is_declared_and_documented() -> None:
     assert 'argument 4     -> r8' in syscall_h
     assert 'argument 5     -> r9' in syscall_h
 
-    # syscall number enum, error code, and dispatch entry declaration.
+    # syscall number enum, error code source, and dispatch entry declaration.
     assert 'SYS_DEBUG_WRITE = 0' in syscall_h
     assert 'SYS_GET_TICK = 1' in syscall_h
     assert 'SYS_WRITE = 2' in syscall_h
     assert 'SYS_EXIT = 3' in syscall_h
-    assert 'SYS_ENOSYS = -38' in syscall_h
-    assert 'SYS_EFAULT = -14' in syscall_h
+    # POSIX-style error codes are centralized in bigos/errno.h as positive
+    # values; the dispatcher negates them on the way to the return register.
+    assert '#include <bigos/errno.h>' in syscall_h
+    assert 'constexpr int ENOSYS = 38;' in errno_h
+    assert 'constexpr int EFAULT = 14;' in errno_h
     assert 'void dispatch(bigos::irq::InterruptFrame *__frame) noexcept;' in syscall_h
 
 
@@ -47,7 +51,7 @@ def test_syscall_abi_mapping_is_documented_in_arch_docs() -> None:
     assert '`rax`' in docs
     assert '`rdi`' in docs and '`r10`' in docs
     assert 'InterruptFrame' in docs
-    assert 'SYS_ENOSYS = -38' in docs
+    assert '-bigos::ENOSYS' in docs
 
 
 def test_irq_dispatch_recognizes_syscall_vector_without_eoi() -> None:
@@ -90,7 +94,7 @@ def test_syscall_dispatch_unknown_number_returns_deterministic_error() -> None:
     syscall = read_source('src/kernel/syscall/syscall.cc')
 
     default_index = syscall.index('default:')
-    enosys_index = syscall.index('result = SYS_ENOSYS;', default_index)
+    enosys_index = syscall.index('result = -bigos::ENOSYS;', default_index)
     assert default_index < enosys_index
 
     # No crash / no exception path from the dispatcher.
@@ -180,7 +184,7 @@ def test_syscall_smoke_is_default_off_gated_and_bounded() -> None:
     assert 'BIGOS_SYSCALL_SMOKE_PASSED' in kernel
     assert 'BIGOS_SYSCALL_SMOKE_FAILED' in kernel
     # Asserts dispatcher hit, correct return value, and unknown-number error code.
-    assert 'unknown_ret == bigos::sys::SYS_ENOSYS' in kernel
+    assert 'unknown_ret == -bigos::ENOSYS' in kernel
 
 
 def test_syscall_smoke_runs_in_non_interrupt_context_after_irq_init() -> None:

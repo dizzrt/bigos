@@ -70,7 +70,7 @@ def test_process_fd_table_lifecycle_and_helpers_are_bounded() -> None:
     assert 'init_fd_table(__process);' in source
     assert 'install_fd_current' in source
     assert 'for (uint32_t i = 0; i < MAX_FDS; i++)' in source
-    assert 'return FD_EMFILE;' in source
+    assert 'return -bigos::EMFILE;' in source
     assert 'read_fd_current' in source
     assert 'close_fd_current' in source
     assert 'close_all_fds(process);' in source

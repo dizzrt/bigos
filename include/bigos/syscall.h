@@ -2,6 +2,7 @@
 #define _BIG_SYSCALL_H
 
 #include <bigos/types.h>
+#include <bigos/errno.h>
 
 namespace bigos::irq {
     struct InterruptFrame;
@@ -40,23 +41,17 @@ namespace bigos::sys {
         SYS_MAP_ANON = 9,      // length, permissions, flags -> restricted anonymous user mapping
     };
 
-    // Deterministic error code for unknown syscall numbers or invalid requests.
-    // Equivalent to -ENOSYS written into the return-value register as a 64-bit
-    // two's-complement negative value.
-    constexpr int64_t SYS_ENOSYS = -38;
-    constexpr int64_t SYS_EFAULT = -14;
-    constexpr int64_t SYS_EBADF = -9;
-    constexpr int64_t SYS_EINVAL = -22;
-    constexpr int64_t SYS_EMFILE = -24;
-    constexpr int64_t SYS_EWOULDBLOCK = -11;
+    // POSIX-style error codes live in bigos/errno.h (single source of truth);
+    // the dispatcher writes their negated value into the return register, e.g.
+    // -bigos::ENOSYS for an unknown syscall number.
     constexpr uint64_t SYS_WRITE_MAX_LEN = 128;
     constexpr uint64_t SYS_IO_MAX_LEN = 512;
     constexpr uint64_t SYS_PATH_MAX_LEN = 256;
 
     // Syscall dispatch entry. Invoked from irq_dispatch when the interrupt vector
     // is VECTOR_SYSCALL. Reads the syscall number from frame->rax, routes to the
-    // matching kernel implementation, and writes the result (or SYS_ENOSYS for an
-    // unknown number) back into frame->rax. It MUST NOT send an i8259 EOI
+    // matching kernel implementation, and writes the result (or -bigos::ENOSYS
+    // for an unknown number) back into frame->rax. It MUST NOT send an i8259 EOI
     // (syscall is not an external IRQ). fd/VFS syscalls additionally check the
     // scheduler blocking guard before allocating or entering synchronous storage IO.
     void dispatch(bigos::irq::InterruptFrame *__frame) noexcept;

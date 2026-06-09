@@ -68,11 +68,11 @@ namespace sys {
 
         static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
             if (__fd != 1 || !bigos::proc::validate_user_buffer(__buffer, __len))
-                bigos::proc::fault_current_and_exit(SYS_EFAULT);
+                bigos::proc::fault_current_and_exit(-bigos::EFAULT);
 
             char bounded[SYS_WRITE_MAX_LEN + 1];
             if (!bigos::proc::copy_current_user_buffer(__buffer, bounded, __len))
-                bigos::proc::fault_current_and_exit(SYS_EFAULT);
+                bigos::proc::fault_current_and_exit(-bigos::EFAULT);
             bounded[__len] = 0;
 
             serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
@@ -82,11 +82,11 @@ namespace sys {
 
         static int64_t sys_open(uint64_t __path, uint64_t __flags) noexcept {
             if (!bigos::sched::can_block())
-                return SYS_EWOULDBLOCK;
+                return -bigos::EWOULDBLOCK;
 
             char path[SYS_PATH_MAX_LEN + 1];
             if (!copy_user_path(__path, path, sizeof(path)))
-                return SYS_EFAULT;
+                return -bigos::EFAULT;
 
             if (!bigos::vfs::initialized()) {
                 const bigos::vfs::Status init_status = bigos::vfs::init();
@@ -109,11 +109,11 @@ namespace sys {
 
         static int64_t sys_read(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
             if (!bigos::sched::can_block())
-                return SYS_EWOULDBLOCK;
+                return -bigos::EWOULDBLOCK;
             if (__len == 0)
                 return 0;
             if (__len > SYS_IO_MAX_LEN || !bigos::proc::validate_user_io_buffer(__buffer, __len))
-                return SYS_EFAULT;
+                return -bigos::EFAULT;
 
             char bounded[SYS_IO_MAX_LEN];
             size_t bytes_read = 0;
@@ -122,7 +122,7 @@ namespace sys {
             if (read_status != bigos::vfs::Status::Success)
                 return vfs_status_to_syscall(read_status);
             if (bytes_read != 0 && !bigos::proc::copy_to_current_user_buffer(__buffer, bounded, bytes_read))
-                return SYS_EFAULT;
+                return -bigos::EFAULT;
             return (int64_t)bytes_read;
         }
 
@@ -184,7 +184,7 @@ namespace sys {
             default:
                 // Unknown number: deterministic negative error code, no crash, no
                 // exception path.
-                result = SYS_ENOSYS;
+                result = -bigos::ENOSYS;
                 break;
         }
 

@@ -153,10 +153,10 @@ namespace {
         // SYS_GET_TICK returns the monotonic kernel tick via rax.
         const int64_t tick_ret = do_syscall(bigos::sys::SYS_GET_TICK, 0);
 
-        // Unknown number must return the deterministic SYS_ENOSYS error code.
+        // Unknown number must return the deterministic -ENOSYS error code.
         const int64_t unknown_ret = do_syscall(SYSCALL_SMOKE_UNKNOWN_NUMBER, 0);
 
-        const bool ok = write_ret > 0 && tick_ret >= 0 && unknown_ret == bigos::sys::SYS_ENOSYS;
+        const bool ok = write_ret > 0 && tick_ret >= 0 && unknown_ret == -bigos::ENOSYS;
         if (ok)
             bigos::serial_puts("BIGOS_SYSCALL_SMOKE_PASSED\n");
         else

@@ -102,6 +102,6 @@ def test_process_exit_fault_and_reaper_are_safe_boundaries() -> None:
     assert 'BIGOS_USER_REAP_DEFERRED active-stack' in proc
     assert 'teardown_user_address_space(process->address_space_root)' in proc
     assert 'bigos::free_pages(process->kernel_stack_base);' in proc
-    assert 'bigos::proc::fault_current_and_exit(SYS_EFAULT);' in syscall
+    assert 'bigos::proc::fault_current_and_exit(-bigos::EFAULT);' in syscall
     assert 'bigos::proc::fault_current_and_exit(-14);' in interrupt
     assert 'bigos::proc::reap_pending_processes();' in sched

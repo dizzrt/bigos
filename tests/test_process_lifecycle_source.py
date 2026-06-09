@@ -44,15 +44,21 @@ def test_wait_exit_zombie_reap_and_nonblocking_context_rules() -> None:
     proc = read_source('src/kernel/proc/proc.cc')
     syscall_h = read_source('include/bigos/syscall.h')
     syscall = read_source('src/kernel/syscall/syscall.cc')
+    errno_h = read_source('include/bigos/errno.h')
 
     for token in (
         'Zombie',
         'ReapPending',
-        'WAIT_ECHILD = -10',
-        'WAIT_EWOULDBLOCK = -11',
         'int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept;',
     ):
         assert token in proc_h
+
+    # wait errors converge onto the single bigos/errno.h source (negated on the
+    # way to the return register): ECHILD = -10, EWOULDBLOCK = -11.
+    assert 'constexpr int ECHILD = 10;' in errno_h
+    assert 'constexpr int EWOULDBLOCK = 11;' in errno_h
+    assert 'return -bigos::ECHILD;' in proc
+    assert 'return -bigos::EWOULDBLOCK;' in proc
 
     assert 'mark_zombie_or_reap_pending(process)' in proc
     assert 'bigos::sched::wake_all(&g_process_wait_queue)' in proc

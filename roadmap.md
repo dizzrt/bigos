@@ -109,9 +109,9 @@ archived OpenSpec changes under `openspec/changes/archive/`.
 
 ### Stage 14.1: Unify errno / 阶段 14.1：统一 errno
 
-Status: proposed. Independent; do this first, before any other stage.
+Status: completed (archived as `2026-06-09-unify-errno`). Independent; done before any other stage.
 
-状态：建议中。独立，应先于其他所有阶段完成。
+状态：已完成（已归档为 `2026-06-09-unify-errno`）。独立，已先于其他所有阶段完成。
 
 Goal: converge the per-subsystem error codes into a single source of truth.
 

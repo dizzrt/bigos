@@ -1181,21 +1181,21 @@ namespace bigos::proc {
     int64_t brk_current(uint64_t __new_break) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
-            return bigos::sys::SYS_EWOULDBLOCK;
+            return -bigos::EWOULDBLOCK;
         if (__new_break == 0)
             return (int64_t)process->vmas.heap_break;
         if (__new_break < process->vmas.heap_base || __new_break > process->vmas.heap_limit)
-            return bigos::sys::SYS_EINVAL;
+            return -bigos::EINVAL;
 
         VmaEntry *heap = internal_find_vma_mut(&process->vmas, process->vmas.heap_base);
         if (heap == nullptr || heap->purpose != VmaPurpose::Heap)
-            return bigos::sys::SYS_EFAULT;
+            return -bigos::EFAULT;
 
         const uint64_t old_break = process->vmas.heap_break;
         uint64_t old_page_end = 0;
         uint64_t new_page_end = 0;
         if (!page_up(old_break, &old_page_end) || !page_up(__new_break, &new_page_end))
-            return bigos::sys::SYS_EINVAL;
+            return -bigos::EINVAL;
 
         if (new_page_end > old_page_end) {
             uint64_t mapped_phys[USER_HEAP_MAX_PAGES] = {};
@@ -1207,7 +1207,7 @@ namespace bigos::proc {
                     free_user_frame(phys);
                     for (uint32_t i = 0; i < mapped_count; i++)
                         unmap_and_free_user_page(process, old_page_end + (uint64_t)i * PAGE_SIZE);
-                    return bigos::sys::SYS_EFAULT;
+                    return -bigos::EFAULT;
                 }
                 mapped_phys[mapped_count++] = phys;
             }
@@ -1225,19 +1225,19 @@ namespace bigos::proc {
     int64_t map_anonymous_current(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
-            return bigos::sys::SYS_EWOULDBLOCK;
+            return -bigos::EWOULDBLOCK;
         if (__flags != 0 || __len == 0 || __len > USER_ANON_MAX_PAGES * PAGE_SIZE)
-            return bigos::sys::SYS_EINVAL;
+            return -bigos::EINVAL;
         uint64_t len = 0;
         if (!page_up(__len, &len))
-            return bigos::sys::SYS_EINVAL;
+            return -bigos::EINVAL;
 
         const auto permissions = (VmaPermission)(uint8_t)__permissions;
         if ((permissions_value(permissions) &
                 ~(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Write) |
                     permissions_value(VmaPermission::Execute))) != 0 ||
             permissions_wx(permissions))
-            return bigos::sys::SYS_EINVAL;
+            return -bigos::EINVAL;
 
         uint64_t base = process->vmas.anon_next;
         uint64_t end = 0;
@@ -1253,11 +1253,11 @@ namespace bigos::proc {
             base += PAGE_SIZE;
         }
         if (add_overflow(base, len, &end) || end > USER_ANON_BASE + USER_ANON_MAX_PAGES * PAGE_SIZE)
-            return bigos::sys::SYS_EINVAL;
+            return -bigos::EINVAL;
 
         if (!internal_add_vma(&process->vmas, {base, end, base, base, permissions, VmaPurpose::Anonymous,
                                                   VmaBacking::Anonymous, VmaGrowth::None, true}))
-            return bigos::sys::SYS_EFAULT;
+            return -bigos::EFAULT;
 
         uint64_t mapped_pages = 0;
         bigos::mm::PageAttr attr = bigos::mm::page_attr::PRESENT | bigos::mm::page_attr::USER;
@@ -1273,7 +1273,7 @@ namespace bigos::proc {
                 for (uint64_t rollback = base; rollback < base + mapped_pages * PAGE_SIZE; rollback += PAGE_SIZE)
                     unmap_and_free_user_page(process, rollback);
                 (void)internal_remove_vma(&process->vmas, base, end);
-                return bigos::sys::SYS_EFAULT;
+                return -bigos::EFAULT;
             }
             mapped_pages++;
         }
@@ -1315,7 +1315,7 @@ namespace bigos::proc {
     int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __file == nullptr)
-            return FD_EBADF;
+            return -bigos::EBADF;
         for (uint32_t i = 0; i < MAX_FDS; i++) {
             if (process->fd_table[i].file == nullptr) {
                 process->fd_table[i].file = __file;
@@ -1324,7 +1324,7 @@ namespace bigos::proc {
                 return (int64_t)i;
             }
         }
-        return FD_EMFILE;
+        return -bigos::EMFILE;
     }
 
     bigos::vfs::Status read_fd_current(uint32_t __fd, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
@@ -1342,10 +1342,10 @@ namespace bigos::proc {
     int64_t close_fd_current(uint32_t __fd) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __fd >= MAX_FDS)
-            return FD_EBADF;
+            return -bigos::EBADF;
         FdEntry *entry = &process->fd_table[__fd];
         if (entry->file == nullptr)
-            return FD_EBADF;
+            return -bigos::EBADF;
         bigos::vfs::File *file = entry->file;
         entry->file = nullptr;
         entry->close_on_exec = false;
@@ -1425,9 +1425,9 @@ namespace bigos::proc {
     int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept {
         Process *parent = g_current_process;
         if (parent == nullptr)
-            return WAIT_ECHILD;
+            return -bigos::ECHILD;
         if (!bigos::sched::can_block())
-            return WAIT_EWOULDBLOCK;
+            return -bigos::EWOULDBLOCK;
 
         Process *match = nullptr;
         for (;;) {
@@ -1451,15 +1451,15 @@ namespace bigos::proc {
             if (match != nullptr)
                 break;
             if (!has_matching_child)
-                return WAIT_ECHILD;
+                return -bigos::ECHILD;
 
             parent->parent_waiting = true;
             const int wait_result = bigos::sched::wait_queue_wait_until(&g_process_wait_queue, nullptr, nullptr, 0);
             parent->parent_waiting = false;
             if (wait_result == bigos::sched::WAIT_BLOCK_FORBIDDEN)
-                return WAIT_EWOULDBLOCK;
+                return -bigos::EWOULDBLOCK;
             if (wait_result != bigos::sched::WAIT_OK)
-                return WAIT_EINVAL;
+                return -bigos::EINVAL;
         }
 
         if (__status != nullptr)

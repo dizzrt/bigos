@@ -2,6 +2,7 @@
 #define _BIG_PROC_H
 
 #include <bigos/types.h>
+#include <bigos/errno.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/memory.h>
 
@@ -25,14 +26,12 @@ namespace bigos::proc {
     constexpr uint32_t EXEC_MAX_ARGC = 8;
     constexpr uint32_t EXEC_MAX_ENVC = 8;
     constexpr uint64_t EXEC_MAX_STRING_BYTES = 256;
-    constexpr int64_t WAIT_ECHILD = -10;
-    constexpr int64_t WAIT_EINVAL = -22;
-    constexpr int64_t WAIT_EWOULDBLOCK = -11;
+    // POSIX-style wait/fd error codes resolve to bigos/errno.h; the negated
+    // value (e.g. -bigos::ECHILD) is what reaches the syscall return register.
+    // EXEC_FAILURE_STATUS is a process exit status, not a POSIX errno, so it is
+    // intentionally kept here and out of the errno convergence scope.
     constexpr int64_t EXEC_FAILURE_STATUS = -126;
     constexpr uint32_t MAX_FDS = 16;
-    constexpr int64_t FD_EBADF = -9;
-    constexpr int64_t FD_EMFILE = -24;
-    constexpr int64_t FD_EWOULDBLOCK = -11;
 
     struct FdEntry {
         bigos::vfs::File *file;

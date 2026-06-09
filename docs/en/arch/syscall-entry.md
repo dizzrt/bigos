@@ -37,7 +37,7 @@ The mapping of syscall number, arguments, return value, and `InterruptFrame` fie
 
 - Reads the number from `InterruptFrame.rax` and routes through a bounded switch.
 - Calls the corresponding implementation for known numbers and writes the result back through `rax`.
-- Writes deterministic negative error `SYS_ENOSYS = -38` (equivalent to `-ENOSYS`) to `rax` for unknown numbers without crashing or entering the CPU exception path.
+- Writes deterministic negative error `-bigos::ENOSYS` (value `-38`) to `rax` for unknown numbers without crashing or entering the CPU exception path. The POSIX-style error codes are centralized in `include/bigos/errno.h` as positive values and negated when written to the return register.
 - `irq_dispatch` identifies syscall with `is_syscall_vector(vector == VECTOR_SYSCALL)`, calls `bigos::sys::dispatch`, and returns directly. This path **MUST NOT** send i8259 EOI because syscall is not an external IRQ. EOI semantics for CPU exceptions, external IRQs, and syscalls remain separate.
 
 ## Diagnostic Syscalls
@@ -45,7 +45,7 @@ The mapping of syscall number, arguments, return value, and `InterruptFrame` fie
 - `SYS_DEBUG_WRITE` (number=0): writes a fixed/bounded in-kernel buffer through existing serial/console output with deterministic marker `BIGOS_SYSCALL_WRITE`, and returns the byte count. In this stage the caller is kernel-mode and the buffer is a bounded kernel source, so **no user pointer validation is performed**.
   - **Ring3 prerequisite**: once ring3 passes user buffer pointers and lengths, they **must** be validated against user address-space ranges and copied through a bounded path before output.
 - `SYS_GET_TICK` (number=1): returns `bigos::timer::ticks()` monotonic tick to validate the return-register path. `timer::ticks()` is stably exposed by `include/bigos/timer.h` and is a context-agnostic bounded read, so it is used instead of `SYS_DEBUG_NOOP`.
-- `SYS_WRITE` (number=2): supports only the early console sink (currently fixed `fd=1`). Before reading the user buffer, it checks low-half range, page-table present/user bits, and maximum length `SYS_WRITE_MAX_LEN`; then it writes bounded content to serial/VGA and returns a deterministic byte count or `SYS_EFAULT`.
+- `SYS_WRITE` (number=2): supports only the early console sink (currently fixed `fd=1`). Before reading the user buffer, it checks low-half range, page-table present/user bits, and maximum length `SYS_WRITE_MAX_LEN`; then it writes bounded content to serial/VGA and returns a deterministic byte count or `-bigos::EFAULT`.
 - `SYS_EXIT` (number=3): records the current user process exit code, marks it terminated, restores the kernel address space, and enters the scheduler's deferred-reclamation exit path. This syscall does not return to terminated user instructions.
 - `SYS_WAIT` (number=4): waits for child process state when the caller can block, or returns the deterministic wait error for unsupported/nonblocking contexts.
 - `SYS_OPEN` (number=5): copies a bounded NUL-terminated user path, accepts only read-only flags, opens through the VFS shell, and returns a process-local fd.

@@ -27,7 +27,7 @@ and VMA-backed syscall-buffer validation.
 - Each `Process` owns a fixed `MAX_FDS` descriptor table with entries pointing
   at VFS `File` objects.
 - `open` installs the lowest available fd in the current process table; table
-  exhaustion returns a deterministic `FD_EMFILE` error and drops the unpublished
+  exhaustion returns a deterministic `-bigos::EMFILE` error and drops the unpublished
   file reference.
 - `read` and `close` reject out-of-range, unused, already-closed, and
   non-readable descriptors with a deterministic bad-fd error.
