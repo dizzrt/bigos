@@ -167,20 +167,28 @@ capabilities become a continuously exercised default path instead of smoke-only.
 
 ### Stage 15: Demand Paging & Page-Fault Policy / 阶段 15：按需分页与缺页策略
 
-Status: proposed. First POSIX foundation; prerequisite for fork/COW/mmap.
+Status: completed (archived as `2026-06-09-introduce-demand-paging`; QEMU headless
+`BIGOS_DEMAND_PAGING_PASSED`, source-contract pytest). First POSIX foundation;
+prerequisite for fork/COW/mmap.
 
-状态：建议中。第一块 POSIX 地基，是 fork/COW/mmap 的前置。
+状态：已完成（已归档为 `2026-06-09-introduce-demand-paging`；QEMU headless
+`BIGOS_DEMAND_PAGING_PASSED`、源码契约 pytest）。第一块 POSIX 地基，是
+fork/COW/mmap 的前置。
 
-Goal: generalize the existing `try_handle_current_stack_fault` into a unified
-page-fault handler.
+Goal: generalize the existing stack-only `try_handle_current_stack_fault` into a
+unified `try_handle_user_page_fault` page-fault handler.
 
-目标：把现有 `try_handle_current_stack_fault` 泛化为统一缺页处理。
+目标：把原栈专用的 `try_handle_current_stack_fault` 泛化为统一的
+`try_handle_user_page_fault` 缺页处理。
 
-- Lazy anonymous-page materialization, allocation-failure -> deterministic
-  process kill, kernel-mode faults still panic.
-- 匿名页惰性分配、分配失败 -> 确定性进程 kill、内核态 fault 仍 panic。
-- Do this standalone and validate independently before fork/COW.
-- 单独完成并独立验证，再进入 fork/COW。
+- Lazy anonymous-page materialization (heap/anon/downward stack), allocation-failure
+  -> deterministic process kill, permission/out-of-range faults -> kill,
+  kernel-mode faults still panic.
+- 匿名页（堆/匿名/向下栈）惰性物化、分配失败 -> 确定性进程 kill、权限违例/越界
+  -> kill、内核态 fault 仍 panic。
+- Done standalone and validated independently before fork/COW via the default-off
+  `demand_paging_smoke` switch.
+- 经默认关闭的 `demand_paging_smoke` 开关单独完成并独立验证，再进入 fork/COW。
 
 ### Stage 15.5: Growable Process/Fd Tables / 阶段 15.5：进程与 fd 表可增长
 

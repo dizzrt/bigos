@@ -188,7 +188,7 @@ namespace bigos::proc {
     bool copy_to_current_user_buffer(uint64_t __addr, const void *__src, uint64_t __len) noexcept;
     int64_t brk_current(uint64_t __new_break) noexcept;
     int64_t map_anonymous_current(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept;
-    bool try_handle_current_stack_fault(uint64_t __fault_address, uint64_t __error_code) noexcept;
+    bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept;
     int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec = false) noexcept;
     bigos::vfs::Status read_fd_current(uint32_t __fd, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
     int64_t close_fd_current(uint32_t __fd) noexcept;
@@ -205,6 +205,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_USER_ELF_SMOKE
     void user_elf_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_DEMAND_PAGING_SMOKE
+    void demand_paging_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 

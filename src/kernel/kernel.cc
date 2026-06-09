@@ -343,6 +343,11 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&user_elf_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_USER_ELF_LOAD_FAILED thread\n");
 #endif
+#ifdef BIGOS_DEMAND_PAGING_SMOKE
+    if (bigos::sched::create_kernel_thread(&bigos::proc::demand_paging_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_DEMAND_PAGING_FAILED thread\n");
+#endif
 
     // Default-on, no-#ifdef normal-boot init launch (decision 1). Runs as a
     // kernel thread so run_user_process can enter ring3 and the deferred reaper

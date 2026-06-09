@@ -46,7 +46,7 @@ namespace irq {
             const bool user_mode = (__frame->cs & 0x3) == 0x3;
 
             if (user_mode) {
-                if (bigos::proc::try_handle_current_stack_fault(fault_address, error))
+                if (bigos::proc::try_handle_user_page_fault(fault_address, error))
                     return;
                 bigos::proc::fault_current_and_exit(-14);
             }

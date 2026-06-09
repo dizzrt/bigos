@@ -81,7 +81,7 @@ def test_user_copy_validation_checks_vma_and_page_table_state() -> None:
     assert "copy_to_user_root(process->address_space_root" in validate_body
 
 
-def test_brk_and_anonymous_mapping_are_restricted_and_rollback_on_failure() -> None:
+def test_brk_and_anonymous_mapping_are_restricted_and_lazy() -> None:
     proc = read_source("src/kernel/proc/proc.cc")
     syscall_h = read_source("include/bigos/syscall.h")
     syscall = read_source("src/kernel/syscall/syscall.cc")
@@ -96,33 +96,67 @@ def test_brk_and_anonymous_mapping_are_restricted_and_rollback_on_failure() -> N
     brk_body = proc[proc.index("int64_t brk_current") : proc.index("int64_t map_anonymous_current")]
     assert "__new_break < process->vmas.heap_base" in brk_body
     assert "__new_break > process->vmas.heap_limit" in brk_body
+    # Lazy growth: no eager per-page allocation in the grow branch.
+    assert "alloc_user_frame()" not in brk_body
+    # Shrink unmaps only materialized pages, bounded by the high-water mark.
+    assert "heap->materialized_end < old_page_end ? heap->materialized_end : old_page_end" in brk_body
     assert "unmap_and_free_user_page(process" in brk_body
     assert "process->vmas.heap_break = __new_break" in brk_body
 
-    anon_body = proc[proc.index("int64_t map_anonymous_current") : proc.index("bool try_handle_current_stack_fault")]
+    anon_body = proc[proc.index("int64_t map_anonymous_current") : proc.index("bool try_handle_user_page_fault")]
     assert "__flags != 0" in anon_body
     assert "__len > USER_ANON_MAX_PAGES * PAGE_SIZE" in anon_body
     assert "permissions_wx(permissions)" in anon_body
     assert "VmaPurpose::Anonymous" in anon_body
-    assert "internal_remove_vma(&process->vmas, base, end)" in anon_body
+    # Lazy backing: registration only, no eager allocation/mapping loop.
+    assert "alloc_user_frame()" not in anon_body
     assert "process->vmas.anon_next = end" in anon_body
 
 
-def test_stack_growth_gate_is_strict_and_non_stack_faults_still_terminate() -> None:
+def test_unified_page_fault_entry_decides_by_vma_metadata() -> None:
     proc = read_source("src/kernel/proc/proc.cc")
     irq = read_source("src/kernel/irq/interrupt.cc")
 
-    assert "try_handle_current_stack_fault(fault_address, error)" in irq
+    assert "try_handle_user_page_fault(fault_address, error)" in irq
     assert "bigos::proc::fault_current_and_exit(-14)" in irq
 
-    stack_body = proc[proc.index("bool try_handle_current_stack_fault") : proc.index("int64_t install_fd_current")]
-    assert "!bigos::sched::can_block()" in stack_body
-    assert "(__error_code & 0x1) != 0" in stack_body
-    assert "(__error_code & (1ull << 4)) != 0" in stack_body
-    assert "stack->purpose != VmaPurpose::Stack" in stack_body
-    assert "stack->growth != VmaGrowth::Down" in stack_body
-    assert "page < stack->start" in stack_body
-    assert "stack->materialized_start = page" in stack_body
+    entry_body = proc[proc.index("bool try_handle_user_page_fault") : proc.index("int64_t install_fd_current")]
+    # Preconditions: running process, allocation-safe, present-bit gate.
+    assert "!bigos::sched::can_block()" in entry_body
+    assert "(__error_code & 0x1) != 0" in entry_body
+    # Locate the covering VMA and require anonymous backing.
+    assert "internal_find_vma_mut(&process->vmas, page)" in entry_body
+    assert "vma->backing != VmaBacking::Anonymous" in entry_body
+    # Permission and NX instruction-fetch gates.
+    assert "(__error_code & 0x2) != 0 && !permissions_include(vma->permissions, VmaPermission::Write)" in entry_body
+    assert "(__error_code & (1ull << 4)) != 0 && !permissions_include(vma->permissions, VmaPermission::Execute)" in entry_body
+    # Downward stack branch reuses the shared materialization path.
+    assert "vma->growth == VmaGrowth::Down" in entry_body
+    assert "page >= vma->materialized_start" in entry_body
+    assert "vma->materialized_start = page" in entry_body
+    # Heap range is bounded by the committed break.
+    assert "page_up(process->vmas.heap_break, &registered_end)" in entry_body
+    # Shared anonymous attr keeps writable pages non-executable.
+    assert "anonymous_page_attr(vma->permissions)" in entry_body
+
+    attr_body = proc[proc.index("bigos::mm::PageAttr anonymous_page_attr") : proc.index("bool map_user_page_for_process")]
+    assert "page_attr::WRITABLE" in attr_body
+    assert "page_attr::NO_EXECUTE" in attr_body
+
+
+def test_demand_paging_smoke_is_default_off_and_marker_emitting() -> None:
+    proc = read_source("src/kernel/proc/proc.cc")
+    xmake = read_source("xmake.lua")
+
+    assert 'option("demand_paging_smoke")' in xmake
+    assert "set_default(false)" in xmake
+    assert 'add_defines("BIGOS_DEMAND_PAGING_SMOKE")' in xmake
+
+    assert "#ifdef BIGOS_DEMAND_PAGING_SMOKE" in proc
+    assert "BIGOS_DEMAND_PAGING_PASSED" in proc
+    assert "BIGOS_DEMAND_PAGING_FAILED" in proc
+    # Allocation-failure injection is smoke-only, not a global test macro.
+    assert "g_demand_paging_force_alloc_fail" in proc
 
 
 def test_low_level_boundaries_are_not_moved_or_widened() -> None:

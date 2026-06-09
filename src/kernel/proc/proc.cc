@@ -106,7 +106,18 @@ namespace {
     bigos::sched::WaitQueue g_process_wait_queue = {};
     bool g_proc_initialized = false;
 
+#ifdef BIGOS_DEMAND_PAGING_SMOKE
+    // Smoke-only, default-off allocation-failure injection. Forces
+    // alloc_user_frame() to fail so the demand-paging smoke can exercise the
+    // deterministic allocation-failure kill path without a global test macro.
+    bool g_demand_paging_force_alloc_fail = false;
+#endif
+
     uint64_t alloc_user_frame() noexcept {
+#ifdef BIGOS_DEMAND_PAGING_SMOKE
+        if (g_demand_paging_force_alloc_fail)
+            return 0;
+#endif
         return (uint64_t)bigos::mm::__detail::alloc_physical_order(0, 0);
     }
 
@@ -294,6 +305,18 @@ namespace {
             !permissions_include(__vma->permissions, bigos::proc::VmaPermission::Execute))
             return false;
         return true;
+    }
+
+    // Derives the leaf PTE attributes for an anonymous demand-zero page from the
+    // owning VMA permissions. Writable pages stay non-executable; read-only and
+    // non-executable pages keep NX so a stray fetch faults rather than executing.
+    bigos::mm::PageAttr anonymous_page_attr(bigos::proc::VmaPermission __permissions) noexcept {
+        bigos::mm::PageAttr attr = bigos::mm::page_attr::PRESENT | bigos::mm::page_attr::USER;
+        if (permissions_include(__permissions, bigos::proc::VmaPermission::Write))
+            attr |= bigos::mm::page_attr::WRITABLE;
+        if (!permissions_include(__permissions, bigos::proc::VmaPermission::Execute))
+            attr |= bigos::mm::page_attr::NO_EXECUTE;
+        return attr;
     }
 
     bool map_user_page_for_process(bigos::proc::Process *__process, uint64_t __vaddr, uint64_t __phys,
@@ -1253,27 +1276,21 @@ namespace bigos::proc {
             return -bigos::EINVAL;
 
         if (new_page_end > old_page_end) {
-            uint64_t mapped_phys[USER_HEAP_MAX_PAGES] = {};
-            uint32_t mapped_count = 0;
-            for (uint64_t page = old_page_end; page < new_page_end; page += PAGE_SIZE) {
-                const uint64_t phys = alloc_user_frame();
-                if (phys == 0 || !zero_frame(phys) ||
-                    !map_user_page_for_process(process, page, phys, bigos::mm::page_attr::USER_DATA, false)) {
-                    free_user_frame(phys);
-                    for (uint32_t i = 0; i < mapped_count; i++)
-                        unmap_and_free_user_page(process, old_page_end + (uint64_t)i * PAGE_SIZE);
-                    return -bigos::EFAULT;
-                }
-                mapped_phys[mapped_count++] = phys;
-            }
-            (void)mapped_phys;
+            // Lazy growth: register the newly covered range by advancing only the
+            // heap break and VMA metadata. Covered pages are materialized on first
+            // access through try_handle_user_page_fault. No eager allocation, so
+            // failure rollback is metadata-only (handled below before publishing).
         } else if (new_page_end < old_page_end) {
-            for (uint64_t page = new_page_end; page < old_page_end; page += PAGE_SIZE)
+            // Shrink: unmap only pages that were actually materialized, per the
+            // heap VMA materialization high-water mark.
+            const uint64_t unmap_top = heap->materialized_end < old_page_end ? heap->materialized_end : old_page_end;
+            for (uint64_t page = new_page_end; page < unmap_top; page += PAGE_SIZE)
                 unmap_and_free_user_page(process, page);
+            if (heap->materialized_end > new_page_end)
+                heap->materialized_end = new_page_end;
         }
 
         process->vmas.heap_break = __new_break;
-        heap->materialized_end = new_page_end;
         return (int64_t)process->vmas.heap_break;
     }
 
@@ -1314,56 +1331,74 @@ namespace bigos::proc {
                                                   VmaBacking::Anonymous, VmaGrowth::None, true}))
             return -bigos::EFAULT;
 
-        uint64_t mapped_pages = 0;
-        bigos::mm::PageAttr attr = bigos::mm::page_attr::PRESENT | bigos::mm::page_attr::USER;
-        if (permissions_include(permissions, VmaPermission::Write))
-            attr |= bigos::mm::page_attr::WRITABLE | bigos::mm::page_attr::NO_EXECUTE;
-        else if (!permissions_include(permissions, VmaPermission::Execute))
-            attr |= bigos::mm::page_attr::NO_EXECUTE;
-
-        for (uint64_t page = base; page < end; page += PAGE_SIZE) {
-            const uint64_t phys = alloc_user_frame();
-            if (phys == 0 || !zero_frame(phys) || !map_user_page_for_process(process, page, phys, attr, false)) {
-                free_user_frame(phys);
-                for (uint64_t rollback = base; rollback < base + mapped_pages * PAGE_SIZE; rollback += PAGE_SIZE)
-                    unmap_and_free_user_page(process, rollback);
-                (void)internal_remove_vma(&process->vmas, base, end);
-                return -bigos::EFAULT;
-            }
-            mapped_pages++;
-        }
-
-        VmaEntry *anon = internal_find_vma_mut(&process->vmas, base);
-        if (anon != nullptr)
-            anon->materialized_end = end;
+        // Lazy backing: the VMA range is registered but no physical frames are
+        // allocated or mapped here. Covered pages are materialized on first
+        // access through try_handle_user_page_fault with the requested
+        // permissions (writable pages stay non-executable). materialized_end
+        // starts at base and advances as pages are faulted in.
         process->vmas.anon_next = end;
         return (int64_t)base;
     }
 
-    bool try_handle_current_stack_fault(uint64_t __fault_address, uint64_t __error_code) noexcept {
+    bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept {
         Process *process = g_current_process;
+        // Allocation-safe, running-process precondition. Non-blocking contexts and
+        // non-running processes cannot materialize lazily and fall through to the
+        // deterministic CPL3 kill path in the caller.
         if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
             return false;
-        if ((__error_code & 0x1) != 0 || (__error_code & (1ull << 4)) != 0)
+        // present bit set => protection violation, not a demand-zero candidate.
+        if ((__error_code & 0x1) != 0)
             return false;
 
         const uint64_t page = page_down(__fault_address);
-        VmaEntry *stack = internal_find_vma_mut(&process->vmas, page);
-        if (stack == nullptr || stack->purpose != VmaPurpose::Stack || stack->growth != VmaGrowth::Down ||
-            page < stack->start || page >= stack->materialized_start)
-            return false;
-        if ((__error_code & 0x2) != 0 && !permissions_include(stack->permissions, VmaPermission::Write))
+        VmaEntry *vma = internal_find_vma_mut(&process->vmas, page);
+        // No covering VMA, or the VMA is not anonymous-backed (guard / ELF file
+        // segments have no demand-zero policy): unrecoverable -> kill.
+        if (vma == nullptr || vma->backing != VmaBacking::Anonymous)
             return false;
 
+        // Access-permission gate. A write fault requires Write permission; an
+        // instruction fetch (NX) into a non-executable page is illegal. Both are
+        // unrecoverable -> kill (the page stays non-executable for writable VMAs).
+        if ((__error_code & 0x2) != 0 && !permissions_include(vma->permissions, VmaPermission::Write))
+            return false;
+        if ((__error_code & (1ull << 4)) != 0 && !permissions_include(vma->permissions, VmaPermission::Execute))
+            return false;
+
+        // Range gate, per growth direction. Downward stacks materialize below the
+        // current materialized start; upward heap is bounded by the committed
+        // heap break; fixed anonymous mappings cover the whole VMA range.
+        if (vma->growth == VmaGrowth::Down) {
+            if (page < vma->start || page >= vma->materialized_start)
+                return false;
+        } else {
+            uint64_t registered_end = vma->end;
+            if (vma->purpose == VmaPurpose::Heap) {
+                if (!page_up(process->vmas.heap_break, &registered_end))
+                    return false;
+            }
+            if (page < vma->start || page >= registered_end)
+                return false;
+        }
+
+        const uint64_t attr = anonymous_page_attr(vma->permissions);
         const uint64_t phys = alloc_user_frame();
         if (phys == 0)
             return false;
-        if (!zero_frame(phys) ||
-            !map_user_page_for_process(process, page, phys, bigos::mm::page_attr::USER_DATA, false)) {
+        if (!zero_frame(phys) || !map_user_page_for_process(process, page, phys, attr, false)) {
             free_user_frame(phys);
             return false;
         }
-        stack->materialized_start = page;
+
+        // Advance the materialization accounting. Downward stacks lower
+        // materialized_start; everything else keeps a materialized_end
+        // high-water mark so shrink/teardown can unmap only real pages.
+        if (vma->growth == VmaGrowth::Down) {
+            vma->materialized_start = page;
+        } else if (page + PAGE_SIZE > vma->materialized_end) {
+            vma->materialized_end = page + PAGE_SIZE;
+        }
         return true;
     }
 
@@ -1587,6 +1622,79 @@ namespace bigos::proc {
         if (!create_first_user_process(&first_process))
             halt_failed("BIGOS_USER_LOAD_FAILED create\n");
         run_user_process(&first_process);
+    }
+#endif
+
+#ifdef BIGOS_DEMAND_PAGING_SMOKE
+    // Validation-only, default-off demand-paging smoke. Runs from ordinary kernel
+    // thread context (can_block() true) and drives the unified user page-fault
+    // entry against a constructed process without entering ring3. It covers:
+    //   1. lazy materialization hit on a registered heap page,
+    //   2. allocation-failure kill (injected via the smoke-only hook),
+    //   3. permission-violation kill (present/protection-violation bit set).
+    // The process address-space root is inactive here, so map/teardown target the
+    // process root only and never touch the active kernel CR3 or VGA/MMIO.
+    bool demand_paging_smoke_run(Process *__process) noexcept {
+        if (!create_first_user_process(__process))
+            return false;
+
+        g_current_process = __process;
+        __process->state = ProcessState::Running;
+
+        const uint64_t heap_base = __process->vmas.heap_base;
+        const uint64_t write_user_fault = 0x2 | 0x4;   // write + user, present=0
+
+        bool ok = true;
+
+        // 1. Lazy materialization hit: grow heap lazily, then fault the first
+        // covered page and confirm it gets mapped in the process root.
+        if (brk_current(heap_base + 2 * PAGE_SIZE) != (int64_t)(heap_base + 2 * PAGE_SIZE))
+            ok = false;
+        if (ok && !try_handle_user_page_fault(heap_base, write_user_fault))
+            ok = false;
+        if (ok && !bigos::mm::user_range_mapped(__process->address_space_root, heap_base, PAGE_SIZE))
+            ok = false;
+
+        // 2. Allocation-failure kill: a legitimate fault on the next registered
+        // heap page must fail deterministically when no frame is available and
+        // must not publish a mapping.
+        if (ok) {
+            g_demand_paging_force_alloc_fail = true;
+            const bool recovered = try_handle_user_page_fault(heap_base + PAGE_SIZE, write_user_fault);
+            g_demand_paging_force_alloc_fail = false;
+            if (recovered)
+                ok = false;
+            if (ok && bigos::mm::user_range_mapped(__process->address_space_root, heap_base + PAGE_SIZE, PAGE_SIZE))
+                ok = false;
+        }
+
+        // 3. Permission-violation kill: a present/protection-violation fault is
+        // never a demand-zero candidate and must not be recovered.
+        if (ok) {
+            const uint64_t protection_fault = 0x1 | 0x2 | 0x4;   // present + write + user
+            if (try_handle_user_page_fault(heap_base, protection_fault))
+                ok = false;
+        }
+
+        // Out-of-range fault outside any VMA must also be rejected.
+        if (ok && try_handle_user_page_fault(0x2000000ull, write_user_fault))
+            ok = false;
+
+        // Deterministic teardown of the constructed process through the existing
+        // lifecycle/reaper; the inactive root is reclaimed by reap.
+        g_current_process = nullptr;
+        __process->state = ProcessState::Terminated;
+        mark_zombie_or_reap_pending(__process);
+        reap_pending_processes();
+        return ok;
+    }
+
+    void demand_paging_smoke_entry(void *) noexcept {
+        static Process smoke_process;
+        if (demand_paging_smoke_run(&smoke_process))
+            bigos::serial_puts("BIGOS_DEMAND_PAGING_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_DEMAND_PAGING_FAILED\n");
     }
 #endif
 }   // namespace bigos::proc

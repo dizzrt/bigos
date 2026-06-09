@@ -89,6 +89,12 @@ option("fs_smoke")
     set_description("enable validation-only kernel exFAT filesystem smoke marker")
 option_end()
 
+option("demand_paging_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only demand-paging lazy materialization / kill smoke marker")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -300,6 +306,10 @@ target("kernel")
 
     if has_config("fs_smoke") then
         add_defines("BIGOS_FS_SMOKE")
+    end
+
+    if has_config("demand_paging_smoke") then
+        add_defines("BIGOS_DEMAND_PAGING_SMOKE")
     end
 
     if is_mode("debug") then 
