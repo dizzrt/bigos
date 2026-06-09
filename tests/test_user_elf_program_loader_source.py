@@ -65,7 +65,11 @@ def test_user_elf_maps_pages_with_explicit_attrs_and_zero_fills_bss() -> None:
     assert 'attr |= bigos::mm::page_attr::NO_EXECUTE;' in proc
     assert 'memset(direct, 0, PAGE_SIZE);' in proc
     assert 'memcpy((uint8_t *)direct + page_offset, __image + file_offset, copy_end - copy_vaddr);' in proc
-    assert 'map_page_in_root(__root, page, phys, __segment.attr)' in proc
+    assert 'map_user_page_for_process(__process, page, phys, __segment.attr, true)' in proc
+    assert 'bool map_user_page_for_process(' in proc
+    assert 'internal_vma_range_allowed(&__process->vmas, __vaddr, PAGE_SIZE, bigos::proc::VmaPermission::Read)' in proc
+    assert '!internal_vma_attr_allowed(vma, __attr)' in proc
+    assert 'bigos::mm::map_page_in_root(__process->address_space_root, __vaddr, __phys, __attr)' in proc
     assert 'map_page_in_root(' in proc and 'bigos::mm::page_attr::USER_DATA' in proc
 
 
