@@ -98,7 +98,11 @@ namespace {
     };
 
     bigos::proc::Process *g_current_process = nullptr;
-    bigos::proc::Process *g_process_table[bigos::proc::MAX_PROCESSES] = {};
+    // Intrusive process registry: a singly-anchored doubly linked list head plus
+    // a live count bounded by MAX_PROCESSES_SOFT_LIMIT. Replaces the former fixed
+    // g_process_table[MAX_PROCESSES] array; nodes are embedded in each Process.
+    bigos::proc::Process *g_process_list_head = nullptr;
+    uint32_t g_process_count = 0;
     bigos::proc::Process *g_init_process = nullptr;
     uint32_t g_reap_head_pid = 0;
     uint32_t g_next_pid = 1;
@@ -111,6 +115,14 @@ namespace {
     // alloc_user_frame() to fail so the demand-paging smoke can exercise the
     // deterministic allocation-failure kill path without a global test macro.
     bool g_demand_paging_force_alloc_fail = false;
+#endif
+
+#ifdef BIGOS_GROWABLE_TABLES_SMOKE
+    // Smoke-only, default-off allocation-failure injection. Forces
+    // alloc_process_object() and grow_fd_table() to fail so the growable-tables
+    // smoke can exercise the deterministic degradation paths without a global
+    // test macro.
+    bool g_growable_force_alloc_fail = false;
 #endif
 
     uint64_t alloc_user_frame() noexcept {
@@ -348,16 +360,53 @@ namespace {
     bigos::proc::Process *lookup_process(uint32_t __pid) noexcept {
         if (__pid == 0)
             return nullptr;
-        for (uint32_t i = 0; i < bigos::proc::MAX_PROCESSES; i++) {
-            bigos::proc::Process *process = g_process_table[i];
-            if (process != nullptr && process->pid == __pid)
+        for (bigos::proc::Process *process = g_process_list_head; process != nullptr; process = process->reg_next) {
+            if (process->pid == __pid)
                 return process;
         }
         return nullptr;
     }
 
+    // Heap-backed Process object lifecycle. alloc_process_object returns a
+    // zeroed object or nullptr on heap exhaustion (deterministic degradation, no
+    // panic); free_process_object releases it. Static smoke objects are never
+    // routed through these and keep heap_allocated == false.
+    bigos::proc::Process *alloc_process_object() noexcept {
+#ifdef BIGOS_GROWABLE_TABLES_SMOKE
+        if (g_growable_force_alloc_fail)
+            return nullptr;
+#endif
+        void *raw = bigos::kmalloc(sizeof(bigos::proc::Process));
+        if (raw == nullptr)
+            return nullptr;
+        auto *process = (bigos::proc::Process *)raw;
+        memset(process, 0, sizeof(*process));
+        process->heap_allocated = true;
+        return process;
+    }
+
+    void free_process_object(bigos::proc::Process *__process) noexcept {
+        if (__process != nullptr && __process->heap_allocated)
+            bigos::free(__process);
+    }
+
+    // Zeroes a Process for (re)use while preserving the heap_allocated ownership
+    // flag, so create/fail paths can reset state without losing track of whether
+    // the reaper must free the object's backing storage.
+    void scrub_process(bigos::proc::Process *__process) noexcept {
+        if (__process == nullptr)
+            return;
+        const bool heap_allocated = __process->heap_allocated;
+        memset(__process, 0, sizeof(*__process));
+        __process->heap_allocated = heap_allocated;
+    }
+
     uint32_t alloc_pid() noexcept {
-        for (uint32_t attempt = 0; attempt < bigos::proc::MAX_PROCESSES * 2; attempt++) {
+        // Bounded scan over the configured soft limit (plus headroom for the two
+        // reserved values 0 / WAIT_ANY) so a large live process count never makes
+        // PID allocation give up prematurely while still terminating.
+        const uint32_t attempts = bigos::proc::MAX_PROCESSES_SOFT_LIMIT * 2 + 2;
+        for (uint32_t attempt = 0; attempt < attempts; attempt++) {
             const uint32_t pid = g_next_pid++;
             if (g_next_pid == 0 || g_next_pid == bigos::proc::WAIT_ANY)
                 g_next_pid = 1;
@@ -370,15 +419,7 @@ namespace {
     bool publish_process(bigos::proc::Process *__process, uint32_t __parent_pid) noexcept {
         if (__process == nullptr || __process->table_published)
             return false;
-
-        uint32_t slot = bigos::proc::MAX_PROCESSES;
-        for (uint32_t i = 0; i < bigos::proc::MAX_PROCESSES; i++) {
-            if (g_process_table[i] == nullptr) {
-                slot = i;
-                break;
-            }
-        }
-        if (slot == bigos::proc::MAX_PROCESSES)
+        if (g_process_count >= bigos::proc::MAX_PROCESSES_SOFT_LIMIT)
             return false;
 
         const uint32_t pid = alloc_pid();
@@ -393,7 +434,14 @@ namespace {
         __process->table_published = true;
         __process->wait_status_consumed = false;
         __process->parent_waiting = false;
-        g_process_table[slot] = __process;
+
+        // Push onto the head of the intrusive registry list (O(1), no search).
+        __process->reg_prev = nullptr;
+        __process->reg_next = g_process_list_head;
+        if (g_process_list_head != nullptr)
+            g_process_list_head->reg_prev = __process;
+        g_process_list_head = __process;
+        g_process_count++;
 
         bigos::proc::Process *parent = lookup_process(__parent_pid);
         if (parent != nullptr) {
@@ -406,13 +454,6 @@ namespace {
     void unpublish_process(bigos::proc::Process *__process) noexcept {
         if (__process == nullptr || !__process->table_published)
             return;
-
-        for (uint32_t i = 0; i < bigos::proc::MAX_PROCESSES; i++) {
-            if (g_process_table[i] == __process) {
-                g_process_table[i] = nullptr;
-                break;
-            }
-        }
 
         bigos::proc::Process *parent = lookup_process(__process->parent_pid);
         if (parent != nullptr) {
@@ -428,6 +469,18 @@ namespace {
                 link = &child->next_sibling_pid;
             }
         }
+
+        // Unlink from the intrusive registry list (O(1)).
+        if (__process->reg_prev != nullptr)
+            __process->reg_prev->reg_next = __process->reg_next;
+        else
+            g_process_list_head = __process->reg_next;
+        if (__process->reg_next != nullptr)
+            __process->reg_next->reg_prev = __process->reg_prev;
+        __process->reg_next = nullptr;
+        __process->reg_prev = nullptr;
+        if (g_process_count > 0)
+            g_process_count--;
 
         __process->table_published = false;
         __process->pid = 0;
@@ -684,14 +737,62 @@ namespace {
         return true;
     }
 
+    constexpr uint32_t FD_TABLE_INITIAL_CAPACITY = 16;
+
+    // Resets the growable fd storage to the empty state. Storage is allocated
+    // lazily on the first install; create paths memset the Process first so this
+    // only documents/normalizes the initial fd_table == nullptr / capacity == 0.
     void init_fd_table(bigos::proc::Process *__process) noexcept {
         if (__process == nullptr)
             return;
-        for (uint32_t i = 0; i < bigos::proc::MAX_FDS; i++) {
-            __process->fd_table[i].file = nullptr;
-            __process->fd_table[i].close_on_exec = false;
-            __process->fd_table[i].readable = false;
+        __process->fd_table = nullptr;
+        __process->fd_capacity = 0;
+    }
+
+    void free_fd_table(bigos::proc::Process *__process) noexcept {
+        if (__process == nullptr || __process->fd_table == nullptr)
+            return;
+        bigos::free(__process->fd_table);
+        __process->fd_table = nullptr;
+        __process->fd_capacity = 0;
+    }
+
+    // Grows the fd storage so it can hold at least __min_capacity entries,
+    // bounded by MAX_FDS_SOFT_LIMIT. Returns false on heap exhaustion or when the
+    // soft limit is reached (deterministic EMFILE at the call site, no panic).
+    bool grow_fd_table(bigos::proc::Process *__process, uint32_t __min_capacity) noexcept {
+        if (__process == nullptr || __min_capacity > bigos::proc::MAX_FDS_SOFT_LIMIT)
+            return false;
+        if (__process->fd_capacity >= __min_capacity)
+            return true;
+#ifdef BIGOS_GROWABLE_TABLES_SMOKE
+        if (g_growable_force_alloc_fail)
+            return false;
+#endif
+
+        uint32_t new_capacity = __process->fd_capacity == 0 ? FD_TABLE_INITIAL_CAPACITY : __process->fd_capacity * 2;
+        if (new_capacity < __min_capacity)
+            new_capacity = __min_capacity;
+        if (new_capacity > bigos::proc::MAX_FDS_SOFT_LIMIT)
+            new_capacity = bigos::proc::MAX_FDS_SOFT_LIMIT;
+
+        auto *entries = (bigos::proc::FdEntry *)bigos::kmalloc(sizeof(bigos::proc::FdEntry) * new_capacity);
+        if (entries == nullptr)
+            return false;
+        for (uint32_t i = 0; i < new_capacity; i++) {
+            if (i < __process->fd_capacity) {
+                entries[i] = __process->fd_table[i];
+            } else {
+                entries[i].file = nullptr;
+                entries[i].close_on_exec = false;
+                entries[i].readable = false;
+            }
         }
+        if (__process->fd_table != nullptr)
+            bigos::free(__process->fd_table);
+        __process->fd_table = entries;
+        __process->fd_capacity = new_capacity;
+        return true;
     }
 
     uint64_t bounded_strlen(const char *__value, uint64_t __limit) noexcept {
@@ -773,8 +874,8 @@ namespace bigos::proc {
     void init() noexcept {
         if (g_proc_initialized)
             return;
-        for (uint32_t i = 0; i < MAX_PROCESSES; i++)
-            g_process_table[i] = nullptr;
+        g_process_list_head = nullptr;
+        g_process_count = 0;
         g_current_process = nullptr;
         g_reap_head_pid = 0;
         g_next_pid = 1;
@@ -826,15 +927,25 @@ namespace bigos::proc {
 
         const char *argv[] = {INIT_ELF_PATH};
         const ExecArgs args = {argv, 1, nullptr, 0};
-        static Process init_process;
-        const UserElfLoadError load_status = create_elf_user_process(&init_process, image, file_size, &args);
+        // Heap-allocated init process object (replaces the former static Process
+        // singleton). PID-1 semantics: a process-object allocation failure is a
+        // deterministic init-launch failure rather than a separate panic class;
+        // it routes through the existing launch_init_failed boundary.
+        Process *init_process = alloc_process_object();
+        if (init_process == nullptr) {
+            bigos::free(image);
+            launch_init_failed("process-object");
+        }
+        const UserElfLoadError load_status = create_elf_user_process(init_process, image, file_size, &args);
         bigos::free(image);
-        if (load_status != UserElfLoadError::Success)
+        if (load_status != UserElfLoadError::Success) {
+            free_process_object(init_process);
             launch_init_failed(user_elf_load_error_name(load_status));
+        }
 
-        g_init_process = &init_process;
+        g_init_process = init_process;
         bigos::serial_puts("BIGOS_INIT_ENTER\n");
-        run_user_process(&init_process);
+        run_user_process(init_process);
     }
 
     bool create_first_user_process(Process *__process) noexcept {
@@ -843,7 +954,7 @@ namespace bigos::proc {
 
         if (!g_proc_initialized)
             init();
-        memset(__process, 0, sizeof(*__process));
+        scrub_process(__process);
         uint64_t code_phys = 0;
         uint64_t data_phys = 0;
         uint64_t stack_phys = 0;
@@ -940,7 +1051,8 @@ namespace bigos::proc {
             free_user_frame(stack_phys);
         if (__process->table_published)
             unpublish_process(__process);
-        memset(__process, 0, sizeof(*__process));
+        free_fd_table(__process);
+        scrub_process(__process);
         __process->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
         return false;
     }
@@ -990,7 +1102,7 @@ namespace bigos::proc {
         if (error != UserElfLoadError::Success)
             return error;
 
-        memset(__process, 0, sizeof(*__process));
+        scrub_process(__process);
         __process->kernel_stack_base = bigos::alloc_kernel_pages(PROCESS_KERNEL_STACK_PAGES, _GFM_PRE_PAGING);
         if (__process->kernel_stack_base == nullptr)
             return UserElfLoadError::OutOfMemory;
@@ -1108,7 +1220,8 @@ namespace bigos::proc {
             (void)bigos::mm::teardown_user_address_space(__process->address_space_root);
         if (__process->table_published)
             unpublish_process(__process);
-        memset(__process, 0, sizeof(*__process));
+        free_fd_table(__process);
+        scrub_process(__process);
         __process->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
         return error;
     }
@@ -1406,7 +1519,8 @@ namespace bigos::proc {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __file == nullptr)
             return -bigos::EBADF;
-        for (uint32_t i = 0; i < MAX_FDS; i++) {
+        // Reuse the lowest free slot within the current capacity.
+        for (uint32_t i = 0; i < process->fd_capacity; i++) {
             if (process->fd_table[i].file == nullptr) {
                 process->fd_table[i].file = __file;
                 process->fd_table[i].close_on_exec = __close_on_exec;
@@ -1414,14 +1528,22 @@ namespace bigos::proc {
                 return (int64_t)i;
             }
         }
-        return -bigos::EMFILE;
+        // No free slot: grow by one entry (bounded by the soft limit). The first
+        // newly added index becomes the lowest available fd.
+        const uint32_t fd = process->fd_capacity;
+        if (fd >= bigos::proc::MAX_FDS_SOFT_LIMIT || !grow_fd_table(process, fd + 1))
+            return -bigos::EMFILE;
+        process->fd_table[fd].file = __file;
+        process->fd_table[fd].close_on_exec = __close_on_exec;
+        process->fd_table[fd].readable = __file->readable;
+        return (int64_t)fd;
     }
 
     bigos::vfs::Status read_fd_current(uint32_t __fd, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
         if (__bytes_read != nullptr)
             *__bytes_read = 0;
         Process *process = g_current_process;
-        if (process == nullptr || process->state != ProcessState::Running || __fd >= MAX_FDS)
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return bigos::vfs::Status::BadFileDescriptor;
         FdEntry *entry = &process->fd_table[__fd];
         if (entry->file == nullptr || !entry->readable)
@@ -1431,7 +1553,7 @@ namespace bigos::proc {
 
     int64_t close_fd_current(uint32_t __fd) noexcept {
         Process *process = g_current_process;
-        if (process == nullptr || process->state != ProcessState::Running || __fd >= MAX_FDS)
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return -bigos::EBADF;
         FdEntry *entry = &process->fd_table[__fd];
         if (entry->file == nullptr)
@@ -1447,7 +1569,7 @@ namespace bigos::proc {
     void close_all_fds(Process *__process) noexcept {
         if (__process == nullptr)
             return;
-        for (uint32_t i = 0; i < MAX_FDS; i++) {
+        for (uint32_t i = 0; i < __process->fd_capacity; i++) {
             FdEntry *entry = &__process->fd_table[i];
             if (entry->file == nullptr)
                 continue;
@@ -1462,7 +1584,7 @@ namespace bigos::proc {
     void close_on_exec_fds(Process *__process) noexcept {
         if (__process == nullptr)
             return;
-        for (uint32_t i = 0; i < MAX_FDS; i++) {
+        for (uint32_t i = 0; i < __process->fd_capacity; i++) {
             FdEntry *entry = &__process->fd_table[i];
             if (entry->file == nullptr || !entry->close_on_exec)
                 continue;
@@ -1598,6 +1720,7 @@ namespace bigos::proc {
             }
 
             close_all_fds(process);
+            free_fd_table(process);
 
             if (process->kernel_stack_base != nullptr) {
                 bigos::free_pages(process->kernel_stack_base);
@@ -1611,8 +1734,15 @@ namespace bigos::proc {
             process->state = ProcessState::Reaped;
             *link = process->next_reap_pid;
             process->next_reap_pid = 0;
+            if (process == g_init_process)
+                g_init_process = nullptr;
             unpublish_process(process);
             bigos::serial_puts("BIGOS_USER_RECLAIMED\n");
+            // Final step: the object is no longer referenced by current, the reap
+            // chain, the registry, or any parent/child link. Free its heap
+            // backing (static smoke objects keep heap_allocated == false and are
+            // left untouched). MUST be the last use of `process`.
+            free_process_object(process);
         }
     }
 
@@ -1695,6 +1825,149 @@ namespace bigos::proc {
             bigos::serial_puts("BIGOS_DEMAND_PAGING_PASSED\n");
         else
             bigos::serial_puts("BIGOS_DEMAND_PAGING_FAILED\n");
+    }
+#endif
+
+#ifdef BIGOS_GROWABLE_TABLES_SMOKE
+    // Validation-only, default-off growable process/fd table smoke. Runs from
+    // ordinary kernel-thread context (can_block() true, non-IRQ) so kmalloc/free
+    // are legal. It deliberately exercises only the growable registry and fd
+    // storage (no ring3 entry / address-space machinery) and covers:
+    //   1. registering more processes than the former fixed 16-process cap,
+    //      with stable distinct PIDs and lookup, then slot/PID reuse after the
+    //      objects are unpublished and freed,
+    //   2. installing more fds than the former fixed 16-fd cap with ascending
+    //      lowest-free allocation, plus lowest-free reuse after a close,
+    //   3. deterministic degradation under injected allocation failure
+    //      (process-object alloc -> nullptr, fd growth -> EMFILE), no panic.
+    bigos::vfs::File *growable_make_dummy_file() noexcept {
+        auto *file = (bigos::vfs::File *)bigos::kmalloc(sizeof(bigos::vfs::File));
+        if (file == nullptr)
+            return nullptr;
+        memset(file, 0, sizeof(*file));
+        file->ops = nullptr;
+        file->vnode = nullptr;
+        file->offset = 0;
+        file->ref_count = 1;
+        file->readable = true;
+        file->close_on_exec = false;
+        return file;
+    }
+
+    bool growable_tables_smoke_run() noexcept {
+        if (!g_proc_initialized)
+            init();
+
+        Process *saved_current = g_current_process;
+        bool ok = true;
+
+        // 1. Process registry growth beyond the former fixed 16-process cap.
+        constexpr uint32_t kProcessCount = 20;
+        const uint32_t base_count = g_process_count;
+        Process *procs[kProcessCount] = {};
+        for (uint32_t i = 0; i < kProcessCount && ok; i++) {
+            procs[i] = alloc_process_object();
+            if (procs[i] == nullptr || !publish_process(procs[i], ROOT_PARENT_PID))
+                ok = false;
+        }
+        for (uint32_t i = 0; i < kProcessCount && ok; i++) {
+            if (procs[i] == nullptr || procs[i]->pid == 0 || lookup_process(procs[i]->pid) != procs[i])
+                ok = false;
+        }
+        if (ok && g_process_count != base_count + kProcessCount)
+            ok = false;
+        // Unpublish + free: registry slots and PIDs must become reusable.
+        for (uint32_t i = 0; i < kProcessCount; i++) {
+            if (procs[i] == nullptr)
+                continue;
+            const uint32_t pid = procs[i]->pid;
+            unpublish_process(procs[i]);
+            if (ok && lookup_process(pid) != nullptr)
+                ok = false;
+            free_process_object(procs[i]);
+            procs[i] = nullptr;
+        }
+        if (ok && g_process_count != base_count)
+            ok = false;
+
+        // 2. fd table growth beyond the former fixed 16-fd cap.
+        if (ok) {
+            Process *fdproc = alloc_process_object();
+            if (fdproc == nullptr) {
+                ok = false;
+            } else {
+                fdproc->state = ProcessState::Running;
+                init_fd_table(fdproc);
+                g_current_process = fdproc;
+
+                constexpr uint32_t kFdCount = 20;
+                for (uint32_t i = 0; i < kFdCount && ok; i++) {
+                    bigos::vfs::File *file = growable_make_dummy_file();
+                    if (file == nullptr) {
+                        ok = false;
+                        break;
+                    }
+                    const int64_t fd = install_fd_current(file, false);
+                    if (fd != (int64_t)i) {
+                        bigos::vfs::release(file);
+                        ok = false;
+                    }
+                }
+                // Close a middle fd and confirm the lowest-free slot is reused.
+                if (ok) {
+                    if (close_fd_current(5) != 0) {
+                        ok = false;
+                    } else {
+                        bigos::vfs::File *file = growable_make_dummy_file();
+                        if (file == nullptr || install_fd_current(file, false) != 5) {
+                            if (file != nullptr)
+                                bigos::vfs::release(file);
+                            ok = false;
+                        }
+                    }
+                }
+                close_all_fds(fdproc);
+                free_fd_table(fdproc);
+                g_current_process = nullptr;
+                free_process_object(fdproc);
+            }
+        }
+
+        // 3. Deterministic degradation under injected allocation failure.
+        if (ok) {
+            g_growable_force_alloc_fail = true;
+            if (alloc_process_object() != nullptr)
+                ok = false;
+
+            static Process inject_proc;
+            scrub_process(&inject_proc);
+            inject_proc.state = ProcessState::Running;
+            init_fd_table(&inject_proc);
+            g_current_process = &inject_proc;
+            bigos::vfs::File *file = growable_make_dummy_file();
+            if (file == nullptr) {
+                ok = false;
+            } else {
+                // No capacity yet and growth injection forced to fail -> EMFILE.
+                if (install_fd_current(file, false) != -bigos::EMFILE)
+                    ok = false;
+                bigos::vfs::release(file);
+            }
+            free_fd_table(&inject_proc);
+            g_current_process = nullptr;
+            g_growable_force_alloc_fail = false;
+        }
+
+        g_growable_force_alloc_fail = false;
+        g_current_process = saved_current;
+        return ok;
+    }
+
+    void growable_tables_smoke_entry(void *) noexcept {
+        if (growable_tables_smoke_run())
+            bigos::serial_puts("BIGOS_GROWABLE_TABLES_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_GROWABLE_TABLES_FAILED\n");
     }
 #endif
 }   // namespace bigos::proc

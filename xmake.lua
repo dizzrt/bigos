@@ -95,6 +95,12 @@ option("demand_paging_smoke")
     set_description("enable validation-only demand-paging lazy materialization / kill smoke marker")
 option_end()
 
+option("growable_tables_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only growable process/fd table smoke marker")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -310,6 +316,10 @@ target("kernel")
 
     if has_config("demand_paging_smoke") then
         add_defines("BIGOS_DEMAND_PAGING_SMOKE")
+    end
+
+    if has_config("growable_tables_smoke") then
+        add_defines("BIGOS_GROWABLE_TABLES_SMOKE")
     end
 
     if is_mode("debug") then 

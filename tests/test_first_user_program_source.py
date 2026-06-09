@@ -54,7 +54,7 @@ def test_process_model_records_identity_address_space_stack_and_exit_state() -> 
         assert token in proc_h
 
     assert 'alloc_pid()' in proc
-    assert 'g_process_table[bigos::proc::MAX_PROCESSES]' in proc
+    assert 'g_process_list_head' in proc
     assert 'publish_process(__process, ROOT_PARENT_PID)' in proc
     assert '__process->state = ProcessState::Created;' in proc
     assert 'process->state = ProcessState::Terminated;' in proc

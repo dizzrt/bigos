@@ -61,19 +61,24 @@ def test_vfs_read_clamps_eof_and_advances_offset_only_on_success() -> None:
     assert '*__bytes_read = result.bytes_read;' in source
 
 
-def test_process_fd_table_lifecycle_and_helpers_are_bounded() -> None:
+def test_process_fd_table_lifecycle_and_helpers_are_growable() -> None:
     header = read_source('include/bigos/proc.h')
     source = read_source('src/kernel/proc/proc.cc')
 
-    assert 'constexpr uint32_t MAX_FDS = 16' in header
-    assert 'FdEntry fd_table[MAX_FDS]' in header
+    # The former fixed 16-fd inline array is replaced by a growable heap array
+    # bounded by a configurable soft limit; lowest-free allocation and EMFILE
+    # degradation are preserved.
+    assert 'MAX_FDS_SOFT_LIMIT = 256' in header
+    assert 'FdEntry *fd_table;' in header
     assert 'init_fd_table(__process);' in source
     assert 'install_fd_current' in source
-    assert 'for (uint32_t i = 0; i < MAX_FDS; i++)' in source
+    assert 'for (uint32_t i = 0; i < process->fd_capacity; i++)' in source
+    assert 'grow_fd_table(process, fd + 1)' in source
     assert 'return -bigos::EMFILE;' in source
     assert 'read_fd_current' in source
     assert 'close_fd_current' in source
     assert 'close_all_fds(process);' in source
+    assert 'free_fd_table(process);' in source
 
 
 def test_exec_and_reap_apply_fd_close_rules_from_safe_context() -> None:

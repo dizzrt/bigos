@@ -24,9 +24,11 @@ def test_launch_init_reuses_vfs_elf_load_chain_and_emits_enter_marker() -> None:
     assert 'bigos::vfs::init();' in proc
     assert 'bigos::vfs::open_absolute(INIT_ELF_PATH' in proc
     assert 'bigos::kmalloc((size_t)file_size)' in proc
-    assert 'create_elf_user_process(&init_process, image, file_size, &args)' in proc
+    # init process object is now heap-allocated (replaces the static singleton).
+    assert 'Process *init_process = alloc_process_object();' in proc
+    assert 'create_elf_user_process(init_process, image, file_size, &args)' in proc
     assert 'bigos::serial_puts("BIGOS_INIT_ENTER\\n");' in proc
-    assert 'run_user_process(&init_process);' in proc
+    assert 'run_user_process(init_process);' in proc
 
 
 def test_launch_init_degrades_deterministically_via_panic() -> None:

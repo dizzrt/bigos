@@ -192,9 +192,9 @@ unified `try_handle_user_page_fault` page-fault handler.
 
 ### Stage 15.5: Growable Process/Fd Tables / 阶段 15.5：进程与 fd 表可增长
 
-Status: proposed. Hard prerequisite for Stage 16.
+Status: completed (archived as `2026-06-09-grow-process-fd-tables`). Hard prerequisite for Stage 16.
 
-状态：建议中。是阶段 16 的硬前置。
+状态：已完成（已归档为 `2026-06-09-grow-process-fd-tables`）。是阶段 16 的硬前置。
 
 Goal: remove the static-slot ceiling before `fork` can hit it.
 

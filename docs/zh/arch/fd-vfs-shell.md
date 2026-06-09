@@ -17,8 +17,8 @@ BigOS 阶段 13 在可写文件系统、page cache、广泛 `mmap` 或用户态 
 
 ## 进程 fd table
 
-- 每个 `Process` 持有固定 `MAX_FDS` descriptor table，entry 指向 VFS `File` 对象。
-- `open` 在当前进程 table 中安装最低可用 fd；容量耗尽返回确定性的 `-bigos::EMFILE`，并 drop 未发布的 file reference。
+- 每个 `Process` 持有可增长的 descriptor table（堆分配的 `FdEntry` 数组，由 `MAX_FDS_SOFT_LIMIT` 软上限约束，而非固定内联大小），entry 指向 VFS `File` 对象；存储按需惰性分配，并在进程被 reap 时释放。
+- `open` 在当前进程 table 中安装最低可用 fd，并按需增长 table；达到 fd 软上限或增长分配失败时返回确定性的 `-bigos::EMFILE`，并 drop 未发布的 file reference。
 - `read` 和 `close` 对越界、未使用、已关闭以及不可读 descriptor 返回确定性 bad-fd 错误。
 - `exec` 保留未设置内部 `close_on_exec` bit 的 descriptor；rollback 不破坏旧 fd table。
 - exit 与 fault path 将 fd-backed 对象销毁延后到 `reap_pending_processes()`，并且需要先通过 active-stack 和 active-CR3 检查。

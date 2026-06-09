@@ -348,6 +348,11 @@ void kernel(const BootInfoHeader *boot_info) {
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_DEMAND_PAGING_FAILED thread\n");
 #endif
+#ifdef BIGOS_GROWABLE_TABLES_SMOKE
+    if (bigos::sched::create_kernel_thread(&bigos::proc::growable_tables_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_GROWABLE_TABLES_FAILED thread\n");
+#endif
 
     // Default-on, no-#ifdef normal-boot init launch (decision 1). Runs as a
     // kernel thread so run_user_process can enter ring3 and the deferred reaper

@@ -24,11 +24,14 @@ and VMA-backed syscall-buffer validation.
 
 ## Process FD Table
 
-- Each `Process` owns a fixed `MAX_FDS` descriptor table with entries pointing
-  at VFS `File` objects.
-- `open` installs the lowest available fd in the current process table; table
-  exhaustion returns a deterministic `-bigos::EMFILE` error and drops the unpublished
-  file reference.
+- Each `Process` owns a growable descriptor table (a heap-allocated `FdEntry`
+  array bounded by `MAX_FDS_SOFT_LIMIT` rather than a fixed inline size), with
+  entries pointing at VFS `File` objects. The storage is allocated lazily and
+  freed when the process is reaped.
+- `open` installs the lowest available fd in the current process table, growing
+  the table on demand; reaching the fd soft limit or a failed growth allocation
+  returns a deterministic `-bigos::EMFILE` error and drops the unpublished file
+  reference.
 - `read` and `close` reject out-of-range, unused, already-closed, and
   non-readable descriptors with a deterministic bad-fd error.
 - `exec` preserves descriptors unless their internal `close_on_exec` bit is set;

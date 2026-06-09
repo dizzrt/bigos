@@ -24,11 +24,14 @@ def test_bounded_pid_table_parent_child_and_publication_rules() -> None:
     proc_h = read_source('include/bigos/proc.h')
     proc = read_source('src/kernel/proc/proc.cc')
 
+    # The former fixed 16-process array is replaced by an intrusive list bounded
+    # by a configurable soft limit; PID/parent-child/publication rules are kept.
     for token in (
-        'MAX_PROCESSES = 16',
+        'MAX_PROCESSES_SOFT_LIMIT = 1024',
         'ROOT_PARENT_PID = 0',
         'WAIT_ANY = 0xffffffffu',
-        'g_process_table[bigos::proc::MAX_PROCESSES]',
+        'g_process_list_head',
+        'g_process_count >= bigos::proc::MAX_PROCESSES_SOFT_LIMIT',
         'uint32_t alloc_pid()',
         'lookup_process(pid) == nullptr',
         'bool publish_process',
@@ -37,6 +40,22 @@ def test_bounded_pid_table_parent_child_and_publication_rules() -> None:
         '__process->table_published = true',
     ):
         assert token in proc_h + proc
+
+
+def test_process_object_and_fd_storage_are_heap_allocated_and_growable() -> None:
+    proc_h = read_source('include/bigos/proc.h')
+    proc = read_source('src/kernel/proc/proc.cc')
+
+    # Process objects come from the kernel heap and are freed on reap; fd storage
+    # is a growable heap array, both bounded by configurable soft limits.
+    assert 'FdEntry *fd_table;' in proc_h
+    assert 'uint32_t fd_capacity;' in proc_h
+    assert 'Process *reg_next;' in proc_h
+    assert 'MAX_FDS_SOFT_LIMIT = 256' in proc_h
+    assert 'alloc_process_object()' in proc
+    assert 'free_process_object(process);' in proc
+    assert 'grow_fd_table(' in proc
+    assert 'free_fd_table(process);' in proc
 
 
 def test_wait_exit_zombie_reap_and_nonblocking_context_rules() -> None:

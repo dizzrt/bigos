@@ -23,7 +23,13 @@ namespace bigos::proc {
     constexpr const char *INIT_ELF_PATH = "/boot/user/init.elf";
     constexpr uint64_t USER_ELF_MAX_FILE_BYTES = 64 * 1024;
     constexpr uint64_t USER_LOW_HALF_LIMIT = 0x0000800000000000ull;
-    constexpr uint32_t MAX_PROCESSES = 16;
+    // Growable process/fd tables: the former compile-time hard caps
+    // (MAX_PROCESSES = 16, MAX_FDS = 16) are replaced by configurable soft
+    // limits. The process registry is an intrusive list and each fd table is a
+    // heap-allocated growable array, both bounded by these soft limits rather
+    // than a fixed inline size.
+    constexpr uint32_t MAX_PROCESSES_SOFT_LIMIT = 1024;
+    constexpr uint32_t MAX_FDS_SOFT_LIMIT = 256;
     constexpr uint32_t MAX_VMAS = 16;
     constexpr uint32_t ROOT_PARENT_PID = 0;
     constexpr uint32_t WAIT_ANY = 0xffffffffu;
@@ -35,7 +41,6 @@ namespace bigos::proc {
     // EXEC_FAILURE_STATUS is a process exit status, not a POSIX errno, so it is
     // intentionally kept here and out of the errno convergence scope.
     constexpr int64_t EXEC_FAILURE_STATUS = -126;
-    constexpr uint32_t MAX_FDS = 16;
 
     struct FdEntry {
         bigos::vfs::File *file;
@@ -136,7 +141,22 @@ namespace bigos::proc {
         bool parent_waiting;
         int64_t exit_code;
         int64_t fault_reason;
-        FdEntry fd_table[MAX_FDS];
+        // Growable per-process fd table: heap-allocated FdEntry array bounded by
+        // MAX_FDS_SOFT_LIMIT instead of a fixed inline array. Allocated lazily on
+        // first install and freed when the process is reaped. fd_capacity is the
+        // current allocated entry count; the lowest free slot is still preferred.
+        FdEntry *fd_table;
+        uint32_t fd_capacity;
+        // True when the Process object itself was allocated from the kernel heap
+        // via alloc_process_object() and must be freed on reap. Static smoke
+        // objects keep this false so the reaper never frees static storage.
+        bool heap_allocated;
+        // Intrusive process-registry node pointers. The registry is a global
+        // doubly linked list threaded through every published Process object;
+        // nodes are allocated/freed with the Process itself (no extra node heap
+        // allocation). Only valid while table_published is true.
+        Process *reg_next;
+        Process *reg_prev;
     };
 
     struct ExecArgs {
@@ -208,6 +228,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_DEMAND_PAGING_SMOKE
     void demand_paging_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_GROWABLE_TABLES_SMOKE
+    void growable_tables_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 
