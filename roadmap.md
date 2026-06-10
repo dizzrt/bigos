@@ -245,9 +245,9 @@ both depend on.
 
 ### Stage 17: Signals / 阶段 17：信号子系统
 
-Status: proposed. Depends on Stage 16 and Stage 16.5.
+Status: completed (archived as `2026-06-10-introduce-signals`). Depends on Stage 16 and Stage 16.5.
 
-状态：建议中。依赖阶段 16 与阶段 16.5。
+状态：已完成（已归档为 `2026-06-10-introduce-signals`）。依赖阶段 16 与阶段 16.5。
 
 Goal: a minimal POSIX signal model.
 

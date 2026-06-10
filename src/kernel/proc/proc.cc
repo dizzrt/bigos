@@ -727,6 +727,11 @@ namespace {
             return;
 
         bigos::proc::Process *parent = lookup_process(process->parent_pid);
+        // Child entering zombie (normal exit or signal/fault termination): set
+        // SIGCHLD pending on the parent. Default action is Ignore so this never
+        // changes existing wait/reaper behavior, and it allocates nothing.
+        if (parent != nullptr)
+            (void)bigos::signal::kill(parent, bigos::signal::SIGCHLD);
         if (parent != nullptr && !process->wait_status_consumed) {
             process->state = bigos::proc::ProcessState::Zombie;
             (void)bigos::sched::wake_all(&g_process_wait_queue);
@@ -1203,6 +1208,7 @@ namespace bigos::proc {
         __process->euid = bigos::cred::ROOT_UID;
         __process->egid = bigos::cred::ROOT_UID;
         __process->start_unix_time = bigos::time::current_unix_time();
+        bigos::signal::init_state(__process);
         init_fd_table(__process);
         if (!publish_process(__process, ROOT_PARENT_PID))
             goto fail;
@@ -1385,6 +1391,7 @@ namespace bigos::proc {
         __process->euid = bigos::cred::ROOT_UID;
         __process->egid = bigos::cred::ROOT_UID;
         __process->start_unix_time = bigos::time::current_unix_time();
+        bigos::signal::init_state(__process);
         init_fd_table(__process);
         if (!publish_process(__process, g_current_process != nullptr ? g_current_process->pid : ROOT_PARENT_PID)) {
             error = UserElfLoadError::OutOfMemory;
@@ -1455,6 +1462,10 @@ namespace bigos::proc {
             return UserElfLoadError::MapFailed;
         }
         close_on_exec_fds(process);
+        // exec replaces the image: user handler dispositions point at now-invalid
+        // user addresses, so reset them to default. The blocked mask and pending
+        // set are preserved (decision 10). prepared.sig_* are discarded.
+        bigos::signal::reset_handlers_on_exec(process);
         (void)old_code;
         (void)old_data;
         (void)old_stack;
@@ -1487,6 +1498,16 @@ namespace bigos::proc {
 
     Process *current_process() noexcept {
         return g_current_process;
+    }
+
+    Process *find_process(uint32_t __pid) noexcept {
+        Process *process = lookup_process(__pid);
+        if (process == nullptr)
+            return nullptr;
+        // Only published, non-reaped processes are valid signal targets.
+        if (process->state == ProcessState::Reaped || process->state == ProcessState::Empty)
+            return nullptr;
+        return process;
     }
 
     void init_vmas(VmaCollection *__vmas) noexcept {
@@ -1819,6 +1840,11 @@ namespace bigos::proc {
         child->euid = parent->euid;
         child->egid = parent->egid;
         child->start_unix_time = bigos::time::current_unix_time();
+
+        // Signal inheritance: the child inherits the disposition table and blocked
+        // mask field-by-field; its pending set starts empty (POSIX fork). No new
+        // allocation, no failure path.
+        bigos::signal::inherit_on_fork(child, parent);
 
         // Child resumes from the parent's syscall frame with rax (return value) 0.
         child->fork_entry_frame = *__parent_frame;
@@ -2598,6 +2624,154 @@ namespace bigos::proc {
             bigos::serial_puts("BIGOS_TIME_IDENTITY_PASSED\n");
         else
             bigos::serial_puts("BIGOS_TIME_IDENTITY_FAILED\n");
+    }
+#endif
+
+#ifdef BIGOS_SIGNAL_SMOKE
+    // Default-off bounded validation of the minimal signal model. It runs in
+    // ordinary kernel context (no ring3 round-trip), exercising:
+    //   1. fixed signal numbers / default actions / SIGKILL uncatchable +
+    //      unblockable invariants,
+    //   2. kill sets a pending bit; mask blocks then unblocks delivery,
+    //   3. a user-handler delivery builds an on-user-stack signal frame and
+    //      rewrites the interrupted frame, and sigreturn restores it exactly,
+    //   4. an over-privileged kill is rejected by cred::may_signal.
+    // The user-stack frame round-trip uses a real created user process address
+    // space (signal helpers walk process->address_space_root directly), so it
+    // does not need a CR3 switch. Any validation failure inside the delivery path
+    // would terminate the current process, so the setup keeps every range valid.
+    bool signal_smoke_run() noexcept {
+        if (!g_proc_initialized)
+            init();
+        bool ok = true;
+
+        namespace sig = bigos::signal;
+
+        // 1. Static invariants.
+        if (!sig::is_uncatchable(sig::SIGKILL) || !sig::is_unblockable(sig::SIGKILL))
+            ok = false;
+        if (sig::default_action(sig::SIGTERM) != sig::DefaultAction::Terminate)
+            ok = false;
+        if (sig::default_action(sig::SIGCHLD) != sig::DefaultAction::Ignore)
+            ok = false;
+        if (sig::valid_signo(0) || sig::valid_signo(sig::SIG_MAX + 1))
+            ok = false;
+
+        Process *saved_current = g_current_process;
+        static Process proc;
+        scrub_process(&proc);
+
+        if (ok && !create_first_user_process(&proc))
+            ok = false;
+
+        if (ok) {
+            g_current_process = &proc;
+            proc.state = ProcessState::Running;
+
+            // 2. kill sets pending; SIGKILL set_disposition rejected; mask drops
+            // SIGKILL; mask blocks SIGUSR1 then unblock re-enables delivery.
+            sig::init_state(&proc);
+            if (sig::kill(&proc, 9999) != -bigos::EINVAL)
+                ok = false;
+            if (sig::kill(&proc, sig::SIGUSR1) != 0 || (proc.sig_pending & sig::signo_bit(sig::SIGUSR1)) == 0)
+                ok = false;
+
+            sig::SigDisposition handler_disp{sig::SigAction::Handler, USER_CODE_BASE};
+            if (sig::set_disposition(&proc, sig::SIGKILL, &handler_disp, nullptr) != -bigos::EINVAL)
+                ok = false;
+
+            sig::SigSet old_mask = 0;
+            if (sig::set_mask(&proc, sig::SIG_BLOCK, sig::signo_bit(sig::SIGKILL) | sig::signo_bit(sig::SIGUSR1),
+                    &old_mask) != 0)
+                ok = false;
+            if ((proc.sig_mask & sig::signo_bit(sig::SIGKILL)) != 0)   // SIGKILL never blockable
+                ok = false;
+            if (sig::has_deliverable_signal(&proc))   // SIGUSR1 pending but blocked
+                ok = false;
+            if (sig::set_mask(&proc, sig::SIG_UNBLOCK, sig::signo_bit(sig::SIGUSR1), nullptr) != 0)
+                ok = false;
+            if (!sig::has_deliverable_signal(&proc))   // unblocked -> deliverable
+                ok = false;
+
+            // 3. User-handler delivery + sigreturn round-trip.
+            if (ok) {
+                sig::init_state(&proc);
+                sig::SigDisposition disp{sig::SigAction::Handler, USER_CODE_BASE};
+                if (sig::set_disposition(&proc, sig::SIGUSR1, &disp, nullptr) != 0)
+                    ok = false;
+                (void)sig::kill(&proc, sig::SIGUSR1);
+
+                bigos::irq::InterruptFrame frame;
+                memset(&frame, 0, sizeof(frame));
+                frame.cs = bigos::arch::x86::USER_CODE_SELECTOR;
+                frame.ss = bigos::arch::x86::USER_DATA_SELECTOR;
+                frame.rflags = (1ull << 9) | (1ull << 1);   // IF + reserved
+                frame.rip = USER_CODE_BASE + 0x40;
+                frame.rsp = USER_STACK_TOP;
+                frame.rax = 0x1111;
+                frame.rbx = 0x2222;
+
+                const uint64_t pre_rsp = frame.rsp;
+                const uint64_t pre_rip = frame.rip;
+                sig::deliver_pending_to_user(&frame, &proc);
+
+                if (frame.rip != USER_CODE_BASE || frame.rdi != (uint64_t)sig::SIGUSR1 || frame.rsp >= pre_rsp)
+                    ok = false;
+                if ((proc.sig_mask & sig::signo_bit(sig::SIGUSR1)) == 0)   // blocked during handler
+                    ok = false;
+                if ((proc.sig_pending & sig::signo_bit(sig::SIGUSR1)) != 0)   // pending consumed
+                    ok = false;
+
+                sig::sigreturn(&frame);
+                if (frame.rip != pre_rip || frame.rsp != pre_rsp || frame.rax != 0x1111 || frame.rbx != 0x2222)
+                    ok = false;
+                if (frame.cs != bigos::arch::x86::USER_CODE_SELECTOR ||
+                    frame.ss != bigos::arch::x86::USER_DATA_SELECTOR)
+                    ok = false;
+                if ((frame.rflags & (1ull << 9)) == 0)   // IF preserved
+                    ok = false;
+                if ((proc.sig_mask & sig::signo_bit(sig::SIGUSR1)) != 0)   // mask restored
+                    ok = false;
+            }
+        }
+
+        // 4. Over-privileged kill is rejected by the cred decision (the SYS_KILL
+        // enforcement primitive); a matching/root actor is allowed.
+        if (ok) {
+            static Process stranger;
+            scrub_process(&stranger);
+            stranger.euid = 4242;
+            proc.uid = 7;
+            proc.euid = 7;
+            if (bigos::cred::may_signal(&stranger, &proc))
+                ok = false;
+            static Process root_actor;
+            scrub_process(&root_actor);   // all zero == root
+            if (!bigos::cred::may_signal(&root_actor, &proc))
+                ok = false;
+        }
+
+        // Teardown the created process through the reference-counted path.
+        g_current_process = nullptr;
+        if (proc.table_published)
+            unpublish_process(&proc);
+        if (proc.address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
+            !bigos::mm::teardown_user_address_space(proc.address_space_root))
+            ok = false;
+        close_all_fds(&proc);
+        free_fd_table(&proc);
+        if (proc.kernel_stack_base != nullptr)
+            bigos::free_pages(proc.kernel_stack_base);
+
+        g_current_process = saved_current;
+        return ok;
+    }
+
+    void signal_smoke_entry(void *) noexcept {
+        if (signal_smoke_run())
+            bigos::serial_puts("BIGOS_SIGNAL_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_SIGNAL_FAILED\n");
     }
 #endif
 }   // namespace bigos::proc

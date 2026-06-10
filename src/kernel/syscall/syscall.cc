@@ -7,7 +7,9 @@
 #include <bigos/timer.h>
 #include <irq/interrupt.h>
 #ifdef BIGOS_USER_PROCESS
+#include <bigos/cred.h>
 #include <bigos/proc.h>
+#include <bigos/signal.h>
 #endif
 
 NAMESPACE_BIGOS_BEG
@@ -171,6 +173,68 @@ namespace sys {
             const bigos::proc::Process *process = bigos::proc::current_process();
             return process != nullptr ? (int64_t)process->gid : -bigos::EINVAL;
         }
+
+        // sys_kill: deliver signo to the target pid after enforcing the
+        // cred::may_signal decision (the single permission enforcement point).
+        // Target lookup precedes the permission check: an absent target is
+        // -ESRCH, a denied actor is -EPERM (target pending untouched), and an
+        // out-of-range signal is -EINVAL. No allocation, no EOI.
+        static int64_t sys_kill(uint64_t __pid, uint64_t __signo) noexcept {
+            bigos::proc::Process *actor = bigos::proc::current_process();
+            if (actor == nullptr)
+                return -bigos::ESRCH;
+            bigos::proc::Process *target = bigos::proc::find_process((uint32_t)__pid);
+            if (target == nullptr)
+                return -bigos::ESRCH;
+            if (!bigos::cred::may_signal(actor, target))
+                return -bigos::EPERM;
+            return bigos::signal::kill(target, (int)__signo);
+        }
+
+        // sys_sigaction: update the current process disposition for signo. The
+        // user passes raw disposition values in registers to avoid a user-buffer
+        // struct ABI this stage: rsi = action selector, rdx = handler entry. When
+        // old_disp_out (r10) is non-null the previous (action, handler) pair is
+        // written back as two uint64 words.
+        static int64_t sys_sigaction(
+            uint64_t __signo, uint64_t __action, uint64_t __handler, uint64_t __old_out) noexcept {
+            bigos::proc::Process *process = bigos::proc::current_process();
+            if (process == nullptr)
+                return -bigos::EINVAL;
+            if (__action > (uint64_t)bigos::signal::SigAction::Handler)
+                return -bigos::EINVAL;
+
+            bigos::signal::SigDisposition new_disp;
+            new_disp.action = (bigos::signal::SigAction)__action;
+            new_disp.handler = __handler;
+            bigos::signal::SigDisposition old_disp;
+            const int64_t result = bigos::signal::set_disposition(process, (int)__signo, &new_disp, &old_disp);
+            if (result != 0)
+                return result;
+            if (__old_out != 0) {
+                uint64_t words[2] = {(uint64_t)old_disp.action, old_disp.handler};
+                if (!bigos::proc::copy_to_current_user_buffer(__old_out, words, sizeof(words)))
+                    return -bigos::EFAULT;
+            }
+            return 0;
+        }
+
+        // sys_sigprocmask: apply how/set to the current process blocked mask. The
+        // old mask is written back through old_out (rdx) when non-null.
+        static int64_t sys_sigprocmask(uint64_t __how, uint64_t __set, uint64_t __old_out) noexcept {
+            bigos::proc::Process *process = bigos::proc::current_process();
+            if (process == nullptr)
+                return -bigos::EINVAL;
+            bigos::signal::SigSet old_mask = 0;
+            const int64_t result = bigos::signal::set_mask(process, __how, __set, &old_mask);
+            if (result != 0)
+                return result;
+            if (__old_out != 0) {
+                if (!bigos::proc::copy_to_current_user_buffer(__old_out, &old_mask, sizeof(old_mask)))
+                    return -bigos::EFAULT;
+            }
+            return 0;
+        }
 #endif
     }   // namespace __detail
 
@@ -238,6 +302,21 @@ namespace sys {
             case SYS_GETGID:
                 result = __detail::sys_getgid();
                 break;
+            case SYS_KILL:
+                result = __detail::sys_kill(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_SIGACTION:
+                result = __detail::sys_sigaction(__frame->rdi, __frame->rsi, __frame->rdx, __frame->r10);
+                break;
+            case SYS_SIGPROCMASK:
+                result = __detail::sys_sigprocmask(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_SIGRETURN:
+                // sigreturn restores the interrupted user context (including rax)
+                // directly into the frame and must NOT have rax overwritten by the
+                // shared return-value path below. It sends no i8259 EOI.
+                bigos::signal::sigreturn(__frame);
+                return;
 #endif
             default:
                 // Unknown number: deterministic negative error code, no crash, no

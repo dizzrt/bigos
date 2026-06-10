@@ -5,6 +5,7 @@
 #include <bigos/errno.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/memory.h>
+#include <bigos/signal.h>
 #include <irq/interrupt.h>
 
 namespace bigos::proc {
@@ -177,6 +178,17 @@ namespace bigos::proc {
         // enter ring3 through the ordinary entry/initial-stack path.
         bool fork_entry_valid;
         bigos::irq::InterruptFrame fork_entry_frame;
+        // Minimal signal state (appended fields; do not reorder the earlier
+        // layout). All inline and fixed-size, so signal delivery and query paths
+        // never allocate. sig_pending is the per-signal pending bitmap, sig_mask
+        // the blocked mask (bit 1ull << (signo - 1)), and sig_disp the per-signal
+        // disposition table indexed by signo - 1. init/non-fork ELF creation
+        // zero these to all-default/empty; fork inherits sig_disp and sig_mask
+        // field-by-field and clears the child sig_pending; exec resets user
+        // handlers to default while preserving sig_mask and sig_pending.
+        bigos::signal::SigSet sig_pending;
+        bigos::signal::SigSet sig_mask;
+        bigos::signal::SigDisposition sig_disp[bigos::signal::SIG_COUNT];
     };
 
     struct ExecArgs {
@@ -210,6 +222,9 @@ namespace bigos::proc {
         const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept;
     [[noreturn]] void run_user_process(Process *__process) noexcept;
     Process *current_process() noexcept;
+    // Looks up a published, live process by PID for the signal/kill path. Returns
+    // nullptr when no active process owns the PID (SYS_KILL maps that to -ESRCH).
+    Process *find_process(uint32_t __pid) noexcept;
     void init() noexcept;
     // Default-on, no-#ifdef normal-boot init launch. Loads INIT_ELF_PATH through
     // the read-only VFS/exFAT path and enters ring3; missing/invalid init halts
@@ -269,6 +284,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_TIME_IDENTITY_SMOKE
     void time_identity_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_SIGNAL_SMOKE
+    void signal_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 

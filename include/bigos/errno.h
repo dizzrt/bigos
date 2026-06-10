@@ -17,6 +17,8 @@
 // BlockStatus enum) are intentionally out of scope and keep their own values.
 
 NAMESPACE_BIGOS_BEG
+constexpr int EPERM = 1;          // operation not permitted
+constexpr int ESRCH = 3;          // no such process
 constexpr int EBADF = 9;          // bad file descriptor
 constexpr int ECHILD = 10;        // no child processes
 constexpr int EWOULDBLOCK = 11;   // operation would block (aliased to EAGAIN)

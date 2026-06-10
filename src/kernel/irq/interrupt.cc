@@ -4,6 +4,7 @@
 #include <bigos/syscall.h>
 #ifdef BIGOS_USER_PROCESS
 #include <bigos/proc.h>
+#include <bigos/signal.h>
 #endif
 
 #include <drivers/irqchip/i8259.h>
@@ -162,6 +163,19 @@ namespace irq {
             handler(__frame);
             driver::irqchip::i8259::send_eoi(irq_line);
             bigos::sched::maybe_preempt_on_irq_return(__frame);
+#ifdef BIGOS_USER_PROCESS
+            // Single signal-delivery point (decision 2/9): only when returning to
+            // a user-mode interrupted frame, after the scheduler IRQ-return bridge
+            // has run and before iretq. Kernel-mode frames never deliver user
+            // signals, and this path sends no i8259 EOI of its own. A default
+            // Terminate disposition routes through fault_current_and_exit and does
+            // not return here.
+            if ((__frame->cs & 0x3) == 0x3) {
+                bigos::proc::Process *current = bigos::proc::current_process();
+                if (current != nullptr && bigos::signal::has_deliverable_signal(current))
+                    bigos::signal::deliver_pending_to_user(__frame, current);
+            }
+#endif
             return;
         }
 

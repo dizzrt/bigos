@@ -46,6 +46,10 @@ namespace bigos::sys {
         SYS_GETPPID = 13,      // return current process parent_pid via rax (read-only)
         SYS_GETUID = 14,       // return current process uid via rax (read-only)
         SYS_GETGID = 15,       // return current process gid via rax (read-only)
+        SYS_KILL = 16,         // (pid, signo) -> 0 or -ESRCH/-EPERM/-EINVAL; enforces cred::may_signal
+        SYS_SIGACTION = 17,    // (signo, new_disp, old_disp_out) -> 0 or -EINVAL
+        SYS_SIGPROCMASK = 18,  // (how, new_set, old_set_out) -> 0 or -EINVAL
+        SYS_SIGRETURN = 19,    // restore the interrupted user context from the user-stack signal frame
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

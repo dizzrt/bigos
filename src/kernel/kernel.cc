@@ -334,6 +334,12 @@ void kernel(const BootInfoHeader *boot_info) {
         bigos::serial_puts("BIGOS_TIME_IDENTITY_FAILED thread\n");
 #endif
 
+#ifdef BIGOS_SIGNAL_SMOKE
+    if (bigos::sched::create_kernel_thread(&bigos::proc::signal_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_SIGNAL_FAILED thread\n");
+#endif
+
 #ifdef BIGOS_SCHEDULER_SMOKE
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_a, nullptr);
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_b, nullptr);
