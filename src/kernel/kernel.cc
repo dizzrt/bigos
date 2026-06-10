@@ -14,6 +14,7 @@
 #include <bigos/proc.h>
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
+#include <bigos/time.h>
 #include <bigos/timer.h>
 #include <bigos/tty.h>
 #include <irq/interrupt.h>
@@ -320,7 +321,18 @@ void kernel(const BootInfoHeader *boot_info) {
     syscall_smoke();
 #endif
 
+    // Establish the one-shot wall-clock baseline after the monotonic tick is
+    // available (IRQ0/PIT unmasked above) and before any process is created, so
+    // process start timestamps observe a ready wall clock.
+    bigos::time::init();
+
     bigos::proc::init();
+
+#ifdef BIGOS_TIME_IDENTITY_SMOKE
+    if (bigos::sched::create_kernel_thread(&bigos::proc::time_identity_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_TIME_IDENTITY_FAILED thread\n");
+#endif
 
 #ifdef BIGOS_SCHEDULER_SMOKE
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_a, nullptr);

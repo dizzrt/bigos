@@ -225,9 +225,9 @@ Goal: real process duplication, enabling `fork`+`exec` and a future shell.
 
 ### Stage 16.5: Time & Identity / 阶段 16.5：时间与身份
 
-Status: proposed. Prerequisite for Stages 17 and 18.
+Status: completed (archived as `2026-06-10-add-time-and-identity`). Prerequisite for Stages 17 and 18.
 
-状态：建议中。是阶段 17 与 18 的前置。
+状态：已完成（已归档为 `2026-06-10-add-time-and-identity`）。是阶段 17 与 18 的前置。
 
 Goal: add the wall-clock and identity primitives that signals and writable FS
 both depend on.

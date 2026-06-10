@@ -41,6 +41,11 @@ namespace bigos::sys {
         SYS_MAP_ANON = 9,      // length, permissions, flags -> restricted anonymous user mapping
         SYS_FORK = 10,         // duplicate current process -> parent gets child PID, child gets 0,
                                // failure returns a negative errno (e.g. -ENOMEM / -EAGAIN)
+        SYS_GET_TIME = 11,     // return current wall-clock Unix seconds via rax (read-only)
+        SYS_GETPID = 12,       // return current process pid via rax (read-only)
+        SYS_GETPPID = 13,      // return current process parent_pid via rax (read-only)
+        SYS_GETUID = 14,       // return current process uid via rax (read-only)
+        SYS_GETGID = 15,       // return current process gid via rax (read-only)
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

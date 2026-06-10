@@ -107,6 +107,12 @@ option("fork_cow_smoke")
     set_description("enable validation-only fork/copy-on-write smoke marker")
 option_end()
 
+option("time_identity_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only wall-clock time and process identity smoke marker")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -259,6 +265,7 @@ target("kernel")
     add_files("src/kernel/syscall/**.cc")
     add_files("src/kernel/terminal/**.cc")
     add_files("src/kernel/timer/**.cc")
+    add_files("src/kernel/time/**.cc")
     add_files("src/kernel/fs/**.cc")
     add_files("src/drivers/**.cc")
     add_files("src/mm/**.cc")
@@ -330,6 +337,10 @@ target("kernel")
 
     if has_config("fork_cow_smoke") then
         add_defines("BIGOS_FORK_COW_SMOKE")
+    end
+
+    if has_config("time_identity_smoke") then
+        add_defines("BIGOS_TIME_IDENTITY_SMOKE")
     end
 
     if is_mode("debug") then 

@@ -3,6 +3,7 @@
 #include <bigos/io.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/sched.h>
+#include <bigos/time.h>
 #include <bigos/timer.h>
 #include <irq/interrupt.h>
 #ifdef BIGOS_USER_PROCESS
@@ -44,6 +45,14 @@ namespace sys {
         // context and does not allocate or block.
         static int64_t sys_get_tick() noexcept {
             return (int64_t)bigos::timer::ticks();
+        }
+
+        // sys_get_time: return the current wall-clock time in Unix epoch seconds.
+        // time::current_unix_time() is a read-only arithmetic snapshot over the
+        // monotonic tick, so it is safe in int 0x80 context and does not allocate,
+        // block, or touch hardware.
+        static int64_t sys_get_time() noexcept {
+            return bigos::time::current_unix_time();
         }
 
 #ifdef BIGOS_USER_PROCESS
@@ -137,6 +146,31 @@ namespace sys {
         static int64_t sys_map_anon(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept {
             return bigos::proc::map_anonymous_current(__len, __permissions, __flags);
         }
+
+        // Read-only identity queries. Each returns a current-process field via
+        // rax. They never allocate, block, or send an EOI. With no current
+        // process they return a deterministic -bigos::ESRCH-style error; the
+        // current process is always present on the int 0x80 path, but guarding it
+        // keeps the helpers side-effect free.
+        static int64_t sys_getpid() noexcept {
+            const bigos::proc::Process *process = bigos::proc::current_process();
+            return process != nullptr ? (int64_t)process->pid : -bigos::EINVAL;
+        }
+
+        static int64_t sys_getppid() noexcept {
+            const bigos::proc::Process *process = bigos::proc::current_process();
+            return process != nullptr ? (int64_t)process->parent_pid : -bigos::EINVAL;
+        }
+
+        static int64_t sys_getuid() noexcept {
+            const bigos::proc::Process *process = bigos::proc::current_process();
+            return process != nullptr ? (int64_t)process->uid : -bigos::EINVAL;
+        }
+
+        static int64_t sys_getgid() noexcept {
+            const bigos::proc::Process *process = bigos::proc::current_process();
+            return process != nullptr ? (int64_t)process->gid : -bigos::EINVAL;
+        }
 #endif
     }   // namespace __detail
 
@@ -155,6 +189,9 @@ namespace sys {
                 break;
             case SYS_GET_TICK:
                 result = __detail::sys_get_tick();
+                break;
+            case SYS_GET_TIME:
+                result = __detail::sys_get_time();
                 break;
 #ifdef BIGOS_USER_PROCESS
             case SYS_WRITE:
@@ -188,6 +225,18 @@ namespace sys {
                 // interrupt path sends no i8259 EOI and does not relax any gate or
                 // register convention.
                 result = bigos::proc::fork_current(__frame);
+                break;
+            case SYS_GETPID:
+                result = __detail::sys_getpid();
+                break;
+            case SYS_GETPPID:
+                result = __detail::sys_getppid();
+                break;
+            case SYS_GETUID:
+                result = __detail::sys_getuid();
+                break;
+            case SYS_GETGID:
+                result = __detail::sys_getgid();
                 break;
 #endif
             default:

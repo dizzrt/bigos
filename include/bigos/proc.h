@@ -142,6 +142,18 @@ namespace bigos::proc {
         bool parent_waiting;
         int64_t exit_code;
         int64_t fault_reason;
+        // Minimal process identity quad (appended fields; do not reorder the
+        // earlier layout). All zero means root. init and non-fork ELF creation
+        // initialize these to 0 (root); fork inherits them field-by-field from
+        // the parent; exec leaves them unchanged (no setuid bit this stage).
+        uint32_t uid;
+        uint32_t gid;
+        uint32_t euid;
+        uint32_t egid;
+        // Process creation wall-clock timestamp (Unix epoch seconds) taken at
+        // init/ELF/fork creation time. exec does NOT refresh it (exec is not a
+        // new process). Signed per the wall-clock API convention.
+        int64_t start_unix_time;
         // Growable per-process fd table: heap-allocated FdEntry array bounded by
         // MAX_FDS_SOFT_LIMIT instead of a fixed inline array. Allocated lazily on
         // first install and freed when the process is reaped. fd_capacity is the
@@ -254,6 +266,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_FORK_COW_SMOKE
     void fork_cow_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_TIME_IDENTITY_SMOKE
+    void time_identity_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 

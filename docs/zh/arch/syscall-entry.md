@@ -52,6 +52,12 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_READ`（number=6）：验证用户目标 range，经进程 fd table 与 VFS file offset 读取到有界 kernel buffer，再 copy out，并返回 byte count。
 - `SYS_CLOSE`（number=7）：关闭 process-local fd 并 drop open-file reference。
 
+随后是 `SYS_BRK`（8）、`SYS_MAP_ANON`（9）、`SYS_FORK`（10）。只读身份/时间查询号位追加在其后，全部不阻塞、不分配、不发 EOI：
+
+- `SYS_GET_TIME`（number=11）：返回当前墙钟时间的 Unix epoch 秒（`bigos::time::current_unix_time()`），参见 `docs/zh/arch/wall-clock-and-identity.md`。
+- `SYS_GETPID`（number=12）/ `SYS_GETPPID`（number=13）：返回当前进程的 `pid` / `parent_pid`。
+- `SYS_GETUID`（number=14）/ `SYS_GETGID`（number=15）：返回当前进程的 `uid` / `gid`。
+
 syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
 
 ## 验证：默认关闭构建开关 + 确定性 marker

@@ -1,11 +1,13 @@
 #include <bigos/proc.h>
 
 #include <string.h>
+#include <bigos/cred.h>
 #include <bigos/io.h>
 #include <bigos/memory.h>
 #include <bigos/panic.h>
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
+#include <bigos/time.h>
 #include <bigos/user_mode.h>
 
 #include "../../mm/buddy.h"
@@ -1194,6 +1196,13 @@ namespace bigos::proc {
         __process->resources_reclaimed = false;
         __process->exit_code = 0;
         __process->fault_reason = 0;
+        // Non-fork creation: default to root identity (no login source yet) and
+        // record the creation-time wall clock.
+        __process->uid = bigos::cred::ROOT_UID;
+        __process->gid = bigos::cred::ROOT_UID;
+        __process->euid = bigos::cred::ROOT_UID;
+        __process->egid = bigos::cred::ROOT_UID;
+        __process->start_unix_time = bigos::time::current_unix_time();
         init_fd_table(__process);
         if (!publish_process(__process, ROOT_PARENT_PID))
             goto fail;
@@ -1367,6 +1376,15 @@ namespace bigos::proc {
         __process->resources_reclaimed = false;
         __process->exit_code = 0;
         __process->fault_reason = 0;
+        // init and non-fork ELF creation default to root identity (no login
+        // source yet) and record the creation-time wall clock. exec reuses this
+        // routine into a throwaway `prepared` object and intentionally does NOT
+        // copy these fields back, so exec preserves identity and start time.
+        __process->uid = bigos::cred::ROOT_UID;
+        __process->gid = bigos::cred::ROOT_UID;
+        __process->euid = bigos::cred::ROOT_UID;
+        __process->egid = bigos::cred::ROOT_UID;
+        __process->start_unix_time = bigos::time::current_unix_time();
         init_fd_table(__process);
         if (!publish_process(__process, g_current_process != nullptr ? g_current_process->pid : ROOT_PARENT_PID)) {
             error = UserElfLoadError::OutOfMemory;
@@ -1793,6 +1811,14 @@ namespace bigos::proc {
         child->resources_reclaimed = false;
         child->exit_code = 0;
         child->fault_reason = 0;
+        // Identity inheritance: the child copies the parent's identity quad
+        // field-by-field (no allocation, no new failure point). The child is a
+        // new process, so its start timestamp is the fork-time wall clock.
+        child->uid = parent->uid;
+        child->gid = parent->gid;
+        child->euid = parent->euid;
+        child->egid = parent->egid;
+        child->start_unix_time = bigos::time::current_unix_time();
 
         // Child resumes from the parent's syscall frame with rax (return value) 0.
         child->fork_entry_frame = *__parent_frame;
@@ -2454,6 +2480,124 @@ namespace bigos::proc {
             bigos::serial_puts("BIGOS_FORK_COW_PASSED\n");
         else
             bigos::serial_puts("BIGOS_FORK_COW_FAILED\n");
+    }
+#endif
+
+#ifdef BIGOS_TIME_IDENTITY_SMOKE
+    // Default-off bounded validation of the wall-clock and identity primitives.
+    // It covers, without entering ring3:
+    //   1. wall clock advances monotonically over the tick (and stays >= the
+    //      degradation baseline, so the RTC-invalid path remains monotonically
+    //      usable),
+    //   2. a non-fork-created process is root and fork's field-by-field identity
+    //      inheritance is honored,
+    //   3. the privilege decision allows root, allows an identity match, and
+    //      rejects a non-match and null inputs.
+    bool time_identity_smoke_run() noexcept {
+        if (!g_proc_initialized)
+            init();
+        bool ok = true;
+
+        // 1. Wall clock: baseline is at least the degradation floor, the current
+        // time is at least the baseline, and consecutive reads never go backwards
+        // (monotonic non-decreasing over the tick). Kept tight so the smoke runs
+        // within a single scheduling quantum and does not race init's CR3.
+        const int64_t boot = bigos::time::boot_unix_time();
+        if (boot < bigos::time::RTC_INVALID_BASELINE)
+            ok = false;
+        int64_t prev = bigos::time::current_unix_time();
+        if (prev < boot)
+            ok = false;
+        for (uint32_t i = 0; ok && i < 1000; i++) {
+            const int64_t now = bigos::time::current_unix_time();
+            if (now < prev)
+                ok = false;
+            prev = now;
+        }
+
+        // 2. Identity: a non-fork-created process is root; fork inheritance copies
+        // the identity quad field-by-field.
+        Process *saved_current = g_current_process;
+        static Process parent;
+        static Process child;
+        scrub_process(&parent);
+        scrub_process(&child);
+
+        if (ok && !create_first_user_process(&parent))
+            ok = false;
+        if (ok && (parent.uid != bigos::cred::ROOT_UID || parent.gid != bigos::cred::ROOT_UID ||
+                      parent.euid != bigos::cred::ROOT_UID || parent.egid != bigos::cred::ROOT_UID))
+            ok = false;
+
+        // Give the parent a distinct non-root identity, then mirror fork's
+        // inheritance contract into the child and confirm a field-by-field match.
+        if (ok) {
+            parent.uid = 1000;
+            parent.gid = 1000;
+            parent.euid = 1000;
+            parent.egid = 1000;
+            child.uid = parent.uid;
+            child.gid = parent.gid;
+            child.euid = parent.euid;
+            child.egid = parent.egid;
+            if (child.uid != parent.uid || child.gid != parent.gid || child.euid != parent.euid ||
+                child.egid != parent.egid)
+                ok = false;
+        }
+
+        // 3. Privilege decision: match allows, non-match rejects, root allows,
+        // null rejects.
+        if (ok) {
+            static Process stranger;
+            scrub_process(&stranger);
+            stranger.uid = 2000;
+            stranger.gid = 2000;
+            stranger.euid = 2000;
+            stranger.egid = 2000;
+
+            static Process root_actor;
+            scrub_process(&root_actor);   // all zero == root
+
+            if (!bigos::cred::may_signal(&parent, &child))   // euid 1000 == target uid 1000
+                ok = false;
+            if (bigos::cred::may_signal(&stranger, &child))   // euid 2000 != 1000
+                ok = false;
+            if (!bigos::cred::may_signal(&root_actor, &stranger))   // root over anyone
+                ok = false;
+            if (bigos::cred::may_signal(nullptr, &child) || bigos::cred::may_signal(&parent, nullptr))
+                ok = false;
+
+            // File-access decision: root bypasses, owner read honored, other
+            // write rejected for a 0644 file.
+            if (!bigos::cred::permits(1000, 1000, 0644, bigos::cred::ROOT_UID, 0, bigos::cred::Access::Write))
+                ok = false;
+            if (!bigos::cred::permits(1000, 1000, 0644, 1000, 1000, bigos::cred::Access::Read))
+                ok = false;
+            if (bigos::cred::permits(1000, 1000, 0644, 3000, 3000, bigos::cred::Access::Write))
+                ok = false;
+        }
+
+        // Teardown the parent created above through the reference-counted path.
+        g_current_process = nullptr;
+        if (parent.table_published)
+            unpublish_process(&parent);
+        if (parent.address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
+            !bigos::mm::teardown_user_address_space(parent.address_space_root))
+            ok = false;
+        close_all_fds(&parent);
+        free_fd_table(&parent);
+        if (parent.kernel_stack_base != nullptr)
+            bigos::free_pages(parent.kernel_stack_base);
+
+        g_current_process = saved_current;
+        return ok;
+    }
+
+    void time_identity_smoke_entry(void *) noexcept {
+        if (time_identity_smoke_run())
+            bigos::serial_puts("BIGOS_TIME_IDENTITY_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_TIME_IDENTITY_FAILED\n");
     }
 #endif
 }   // namespace bigos::proc

@@ -52,6 +52,18 @@ The mapping of syscall number, arguments, return value, and `InterruptFrame` fie
 - `SYS_READ` (number=6): validates the user destination range, reads through the process fd table and VFS file offset into a bounded kernel buffer, copies out, and returns the byte count.
 - `SYS_CLOSE` (number=7): closes the process-local fd and drops the open-file reference.
 
+`SYS_BRK` (8), `SYS_MAP_ANON` (9), and `SYS_FORK` (10) follow. The read-only
+identity/time queries are appended after them and never block, allocate, or send
+an EOI:
+
+- `SYS_GET_TIME` (number=11): returns the current wall-clock time in Unix epoch
+  seconds (`bigos::time::current_unix_time()`); see
+  `docs/en/arch/wall-clock-and-identity.md`.
+- `SYS_GETPID` (number=12) / `SYS_GETPPID` (number=13): return the current
+  process `pid` / `parent_pid`.
+- `SYS_GETUID` (number=14) / `SYS_GETGID` (number=15): return the current process
+  `uid` / `gid`.
+
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 
 ## Validation: Default-Off Build Switches And Deterministic Markers
