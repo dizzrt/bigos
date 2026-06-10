@@ -180,6 +180,15 @@ namespace sys {
             case SYS_MAP_ANON:
                 result = __detail::sys_map_anon(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
+            case SYS_FORK:
+                // fork duplicates the current process. The dispatcher passes the
+                // parent's saved frame so the child can resume from the same int
+                // 0x80 return point with rax = 0; the parent receives the child
+                // PID (or a negative errno) written back below. This software
+                // interrupt path sends no i8259 EOI and does not relax any gate or
+                // register convention.
+                result = bigos::proc::fork_current(__frame);
+                break;
 #endif
             default:
                 // Unknown number: deterministic negative error code, no crash, no

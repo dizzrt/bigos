@@ -1,5 +1,6 @@
 #include <type_traits>
 #include <bigos/io.h>   // TODO remove later
+#include <bigos/memory.h>
 #include <bigos/panic.h>
 
 #include "kmem.h"
@@ -121,6 +122,10 @@ namespace mm {
         __detail::init_buddy(__boot_info);
         __detail::init_vmem();
         __detail::init_direct_map(__boot_info);
+        // COW frame reference-count table: depends on the direct map being live
+        // (it is direct-map-resident and indexed by physical frame number) and
+        // is established before any user process is created.
+        init_frame_refcount();
     }
 }   // namespace mm
 

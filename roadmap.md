@@ -210,9 +210,9 @@ Goal: remove the static-slot ceiling before `fork` can hit it.
 
 ### Stage 16: `fork` + Copy-On-Write / 阶段 16：`fork` 与写时复制
 
-Status: proposed. Depends on Stage 15 and Stage 15.5.
+Status: completed (archived as `2026-06-10-introduce-fork-cow`). Depends on Stage 15 and Stage 15.5.
 
-状态：建议中。依赖阶段 15 与阶段 15.5。
+状态：已完成（已归档为 `2026-06-10-introduce-fork-cow`）。依赖阶段 15 与阶段 15.5。
 
 Goal: real process duplication, enabling `fork`+`exec` and a future shell.
 

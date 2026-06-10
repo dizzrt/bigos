@@ -5,6 +5,7 @@
 #include <bigos/errno.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/memory.h>
+#include <irq/interrupt.h>
 
 namespace bigos::proc {
     constexpr uint64_t USER_CODE_BASE = 0x0000000000400000ull;
@@ -157,6 +158,13 @@ namespace bigos::proc {
         // allocation). Only valid while table_published is true.
         Process *reg_next;
         Process *reg_prev;
+        // Set for a process created by fork(): holds the saved user InterruptFrame
+        // (a verbatim copy of the parent's syscall frame with rax rewritten to 0)
+        // that the child's first scheduling restores through enter_user_mode_frame.
+        // fork_entry_valid gates that path; non-fork processes keep it false and
+        // enter ring3 through the ordinary entry/initial-stack path.
+        bool fork_entry_valid;
+        bigos::irq::InterruptFrame fork_entry_frame;
     };
 
     struct ExecArgs {
@@ -209,6 +217,18 @@ namespace bigos::proc {
     int64_t brk_current(uint64_t __new_break) noexcept;
     int64_t map_anonymous_current(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept;
     bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept;
+    // Duplicates the current user process into a new child (POSIX-style fork).
+    // __parent_frame is the parent's saved int 0x80 InterruptFrame from the
+    // syscall dispatcher; it is copied verbatim into the child with rax rewritten
+    // to 0 so the child resumes from the same instruction returning 0. The child
+    // receives a copy-on-write copy of the parent address space (writable
+    // anonymous pages shared read-only with the COW marker, ELF segments copied
+    // into independent frames), a copied per-process fd table, an independent PID
+    // and kernel stack. Returns the child PID to the parent. On any allocation
+    // failure it rolls back all partial child state and returns a deterministic
+    // negative errno (e.g. -bigos::ENOMEM / -bigos::EAGAIN) with the parent left
+    // Running. Non-IRQ / allocation-permitted (CPL3 syscall) context only.
+    int64_t fork_current(const bigos::irq::InterruptFrame *__parent_frame) noexcept;
     int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec = false) noexcept;
     bigos::vfs::Status read_fd_current(uint32_t __fd, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
     int64_t close_fd_current(uint32_t __fd) noexcept;
@@ -231,6 +251,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_GROWABLE_TABLES_SMOKE
     void growable_tables_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_FORK_COW_SMOKE
+    void fork_cow_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 

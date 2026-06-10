@@ -1,6 +1,7 @@
 #include <bigos/user_mode.h>
 
 #include <string.h>
+#include <irq/interrupt.h>
 
 namespace {
     struct GDTPointer {
@@ -32,6 +33,7 @@ namespace {
     extern "C" void bigos_x86_load_tss(uint16_t __selector) noexcept;
     extern "C" [[noreturn]] void bigos_x86_iret_to_user(
         uint64_t __rip, uint64_t __rsp, uint64_t __cs, uint64_t __ss) noexcept;
+    extern "C" [[noreturn]] void bigos_x86_iret_to_user_frame(const bigos::irq::InterruptFrame *__frame) noexcept;
 
     void set_tss_descriptor(uint16_t __selector, const TSS64 *__tss) noexcept {
         const uint64_t base = (uint64_t)__tss;
@@ -68,5 +70,9 @@ namespace bigos::arch::x86 {
 
     [[noreturn]] void enter_user_mode(uint64_t __rip, uint64_t __rsp) noexcept {
         bigos_x86_iret_to_user(__rip, __rsp, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
+    }
+
+    [[noreturn]] void enter_user_mode_frame(const bigos::irq::InterruptFrame *__frame) noexcept {
+        bigos_x86_iret_to_user_frame(__frame);
     }
 }   // namespace bigos::arch::x86

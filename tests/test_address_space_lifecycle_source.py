@@ -75,7 +75,10 @@ def test_user_teardown_preserves_borrowed_high_half_and_rejects_active_root() ->
     assert 'USER_PML4_LIMIT = 256' in low_half_body
     assert 'PageTableOwner::UserAddressSpace' in low_half_body
     assert 'PAGING_DESCRIPTOR_LARGE_PAGE' in low_half_body
-    assert 'free_physical_order((void *)leaf_phys)' in low_half_body
+    # Leaf user frames are released through the copy-on-write reference-count
+    # path (a non-fork frame has an implicit count of one, so this is equivalent
+    # to the former unconditional free).
+    assert 'frame_ref_dec_and_maybe_free(leaf_phys)' in low_half_body
 
 
 def test_process_exit_fault_and_reaper_are_safe_boundaries() -> None:

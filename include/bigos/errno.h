@@ -20,6 +20,8 @@ NAMESPACE_BIGOS_BEG
 constexpr int EBADF = 9;          // bad file descriptor
 constexpr int ECHILD = 10;        // no child processes
 constexpr int EWOULDBLOCK = 11;   // operation would block (aliased to EAGAIN)
+constexpr int EAGAIN = 11;        // resource temporarily unavailable (e.g. process soft limit reached)
+constexpr int ENOMEM = 12;        // out of kernel memory
 constexpr int EFAULT = 14;        // bad address
 constexpr int EINVAL = 22;        // invalid argument
 constexpr int EMFILE = 24;        // too many open files

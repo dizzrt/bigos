@@ -125,9 +125,21 @@ namespace {
     bool g_growable_force_alloc_fail = false;
 #endif
 
+#ifdef BIGOS_FORK_COW_SMOKE
+    // Smoke-only, default-off allocation-failure injection. Forces
+    // alloc_user_frame() to fail so the fork/COW smoke can exercise the
+    // deterministic degradation paths (fork rollback, write-split kill) without a
+    // global test macro.
+    bool g_fork_cow_force_alloc_fail = false;
+#endif
+
     uint64_t alloc_user_frame() noexcept {
 #ifdef BIGOS_DEMAND_PAGING_SMOKE
         if (g_demand_paging_force_alloc_fail)
+            return 0;
+#endif
+#ifdef BIGOS_FORK_COW_SMOKE
+        if (g_fork_cow_force_alloc_fail)
             return 0;
 #endif
         return (uint64_t)bigos::mm::__detail::alloc_physical_order(0, 0);
@@ -868,6 +880,156 @@ namespace {
         *__initial_sp = __stack_base + sp;
         return true;
     }
+
+    // Derives the read-only copy-on-write leaf attribute from a writable
+    // anonymous page's current attribute: clear WRITABLE, set PTE_COW, keep
+    // present/user/NX. The next write to either sharer faults into the COW split
+    // branch of try_handle_user_page_fault.
+    bigos::mm::PageAttr cow_shared_attr(bigos::mm::PageAttr __attr) noexcept {
+        return (__attr & ~bigos::mm::page_attr::WRITABLE) | bigos::mm::page_attr::PTE_COW;
+    }
+
+    // Copies one already-materialized parent leaf page into the child root per
+    // decision 9. Returns false on allocation/map failure (the caller rolls back
+    // the whole fork). guard pages and absent pages are handled by the caller
+    // (it only invokes this for present user leaves).
+    bool clone_user_leaf(bigos::proc::Process *__parent, bigos::proc::Process *__child,
+        const bigos::proc::VmaEntry &__vma, uint64_t __page, uint64_t __parent_phys,
+        bigos::mm::PageAttr __parent_attr) noexcept {
+        if (__vma.backing == bigos::proc::VmaBacking::ElfSegment) {
+            // ELF segments (text / rodata / writable data) get an independent
+            // child frame with the segment's own attributes; no COW, no sharing.
+            const uint64_t child_phys = alloc_user_frame();
+            if (child_phys == 0)
+                return false;
+            void *src = bigos::mm::phys_to_direct(__parent_phys);
+            void *dst = bigos::mm::phys_to_direct(child_phys);
+            if (src == nullptr || dst == nullptr) {
+                free_user_frame(child_phys);
+                return false;
+            }
+            memcpy(dst, src, PAGE_SIZE);
+            if (!bigos::mm::map_page_in_root(__child->address_space_root, __page, child_phys, __parent_attr)) {
+                free_user_frame(child_phys);
+                return false;
+            }
+            return true;
+        }
+
+        // Anonymous backing.
+        if ((__parent_attr & bigos::mm::page_attr::WRITABLE) != 0) {
+            // Writable anonymous page -> COW share: downgrade both sides to
+            // read-only + PTE_COW over the same frame and bump the share count.
+            const bigos::mm::PageAttr cow_attr = cow_shared_attr(__parent_attr);
+            if (!bigos::mm::frame_ref_inc(__parent_phys))
+                return false;
+            if (!bigos::mm::map_page_in_root(__child->address_space_root, __page, __parent_phys, cow_attr)) {
+                bigos::mm::frame_ref_dec_and_maybe_free(__parent_phys);
+                return false;
+            }
+            if (!bigos::mm::remap_user_page_in_root(__parent->address_space_root, __page, __parent_phys, cow_attr)) {
+                // Child mapping already counts the share; teardown via fork
+                // rollback will decrement it. Leaving the parent writable here is
+                // unsafe (it could mutate the now-shared frame), so fail hard.
+                return false;
+            }
+            return true;
+        }
+
+        // Read-only anonymous page: share directly (it never becomes writable, so
+        // no COW marker is needed), counting the extra owner.
+        if (!bigos::mm::frame_ref_inc(__parent_phys))
+            return false;
+        if (!bigos::mm::map_page_in_root(__child->address_space_root, __page, __parent_phys, __parent_attr)) {
+            bigos::mm::frame_ref_dec_and_maybe_free(__parent_phys);
+            return false;
+        }
+        return true;
+    }
+
+    bool clone_user_address_space_cow(bigos::proc::Process *__parent, bigos::proc::Process *__child) noexcept {
+        if (__parent == nullptr || __child == nullptr)
+            return false;
+
+        __child->address_space_root = bigos::mm::derive_user_address_space_root();
+        __child->kernel_address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+        if (__child->address_space_root == bigos::mm::INVALID_PHYS_ADDR)
+            return false;
+        if (!clone_process_kernel_stack_mapping(__child))
+            return false;
+
+        // Value-copy the VMA collection (ranges, purposes, backings, growth,
+        // permissions, materialization accounting, heap/anon bookkeeping).
+        __child->vmas = __parent->vmas;
+
+        // Walk every VMA's registered range and replicate only the pages that are
+        // actually present in the parent root. Unmaterialized lazy pages are left
+        // absent in the child and re-fault later through the unified handler;
+        // guard pages have no leaves and are skipped.
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            const bigos::proc::VmaEntry &vma = __parent->vmas.entries[i];
+            if (!vma.used || vma.backing == bigos::proc::VmaBacking::Guard)
+                continue;
+            for (uint64_t page = vma.start; page < vma.end; page += PAGE_SIZE) {
+                uint64_t parent_phys = bigos::mm::INVALID_PHYS_ADDR;
+                bigos::mm::PageAttr parent_attr = 0;
+                if (!bigos::mm::read_user_leaf_in_root(__parent->address_space_root, page, &parent_phys, &parent_attr))
+                    continue;   // not materialized: copy metadata only (already done)
+                if (!clone_user_leaf(__parent, __child, vma, page, parent_phys, parent_attr))
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    bool clone_fd_table(bigos::proc::Process *__parent, bigos::proc::Process *__child) noexcept {
+        if (__parent == nullptr || __child == nullptr)
+            return false;
+        __child->fd_table = nullptr;
+        __child->fd_capacity = 0;
+        if (__parent->fd_table == nullptr || __parent->fd_capacity == 0)
+            return true;
+        if (__parent->fd_capacity > bigos::proc::MAX_FDS_SOFT_LIMIT)
+            return false;
+
+        auto *entries = (bigos::proc::FdEntry *)bigos::kmalloc(sizeof(bigos::proc::FdEntry) * __parent->fd_capacity);
+        if (entries == nullptr)
+            return false;
+        for (uint32_t i = 0; i < __parent->fd_capacity; i++) {
+            entries[i] = __parent->fd_table[i];
+            // Share the underlying read-only vfs::File: a retain per duplicated
+            // descriptor keeps the File alive until both processes close it.
+            if (entries[i].file != nullptr)
+                bigos::vfs::retain(entries[i].file);
+        }
+        __child->fd_table = entries;
+        __child->fd_capacity = __parent->fd_capacity;
+        return true;
+    }
+
+    // First-scheduling entry for a forked child kernel thread. Mirrors
+    // run_user_process but resumes the saved parent frame (rax already 0) rather
+    // than a fresh entry/stack. arg is the child Process*.
+    void fork_child_entry(void *__arg) noexcept {
+        auto *child = (bigos::proc::Process *)__arg;
+        if (child == nullptr || !child->fork_entry_valid)
+            halt_failed("BIGOS_FORK_CHILD_FAILED invalid-child\n");
+
+        if (!g_user_mode_initialized) {
+            bigos::arch::x86::init_user_mode();
+            g_user_mode_initialized = true;
+        }
+
+        g_current_process = child;
+        child->state = bigos::proc::ProcessState::Running;
+        // Capture the kernel root (active here on the kernel thread) so exit/fault
+        // can switch back before teardown, identical to run_user_process.
+        child->kernel_address_space_root = bigos::mm::read_cr3();
+        bigos::arch::x86::set_tss_rsp0(child->kernel_stack_top);
+        bigos::serial_puts("BIGOS_FORK_CHILD_ENTER\n");
+        bigos::mm::activate_address_space_root(child->address_space_root);
+        bigos::arch::x86::enter_user_mode_frame(&child->fork_entry_frame);
+    }
 }   // namespace
 
 namespace bigos::proc {
@@ -919,8 +1081,7 @@ namespace bigos::proc {
         status = bigos::vfs::read(file, image, (size_t)file_size, &bytes_read);
         bigos::vfs::release(file);
         if (status != bigos::vfs::Status::Success || bytes_read != file_size) {
-            const char *reason =
-                status == bigos::vfs::Status::Success ? "short-read" : bigos::vfs::status_name(status);
+            const char *reason = status == bigos::vfs::Status::Success ? "short-read" : bigos::vfs::status_name(status);
             bigos::free(image);
             launch_init_failed(reason);
         }
@@ -1453,6 +1614,11 @@ namespace bigos::proc {
         return (int64_t)base;
     }
 
+    // Resolves a copy-on-write write fault for the current process on a present,
+    // read-only, PTE_COW page covered by a writable anonymous VMA. Defined after
+    // try_handle_user_page_fault; declared here so the fault handler can call it.
+    bool cow_split_current(Process *__process, uint64_t __page, const VmaEntry *__vma) noexcept;
+
     bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept {
         Process *process = g_current_process;
         // Allocation-safe, running-process precondition. Non-blocking contexts and
@@ -1460,11 +1626,27 @@ namespace bigos::proc {
         // deterministic CPL3 kill path in the caller.
         if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
             return false;
-        // present bit set => protection violation, not a demand-zero candidate.
-        if ((__error_code & 0x1) != 0)
-            return false;
-
         const uint64_t page = page_down(__fault_address);
+        // present bit set => either a copy-on-write write split or a genuine
+        // protection violation. Check the COW case first; anything else is a kill.
+        if ((__error_code & 0x1) != 0) {
+            // Only a write (bit1) to a present, read-only, COW-marked page covered
+            // by a writable anonymous VMA is a split candidate.
+            if ((__error_code & 0x2) == 0)
+                return false;
+            VmaEntry *cow_vma = internal_find_vma_mut(&process->vmas, page);
+            if (cow_vma == nullptr || cow_vma->backing != VmaBacking::Anonymous ||
+                !permissions_include(cow_vma->permissions, VmaPermission::Write))
+                return false;
+            uint64_t cow_phys = bigos::mm::INVALID_PHYS_ADDR;
+            bigos::mm::PageAttr cow_attr = 0;
+            if (!bigos::mm::read_user_leaf_in_root(process->address_space_root, page, &cow_phys, &cow_attr))
+                return false;
+            if ((cow_attr & bigos::mm::page_attr::PTE_COW) == 0 || (cow_attr & bigos::mm::page_attr::WRITABLE) != 0)
+                return false;
+            return cow_split_current(process, page, cow_vma);
+        }
+
         VmaEntry *vma = internal_find_vma_mut(&process->vmas, page);
         // No covering VMA, or the VMA is not anonymous-backed (guard / ELF file
         // segments have no demand-zero policy): unrecoverable -> kill.
@@ -1513,6 +1695,133 @@ namespace bigos::proc {
             vma->materialized_end = page + PAGE_SIZE;
         }
         return true;
+    }
+
+    // When the shared frame still has other owners it allocates a private copy,
+    // remaps the faulting page writable, and drops the original's reference; when
+    // the current process is the lone owner it restores write permission in
+    // place. Returns false (deterministic kill via the caller) on allocation
+    // failure without corrupting the shared frame or leaving a partial/writable
+    // mapping for the faulting page.
+    bool cow_split_current(Process *__process, uint64_t __page, const VmaEntry *__vma) noexcept {
+        uint64_t old_phys = bigos::mm::INVALID_PHYS_ADDR;
+        bigos::mm::PageAttr old_attr = 0;
+        if (!bigos::mm::read_user_leaf_in_root(__process->address_space_root, __page, &old_phys, &old_attr))
+            return false;
+
+        // The page's intended writable attribute (NX preserved for data pages).
+        const bigos::mm::PageAttr writable_attr =
+            (old_attr & ~bigos::mm::page_attr::PTE_COW) | bigos::mm::page_attr::WRITABLE;
+
+        if (!bigos::mm::frame_ref_is_shared(old_phys)) {
+            // Lone owner: restore write permission and clear the marker in place,
+            // no copy and no allocation.
+            return bigos::mm::remap_user_page_in_root(__process->address_space_root, __page, old_phys, writable_attr);
+        }
+
+        const uint64_t new_phys = alloc_user_frame();
+        if (new_phys == 0)
+            return false;
+        void *src = bigos::mm::phys_to_direct(old_phys);
+        void *dst = bigos::mm::phys_to_direct(new_phys);
+        if (src == nullptr || dst == nullptr) {
+            free_user_frame(new_phys);
+            return false;
+        }
+        memcpy(dst, src, PAGE_SIZE);
+        if (!bigos::mm::remap_user_page_in_root(__process->address_space_root, __page, new_phys, writable_attr)) {
+            free_user_frame(new_phys);
+            return false;
+        }
+        // The faulting process now owns new_phys (implicit count 1); drop its hold
+        // on the original shared frame, which the other sharer keeps mapped.
+        bigos::mm::frame_ref_dec_and_maybe_free(old_phys);
+        (void)__vma;
+        return true;
+    }
+
+    int64_t fork_current(const bigos::irq::InterruptFrame *__parent_frame) noexcept {
+        Process *parent = g_current_process;
+        if (parent == nullptr || parent->state != ProcessState::Running || __parent_frame == nullptr)
+            return -bigos::EINVAL;
+        if (!bigos::sched::can_block())
+            return -bigos::EWOULDBLOCK;
+        // Deterministic process soft-limit failure (no overflow / panic).
+        if (g_process_count >= bigos::proc::MAX_PROCESSES_SOFT_LIMIT)
+            return -bigos::EAGAIN;
+
+        Process *child = alloc_process_object();
+        if (child == nullptr)
+            return -bigos::ENOMEM;
+
+        // Independent kernel stack for the child kernel thread.
+        child->kernel_stack_base = bigos::alloc_kernel_pages(PROCESS_KERNEL_STACK_PAGES, _GFM_PRE_PAGING);
+        if (child->kernel_stack_base == nullptr) {
+            free_process_object(child);
+            return -bigos::ENOMEM;
+        }
+        child->kernel_stack_len = (uint64_t)PROCESS_KERNEL_STACK_PAGES * PAGE_SIZE;
+        child->kernel_stack_top = (uint64_t)child->kernel_stack_base + child->kernel_stack_len;
+        child->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+
+        // COW address-space copy. On failure roll back: any frames the partial
+        // copy shared/allocated are owned by the child root and are released by
+        // teardown (reference-count-aware), so a single teardown undoes them.
+        if (!clone_user_address_space_cow(parent, child)) {
+            if (child->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+                (void)bigos::mm::teardown_user_address_space(child->address_space_root);
+            bigos::free_pages(child->kernel_stack_base);
+            free_process_object(child);
+            return -bigos::ENOMEM;
+        }
+
+        if (!clone_fd_table(parent, child)) {
+            (void)bigos::mm::teardown_user_address_space(child->address_space_root);
+            bigos::free_pages(child->kernel_stack_base);
+            free_process_object(child);
+            return -bigos::ENOMEM;
+        }
+
+        // Mirror the parent's user-visible process metadata.
+        child->entry = parent->entry;
+        child->code = parent->code;
+        child->data = parent->data;
+        child->stack = parent->stack;
+        child->initial_stack = parent->initial_stack;
+        child->state = ProcessState::Created;
+        child->reap_pending = false;
+        child->resources_reclaimed = false;
+        child->exit_code = 0;
+        child->fault_reason = 0;
+
+        // Child resumes from the parent's syscall frame with rax (return value) 0.
+        child->fork_entry_frame = *__parent_frame;
+        child->fork_entry_frame.rax = 0;
+        child->fork_entry_valid = true;
+
+        if (!publish_process(child, parent->pid)) {
+            close_all_fds(child);
+            free_fd_table(child);
+            (void)bigos::mm::teardown_user_address_space(child->address_space_root);
+            bigos::free_pages(child->kernel_stack_base);
+            free_process_object(child);
+            return -bigos::EAGAIN;
+        }
+
+        const uint32_t child_pid = child->pid;
+        // Spawn the child's kernel thread; its first scheduling enters ring3 via
+        // fork_child_entry. On failure unpublish + roll back fully.
+        if (bigos::sched::create_kernel_thread(&fork_child_entry, child) == bigos::sched::INVALID_THREAD_ID) {
+            unpublish_process(child);
+            close_all_fds(child);
+            free_fd_table(child);
+            (void)bigos::mm::teardown_user_address_space(child->address_space_root);
+            bigos::free_pages(child->kernel_stack_base);
+            free_process_object(child);
+            return -bigos::ENOMEM;
+        }
+
+        return (int64_t)child_pid;
     }
 
     int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec) noexcept {
@@ -1968,6 +2277,183 @@ namespace bigos::proc {
             bigos::serial_puts("BIGOS_GROWABLE_TABLES_PASSED\n");
         else
             bigos::serial_puts("BIGOS_GROWABLE_TABLES_FAILED\n");
+    }
+#endif
+
+#ifdef BIGOS_FORK_COW_SMOKE
+    // Validation-only, default-off fork/copy-on-write smoke. Runs from ordinary
+    // kernel-thread context (can_block() true, non-IRQ) so kmalloc/free and frame
+    // allocation are legal. It exercises the COW machinery against inactive
+    // process roots without entering ring3, covering:
+    //   1. fork-style COW clone: a writable anonymous page becomes read-only +
+    //      PTE_COW in both parent and child over one shared, reference-counted
+    //      frame (parent/child can run independently from the same image),
+    //   2. write-time split memory isolation: a write to the shared page in one
+    //      process allocates a private copy and leaves the other untouched,
+    //   3. lone-owner in-place restore plus reference-counted release on ordered
+    //      teardown (no early free, no leak),
+    //   4. allocation-failure deterministic degradation: an injected frame-alloc
+    //      failure makes the write split fail without corrupting the shared frame
+    //      or leaving a writable mapping.
+    bool fork_cow_leaf(Process *__process, uint64_t __vaddr, uint64_t *__phys, bigos::mm::PageAttr *__attr) noexcept {
+        return bigos::mm::read_user_leaf_in_root(__process->address_space_root, __vaddr, __phys, __attr);
+    }
+
+    bool fork_cow_smoke_run() noexcept {
+        if (!g_proc_initialized)
+            init();
+        Process *saved_current = g_current_process;
+        bool ok = true;
+
+        static Process parent;
+        static Process child;
+        scrub_process(&parent);
+        scrub_process(&child);
+
+        if (!create_first_user_process(&parent))
+            return false;
+        g_current_process = &parent;
+        parent.state = ProcessState::Running;
+
+        const uint64_t data_page = USER_DATA_BASE;
+
+        uint64_t parent_phys0 = bigos::mm::INVALID_PHYS_ADDR;
+        bigos::mm::PageAttr parent_attr0 = 0;
+        if (!fork_cow_leaf(&parent, data_page, &parent_phys0, &parent_attr0) ||
+            (parent_attr0 & bigos::mm::page_attr::WRITABLE) == 0)
+            ok = false;
+
+        // Independent child kernel stack so clone_process_kernel_stack_mapping has
+        // something to mirror, matching the real fork path.
+        child.kernel_stack_base = ok ? bigos::alloc_kernel_pages(PROCESS_KERNEL_STACK_PAGES, _GFM_PRE_PAGING) : nullptr;
+        if (ok && child.kernel_stack_base == nullptr)
+            ok = false;
+        if (ok) {
+            child.kernel_stack_len = (uint64_t)PROCESS_KERNEL_STACK_PAGES * PAGE_SIZE;
+            child.kernel_stack_top = (uint64_t)child.kernel_stack_base + child.kernel_stack_len;
+            child.address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+        }
+
+        // 1. COW clone.
+        if (ok && !clone_user_address_space_cow(&parent, &child))
+            ok = false;
+        if (ok && !clone_fd_table(&parent, &child))
+            ok = false;
+        if (ok)
+            child.state = ProcessState::Running;
+
+        // Both sides must now be read-only + PTE_COW over the same shared frame.
+        uint64_t parent_phys1 = bigos::mm::INVALID_PHYS_ADDR;
+        bigos::mm::PageAttr parent_attr1 = 0;
+        uint64_t child_phys1 = bigos::mm::INVALID_PHYS_ADDR;
+        bigos::mm::PageAttr child_attr1 = 0;
+        if (ok && (!fork_cow_leaf(&parent, data_page, &parent_phys1, &parent_attr1) ||
+                      !fork_cow_leaf(&child, data_page, &child_phys1, &child_attr1)))
+            ok = false;
+        if (ok && (parent_phys1 != parent_phys0 || child_phys1 != parent_phys0))
+            ok = false;
+        if (ok && ((parent_attr1 & bigos::mm::page_attr::WRITABLE) != 0 ||
+                      (parent_attr1 & bigos::mm::page_attr::PTE_COW) == 0))
+            ok = false;
+        if (ok &&
+            ((child_attr1 & bigos::mm::page_attr::WRITABLE) != 0 || (child_attr1 & bigos::mm::page_attr::PTE_COW) == 0))
+            ok = false;
+        if (ok && !bigos::mm::frame_ref_is_shared(parent_phys0))
+            ok = false;
+
+        // 2. Write-time split on the parent: shared -> private copy.
+        const uint64_t cow_write_fault = 0x1 | 0x2 | 0x4;   // present + write + user
+        if (ok) {
+            g_current_process = &parent;
+            if (!try_handle_user_page_fault(data_page, cow_write_fault))
+                ok = false;
+        }
+        uint64_t parent_phys2 = bigos::mm::INVALID_PHYS_ADDR;
+        bigos::mm::PageAttr parent_attr2 = 0;
+        uint64_t child_phys2 = bigos::mm::INVALID_PHYS_ADDR;
+        bigos::mm::PageAttr child_attr2 = 0;
+        if (ok && (!fork_cow_leaf(&parent, data_page, &parent_phys2, &parent_attr2) ||
+                      !fork_cow_leaf(&child, data_page, &child_phys2, &child_attr2)))
+            ok = false;
+        // Parent now owns a fresh writable frame; child still maps the original.
+        if (ok && ((parent_attr2 & bigos::mm::page_attr::WRITABLE) == 0 || parent_phys2 == parent_phys0))
+            ok = false;
+        if (ok && child_phys2 != parent_phys0)
+            ok = false;
+        // The original frame now has a single owner (the child).
+        if (ok && bigos::mm::frame_ref_is_shared(parent_phys0))
+            ok = false;
+
+        // 3. Lone-owner in-place restore on the child: no copy, same frame.
+        if (ok) {
+            g_current_process = &child;
+            if (!try_handle_user_page_fault(data_page, cow_write_fault))
+                ok = false;
+        }
+        uint64_t child_phys3 = bigos::mm::INVALID_PHYS_ADDR;
+        bigos::mm::PageAttr child_attr3 = 0;
+        if (ok && !fork_cow_leaf(&child, data_page, &child_phys3, &child_attr3))
+            ok = false;
+        if (ok && ((child_attr3 & bigos::mm::page_attr::WRITABLE) == 0 || child_phys3 != parent_phys0))
+            ok = false;
+
+        // 4. Allocation-failure deterministic degradation. Re-share the parent's
+        // current data frame with a probe so a write split must copy, then inject
+        // a frame-alloc failure and confirm the split is rejected without
+        // corrupting the shared frame or making the page writable.
+        if (ok) {
+            if (!bigos::mm::frame_ref_inc(parent_phys2))
+                ok = false;
+            if (ok && !bigos::mm::remap_user_page_in_root(
+                          parent.address_space_root, data_page, parent_phys2, cow_shared_attr(parent_attr2)))
+                ok = false;
+            if (ok) {
+                g_current_process = &parent;
+                g_fork_cow_force_alloc_fail = true;
+                const bool split = try_handle_user_page_fault(data_page, cow_write_fault);
+                g_fork_cow_force_alloc_fail = false;
+                if (split)
+                    ok = false;
+                uint64_t pp = bigos::mm::INVALID_PHYS_ADDR;
+                bigos::mm::PageAttr pa = 0;
+                if (ok && (!fork_cow_leaf(&parent, data_page, &pp, &pa) || pp != parent_phys2 ||
+                              (pa & bigos::mm::page_attr::WRITABLE) != 0 || (pa & bigos::mm::page_attr::PTE_COW) == 0))
+                    ok = false;
+            }
+            // Drop the probe reference so parent_phys2 returns to a lone owner.
+            bigos::mm::frame_ref_dec_and_maybe_free(parent_phys2);
+        }
+
+        // Teardown both roots through the reference-counted path; ordered release
+        // must free each frame exactly once and never early-free a shared frame.
+        g_current_process = nullptr;
+        if (child.address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
+            !bigos::mm::teardown_user_address_space(child.address_space_root))
+            ok = false;
+        close_all_fds(&child);
+        free_fd_table(&child);
+        if (child.kernel_stack_base != nullptr)
+            bigos::free_pages(child.kernel_stack_base);
+
+        if (parent.table_published)
+            unpublish_process(&parent);
+        if (parent.address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
+            !bigos::mm::teardown_user_address_space(parent.address_space_root))
+            ok = false;
+        close_all_fds(&parent);
+        free_fd_table(&parent);
+        if (parent.kernel_stack_base != nullptr)
+            bigos::free_pages(parent.kernel_stack_base);
+
+        g_current_process = saved_current;
+        return ok;
+    }
+
+    void fork_cow_smoke_entry(void *) noexcept {
+        if (fork_cow_smoke_run())
+            bigos::serial_puts("BIGOS_FORK_COW_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_FORK_COW_FAILED\n");
     }
 #endif
 }   // namespace bigos::proc

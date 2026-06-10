@@ -101,6 +101,12 @@ option("growable_tables_smoke")
     set_description("enable validation-only growable process/fd table smoke marker")
 option_end()
 
+option("fork_cow_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only fork/copy-on-write smoke marker")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -320,6 +326,10 @@ target("kernel")
 
     if has_config("growable_tables_smoke") then
         add_defines("BIGOS_GROWABLE_TABLES_SMOKE")
+    end
+
+    if has_config("fork_cow_smoke") then
+        add_defines("BIGOS_FORK_COW_SMOKE")
     end
 
     if is_mode("debug") then 

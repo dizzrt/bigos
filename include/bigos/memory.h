@@ -41,6 +41,14 @@ namespace mm {
         constexpr PageAttr GLOBAL = 1ull << 8;
         constexpr PageAttr NO_EXECUTE = 1ull << 63;
 
+        // Copy-on-write software marker. x86_64 leaf PTEs expose three
+        // software-available bits (9..11) that the CPU ignores; COW uses bit 9.
+        // It is orthogonal to the hardware present/writable/user/NX bits above:
+        // a COW page is published present + user, with WRITABLE cleared and
+        // PTE_COW set, so the next write faults into the COW split handler. This
+        // is the single owner of bit 9; no other feature may reuse it.
+        constexpr PageAttr PTE_COW = 1ull << 9;
+
         // Kernel default: present + writable, supervisor (user=0), executable
         // (NX=0). Bit-for-bit equivalent to the legacy DEFAULT_ATTR_PTE = 0x3.
         constexpr PageAttr KERNEL_DEFAULT = PRESENT | WRITABLE;
@@ -90,6 +98,45 @@ namespace mm {
     // high-half entries borrowed, refuses the active CR3 root, and releases the
     // PML4 root last.
     _attr_nodiscard_ bool teardown_user_address_space(uint64_t __root_phys) noexcept;
+
+    // User physical-frame reference counting for copy-on-write sharing. The
+    // table is a direct-map-resident fixed-size array indexed by physical frame
+    // number, established once by init_frame_refcount() after init_direct_map().
+    // Every leaf user frame returned by the user allocator is treated as having
+    // an implicit initial count of one (single owner); fork sharing increments
+    // it, and write-time split / address-space teardown decrement it. The frame
+    // is returned to the buddy allocator only when the count reaches zero.
+    //
+    // Single-core / non-IRQ-context only: these mutate the table without atomics
+    // and MUST NOT be called from IRQ handlers, matching the other mm
+    // primitives. SMP would require per-frame locking or atomics plus TLB
+    // shootdown coordination.
+    void init_frame_refcount() noexcept;
+    // Increments the reference count for a user frame. Returns false if the
+    // count is already saturated (deterministic failure so fork can roll back)
+    // or the frame is out of the table's range.
+    _attr_nodiscard_ bool frame_ref_inc(uint64_t __phys) noexcept;
+    // Decrements the reference count for a user frame and frees it to the buddy
+    // allocator when the count reaches zero. Frames outside the table range (and
+    // never-incremented frames, treated as a lone owner) are freed directly.
+    void frame_ref_dec_and_maybe_free(uint64_t __phys) noexcept;
+    // True when a user frame is currently shared by more than one owner. A
+    // lone-owner or untracked frame reports false, so a write-time split can
+    // restore write permission in place instead of copying.
+    _attr_nodiscard_ bool frame_ref_is_shared(uint64_t __phys) noexcept;
+
+    // Overwrites the leaf PTE for an existing user mapping in __root_phys with
+    // __phys | __attr, invalidating the current page's TLB entry when __root is
+    // the active CR3. The leaf PTE must already be present; this does not
+    // allocate intermediate levels. Used by COW copy and write-time split.
+    _attr_nodiscard_ bool remap_user_page_in_root(
+        uint64_t __root_phys, uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept;
+
+    // Reads the leaf physical frame and PTE attributes for a present user
+    // mapping in __root_phys. Returns false when the page is not a present user
+    // leaf. __phys and __attr may be null when only presence matters.
+    _attr_nodiscard_ bool read_user_leaf_in_root(
+        uint64_t __root_phys, uint64_t __vaddr, uint64_t *__phys, PageAttr *__attr) noexcept;
 
     _attr_nodiscard_ uint64_t read_cr3() noexcept;
     void activate_address_space_root(uint64_t __root_phys) noexcept;

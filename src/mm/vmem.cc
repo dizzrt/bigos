@@ -104,6 +104,19 @@ constexpr uint32_t DIRECT_MAP_MAX_RANGES = 128;
 static DirectMapRange gDirectMapRanges[DIRECT_MAP_MAX_RANGES];
 static uint32_t gDirectMapRangeCount;
 
+// User physical-frame reference count table (copy-on-write). Indexed by
+// physical frame number (phys >> PAGE_SHIFT). The storage is a buddy-allocated
+// contiguous block accessed through the direct map; it lives outside the slab
+// and offers O(1) frame-number indexing. A zero entry means "untracked"; the
+// implicit owner count of a freshly allocated user frame is one. fork sharing
+// increments, write-time split / teardown decrement; the frame returns to the
+// buddy allocator only when the count drops back to zero. Single-core /
+// non-IRQ-context only: mutated without atomics, never from an IRQ handler.
+static uint16_t *gFrameRefcount;
+static uint64_t gFrameRefcountMaxFrame;
+
+constexpr uint16_t FRAME_REFCOUNT_MAX = 0xffffu;
+
 constexpr uint32_t PAGE_TABLE_METADATA_CAPACITY = 512;
 static PageTableMetadata gPageTableMetadata[PAGE_TABLE_METADATA_CAPACITY];
 
@@ -658,7 +671,12 @@ static bool teardown_user_low_half(uint64_t __root_phys) noexcept {
                     pt[pt_i] = 0;
                     if (!decrement_present_entry(pt_phys))
                         return false;
-                    bigos::mm::__detail::free_physical_order((void *)leaf_phys);
+                    // Reference-count-aware release: every user leaf frame (ELF
+                    // segment copies and anonymous pages alike) is allocated with
+                    // an implicit owner count of one, so for a non-fork process
+                    // this frees the frame exactly as before; COW-shared frames
+                    // are only returned to buddy once the last owner is gone.
+                    bigos::mm::frame_ref_dec_and_maybe_free(leaf_phys);
                 }
 
                 if (!page_table_empty(pt_phys))
@@ -1113,6 +1131,133 @@ namespace mm {
 
         unregister_page_table(root);
         __detail::free_physical_order((void *)root);
+        return true;
+    }
+
+    void init_frame_refcount() noexcept {
+        constexpr uint32_t PAGE_SHIFT = 12;
+        gFrameRefcount = nullptr;
+        gFrameRefcountMaxFrame = 0;
+
+        // Highest physical address covered by the direct map bounds the set of
+        // allocatable user frames; the buddy allocator only hands back RAM that
+        // the direct map covers, so this is a safe upper bound for the table.
+        uint64_t max_phys_end = 0;
+        for (uint32_t i = 0; i < gDirectMapRangeCount; i++) {
+            const uint64_t end = gDirectMapRanges[i].base + gDirectMapRanges[i].len;
+            if (end > max_phys_end)
+                max_phys_end = end;
+        }
+        if (max_phys_end == 0)
+            return;
+
+        uint64_t max_frame = (max_phys_end - 1) >> PAGE_SHIFT;
+        uint64_t entries = max_frame + 1;
+        uint64_t bytes = entries * sizeof(uint16_t);
+        uint64_t pages = (bytes + PAGE_SIZE - 1) / PAGE_SIZE;
+
+        uint32_t order = 0;
+        while ((1ull << order) < pages && order < BUDDY_MAX_ORDER)
+            order++;
+        // Clamp the covered range to one contiguous buddy block. Frames beyond
+        // the table are simply untracked: frame_ref_inc() fails deterministically
+        // on them (forcing a fork rollback) and frame_ref_dec_and_maybe_free()
+        // frees them directly, so safety is preserved.
+        if ((1ull << order) < pages) {
+            pages = 1ull << BUDDY_MAX_ORDER;
+            entries = pages * PAGE_SIZE / sizeof(uint16_t);
+            max_frame = entries - 1;
+        }
+
+        uint64_t phys = (uint64_t)__detail::alloc_physical_order(order, 0);
+        if (phys == 0)
+            return;
+        void *table = phys_to_direct(phys);
+        if (table == nullptr) {
+            __detail::free_physical_order((void *)phys);
+            return;
+        }
+        memset(table, 0, (size_t)(pages * PAGE_SIZE));
+        gFrameRefcount = (uint16_t *)table;
+        gFrameRefcountMaxFrame = max_frame;
+    }
+
+    static uint16_t *frame_refcount_slot(uint64_t __phys) noexcept {
+        if (gFrameRefcount == nullptr)
+            return nullptr;
+        const uint64_t frame = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) >> 12;
+        if (frame > gFrameRefcountMaxFrame)
+            return nullptr;
+        return &gFrameRefcount[frame];
+    }
+
+    bool frame_ref_inc(uint64_t __phys) noexcept {
+        uint16_t *slot = frame_refcount_slot(__phys);
+        if (slot == nullptr)
+            return false;
+        // 0 encodes the lone implicit owner (count == 1); the first share moves
+        // the true count to 2. Saturation is a deterministic failure, never a
+        // wrap-around, so the caller can roll back the fork.
+        if (*slot == 0) {
+            *slot = 2;
+            return true;
+        }
+        if (*slot == FRAME_REFCOUNT_MAX)
+            return false;
+        (*slot)++;
+        return true;
+    }
+
+    void frame_ref_dec_and_maybe_free(uint64_t __phys) noexcept {
+        const uint64_t frame_phys = __phys & PAGING_DESCRIPTOR_ADDR_MASK;
+        uint16_t *slot = frame_refcount_slot(frame_phys);
+        if (slot == nullptr || *slot == 0) {
+            // Untracked or lone owner (count == 1): this decrement releases it.
+            __detail::free_physical_order((void *)frame_phys);
+            return;
+        }
+        (*slot)--;
+        // Collapse a remaining count of one back to the lone-owner encoding so a
+        // later teardown of that last owner frees the frame exactly once.
+        if (*slot == 1)
+            *slot = 0;
+    }
+
+    bool frame_ref_is_shared(uint64_t __phys) noexcept {
+        uint16_t *slot = frame_refcount_slot(__phys);
+        // 0 encodes the lone implicit owner; any value >= 2 means shared.
+        return slot != nullptr && *slot >= 2;
+    }
+
+    bool read_user_leaf_in_root(uint64_t __root_phys, uint64_t __vaddr, uint64_t *__phys, PageAttr *__attr) noexcept {
+        if (__phys != nullptr)
+            *__phys = INVALID_PHYS_ADDR;
+        if (__attr != nullptr)
+            *__attr = 0;
+        if (__root_phys == INVALID_PHYS_ADDR || (__vaddr & (PAGE_SIZE - 1)) != 0)
+            return false;
+        uint64_t *pte = root_pte(__root_phys, __vaddr);
+        if (pte == nullptr || !paging_present(*pte) || (*pte & page_attr::USER) == 0)
+            return false;
+        if (__phys != nullptr)
+            *__phys = *pte & PAGING_DESCRIPTOR_ADDR_MASK;
+        if (__attr != nullptr)
+            *__attr = *pte & ~PAGING_DESCRIPTOR_ADDR_MASK;
+        return true;
+    }
+
+    bool remap_user_page_in_root(uint64_t __root_phys, uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept {
+        if (__root_phys == INVALID_PHYS_ADDR || (__vaddr & (PAGE_SIZE - 1)) != 0 || (__phys & (PAGE_SIZE - 1)) != 0)
+            return false;
+        uint64_t *pte = root_pte(__root_phys, __vaddr);
+        if (pte == nullptr || !paging_present(*pte) || (*pte & page_attr::USER) == 0)
+            return false;
+        {
+            bigos::irq::InterruptGuard guard;
+            *pte = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
+            if ((__root_phys & PAGING_DESCRIPTOR_ADDR_MASK) == (read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK))
+                flush_kernel_tlb_page(__vaddr);
+        }
         return true;
     }
 

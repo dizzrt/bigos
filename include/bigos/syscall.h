@@ -39,6 +39,8 @@ namespace bigos::sys {
         SYS_CLOSE = 7,         // fd -> close current process descriptor
         SYS_BRK = 8,           // requested break -> committed heap break or deterministic negative error
         SYS_MAP_ANON = 9,      // length, permissions, flags -> restricted anonymous user mapping
+        SYS_FORK = 10,         // duplicate current process -> parent gets child PID, child gets 0,
+                               // failure returns a negative errno (e.g. -ENOMEM / -EAGAIN)
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);
