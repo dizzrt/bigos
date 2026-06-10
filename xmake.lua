@@ -119,6 +119,18 @@ option("signal_smoke")
     set_description("enable validation-only minimal signal model smoke marker")
 option_end()
 
+option("writable_fs_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only writable filesystem (bigfs) smoke marker")
+option_end()
+
+option("pipe_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only pipe / dup smoke marker")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -274,6 +286,7 @@ target("kernel")
     add_files("src/kernel/timer/**.cc")
     add_files("src/kernel/time/**.cc")
     add_files("src/kernel/fs/**.cc")
+    add_files("src/kernel/ipc/**.cc")
     add_files("src/drivers/**.cc")
     add_files("src/mm/**.cc")
     add_files("cpp/**.cc")
@@ -352,6 +365,14 @@ target("kernel")
 
     if has_config("signal_smoke") then
         add_defines("BIGOS_SIGNAL_SMOKE")
+    end
+
+    if has_config("writable_fs_smoke") then
+        add_defines("BIGOS_WRITABLE_FS_SMOKE")
+    end
+
+    if has_config("pipe_smoke") then
+        add_defines("BIGOS_PIPE_SMOKE")
     end
 
     if is_mode("debug") then 

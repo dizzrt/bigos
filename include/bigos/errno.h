@@ -19,14 +19,22 @@
 NAMESPACE_BIGOS_BEG
 constexpr int EPERM = 1;          // operation not permitted
 constexpr int ESRCH = 3;          // no such process
+constexpr int EIO = 5;            // input/output error
 constexpr int EBADF = 9;          // bad file descriptor
 constexpr int ECHILD = 10;        // no child processes
 constexpr int EWOULDBLOCK = 11;   // operation would block (aliased to EAGAIN)
 constexpr int EAGAIN = 11;        // resource temporarily unavailable (e.g. process soft limit reached)
 constexpr int ENOMEM = 12;        // out of kernel memory
+constexpr int EACCES = 13;        // permission denied
 constexpr int EFAULT = 14;        // bad address
+constexpr int EEXIST = 17;        // file exists
+constexpr int EISDIR = 21;        // is a directory
 constexpr int EINVAL = 22;        // invalid argument
 constexpr int EMFILE = 24;        // too many open files
+constexpr int ENOSPC = 28;        // no space left on device
+constexpr int ESPIPE = 29;        // illegal seek (not seekable, e.g. pipe)
+constexpr int EROFS = 30;         // read-only file system
+constexpr int EPIPE = 32;         // broken pipe (all read ends closed)
 constexpr int ENOSYS = 38;        // function not implemented
 NAMESPACE_BIGOS_END
 

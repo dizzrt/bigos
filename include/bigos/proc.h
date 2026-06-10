@@ -258,6 +258,18 @@ namespace bigos::proc {
     int64_t fork_current(const bigos::irq::InterruptFrame *__parent_frame) noexcept;
     int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec = false) noexcept;
     bigos::vfs::Status read_fd_current(uint32_t __fd, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
+    // Writes through a process-local fd to a writable file or pipe write end.
+    bigos::vfs::Status write_fd_current(
+        uint32_t __fd, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
+    bigos::vfs::Status lseek_fd_current(uint32_t __fd, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
+    bigos::vfs::Status fsync_fd_current(uint32_t __fd) noexcept;
+    // Returns the vfs::File bound to a current-process fd, or nullptr on an
+    // invalid/unused descriptor. The reference count is not changed.
+    bigos::vfs::File *file_for_fd_current(uint32_t __fd) noexcept;
+    // dup/dup2 share the underlying vfs::File (offset and ref count). dup picks
+    // the lowest free fd; dup2 closes an already-open newfd first then binds it.
+    int64_t dup_fd_current(uint32_t __oldfd) noexcept;
+    int64_t dup2_fd_current(uint32_t __oldfd, uint32_t __newfd) noexcept;
     int64_t close_fd_current(uint32_t __fd) noexcept;
     void close_all_fds(Process *__process) noexcept;
     void close_on_exec_fds(Process *__process) noexcept;

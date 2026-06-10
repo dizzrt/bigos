@@ -50,6 +50,13 @@ namespace bigos::sys {
         SYS_SIGACTION = 17,    // (signo, new_disp, old_disp_out) -> 0 or -EINVAL
         SYS_SIGPROCMASK = 18,  // (how, new_set, old_set_out) -> 0 or -EINVAL
         SYS_SIGRETURN = 19,    // restore the interrupted user context from the user-stack signal frame
+        SYS_LSEEK = 20,        // (fd, offset, whence) -> new offset, or -EBADF/-ESPIPE/-EINVAL
+        SYS_PIPE = 21,         // (int out_fds[2]) -> 0, or -EMFILE/-ENOMEM/-EFAULT
+        SYS_DUP = 22,          // (oldfd) -> newfd, or -EBADF/-EMFILE
+        SYS_DUP2 = 23,         // (oldfd, newfd) -> newfd, or -EBADF/-EMFILE
+        SYS_FSYNC = 24,        // (fd) -> 0, or -EBADF/-EIO
+        SYS_MKDIR = 25,        // (path, mode) -> 0, or -EEXIST/-EACCES/-ENOSPC/-EROFS/-EINVAL
+        SYS_UNLINK = 26,       // (path) -> 0, or -ENOENT/-EACCES/-EISDIR/-EROFS/-EINVAL
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

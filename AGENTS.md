@@ -68,8 +68,9 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
 - For repository documentation, treat `docs/en` as canonical and keep `docs/zh`
   synchronized with matching relative Markdown paths. Refer to `docs/en` first;
   consult `docs/zh` when Simplified Chinese wording helps resolve ambiguity.
-- Use repository-relative paths for documentation references. Do not commit local
-  machine-specific absolute documentation paths.
+- Use repository-relative paths for all file references in documentation,
+  OpenSpec artifacts, tasks, comments, and review notes. Do not use or commit
+  local machine-specific absolute paths or `file://` URLs for repository files.
 - Do not silently change boot addresses, linker addresses, interrupt vectors,
   page-table self-mapping addresses, disk offsets, or ABI assumptions.
 

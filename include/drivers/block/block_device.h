@@ -23,12 +23,19 @@ namespace block {
     using ReadSectorsFn = BlockStatus (*)(
         BlockDevice *__device, uint64_t __lba, uint32_t __sector_count, void *__dst, size_t __dst_len) noexcept;
 
+    using WriteSectorsFn = BlockStatus (*)(
+        BlockDevice *__device, uint64_t __lba, uint32_t __sector_count, const void *__src, size_t __src_len) noexcept;
+
     struct BlockDevice {
         uint32_t sector_size;
         // Zero means the device does not expose a reliable sector-count limit.
         uint64_t total_sectors;
         void *context;
         ReadSectorsFn read_impl;
+        // Appended field (does not reorder the read-only layout above). A null
+        // write_impl marks the device read-only; write_sectors() then returns
+        // Unsupported (mapped to -EROFS by upper layers).
+        WriteSectorsFn write_impl;
     };
 
     // Synchronous, read-only, non-IRQ-handler-safe block read contract.
@@ -36,6 +43,14 @@ namespace block {
     // buffer bounds before dispatching to the hardware backend.
     BlockStatus read_sectors(
         BlockDevice *__device, uint64_t __lba, uint32_t __sector_count, void *__dst, size_t __dst_len) noexcept;
+
+    // Synchronous, non-IRQ-handler-safe block write contract symmetric to
+    // read_sectors(). The caller owns the source buffer. This API validates the
+    // sector count, source length and LBA-range overflow before dispatching to
+    // the backend; a device with write_impl == nullptr is read-only and returns
+    // Unsupported without issuing any device write.
+    BlockStatus write_sectors(
+        BlockDevice *__device, uint64_t __lba, uint32_t __sector_count, const void *__src, size_t __src_len) noexcept;
 
     const char *status_name(BlockStatus __status) noexcept;
 }   // namespace block

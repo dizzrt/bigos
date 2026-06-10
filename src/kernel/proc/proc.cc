@@ -1927,6 +1927,99 @@ namespace bigos::proc {
         return 0;
     }
 
+    bigos::vfs::Status write_fd_current(
+        uint32_t __fd, const void *__src, size_t __len, size_t *__bytes_written) noexcept {
+        if (__bytes_written != nullptr)
+            *__bytes_written = 0;
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
+            return bigos::vfs::Status::BadFileDescriptor;
+        FdEntry *entry = &process->fd_table[__fd];
+        if (entry->file == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        return bigos::vfs::write(entry->file, __src, __len, __bytes_written);
+    }
+
+    bigos::vfs::Status lseek_fd_current(
+        uint32_t __fd, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
+            return bigos::vfs::Status::BadFileDescriptor;
+        FdEntry *entry = &process->fd_table[__fd];
+        if (entry->file == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        return bigos::vfs::lseek(entry->file, __offset, __whence, __new_offset);
+    }
+
+    bigos::vfs::Status fsync_fd_current(uint32_t __fd) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
+            return bigos::vfs::Status::BadFileDescriptor;
+        FdEntry *entry = &process->fd_table[__fd];
+        if (entry->file == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        return bigos::vfs::fsync(entry->file);
+    }
+
+    bigos::vfs::File *file_for_fd_current(uint32_t __fd) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
+            return nullptr;
+        return process->fd_table[__fd].file;
+    }
+
+    int64_t dup_fd_current(uint32_t __oldfd) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __oldfd >= process->fd_capacity)
+            return -bigos::EBADF;
+        FdEntry *old = &process->fd_table[__oldfd];
+        if (old->file == nullptr)
+            return -bigos::EBADF;
+        bigos::vfs::File *file = old->file;
+        const bool readable = old->readable;
+        // install_fd_current uses file->readable, so retain then install. The new
+        // fd never inherits close-on-exec (POSIX dup semantics).
+        bigos::vfs::retain(file);
+        const int64_t fd = install_fd_current(file, false);
+        if (fd < 0) {
+            bigos::vfs::release(file);
+            return fd;
+        }
+        process->fd_table[fd].readable = readable;
+        return fd;
+    }
+
+    int64_t dup2_fd_current(uint32_t __oldfd, uint32_t __newfd) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __oldfd >= process->fd_capacity)
+            return -bigos::EBADF;
+        FdEntry *old = &process->fd_table[__oldfd];
+        if (old->file == nullptr)
+            return -bigos::EBADF;
+        if (__newfd >= bigos::proc::MAX_FDS_SOFT_LIMIT)
+            return -bigos::EBADF;
+        // dup2(fd, fd) on a valid fd is a no-op returning newfd.
+        if (__oldfd == __newfd)
+            return (int64_t)__newfd;
+        // Ensure the table is large enough to address newfd.
+        if (__newfd >= process->fd_capacity && !grow_fd_table(process, __newfd + 1))
+            return -bigos::EMFILE;
+
+        bigos::vfs::File *file = old->file;
+        const bool readable = old->readable;
+        FdEntry *target = &process->fd_table[__newfd];
+        if (target->file != nullptr) {
+            bigos::vfs::File *prev = target->file;
+            target->file = nullptr;
+            bigos::vfs::release(prev);
+        }
+        bigos::vfs::retain(file);
+        target->file = file;
+        target->readable = readable;
+        target->close_on_exec = false;
+        return (int64_t)__newfd;
+    }
+
     void close_all_fds(Process *__process) noexcept {
         if (__process == nullptr)
             return;

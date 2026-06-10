@@ -268,9 +268,9 @@ Goal: a minimal POSIX signal model.
 
 ### Stage 18: Writable FS + Page Cache + Pipe / 阶段 18：可写文件系统 + 页缓存 + 管道
 
-Status: proposed. Depends on Stage 15 and Stage 16.5.
+Status: completed (archived as `2026-06-11-introduce-writable-fs-page-cache-pipe`). Depends on Stage 15 and Stage 16.5.
 
-状态：建议中。依赖阶段 15 与阶段 16.5。
+状态：已完成（已归档为 `2026-06-11-introduce-writable-fs-page-cache-pipe`）。依赖阶段 15 与阶段 16.5。
 
 Goal: general-purpose I/O semantics.
 

@@ -27,6 +27,11 @@ void bigos::outb(uint16_t port, uint8_t value) {
     return;
 }
 
+void bigos::outw(uint16_t port, uint16_t value) {
+    asm volatile("outw %w1,%w0" : : "d"(port), "a"(value));
+    return;
+}
+
 void bigos::serial_init() {
     outb(COM1_PORT + 1, 0x00);
     outb(COM1_PORT + 3, 0x80);

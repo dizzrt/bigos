@@ -1,0 +1,123 @@
+# 可写文件系统、页/块缓存与管道
+
+BigOS 阶段 18 在现有只读 I/O 栈（只读 ATA PIO、只读 exFAT 挂载、只读 fd/VFS
+壳层）之上加入第一层可写 I/O 地基：内核块缓冲缓存、块设备写路径、最小可写文件
+系统（`bigfs`）以及 `pipe`/`dup`/`dup2`。owner/mode 权限纯原语
+`cred::may_access`（阶段 16.5）在可写路径上成为实际强制点。只读 exFAT 路径、磁盘
+镜像、MBR/分区发现、`int 0x80` 寄存器 ABI、IDT/向量布局、DPL 设置、页表自映射与
+CR3 约定均不变。
+
+## 块缓冲缓存
+
+`bigos::bcache`（`include/bigos/fs/bcache.h`、`src/kernel/fs/bcache.cc`）以
+`(BlockDevice*, block_no)` 为键缓存固定大小块。块大小为一个扇区（512 字节），
+容量为有界编译期常量（`CACHE_BLOCKS`）。缓存数据页用 `alloc_kernel_pages` 配合
+`_GFM_PRE_PAGING` 一次性分配。
+
+- `get(dev, block_no)` 返回引用计数加一的块；命中直接返回不再读盘，未命中经
+  `block::read_sectors` 装入。
+- `put`、`mark_dirty`、`sync`、`sync_all` 分别释放引用、标脏、经
+  `block::write_sectors` 回写脏块。
+- 写回（write-back）语义：写入只标脏，落盘点为 `fsync`、淘汰回写或 `sync_all`。
+- 淘汰优先选未被引用的干净块（不触发落盘）；唯一可复用块为脏块时先回写再复用。
+  所有槽位都被引用时 `get` 返回 `nullptr`（上层映射为 `-ENOMEM`/`-ENOSPC`），绝
+  不死等阻塞、绝不在 IRQ 上下文落盘。
+- 装入与回写执行同步块 IO，MUST 只在可阻塞进程上下文运行；syscall 层在进入前检查
+  调度阻塞守卫。设备写失败时块保持 dirty（不丢数据）并返回 `IoError`。
+
+## 块设备写路径
+
+`BlockDevice` 追加 `write_impl` 字段（`write_impl` 为空表示只读设备）并新增
+`block::write_sectors(dev, lba, count, src, src_len)`，与 `read_sectors` 对称。
+发起设备写前校验扇区数、源缓冲长度与 LBA 范围溢出。ATA PIO 后端实现 LBA48
+WRITE SECTORS EXT 加 FLUSH CACHE EXT，复用现有 BSY/DRDY/DRQ 轮询时序。只读设备返
+回 `Unsupported`，上层映射为 `-EROFS`。
+
+## 可写文件系统（`bigfs`）
+
+`bigos::bigfs`（`include/bigos/fs/bigfs.h`、`src/kernel/fs/bigfs.cc`）是挂载在
+`/rw` 的最小可写文件系统，与只读 exFAT 挂载并存。默认承载介质为 RAM-backed
+`BlockDevice`（决策 9），整条写路径因此可端到端跑通而不触碰磁盘镜像。布局（以
+512 字节块计）：超级块、inode 位图、数据块位图、inode 表、数据区。全程有界：固定
+inode 数、仅直接块的文件（有界 `MAX_FILE_SIZE`）、定长目录项。所有元数据与数据均
+经块缓冲缓存读写。
+
+每个 inode 携带 `owner`（uid/gid）与 `mode`。支持：可写 `open`
+（`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`）、文件 `write`、`lseek`、`O_TRUNC`
+截断、`mkdir`、`unlink`。失败语义确定性
+（`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-EISDIR`/`-EINVAL`/`-EIO`/`-EACCES`/`-EROFS`），
+失败路径绝不发布半成品元数据。
+
+由于介质为 RAM-backed，重启不持久；本阶段只保证运行期一致性（写后读回，以及
+`fsync` 加缓存淘汰后再读一致）。无 journaling，崩溃一致性不在范围内，作为已知限
+制明确记录。
+
+## 权限强制
+
+`bigfs` 的 open（写/创建）、`write`、`mkdir`、`unlink` 在修改状态前调用
+`cred::permits(file_uid, file_gid, mode, req_uid, req_gid, access)`：root 全放行，
+否则按 owner/group/other 位判定。拒绝返回 `-EACCES` 且不修改文件系统状态。新文件
+owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端对任何写/创建请求返回
+`-EROFS`。判定逻辑本身相对阶段 16.5 不变。
+
+## VFS 与 fd 扩展
+
+`FileOperations` 追加 `write` 与 `lseek` op，`File` 追加 `writable` 标志（保留只读
+`read`/`close` 布局）。`write` op 为空的后端即只读（`write` 返回 `-EROFS`）；
+`lseek` op 为空时使用带溢出检查的普通 offset 运算。`open_absolute` 增加可写重载，
+接受创建 flags 与 `O_CREAT` 的 mode/owner。fd 层新增 `dup`/`dup2`（共享同一 `File`
+与 offset，每个新 fd 增引用一次；`dup2` 先关闭已打开的目标），以及经进程局部 fd
+的 `write`/`lseek`/`fsync`。
+
+## 管道
+
+`bigos::ipc`（`include/bigos/ipc/pipe.h`、`src/kernel/ipc/pipe.cc`）提供有界环形
+缓冲管道与一对相连的读端/写端 `File`。缓冲空且写端开时读阻塞、写入后唤醒；缓冲满
+且读端开时写阻塞、读出后唤醒。阻塞只在可阻塞进程上下文进行，不可阻塞上下文确定性
+失败。写端全关后读返回 0（EOF）；读端全关后写返回 `-EPIPE`（`SIGPIPE` 投递为可选
+增强，决策 10）。对管道 `lseek` 返回 `-ESPIPE`。端引用计数精确管理：`fork` 继承端
+并增计数，`exec` 遵守 close-on-exec，exit/reap 关闭每个剩余端各一次，两端归零时回
+收管道对象。
+
+## syscall ABI
+
+新号紧随 `SYS_SIGRETURN = 19` 追加：`SYS_LSEEK = 20`、`SYS_PIPE = 21`、
+`SYS_DUP = 22`、`SYS_DUP2 = 23`、`SYS_FSYNC = 24`、`SYS_MKDIR = 25`、
+`SYS_UNLINK = 26`。`SYS_OPEN = 5` 扩展为接受可写/创建 flags 与 `O_CREAT` 的 mode；
+`SYS_WRITE = 2` 扩展为写文件/管道 fd，同时保留控制台快路径。寄存器 ABI、既有号位、
+向量布局与「syscall 不发 EOI」规则不变。写/管道/FS syscall 在分配或进入同步块 IO/
+阻塞前检查调度阻塞守卫。
+
+## 验证 smoke
+
+两个默认关闭开关控制运行时 smoke；既有 smoke 矩阵不变。
+
+- `xmake f --writable_fs_smoke=y` 启用 `BIGOS_WRITABLE_FS_SMOKE`。在可阻塞内核线
+  程中覆盖 `O_CREAT` 建文件 + 写 + 读回、`fsync` 后强制淘汰再读一致、owner/mode
+  权限拒绝、只读后端写被 `-EROFS` 拒绝，发射
+  `BIGOS_WRITABLE_FS_PASSED`/`BIGOS_WRITABLE_FS_FAILED`。
+- `xmake f --pipe_smoke=y` 启用 `BIGOS_PIPE_SMOKE`，覆盖跨线程 FIFO 写读、读空阻
+  塞 + 写入唤醒、写端全关读 EOF、读端全关写 `-EPIPE`，发射
+  `BIGOS_PIPE_PASSED`/`BIGOS_PIPE_FAILED`。
+
+无界 QEMU 串口 marker smoke 示例：
+
+```bash
+xmake f --writable_fs_smoke=y
+uv run python tools/boot_debug.py run --emulator qemu --display none \
+  --serial-log build/test/serial.log --expect-serial-marker BIGOS_WRITABLE_FS_PASSED
+```
+
+当 QEMU/Bochs、ROM/显示、交叉工具链或磁盘镜像不可用时，记录缺失工具、跳过的验证
+与残留风险，不得声称已做运行时验证。
+
+## 非目标
+
+- 无硬/软链接、`rename`、完整 `stat`/`fstat`、完整 `fcntl`，或完整
+  `readdir`/`getdents` 遍历。
+- 无 file-backed mmap 与页缓存共享映射、多挂载命名空间、`mount`/`umount`、
+  journaling、`fsck`、配额、ACL/xattr。
+- 无命名管道（FIFO）/`mknod`/socket，除可选 `SIGPIPE` 外无其他管道信号语义。
+- 无 SMP 缓存一致性与写性能优化（仅保证正确性与有界性）。
+- 不改 `int 0x80` 寄存器 ABI、既有 syscall 号、IDT/向量布局、DPL、页表/CR3/地址
+  布局、外部 IRQ/异常 EOI 语义，以及 MBR/分区/exFAT 只读发现与磁盘镜像布局。

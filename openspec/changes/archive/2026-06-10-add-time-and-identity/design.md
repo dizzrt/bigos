@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前的时间能力仅有 `bigos::timer` 提供的单调 tick（PIT IRQ0 推进，`tick_t g_ticks`），可回答「自启动以来过了多少 tick」，但无法回答「现在的墙钟时间是几点」，也没有把任何 RTC 来源接入内核。进程模型（`Process`，见 [proc.h](file:///Users/bytedance/Desktop/workspace/kernel/bigos/include/bigos/proc.h#L117-L168)）有 pid/parent_pid/state/exit_code 等字段，但没有任何身份概念（uid/gid）与时间戳，也没有「谁能对谁做特权操作」的判定。
+BigOS 当前的时间能力仅有 `bigos::timer` 提供的单调 tick（PIT IRQ0 推进，`tick_t g_ticks`），可回答「自启动以来过了多少 tick」，但无法回答「现在的墙钟时间是几点」，也没有把任何 RTC 来源接入内核。进程模型（`Process`，见 [proc.h](include/bigos/proc.h#L117-L168)）有 pid/parent_pid/state/exit_code 等字段，但没有任何身份概念（uid/gid）与时间戳，也没有「谁能对谁做特权操作」的判定。
 
 阶段 16 已落地 `fork_current`（COW 复制地址空间、复制 fd 表），fork 子进程目前继承大部分父进程语义但没有身份字段可继承。阶段 17（信号）需要「谁能 kill 谁」的判定，阶段 18（可写文件系统）需要 owner/mode 与文件时间戳——两者都依赖本阶段提供的墙钟与身份原语。
 

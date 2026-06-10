@@ -1,0 +1,84 @@
+#ifndef _BIGOS_FS_BIGFS_H
+#define _BIGOS_FS_BIGFS_H
+
+#include <bigos/types.h>
+#include <drivers/block/block_device.h>
+
+NAMESPACE_BIGOS_BEG
+namespace bigfs {
+    // Minimal writable filesystem on a RAM-backed block device. Layout (in
+    // BLOCK_SIZE blocks): superblock, inode bitmap, data bitmap, inode table,
+    // then the data region. Everything is read/written through the block buffer
+    // cache so writes are write-back and fsync/eviction stay consistent. Bounded
+    // throughout (fixed inode count, direct-block-only files, fixed directory
+    // entry size). It coexists with the read-only exFAT mount and never touches
+    // the on-disk image / MBR / exFAT discovery contract.
+    constexpr const char *MOUNT_PREFIX = "/rw";
+    constexpr uint32_t MAGIC = 0x42494746;   // "BIGF"
+    constexpr uint32_t BLOCK_SIZE = driver::block::DEFAULT_SECTOR_SIZE;   // 512
+    constexpr uint32_t TOTAL_BLOCKS = 256;                                // 128 KiB RAM disk
+    constexpr uint32_t INODE_COUNT = 32;
+    constexpr uint32_t INODE_SIZE = 64;
+    constexpr uint32_t INODES_PER_BLOCK = BLOCK_SIZE / INODE_SIZE;        // 8
+    constexpr uint32_t INODE_TABLE_START = 3;                             // blocks 0,1,2 reserved
+    constexpr uint32_t INODE_TABLE_BLOCKS = INODE_COUNT / INODES_PER_BLOCK;   // 4
+    constexpr uint32_t DATA_START = INODE_TABLE_START + INODE_TABLE_BLOCKS;   // 7
+    constexpr uint32_t DATA_BLOCK_COUNT = TOTAL_BLOCKS - DATA_START;          // 249
+    constexpr uint32_t DIRECT_BLOCKS = 8;
+    constexpr uint64_t MAX_FILE_SIZE = (uint64_t)DIRECT_BLOCKS * BLOCK_SIZE;   // 4096
+    constexpr uint32_t DIRENT_SIZE = 32;
+    constexpr uint32_t DIRENT_NAME_MAX = 27;   // 28-byte name field, NUL-terminated
+    constexpr uint32_t ROOT_INODE = 0;
+    constexpr uint32_t INODE_FREE = 0;
+    constexpr uint32_t INODE_REGULAR = 1;
+    constexpr uint32_t INODE_DIRECTORY = 2;
+
+    enum class Status : int32_t {
+        Success = 0,
+        Invalid,
+        NotFound,
+        Exists,
+        NoSpace,
+        NotDirectory,
+        IsDirectory,
+        NotEmpty,
+        AccessDenied,
+        IoError,
+    };
+
+    // Allocates the RAM-backed device, formats a fresh filesystem and prepares
+    // the block buffer cache. Idempotent; only the first call allocates. Returns
+    // false on allocation failure (no writable mount is published). Blockable /
+    // non-IRQ context only.
+    bool init() noexcept;
+    bool initialized() noexcept;
+
+    // The backing block device (for smoke-driven cache eviction). Null before init.
+    driver::block::BlockDevice *device() noexcept;
+
+    // True when an absolute path targets this writable mount (prefix MOUNT_PREFIX).
+    bool owns_path(const char *__abs_path) noexcept;
+
+    // Opens/creates a regular file. __flags uses the vfs OPEN_* bits. On O_CREAT
+    // the new file records (__uid, __gid) as owner and __mode as its permission
+    // bits; access checks use (__uid, __gid) as the requester identity. On
+    // success returns Success and fills __out_inode/__out_size.
+    Status open(const char *__abs_path, uint64_t __flags, uint32_t __mode, uint32_t __uid, uint32_t __gid,
+        uint32_t *__out_inode, uint64_t *__out_size) noexcept;
+
+    Status read(uint32_t __inode, uint64_t __offset, void *__dst, size_t __len, size_t *__out_read) noexcept;
+    Status write(uint32_t __inode, uint64_t __offset, const void *__src, size_t __len, uint32_t __uid, uint32_t __gid,
+        size_t *__out_written) noexcept;
+
+    Status mkdir(const char *__abs_path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
+    Status unlink(const char *__abs_path, uint32_t __uid, uint32_t __gid) noexcept;
+
+    // Flushes every dirty cached block for the writable device.
+    Status fsync() noexcept;
+
+    bool stat(uint32_t __inode, uint32_t *__mode, uint32_t *__uid, uint32_t *__gid, uint64_t *__size,
+        bool *__is_dir) noexcept;
+}   // namespace bigfs
+NAMESPACE_BIGOS_END
+
+#endif   // _BIGOS_FS_BIGFS_H

@@ -39,8 +39,10 @@ def test_vfs_init_mounts_exfat_without_publishing_partial_root() -> None:
 def test_vfs_open_rejects_unsupported_paths_and_write_flags() -> None:
     source = read_source('src/kernel/fs/vfs.cc')
 
-    assert 'readonly_flags' in source
-    assert 'OPEN_WRONLY | bigos::vfs::OPEN_RDWR | bigos::vfs::OPEN_CREAT | bigos::vfs::OPEN_TRUNC' in source
+    # Writable opens are now routed to the bigfs backend; the read-only exFAT
+    # backend rejects write/create flags with EROFS.
+    assert 'OPEN_WRONLY | OPEN_RDWR | OPEN_CREAT | OPEN_TRUNC' in source
+    assert 'return Status::ReadOnlyFs;' in source
     assert 'path_supported' in source
     assert "__path[0] != '/'" in source
     assert "start[0] == '.'" in source
@@ -110,7 +112,7 @@ def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
     assert 'copy_user_path' in syscall
     assert 'if (!bigos::sched::can_block())' in syscall
     assert 'bigos::vfs::init()' in syscall
-    assert 'bigos::vfs::open_absolute(path, __flags, &file)' in syscall
+    assert 'bigos::vfs::open_absolute(path, __flags, (uint32_t)__mode, uid, gid, &file)' in syscall
     assert 'bigos::proc::install_fd_current(file, false)' in syscall
     assert 'bigos::proc::read_fd_current' in syscall
     assert 'bigos::proc::copy_to_current_user_buffer' in syscall

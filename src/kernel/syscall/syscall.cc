@@ -8,6 +8,7 @@
 #include <irq/interrupt.h>
 #ifdef BIGOS_USER_PROCESS
 #include <bigos/cred.h>
+#include <bigos/ipc/pipe.h>
 #include <bigos/proc.h>
 #include <bigos/signal.h>
 #endif
@@ -78,20 +79,39 @@ namespace sys {
         }
 
         static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
-            if (__fd != 1 || !bigos::proc::validate_user_buffer(__buffer, __len))
-                bigos::proc::fault_current_and_exit(-bigos::EFAULT);
+            // Console fast path keeps its original behavior unchanged.
+            if (__fd == 1) {
+                if (!bigos::proc::validate_user_buffer(__buffer, __len))
+                    bigos::proc::fault_current_and_exit(-bigos::EFAULT);
+                char bounded[SYS_WRITE_MAX_LEN + 1];
+                if (__len > SYS_WRITE_MAX_LEN || !bigos::proc::copy_current_user_buffer(__buffer, bounded, __len))
+                    bigos::proc::fault_current_and_exit(-bigos::EFAULT);
+                bounded[__len] = 0;
+                serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
+                serial_puts(bounded);
+                return (int64_t)__len;
+            }
 
-            char bounded[SYS_WRITE_MAX_LEN + 1];
+            // File / pipe write. Blockable context required (pipe write may block,
+            // file write may perform synchronous block IO).
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            if (__len == 0)
+                return 0;
+            if (__len > SYS_IO_MAX_LEN || !bigos::proc::validate_user_buffer(__buffer, __len))
+                return -bigos::EFAULT;
+            char bounded[SYS_IO_MAX_LEN];
             if (!bigos::proc::copy_current_user_buffer(__buffer, bounded, __len))
-                bigos::proc::fault_current_and_exit(-bigos::EFAULT);
-            bounded[__len] = 0;
-
-            serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
-            serial_puts(bounded);
-            return (int64_t)__len;
+                return -bigos::EFAULT;
+            size_t bytes_written = 0;
+            const bigos::vfs::Status status =
+                bigos::proc::write_fd_current((uint32_t)__fd, bounded, (size_t)__len, &bytes_written);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            return (int64_t)bytes_written;
         }
 
-        static int64_t sys_open(uint64_t __path, uint64_t __flags) noexcept {
+        static int64_t sys_open(uint64_t __path, uint64_t __flags, uint64_t __mode) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
 
@@ -105,8 +125,15 @@ namespace sys {
                     return vfs_status_to_syscall(init_status);
             }
 
+            // O_CREAT records the calling process identity as owner; the access
+            // decision uses the same identity (see cred::permits / decision 7).
+            bigos::proc::Process *process = bigos::proc::current_process();
+            const uint32_t uid = process != nullptr ? process->uid : 0;
+            const uint32_t gid = process != nullptr ? process->gid : 0;
+
             bigos::vfs::File *file = nullptr;
-            const bigos::vfs::Status open_status = bigos::vfs::open_absolute(path, __flags, &file);
+            const bigos::vfs::Status open_status =
+                bigos::vfs::open_absolute(path, __flags, (uint32_t)__mode, uid, gid, &file);
             if (open_status != bigos::vfs::Status::Success)
                 return vfs_status_to_syscall(open_status);
 
@@ -139,6 +166,100 @@ namespace sys {
 
         static int64_t sys_close(uint64_t __fd) noexcept {
             return bigos::proc::close_fd_current((uint32_t)__fd);
+        }
+
+        static int64_t sys_lseek(uint64_t __fd, uint64_t __offset, uint64_t __whence) noexcept {
+            uint64_t new_offset = 0;
+            const bigos::vfs::Status status =
+                bigos::proc::lseek_fd_current((uint32_t)__fd, (int64_t)__offset, (int)__whence, &new_offset);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            return (int64_t)new_offset;
+        }
+
+        static int64_t sys_pipe(uint64_t __out_fds) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            // Two 32-bit fds written back to the user array.
+            if (!bigos::proc::validate_user_buffer(__out_fds, sizeof(uint32_t) * 2))
+                return -bigos::EFAULT;
+
+            bigos::vfs::File *read_file = nullptr;
+            bigos::vfs::File *write_file = nullptr;
+            const bigos::vfs::Status status = bigos::ipc::create(&read_file, &write_file);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+
+            const int64_t read_fd = bigos::proc::install_fd_current(read_file, false);
+            if (read_fd < 0) {
+                bigos::vfs::release(read_file);
+                bigos::vfs::release(write_file);
+                return read_fd;
+            }
+            const int64_t write_fd = bigos::proc::install_fd_current(write_file, false);
+            if (write_fd < 0) {
+                bigos::proc::close_fd_current((uint32_t)read_fd);
+                bigos::vfs::release(write_file);
+                return write_fd;
+            }
+            uint32_t fds[2] = {(uint32_t)read_fd, (uint32_t)write_fd};
+            if (!bigos::proc::copy_to_current_user_buffer(__out_fds, fds, sizeof(fds))) {
+                bigos::proc::close_fd_current((uint32_t)read_fd);
+                bigos::proc::close_fd_current((uint32_t)write_fd);
+                return -bigos::EFAULT;
+            }
+            return 0;
+        }
+
+        static int64_t sys_dup(uint64_t __oldfd) noexcept {
+            return bigos::proc::dup_fd_current((uint32_t)__oldfd);
+        }
+
+        static int64_t sys_dup2(uint64_t __oldfd, uint64_t __newfd) noexcept {
+            return bigos::proc::dup2_fd_current((uint32_t)__oldfd, (uint32_t)__newfd);
+        }
+
+        static int64_t sys_fsync(uint64_t __fd) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            const bigos::vfs::Status status = bigos::proc::fsync_fd_current((uint32_t)__fd);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            return 0;
+        }
+
+        static int64_t sys_mkdir(uint64_t __path, uint64_t __mode) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+            bigos::proc::Process *process = bigos::proc::current_process();
+            const uint32_t uid = process != nullptr ? process->uid : 0;
+            const uint32_t gid = process != nullptr ? process->gid : 0;
+            return vfs_status_to_syscall(bigos::vfs::mkdir(path, (uint32_t)__mode, uid, gid));
+        }
+
+        static int64_t sys_unlink(uint64_t __path) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+            bigos::proc::Process *process = bigos::proc::current_process();
+            const uint32_t uid = process != nullptr ? process->uid : 0;
+            const uint32_t gid = process != nullptr ? process->gid : 0;
+            return vfs_status_to_syscall(bigos::vfs::unlink(path, uid, gid));
         }
 
         static int64_t sys_brk(uint64_t __new_break) noexcept {
@@ -267,13 +388,34 @@ namespace sys {
                 result = bigos::proc::wait_current((uint32_t)__frame->rdi, nullptr);
                 break;
             case SYS_OPEN:
-                result = __detail::sys_open(__frame->rdi, __frame->rsi);
+                result = __detail::sys_open(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
             case SYS_READ:
                 result = __detail::sys_read(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
             case SYS_CLOSE:
                 result = __detail::sys_close(__frame->rdi);
+                break;
+            case SYS_LSEEK:
+                result = __detail::sys_lseek(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_PIPE:
+                result = __detail::sys_pipe(__frame->rdi);
+                break;
+            case SYS_DUP:
+                result = __detail::sys_dup(__frame->rdi);
+                break;
+            case SYS_DUP2:
+                result = __detail::sys_dup2(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_FSYNC:
+                result = __detail::sys_fsync(__frame->rdi);
+                break;
+            case SYS_MKDIR:
+                result = __detail::sys_mkdir(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_UNLINK:
+                result = __detail::sys_unlink(__frame->rdi);
                 break;
             case SYS_BRK:
                 result = __detail::sys_brk(__frame->rdi);

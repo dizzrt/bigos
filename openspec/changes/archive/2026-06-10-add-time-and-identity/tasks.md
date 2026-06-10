@@ -14,7 +14,7 @@
 
 ## 3. 进程身份与权限原语
 
-- [x] 3.1 在 [proc.h](file:///Users/bytedance/Desktop/workspace/kernel/bigos/include/bigos/proc.h) 的 `Process` 增加 `uint32_t uid, gid, euid, egid;` 与 `int64_t start_unix_time;`，保持为追加字段、不破坏既有布局假设。
+- [x] 3.1 在 [proc.h](include/bigos/proc.h) 的 `Process` 增加 `uint32_t uid, gid, euid, egid;` 与 `int64_t start_unix_time;`，保持为追加字段、不破坏既有布局假设。
 - [x] 3.2 在进程创建路径初始化身份：init 与非 fork ELF 创建路径置 root（全 0）、`start_unix_time = current_unix_time()`；exec 不改变身份、不刷新时间戳。
 - [x] 3.3 在 `fork_current` 中让子进程逐字段继承父进程 uid/gid/euid/egid，`start_unix_time` 取 fork 时墙钟；确认不引入新的分配失败点、不改变父返回子 PID/子返回 0 与 COW/引用计数/回滚语义。
 - [x] 3.4 实现进程特权操作判定纯函数 `may_signal(actor, target)`：euid==0 放行任意目标，否则要求身份匹配，非法/空指针输入返回拒绝、无副作用。
@@ -23,8 +23,8 @@
 
 ## 4. 只读身份/时间查询 syscall
 
-- [x] 4.1 在 [syscall.h](file:///Users/bytedance/Desktop/workspace/kernel/bigos/include/bigos/syscall.h) 的 `SyscallNumber` 末尾追加 `SYS_GET_TIME = 11`、`SYS_GETPID = 12`、`SYS_GETPPID = 13`、`SYS_GETUID = 14`、`SYS_GETGID = 15`，不改动既有号位与寄存器 ABI 注释。
-- [x] 4.2 在 [syscall.cc](file:///Users/bytedance/Desktop/workspace/kernel/bigos/src/kernel/syscall/syscall.cc) 的 `dispatch` 增加对应分支：`SYS_GET_TIME` 回写 `current_unix_time()`，其余回写当前进程 pid/parent_pid/uid/gid；全部只读、不发 EOI、不阻塞、不分配。
+- [x] 4.1 在 [syscall.h](include/bigos/syscall.h) 的 `SyscallNumber` 末尾追加 `SYS_GET_TIME = 11`、`SYS_GETPID = 12`、`SYS_GETPPID = 13`、`SYS_GETUID = 14`、`SYS_GETGID = 15`，不改动既有号位与寄存器 ABI 注释。
+- [x] 4.2 在 [syscall.cc](src/kernel/syscall/syscall.cc) 的 `dispatch` 增加对应分支：`SYS_GET_TIME` 回写 `current_unix_time()`，其余回写当前进程 pid/parent_pid/uid/gid；全部只读、不发 EOI、不阻塞、不分配。
 - [x] 4.3 中断/ABI 审查：确认新增分支不发送 i8259 EOI、不改变 `InterruptFrame` 用法与 rax 返回约定，向量布局与 DPL 设置不变。
 
 ## 5. 验证开关与 smoke

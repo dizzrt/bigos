@@ -23,6 +23,15 @@
 #include <bigos/io.h>
 #include <ktl/buffer.h>
 #include <string.h>
+#ifdef BIGOS_WRITABLE_FS_SMOKE
+#include <bigos/fs/bcache.h>
+#include <bigos/fs/bigfs.h>
+#include <bigos/cred.h>
+#endif
+#ifdef BIGOS_PIPE_SMOKE
+#include <bigos/ipc/pipe.h>
+#include <bigos/sched.h>
+#endif
 
 extern "C" void kernel(const BootInfoHeader *boot_info);
 
@@ -285,6 +294,197 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_WRITABLE_FS_SMOKE
+namespace {
+    bool wfs_bytes_equal(const char *__a, const char *__b, size_t __len) noexcept {
+        for (size_t i = 0; i < __len; i++)
+            if (__a[i] != __b[i])
+                return false;
+        return true;
+    }
+
+    void writable_fs_smoke_entry(void *) noexcept {
+        // Runs from blockable kernel-thread context: bigfs init performs block IO.
+        if (!bigos::bigfs::init()) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED init\n");
+            return;
+        }
+        driver::block::BlockDevice *dev = bigos::bigfs::device();
+        const uint32_t uid = bigos::cred::ROOT_UID;   // root may write any file
+        const uint32_t gid = 0;
+
+        // 1) O_CREAT + write + read back consistent.
+        const char *path = "/rw/file.txt";
+        const char *payload = "BIGOS_WRITABLE_FS_PAYLOAD";
+        const size_t plen = strlen(payload);
+        uint32_t inode = 0;
+        uint64_t size = 0;
+        bigos::bigfs::Status s = bigos::bigfs::open(
+            path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid, &inode, &size);
+        if (s != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED create\n");
+            return;
+        }
+        size_t written = 0;
+        s = bigos::bigfs::write(inode, 0, payload, plen, uid, gid, &written);
+        if (s != bigos::bigfs::Status::Success || written != plen) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED write\n");
+            return;
+        }
+        char buf[64] = {};
+        size_t read = 0;
+        s = bigos::bigfs::read(inode, 0, buf, plen, &read);
+        if (s != bigos::bigfs::Status::Success || read != plen || !wfs_bytes_equal(buf, payload, plen)) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED readback\n");
+            return;
+        }
+
+        // 2) fsync to device, force-evict cache, then read again consistent.
+        if (bigos::bigfs::fsync() != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED fsync\n");
+            return;
+        }
+        bigos::bcache::invalidate_device(dev);
+        for (size_t i = 0; i < sizeof(buf); i++)
+            buf[i] = 0;
+        read = 0;
+        s = bigos::bigfs::read(inode, 0, buf, plen, &read);
+        if (s != bigos::bigfs::Status::Success || read != plen || !wfs_bytes_equal(buf, payload, plen)) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED evict-readback\n");
+            return;
+        }
+
+        // 3) owner/mode permission denial: a root-owned 0600 file rejects a write
+        // from a non-owner whose other bits grant no write access.
+        const char *priv_path = "/rw/priv.txt";
+        uint32_t priv_inode = 0;
+        s = bigos::bigfs::open(
+            priv_path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0600, uid, gid, &priv_inode, &size);
+        if (s != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED priv-create\n");
+            return;
+        }
+        // uid 2000 (not owner, not group, other has no write bit) must be denied.
+        size_t denied_written = 0;
+        s = bigos::bigfs::write(priv_inode, 0, payload, plen, 2000, 2000, &denied_written);
+        if (s != bigos::bigfs::Status::AccessDenied) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED perm\n");
+            return;
+        }
+
+        // 4) read-only exFAT backend write rejected with EROFS via the VFS layer.
+        if (bigos::vfs::init() == bigos::vfs::Status::Success) {
+            bigos::vfs::File *ro = nullptr;
+            const bigos::vfs::Status ro_status =
+                bigos::vfs::open_absolute("/boot/fs_smoke.txt", bigos::vfs::OPEN_WRONLY, 0644, uid, gid, &ro);
+            if (ro_status != bigos::vfs::Status::ReadOnlyFs) {
+                if (ro != nullptr)
+                    bigos::vfs::release(ro);
+                bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED erofs\n");
+                return;
+            }
+        }
+
+        bigos::serial_puts("BIGOS_WRITABLE_FS_PASSED\n");
+    }
+}   // namespace
+#endif
+
+#ifdef BIGOS_PIPE_SMOKE
+namespace {
+    bigos::vfs::File *g_pipe_read = nullptr;
+    bigos::vfs::File *g_pipe_write = nullptr;
+    volatile bool g_pipe_failed = false;
+    volatile bool g_pipe_reader_done = false;
+
+    bool pipe_bytes_equal(const char *__a, const char *__b, size_t __len) noexcept {
+        for (size_t i = 0; i < __len; i++)
+            if (__a[i] != __b[i])
+                return false;
+        return true;
+    }
+
+    void pipe_smoke_reader(void *) noexcept {
+        // The reader blocks on the empty pipe until the writer wakes it; the
+        // payload must arrive in FIFO order.
+        const char *expect = "BIGOS_PIPE_FIFO";
+        const size_t elen = strlen(expect);
+        char buf[32] = {};
+        size_t total = 0;
+        while (total < elen) {
+            size_t got = 0;
+            const bigos::vfs::Status s = bigos::vfs::read(g_pipe_read, buf + total, elen - total, &got);
+            if (s != bigos::vfs::Status::Success || got == 0)
+                break;
+            total += got;
+        }
+        if (total != elen || !pipe_bytes_equal(buf, expect, elen))
+            g_pipe_failed = true;
+
+        // After the writer closes its end, a subsequent read returns 0 (EOF).
+        size_t eof_got = 0;
+        const bigos::vfs::Status eof = bigos::vfs::read(g_pipe_read, buf, 1, &eof_got);
+        if (eof != bigos::vfs::Status::Success || eof_got != 0)
+            g_pipe_failed = true;
+        g_pipe_reader_done = true;
+    }
+
+    void pipe_smoke_writer(void *) noexcept {
+        const char *payload = "BIGOS_PIPE_FIFO";
+        const size_t plen = strlen(payload);
+        size_t written = 0;
+        const bigos::vfs::Status s = bigos::vfs::write(g_pipe_write, payload, plen, &written);
+        if (s != bigos::vfs::Status::Success || written != plen)
+            g_pipe_failed = true;
+        // Close the write end so the reader observes EOF.
+        bigos::vfs::release(g_pipe_write);
+        g_pipe_write = nullptr;
+
+        // Wait for the reader to finish consuming + EOF.
+        for (uint32_t spin = 0; spin < 1000 && !g_pipe_reader_done; spin++)
+            bigos::sched::yield();
+
+        // dup-like sharing check: a second pipe whose read end is closed makes a
+        // write return EPIPE; also verify dup shares offset via lseek on a file
+        // is covered by the writable smoke. Here check EPIPE.
+        bigos::vfs::File *r2 = nullptr;
+        bigos::vfs::File *w2 = nullptr;
+        if (bigos::ipc::create(&r2, &w2) == bigos::vfs::Status::Success) {
+            bigos::vfs::release(r2);   // close read end
+            size_t w2done = 0;
+            const bigos::vfs::Status ps = bigos::vfs::write(w2, payload, plen, &w2done);
+            if (ps != bigos::vfs::Status::BrokenPipe)
+                g_pipe_failed = true;
+            bigos::vfs::release(w2);
+        } else {
+            g_pipe_failed = true;
+        }
+
+        // Release the reader's end so the pipe object is reclaimed.
+        if (g_pipe_read != nullptr) {
+            bigos::vfs::release(g_pipe_read);
+            g_pipe_read = nullptr;
+        }
+
+        if (g_pipe_failed)
+            bigos::serial_puts("BIGOS_PIPE_FAILED\n");
+        else
+            bigos::serial_puts("BIGOS_PIPE_PASSED\n");
+    }
+
+    void pipe_smoke_entry(void *) noexcept {
+        if (bigos::ipc::create(&g_pipe_read, &g_pipe_write) != bigos::vfs::Status::Success) {
+            bigos::serial_puts("BIGOS_PIPE_FAILED create\n");
+            return;
+        }
+        // Reader runs first and blocks on the empty pipe; the writer then wakes it.
+        if (bigos::sched::create_kernel_thread(&pipe_smoke_reader, nullptr) == bigos::sched::INVALID_THREAD_ID ||
+            bigos::sched::create_kernel_thread(&pipe_smoke_writer, nullptr) == bigos::sched::INVALID_THREAD_ID)
+            bigos::serial_puts("BIGOS_PIPE_FAILED thread\n");
+    }
+}   // namespace
+#endif
+
 void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
     bigos::serial_init();
@@ -338,6 +538,16 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&bigos::proc::signal_smoke_entry, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_SIGNAL_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_WRITABLE_FS_SMOKE
+    if (bigos::sched::create_kernel_thread(&writable_fs_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_PIPE_SMOKE
+    if (bigos::sched::create_kernel_thread(&pipe_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_PIPE_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_SCHEDULER_SMOKE

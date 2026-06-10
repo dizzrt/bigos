@@ -24,17 +24,36 @@ namespace vfs {
         Overflow = -75,
         BlockError = -5,
         WouldBlock = -11,
+        ReadOnlyFs = -30,
+        NoSpace = -28,
+        AccessDenied = -13,
+        NotSeekable = -29,
+        IsDirectory = -21,
+        Exists = -17,
+        BrokenPipe = -32,
     };
+
+    // Seek whence values for lseek (POSIX numeric layout).
+    constexpr int SEEK_SET = 0;
+    constexpr int SEEK_CUR = 1;
+    constexpr int SEEK_END = 2;
 
     struct Vnode;
     struct File;
 
     using ReadOp = Status (*)(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
+    using WriteOp = Status (*)(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
+    using LseekOp = Status (*)(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
     using CloseOp = void (*)(File *__file) noexcept;
 
     struct FileOperations {
         ReadOp read;
         CloseOp close;
+        // Appended ops (do not reorder read/close above). A read-only backend may
+        // leave write null (the wrapper then returns ReadOnlyFs) and lseek null
+        // (the wrapper then performs ordinary offset arithmetic).
+        WriteOp write;
+        LseekOp lseek;
     };
 
     struct Vnode {
@@ -51,13 +70,27 @@ namespace vfs {
         bool readable;
         bool close_on_exec;
         void *private_data;
+        // Appended field (do not reorder the layout above). True when the file
+        // object was opened with write access.
+        bool writable;
     };
 
     const char *status_name(Status __status) noexcept;
     Status init() noexcept;
     bool initialized() noexcept;
     Status open_absolute(const char *__path, uint64_t __flags, File **__out_file) noexcept;
+    // Writable/creating open. __mode/__uid/__gid apply to O_CREAT; for read-only
+    // opens they are ignored. The simpler open_absolute() forwards here as a
+    // read-only request preserving its existing semantics.
+    Status open_absolute(const char *__path, uint64_t __flags, uint32_t __mode, uint32_t __uid, uint32_t __gid,
+        File **__out_file) noexcept;
     Status read(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
+    Status write(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
+    Status lseek(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
+    Status fsync(File *__file) noexcept;
+    // Directory mutation on the writable backend. owner/identity are the caller's.
+    Status mkdir(const char *__path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
+    Status unlink(const char *__path, uint32_t __uid, uint32_t __gid) noexcept;
     void retain(File *__file) noexcept;
     void release(File *__file) noexcept;
 }   // namespace vfs
