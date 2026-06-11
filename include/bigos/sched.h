@@ -56,6 +56,13 @@ namespace sched {
     // This function does not return.
     [[noreturn]] void thread_exit() noexcept;
 
+    // Associate (or clear) the calling thread's user process. The scheduler
+    // re-establishes the proc layer's global ring3 context (current process,
+    // user CR3, TSS rsp0) from this value whenever the thread is switched back
+    // in. Pass nullptr for pure kernel threads. The argument is an opaque
+    // bigos::proc::Process* to avoid a scheduler dependency on the proc layout.
+    void set_current_user_process(void *__process) noexcept;
+
     // Enter the scheduler. Non-interrupt-context only.
     //
     // Adopts the current boot/main execution context as a scheduler thread,
@@ -69,6 +76,14 @@ namespace sched {
     // running kernel-thread context after sched::start(), with maskable IRQs
     // enabled and outside IRQ/exception/syscall/fatal/scheduler critical paths.
     bool can_block() noexcept;
+    // Allocation-safe predicate for the CPU page-fault materialization path
+    // (demand-zero / COW split). Unlike can_block() this does NOT require a
+    // blockable context: a real ring3 #PF dispatches under the nonblocking guard
+    // with IF=0, yet frame allocation there does not block. It requires only an
+    // ordinary running kernel-thread context after sched::start() (not the idle
+    // thread) and that no scheduler critical section is held. The fault handler
+    // never blocks, so this is sufficient and strictly weaker than can_block().
+    bool can_allocate_in_fault() noexcept;
     void enter_nonblocking_context() noexcept;
     void leave_nonblocking_context() noexcept;
     void disable_preemption() noexcept;

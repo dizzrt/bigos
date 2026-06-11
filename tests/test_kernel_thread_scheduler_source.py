@@ -124,6 +124,34 @@ def test_yield_is_round_robin_single_core() -> None:
     assert 'if (next == nullptr)' in yield_body
 
 
+def test_context_switch_prepares_next_address_space_before_loading_stack() -> None:
+    # sched_h = read_source('include/bigos/sched.h')
+    proc_h = read_source('include/bigos/proc.h')
+    sched = read_source('src/kernel/sched/sched.cc')
+    proc = read_source('src/kernel/proc/proc.cc')
+
+    assert 'void prepare_context_switch_to(Process *__next_process) noexcept;' in proc_h
+    assert 'prepare_address_space_for_next' in sched
+    assert 'bigos::proc::prepare_context_switch_to(' in sched
+    assert 'user CR3' in proc_h
+    assert 'kernel CR3' in proc_h
+
+    for start_token, end_token in (
+        ('void schedule_blocked_current_locked', '// New-thread startup path'),
+        ('void yield()', 'void set_current_user_process'),
+        ('void thread_exit()', 'void start()'),
+    ):
+        body = sched[sched.index(start_token) : sched.index(end_token)]
+        prepare_index = body.index('prepare_address_space_for_next(next);')
+        switch_index = body.index('switch_context(')
+        assert prepare_index < switch_index
+
+    prepare_body = proc[proc.index('void prepare_context_switch_to') : proc.index('Process *find_process')]
+    assert 'restore_current_user_context(__next_process);' in prepare_body
+    assert 'current->kernel_address_space_root' in prepare_body
+    assert 'activate_address_space_root(current->kernel_address_space_root)' in prepare_body
+
+
 def test_idle_thread_replaces_naked_kernel_halt_loop() -> None:
     kernel = read_source('src/kernel/kernel.cc')
     sched = read_source('src/kernel/sched/sched.cc')
@@ -180,7 +208,7 @@ def test_irq_paths_do_not_allocate_scheduler_objects() -> None:
     timer_body = isr[isr.index('implement_isr(timer)') : isr.index('implement_isr(keyboard)')]
     keyboard_body = isr[isr.index('implement_isr(keyboard)') : isr.index('void init_isr_timer()')]
     page_fault_body = interrupt[
-        interrupt.index('static void page_fault_handler') : interrupt.index('static void default_external_irq_handler')
+        interrupt.index('static bool page_fault_handler') : interrupt.index('static void default_external_irq_handler')
     ]
 
     forbidden = (

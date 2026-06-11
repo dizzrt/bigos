@@ -59,6 +59,15 @@ namespace sched {
             uint32_t policy_slot;
             // Intrusive terminated-list node; deferred reclamation only.
             TCB *term_next;
+            // The user process (bigos::proc::Process*) this kernel thread runs in
+            // ring3, or nullptr for pure kernel threads (idle, smoke helpers, the
+            // boot thread). The proc layer's ring3 context (current process, user
+            // CR3, TSS rsp0) is global, so when a thread is switched back in the
+            // scheduler must re-establish it from this field; otherwise a thread
+            // that ran in between (e.g. a forked child that exited) leaves the
+            // wrong process / address space active. Untyped here to avoid a
+            // scheduler dependency on the proc layout.
+            void *user_process;
         };
 
         // Single-core scheduler state. There is no per-CPU run queue, no SMP
@@ -136,12 +145,45 @@ namespace sched {
                 __t->time_slice_remaining = DEFAULT_TIME_SLICE_TICKS;
         }
 
+        // After a switch_context returns into a thread, re-establish the proc
+        // layer's global ring3 context (current process, user CR3, TSS rsp0) for
+        // the now-current thread. This must run on every resume path because a
+        // thread that ran in between may have left a different (or no) user
+        // process active. A no-op for kernel threads (user_process == nullptr).
+        void restore_user_context_on_resume() noexcept {
+#ifdef BIGOS_USER_PROCESS
+            if (g_current != nullptr && g_current->user_process != nullptr)
+                bigos::proc::restore_current_user_context((bigos::proc::Process *)g_current->user_process);
+#endif
+        }
+
+        void prepare_address_space_for_next(TCB *__next) noexcept {
+#ifdef BIGOS_USER_PROCESS
+            bigos::proc::prepare_context_switch_to(
+                __next != nullptr ? (bigos::proc::Process *)__next->user_process : nullptr);
+#else
+            (void)__next;
+#endif
+        }
+
+        void prepare_address_space_before_switch(TCB *__next) noexcept {
+#ifdef BIGOS_USER_PROCESS
+            // Do not activate a target user CR3 while still running on the
+            // outgoing thread's stack. Some outgoing stacks (notably idle's boot
+            // stack) are not mapped in the target user root. The incoming user
+            // thread restores its CR3/TSS after switch_context resumes on its own
+            // kernel stack.
+            if (__next != nullptr && __next->user_process != nullptr)
+                return;
+#endif
+            prepare_address_space_for_next(__next);
+        }
+
         bool can_preempt_from_irq_return(const irq::InterruptFrame *__frame) noexcept {
             constexpr uint64_t RPL_MASK = 0x3;
             return __frame != nullptr && (__frame->cs & RPL_MASK) == 0 && g_scheduler_started &&
-                   is_ordinary_running_thread(g_current) && g_reschedule_pending &&
-                   g_preemption_disable_depth == 0 && g_scheduler_critical_depth == 0 &&
-                   g_nonblocking_depth <= 1 && has_runnable_peer();
+                   is_ordinary_running_thread(g_current) && g_reschedule_pending && g_preemption_disable_depth == 0 &&
+                   g_scheduler_critical_depth == 0 && g_nonblocking_depth <= 1 && has_runnable_peer();
         }
 
         void rq_push(TCB *__t) noexcept {
@@ -255,7 +297,9 @@ namespace sched {
             }
 
             g_current = next;
+            prepare_address_space_before_switch(next);
             switch_context(&__prev->saved_sp, next->saved_sp);
+            restore_user_context_on_resume();
         }
 
         // New-thread startup path. Entered for the first time through the prepared
@@ -303,22 +347,22 @@ namespace sched {
         tcb->static_priority = __detail::DEFAULT_STATIC_PRIORITY;
         tcb->policy_slot = __detail::DEFAULT_POLICY_SLOT;
         tcb->term_next = nullptr;
+        tcb->user_process = nullptr;
 
         // Build the initial stack frame so the first switch_context resume lands
         // in thread_trampoline with a 16-byte-aligned System V frame. Layout from
         // saved_sp upward: r15, r14, r13, r12, rbx, rbp, return-address, pad.
-        const uint64_t stack_top =
-            (uint64_t)stack_base + (uint64_t)__detail::KERNEL_THREAD_STACK_PAGES * PAGE_SIZE;
+        const uint64_t stack_top = (uint64_t)stack_base + (uint64_t)__detail::KERNEL_THREAD_STACK_PAGES * PAGE_SIZE;
         uint64_t *sp = (uint64_t *)stack_top;
         sp -= 8;
-        sp[0] = 0;   // r15
-        sp[1] = 0;   // r14
-        sp[2] = 0;   // r13
-        sp[3] = 0;   // r12
-        sp[4] = 0;   // rbx
-        sp[5] = 0;   // rbp
+        sp[0] = 0;                                        // r15
+        sp[1] = 0;                                        // r14
+        sp[2] = 0;                                        // r13
+        sp[3] = 0;                                        // r12
+        sp[4] = 0;                                        // rbx
+        sp[5] = 0;                                        // rbp
         sp[6] = (uint64_t)&__detail::thread_trampoline;   // return address
-        sp[7] = 0;   // alignment padding
+        sp[7] = 0;                                        // alignment padding
         tcb->saved_sp = (uint64_t)sp;
 
         bigos::irq::disableIRQ();
@@ -355,16 +399,23 @@ namespace sched {
         __detail::g_reschedule_pending = false;
         __detail::g_current = next;
         __detail::leave_scheduler_critical();
+        __detail::prepare_address_space_before_switch(next);
         switch_context(&prev->saved_sp, next->saved_sp);
 
         // Resumed: the thread that switched back to us left interrupts masked.
+        __detail::restore_user_context_on_resume();
         bigos::irq::enableIRQ();
+    }
+
+    void set_current_user_process(void *__process) noexcept {
+        bigos::irq::InterruptGuard guard;
+        if (__detail::g_current != nullptr)
+            __detail::g_current->user_process = __process;
     }
 
     void thread_exit() noexcept {
         bigos::irq::disableIRQ();
         __detail::enter_scheduler_critical();
-
         __detail::TCB *prev = __detail::g_current;
         __detail::wait_queue_remove_locked(prev);
         __detail::sleep_remove_locked(prev);
@@ -385,6 +436,7 @@ namespace sched {
 
         __detail::g_current = next;
         __detail::leave_scheduler_critical();
+        __detail::prepare_address_space_before_switch(next);
         switch_context(&prev->saved_sp, next->saved_sp);
 
         // Unreachable: a terminated thread is never scheduled again.
@@ -413,6 +465,7 @@ namespace sched {
         __detail::g_boot_tcb.static_priority = __detail::DEFAULT_STATIC_PRIORITY;
         __detail::g_boot_tcb.policy_slot = __detail::DEFAULT_POLICY_SLOT;
         __detail::g_boot_tcb.term_next = nullptr;
+        __detail::g_boot_tcb.user_process = nullptr;
 
         __detail::g_idle = &__detail::g_boot_tcb;
         __detail::g_current = &__detail::g_boot_tcb;
@@ -434,6 +487,16 @@ namespace sched {
                __detail::g_current != __detail::g_idle && __detail::g_current->state == ThreadState::Running &&
                __detail::g_nonblocking_depth == 0 && __detail::g_scheduler_critical_depth == 0 &&
                __detail::interrupts_enabled();
+    }
+
+    bool can_allocate_in_fault() noexcept {
+        // Weaker than can_block(): the CPU page-fault path runs under the
+        // nonblocking guard with IF=0 but its frame allocation never blocks.
+        // Require only an ordinary running kernel thread (not idle) after start
+        // and no scheduler critical section; ignore the nonblocking depth and IF.
+        return __detail::g_scheduler_started && __detail::g_current != nullptr &&
+               __detail::g_current != __detail::g_idle && __detail::g_current->state == ThreadState::Running &&
+               __detail::g_scheduler_critical_depth == 0;
     }
 
     void enter_nonblocking_context() noexcept {
@@ -473,8 +536,8 @@ namespace sched {
         return __queue == nullptr || __queue->head == nullptr;
     }
 
-    int wait_queue_wait_until(WaitQueue *__queue, WaitPredicate __predicate, void *__arg,
-                              timer::tick_t __timeout_ticks) noexcept {
+    int wait_queue_wait_until(
+        WaitQueue *__queue, WaitPredicate __predicate, void *__arg, timer::tick_t __timeout_ticks) noexcept {
         if (__queue == nullptr)
             return WAIT_INVALID;
         if (!can_block())
@@ -595,6 +658,7 @@ namespace sched {
         __detail::leave_scheduler_critical();
 
         switch_context(&prev->saved_sp, next->saved_sp);
+        __detail::restore_user_context_on_resume();
     }
 
     void on_timer_tick() noexcept {

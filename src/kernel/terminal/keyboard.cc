@@ -1,4 +1,5 @@
 #include <bigos/keyboard.h>
+#include <bigos/io.h>
 #include <bigos/tty.h>
 
 namespace bigos::input {
@@ -169,8 +170,9 @@ namespace bigos::input {
 
     void handle_keyboard_scancode(uint8_t scancode) noexcept {
         char ch = 0;
-        if (decode_ps2_set1(scancode, &ch))
+        if (decode_ps2_set1(scancode, &ch)) {
             (void)terminal::enqueue_input(ch);
+        }
     }
 
     KeyboardDecodeStats keyboard_decode_stats() noexcept {

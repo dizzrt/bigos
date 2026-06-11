@@ -18,8 +18,11 @@
 
 NAMESPACE_BIGOS_BEG
 constexpr int EPERM = 1;          // operation not permitted
+constexpr int ENOENT = 2;         // no such file or directory
 constexpr int ESRCH = 3;          // no such process
 constexpr int EIO = 5;            // input/output error
+constexpr int E2BIG = 7;          // argument list too long
+constexpr int ENOEXEC = 8;        // exec format error
 constexpr int EBADF = 9;          // bad file descriptor
 constexpr int ECHILD = 10;        // no child processes
 constexpr int EWOULDBLOCK = 11;   // operation would block (aliased to EAGAIN)

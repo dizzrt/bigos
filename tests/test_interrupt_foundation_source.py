@@ -45,10 +45,12 @@ def test_keyboard_irq_handler_is_registered_before_unmask() -> None:
     xmake = read_source('xmake.lua')
 
     register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
-    guard_index = isr.index('#ifdef BIGOS_KEYBOARD_SMOKE')
     unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);')
 
-    assert register_index < guard_index < unmask_index
+    # Stage 19: keyboard IRQ1 is unmasked unconditionally (no BIGOS_KEYBOARD_SMOKE
+    # guard in isr.cc) so the default-boot interactive /bin/sh can read the TTY.
+    assert '#ifdef BIGOS_KEYBOARD_SMOKE' not in isr
+    assert register_index < unmask_index
     assert 'PS2_KEYBOARD_DATA_PORT = 0x60' in isr
     assert 'bigos::input::handle_keyboard_scancode(scancode);' in isr
     assert 'option("keyboard_smoke")' in xmake
@@ -73,7 +75,7 @@ def test_memory_self_test_stays_before_irq_pic_and_enable() -> None:
 def test_page_fault_handler_is_diagnostic_only() -> None:
     interrupt = read_source('src/kernel/irq/interrupt.cc')
 
-    handler_start = interrupt.index('static void page_fault_handler')
+    handler_start = interrupt.index('static bool page_fault_handler')
     handler_end = interrupt.index('static void default_external_irq_handler')
     handler_body = interrupt[handler_start:handler_end]
 

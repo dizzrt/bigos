@@ -19,9 +19,11 @@ def test_keyboard_irq1_handoff_preserves_dispatch_eoi_boundary() -> None:
     interrupt = read_source('src/kernel/irq/interrupt.cc')
 
     register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
-    guard_index = isr.index('#ifdef BIGOS_KEYBOARD_SMOKE')
     unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);')
-    assert register_index < guard_index < unmask_index
+    # Stage 19: keyboard IRQ1 is unmasked unconditionally (no BIGOS_KEYBOARD_SMOKE
+    # guard) so the default-boot interactive /bin/sh can read from the TTY ring.
+    assert '#ifdef BIGOS_KEYBOARD_SMOKE' not in isr
+    assert register_index < unmask_index
 
     body = keyboard_handler_body()
     assert 'const uint8_t scancode = inb(PS2_KEYBOARD_DATA_PORT);' in body

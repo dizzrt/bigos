@@ -47,9 +47,11 @@ namespace irq::isr {
 
         void init_isr_keyboard() {
             register_isr(VECTOR_KEYBOARD, &isr_keyboard);
-#ifdef BIGOS_KEYBOARD_SMOKE
+            // Keyboard IRQ1 is enabled by default so the normal-boot interactive
+            // /bin/sh can read commands from the TTY input ring. The keyboard_smoke
+            // build also relied on this line; it now stays on unconditionally
+            // because the default user-space init enters an interactive shell.
             driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);
-#endif
         }
     }   // namespace __detail
 

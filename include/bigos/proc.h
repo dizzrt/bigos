@@ -220,6 +220,14 @@ namespace bigos::proc {
         Process *__process, const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept;
     UserElfLoadError exec_current_from_elf_image(
         const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept;
+    // SYS_EXECVE backing path: opens __path through the read-only VFS, reads a
+    // bounded ELF image into a kernel buffer, replaces the current process image
+    // via exec_current_from_elf_image, and enters the new program (does not
+    // return on success). On failure it returns a deterministic negative errno
+    // (-ENOENT/-EACCES/-ENOEXEC/-E2BIG/-EFAULT/-ENOMEM/-EWOULDBLOCK/-EIO) with
+    // the calling process left able to continue. Blockable (CPL3 syscall)
+    // context only; checks the scheduler blocking guard before block IO/alloc.
+    int64_t execve_current(const char *__path, const ExecArgs *__args) noexcept;
     [[noreturn]] void run_user_process(Process *__process) noexcept;
     Process *current_process() noexcept;
     // Looks up a published, live process by PID for the signal/kill path. Returns
@@ -274,6 +282,14 @@ namespace bigos::proc {
     void close_all_fds(Process *__process) noexcept;
     void close_on_exec_fds(Process *__process) noexcept;
     int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept;
+    // Re-establishes the global ring3 context (current process, user CR3, TSS
+    // rsp0) for __process after a blocking syscall may have switched to and from
+    // another user kernel thread. Called at the syscall dispatch return boundary.
+    void restore_current_user_context(Process *__process) noexcept;
+    // Prepares the active address-space context for a scheduler switch to
+    // __next_process. User threads need their user CR3 before their kernel stack
+    // is loaded; kernel-only threads need the saved kernel CR3 instead.
+    void prepare_context_switch_to(Process *__next_process) noexcept;
     void mark_current_faulted(int64_t __reason) noexcept;
     [[noreturn]] void fault_current_and_exit(int64_t __reason) noexcept;
     [[noreturn]] void exit_current(int64_t __code) noexcept;

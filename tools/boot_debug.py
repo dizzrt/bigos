@@ -66,6 +66,12 @@ FS_SMOKE_PAYLOAD = b'BIGOS_FS_SMOKE_PAYLOAD\n'
 USER_INIT_ELF = BUILD_DIR / 'bin' / 'user' / 'init.elf'
 USER_INIT_ELF_MAX_BYTES = 64 * 1024
 USER_INIT_ELF_PATH = '/boot/user/init.elf'
+# User /bin programs packaged at the root /bin directory. The kernel VFS opens
+# them by absolute path; the shell PATH lookup defaults to /bin. The same
+# USER_ELF_MAX_FILE_BYTES limit is enforced for both init and execve targets.
+USER_BIN_DIR = BUILD_DIR / 'bin' / 'user' / 'bin'
+USER_BIN_PROGRAMS = ('sh', 'echo', 'cat')
+USER_BIN_MAX_BYTES = USER_INIT_ELF_MAX_BYTES
 
 BUILD_TOOLS = (
     'xmake',
@@ -104,6 +110,9 @@ class ImageLayout:
     user_dir_cluster: int
     user_init_clusters: int
     user_init_cluster: int
+    bin_dir_cluster: int = 0
+    # Tuple of (name, first_cluster, data_length, clusters) for /bin programs.
+    bin_files: tuple[tuple[str, int, int, int], ...] = ()
 
     @property
     def cluster_heap_lba(self) -> int:
@@ -131,6 +140,8 @@ class PreparedArtifacts:
     exdbr: Path
     boot: Path
     user_init_elf: Path | None = None
+    # List of (name, Path) for user /bin programs, in packaging order.
+    bin_programs: tuple[tuple[str, Path], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -181,6 +192,7 @@ SMOKE_OPTIONS = (
     'user_program_smoke',
     'fs_smoke',
     'user_elf_smoke',
+    'userland_smoke',
 )
 RUNTIME_SMOKE_MATRIX = (
     RuntimeSmokeCase(
@@ -276,14 +288,30 @@ RUNTIME_SMOKE_MATRIX = (
         case_id='default-init',
         title='Default user-space init',
         switches=(),
-        expected_marker='BIGOS_INIT_EXIT',
+        expected_marker='BIGOS_USER_EXEC',
         timeout_seconds=30.0,
         risk_area='default-on normal-boot ring3 init launch via launch_init (no smoke switch)',
         validation_markers=(
             'BIGOS_INIT_ENTER',
-            'BIGOS_INIT_EXIT',
+            'BIGOS_USER_EXEC',
         ),
-        proc_boundary='default build (no smoke switch); packages /boot/user/init.elf and enters ring3 on normal boot',
+        proc_boundary=(
+            'default build (no smoke switch); packages /boot/user/init.elf and /bin/sh, enters ring3 on normal '
+            'boot, and the resident C init forks + execve /bin/sh (BIGOS_USER_EXEC); PID-1 does not exit'
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='userland-runtime',
+        title='Userland runtime (crt0/libc/shell)',
+        switches=('userland_smoke',),
+        expected_marker='BIGOS_USERLAND_PASSED',
+        timeout_seconds=40.0,
+        risk_area='crt0 arg passing, user libc + errno translation, fork/execve/wait, single-stage pipe, '
+        'redirection, and the minimal malloc/free',
+        proc_boundary=(
+            'default-off userland_smoke build; packages the userland validation program as /boot/user/init.elf and '
+            'runs it as PID-1 with deterministic non-interactive assertions (no manual stdin)'
+        ),
     ),
 )
 
@@ -403,20 +431,30 @@ def get_artifacts(kernel: Path = DEFAULT_KERNEL) -> PreparedArtifacts:
     require_file(kernel, 'image build', 'kernel ELF')
     for name, (path, max_size) in BOOT_ARTIFACTS.items():
         require_file(path, 'image build', f'{name} artifact', max_size)
-    user_init_elf = USER_INIT_ELF if USER_INIT_ELF.is_file() else None
-    if user_init_elf is not None:
-        require_file(user_init_elf, 'image build', USER_INIT_ELF_PATH, USER_INIT_ELF_MAX_BYTES)
+    require_file(USER_INIT_ELF, 'image build', USER_INIT_ELF_PATH, USER_INIT_ELF_MAX_BYTES)
+    bin_programs: list[tuple[str, Path]] = []
+    for name in USER_BIN_PROGRAMS:
+        program = USER_BIN_DIR / name
+        require_file(program, 'image build', f'/bin/{name}', USER_BIN_MAX_BYTES)
+        bin_programs.append((name, program))
     return PreparedArtifacts(
         kernel=kernel,
         mbr=BOOT_ARTIFACTS['mbr'][0],
         dbr=BOOT_ARTIFACTS['dbr'][0],
         exdbr=BOOT_ARTIFACTS['exdbr'][0],
         boot=BOOT_ARTIFACTS['boot'][0],
-        user_init_elf=user_init_elf,
+        user_init_elf=USER_INIT_ELF,
+        bin_programs=tuple(bin_programs),
     )
 
 
-def make_layout(image_size: int, boot_size: int, kernel_size: int, user_init_size: int = 0) -> ImageLayout:
+def make_layout(
+    image_size: int,
+    boot_size: int,
+    kernel_size: int,
+    user_init_size: int = 0,
+    bin_sizes: Sequence[tuple[str, int]] = (),
+) -> ImageLayout:
     image_size = align_up(image_size, SECTOR_SIZE)
     total_sectors = image_size // SECTOR_SIZE
     partition_sectors = total_sectors - PARTITION_LBA
@@ -431,11 +469,24 @@ def make_layout(image_size: int, boot_size: int, kernel_size: int, user_init_siz
     user_dir_cluster = fs_smoke_cluster + fs_smoke_clusters
     user_init_clusters = clusters_for_size(user_init_size) if user_init_size > 0 else 0
     user_init_cluster = user_dir_cluster + 1
-    last_cluster = (
-        user_init_cluster + user_init_clusters - 1
+    next_cluster = (
+        user_init_cluster + user_init_clusters
         if user_init_clusters > 0
-        else fs_smoke_cluster + fs_smoke_clusters - 1
+        else fs_smoke_cluster + fs_smoke_clusters
     )
+
+    # /bin directory (single cluster) plus one contiguous run per program.
+    bin_dir_cluster = 0
+    bin_files: list[tuple[str, int, int, int]] = []
+    if bin_sizes:
+        bin_dir_cluster = next_cluster
+        next_cluster += 1
+        for name, size in bin_sizes:
+            clusters = clusters_for_size(size)
+            bin_files.append((name, next_cluster, size, clusters))
+            next_cluster += clusters
+
+    last_cluster = next_cluster - 1
     cluster_count = (partition_sectors - CLUSTER_HEAP_OFFSET) // SECTORS_PER_CLUSTER
     if cluster_count < last_cluster - 1:
         raise StageError(
@@ -456,6 +507,8 @@ def make_layout(image_size: int, boot_size: int, kernel_size: int, user_init_siz
         user_dir_cluster=user_dir_cluster,
         user_init_clusters=user_init_clusters,
         user_init_cluster=user_init_cluster,
+        bin_dir_cluster=bin_dir_cluster,
+        bin_files=tuple(bin_files),
     )
 
 
@@ -590,6 +643,10 @@ def make_allocation_bitmap(layout: ImageLayout) -> bytes:
     if layout.user_init_clusters > 0:
         used_clusters.append(layout.user_dir_cluster)
         used_clusters.extend(range(layout.user_init_cluster, layout.user_init_cluster + layout.user_init_clusters))
+    if layout.bin_dir_cluster != 0:
+        used_clusters.append(layout.bin_dir_cluster)
+        for _name, first_cluster, _size, clusters in layout.bin_files:
+            used_clusters.extend(range(first_cluster, first_cluster + clusters))
     for cluster in used_clusters:
         index = cluster - 2
         bitmap[index // 8] |= 1 << (index % 8)
@@ -620,8 +677,10 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
     dbr = read_file(artifacts.dbr)
     exdbr = read_file(artifacts.exdbr)
     user_init = read_file(artifacts.user_init_elf) if artifacts.user_init_elf is not None else b''
+    bin_data = [(name, read_file(program)) for name, program in artifacts.bin_programs]
+    bin_sizes = [(name, len(data)) for name, data in bin_data]
 
-    layout = make_layout(image_size, len(boot), len(kernel), len(user_init))
+    layout = make_layout(image_size, len(boot), len(kernel), len(user_init), bin_sizes)
     image_path.parent.mkdir(parents=True, exist_ok=True)
 
     with image_path.open('wb') as image:
@@ -634,12 +693,13 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
         write_at(image, (layout.partition_lba + EXFAT_BACKUP_BOOT_OFFSET) * SECTOR_SIZE, backup_region)
 
         write_cluster(image, layout, BITMAP_CLUSTER, make_allocation_bitmap(layout))
-        root = make_directory(
-            [
-                ExfatFile('boot', BOOT_DIR_CLUSTER, CLUSTER_SIZE, is_directory=True),
-                ExfatFile('kernel', layout.kernel_cluster, len(kernel), is_directory=False),
-            ]
-        )
+        root_entries = [
+            ExfatFile('boot', BOOT_DIR_CLUSTER, CLUSTER_SIZE, is_directory=True),
+            ExfatFile('kernel', layout.kernel_cluster, len(kernel), is_directory=False),
+        ]
+        if layout.bin_dir_cluster != 0:
+            root_entries.append(ExfatFile('bin', layout.bin_dir_cluster, CLUSTER_SIZE, is_directory=True))
+        root = make_directory(root_entries)
         boot_entries = [
             ExfatFile('boot.bin', BOOT_FILE_CLUSTER, len(boot), is_directory=False),
             ExfatFile('kernel', layout.kernel_cluster, len(kernel), is_directory=False),
@@ -661,6 +721,17 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
             )
             write_cluster(image, layout, layout.user_dir_cluster, user_dir)
             write_at(image, layout.cluster_lba(layout.user_init_cluster) * SECTOR_SIZE, user_init)
+        if layout.bin_dir_cluster != 0:
+            bin_entries = [
+                ExfatFile(name, first_cluster, size, is_directory=False)
+                for (name, first_cluster, size, _clusters) in layout.bin_files
+            ]
+            write_cluster(image, layout, layout.bin_dir_cluster, make_directory(bin_entries))
+            size_by_name = {name: len(data) for name, data in bin_data}
+            data_by_name = dict(bin_data)
+            for name, first_cluster, _size, _clusters in layout.bin_files:
+                assert size_by_name[name] == len(data_by_name[name])
+                write_at(image, layout.cluster_lba(first_cluster) * SECTOR_SIZE, data_by_name[name])
 
     return layout
 
@@ -778,6 +849,22 @@ def validate_image(image_path: Path) -> None:
                 raise StageError('image validate', f'{USER_INIT_ELF_PATH} is empty')
             if init_entry.data_length > USER_INIT_ELF_MAX_BYTES:
                 raise StageError('image validate', f'{USER_INIT_ELF_PATH} exceeds the loader bound')
+
+        try:
+            bin_dir_entry = find_child(root, 'bin', want_directory=True)
+        except StageError:
+            bin_dir_entry = None
+        if bin_dir_entry is not None:
+            image.seek(cluster_lba(bin_dir_entry.first_cluster) * SECTOR_SIZE)
+            bin_directory = image.read(CLUSTER_SIZE)
+            for name in USER_BIN_PROGRAMS:
+                if not (USER_BIN_DIR / name).is_file():
+                    continue
+                entry = find_child(bin_directory, name, want_directory=False)
+                if entry.data_length <= 0:
+                    raise StageError('image validate', f'/bin/{name} is empty')
+                if entry.data_length > USER_BIN_MAX_BYTES:
+                    raise StageError('image validate', f'/bin/{name} exceeds the loader bound')
 
 
 def disk_geometry(image_size: int) -> tuple[int, int, int]:

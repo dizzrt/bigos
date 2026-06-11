@@ -4,13 +4,14 @@ Language: English | [简体中文](README-zh.md)
 
 BigOS is an early-stage x86_64 operating system kernel written mainly in
 freestanding C++17, C17, and assembly. It has grown from a boot/kernel skeleton
-into a single-core kernel with a minimal user-mode loop: bootstrapping,
+into a single-core kernel with a bounded userland loop: bootstrapping,
 text/serial output, interrupt/exception/syscall handling, a PIT timer tick, a
 keyboard-driven TTY input path, a bounded timer-aware kernel-thread scheduler,
 wait queues and timeout sleep, an `int 0x80` syscall entry, process lifecycle
-core, read-only fd/VFS services, default-off ring3 user-program smokes, a
-bounded ELF64 user-program loader, VMA-backed user-memory validation, and a
-fairly complete early kernel memory-management stack.
+core, fd/VFS services, writable `/rw` files, pipes/dup, default-on PID-1 init,
+a minimal user crt0/libc, `/bin/sh`, bounded ELF64 user-program loading,
+VMA-backed user-memory validation, and a fairly complete early kernel
+memory-management stack.
 
 This repository is a research/toy OS kernel project, not a hosted application or
 service.
@@ -18,9 +19,9 @@ service.
 ## Status
 
 The project has iterated past kernel infrastructure bring-up into a single-core
-kernel with timer, input, scheduling, syscall, read-only block/exFAT services,
-bounded user ELF loading, and minimal user-mode smokes on top of the boot path,
-interrupt foundation, and early memory management.
+kernel with timer, input, scheduling, syscall, read/write VFS primitives,
+bounded user ELF loading, a resident PID-1 init, and a minimal userland runtime
+on top of the boot path, interrupt foundation, and early memory management.
 
 Implemented or partially implemented:
 
@@ -31,7 +32,8 @@ Implemented or partially implemented:
 - Kernel-owned static IDT, generated assembly ISR stubs, and a stable
   `InterruptFrame` dispatch ABI that separates CPU exceptions, i8259 IRQs, and
   the `int 0x80` syscall vector.
-- Diagnostic-only `#PF` handler that reads `CR2` and emits a `BIGOS_PAGE_FAULT` marker.
+- `#PF` handler that reads `CR2`, recovers supported user demand-zero/COW faults,
+  and emits `BIGOS_PAGE_FAULT` for unrecoverable kernel faults.
 - Unified early fatal diagnostics (`bigos::kpanic`/`khalt`) that emit a stable
   `BIGOS_PANIC code=<code> source=<source>` marker on COM1 and VGA, then disable
   interrupts and halt.
@@ -43,21 +45,25 @@ Implemented or partially implemented:
   context switch, round-robin `yield()`, scheduler-owned idle thread, wait
   queues, timeout sleep, preemption-disable guards, and bounded IRQ-return timer
   preemption.
-- `int 0x80` syscall entry with a minimal register ABI and a bounded dispatcher:
-  `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, `SYS_WAIT`,
-  `SYS_OPEN`, `SYS_READ`, `SYS_CLOSE`, `SYS_BRK`, and `SYS_MAP_ANON`.
+- `int 0x80` syscall entry with a minimal register ABI and a bounded dispatcher
+  including process, fd/VFS, pipe/dup, identity/time, signal, and `SYS_EXECVE`
+  calls used by the user libc and shell.
 - Default-off first ring3 user program smoke: a flat embedded image enters
   ring3 via TSS/RSP0 and `iretq`, then completes a `SYS_WRITE`/`SYS_EXIT` loop.
 - Default-off user ELF smoke: a bounded ELF64 `ET_EXEC` image is packaged as
   `/boot/user/init.elf`, read from exFAT, mapped into a derived user address
   space, and entered in ring3.
+- Default-on resident C init packaged as `/boot/user/init.elf`, which starts and
+  restarts `/bin/sh` with `fork` + `execve`, and a default-off
+  `userland_smoke` path that validates crt0, libc, fork/exec/wait, pipe,
+  redirection, and malloc with `BIGOS_USERLAND_PASSED`.
 - Process lifecycle core with PID/parent-child state, wait/exit/reap semantics,
   process-local fd table, bounded exec image replacement, and safe teardown on
   exit or user fault.
-- Read-only kernel block/filesystem path and VFS shell: synchronous ATA PIO
-  sector reads, MBR exFAT partition discovery, read-only mount, absolute path
-  lookup, fd-backed `open`/`read`/`close`, and bounded file reads for controlled
-  raw images.
+- Kernel block/filesystem path and VFS shell: synchronous ATA PIO sector reads,
+  MBR exFAT partition discovery, read-only exFAT boot assets, writable `/rw`
+  files, absolute path lookup, fd-backed `open`/`read`/`write`/`close`, and
+  bounded file reads/writes for controlled raw images.
 - Buddy physical page allocator with an early metadata arena for bootstrap.
 - Slab/kmalloc allocator with size classes, dynamic slab reclaim, page-backed
   large allocations, optional debug guards, and validation statistics.
@@ -67,8 +73,9 @@ Implemented or partially implemented:
 - User address-space teardown and empty PT/PD/PDPT reclamation for owned
   runtime-created mappings, with high-half kernel mappings kept borrowed.
 - Bounded VMA/user-memory API for stack/heap/image metadata, VMA-backed syscall
-  buffer validation, `brk`, restricted anonymous mapping, and stack-growth fault
-  hooks; this is not general demand paging.
+  buffer validation, `brk`, restricted anonymous mapping, demand-zero user
+  materialization, and COW write splitting; this is not broad file-backed
+  demand paging.
 - Explicit allocation API: `alloc_kernel_pages(nr_pages, flags)` for kernel
   virtual pages and an internal `alloc_physical_order(order, flags)` for buddy.
 - Switchable early memory runtime self-test (`bigos::mm::self_test`).
@@ -79,13 +86,14 @@ Not implemented or still skeletal:
 - UEFI bootloader, ESP image generation, and OVMF/QEMU UEFI smoke tests.
 - SMP, per-CPU run queues, cross-CPU migration, full priority/realtime
   scheduling, and POSIX scheduling policy.
-- A full POSIX multi-process model: `fork`, signals, broad process policy, and
-  general exec semantics beyond the bounded argv/envp/user-ELF path.
-- General demand paging, copy-on-write, file-backed `mmap`, broad mapping
-  policy, and user-space libc.
-- Writable filesystems, page cache, async I/O, directory mutation, permissions,
-  relative paths/cwd, and broad storage-device support beyond the current
-  synchronous read-only ATA PIO plus exFAT/VFS subset.
+- A full POSIX multi-process model: broad process policy, `fork` semantics such
+  as COW beyond the current bounded subset, `exec*` families, job control, and
+  terminal process groups.
+- File-backed `mmap`, broad mapping policy, dynamic linking, shared libraries,
+  and a complete POSIX libc.
+- Full writable filesystems, async I/O, relative paths/cwd, broad directory
+  mutation semantics, and broad storage-device support beyond the current
+  controlled ATA PIO plus exFAT/VFS subset.
 - Broad device-driver support.
 - Complete build/install automation and CI.
 
@@ -186,15 +194,16 @@ xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSE
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
 xmake f --fs_smoke=y          # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
 xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
+xmake f --userland_smoke=y    # BIGOS_USERLAND_SMOKE -> BIGOS_USERLAND_PASSED/FAILED
 ```
 
 `--mm_self_test` implies `--slab_debug`. The self-test emits the
 `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` markers on COM1 and VGA.
-`--user_program_smoke` and `--user_elf_smoke` enter default-off user-program
-smoke paths; the shared process lifecycle core is compiled as a normal kernel
-subsystem. The ELF smoke also builds and packages `build/bin/user/init.elf` as
-`/boot/user/init.elf`. These smoke entry threads are not part of a normal boot.
-All markers are written to COM1 serial and VGA.
+Normal boot packages `/boot/user/init.elf`, `/bin/sh`, and `/bin/*` helpers,
+enters PID-1 init, and starts `/bin/sh`; default headless validation observes
+`BIGOS_USER_EXEC`. `--user_program_smoke`, `--user_elf_smoke`, and
+`--userland_smoke` select default-off user-program validation paths in place of
+the normal user init payload. All markers are written to COM1 serial and VGA.
 
 Local emulator runs for the current Legacy BIOS/MBR/exFAT path:
 
@@ -228,9 +237,10 @@ uv run python tools/boot_debug.py run
 The helper runs preflight checks, can build the kernel and boot artifacts when
 not called from an xmake run target, creates a raw disk image entirely in user
 space, writes the MBR, exFAT boot regions, `/boot/boot.bin`, root `kernel`,
-`/boot/fs_smoke.txt`, and optional `/boot/user/init.elf`, then launches the
-selected emulator unless `--no-launch` is supplied. It does not build a UEFI
-loader, ESP image, OVMF configuration, or new storage-driver path.
+`/boot/fs_smoke.txt`, `/boot/user/init.elf`, and packaged `/bin/*` user
+programs, then launches the selected emulator unless `--no-launch` is supplied.
+It does not build a UEFI loader, ESP image, OVMF configuration, or new
+storage-driver path.
 
 Generated boot-debug artifacts are isolated under `build/` by default:
 

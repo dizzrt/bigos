@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -5,6 +6,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def read_source(relative: str) -> str:
     return (ROOT / relative).read_text(encoding='utf-8')
+
+
+def parse_kernel_enum_assignments(source: str) -> dict[str, int]:
+    enum_start = source.index('enum SyscallNumber')
+    enum_end = source.index('};', enum_start)
+    enum_body = source[enum_start:enum_end]
+    return {name: int(value) for name, value in re.findall(r'\b(SYS_[A-Z0-9_]+)\s*=\s*(\d+)', enum_body)}
+
+
+def parse_kernel_errno_constants(source: str) -> dict[str, int]:
+    return {name: int(value) for name, value in re.findall(r'constexpr int (E[A-Z0-9_]+)\s*=\s*(\d+);', source)}
+
+
+def parse_user_defines(source: str) -> dict[str, int]:
+    return {name: int(value) for name, value in re.findall(r'^#define\s+([A-Z][A-Z0-9_]+)\s+(\d+)$', source, re.M)}
 
 
 def test_syscall_vector_constant_is_named_and_centralized() -> None:
@@ -42,6 +58,20 @@ def test_syscall_abi_is_declared_and_documented() -> None:
     assert 'constexpr int ENOSYS = 38;' in errno_h
     assert 'constexpr int EFAULT = 14;' in errno_h
     assert 'void dispatch(bigos::irq::InterruptFrame *__frame) noexcept;' in syscall_h
+
+
+def test_user_libc_syscall_and_errno_mirrors_match_kernel_headers() -> None:
+    kernel_syscalls = parse_kernel_enum_assignments(read_source('include/bigos/syscall.h'))
+    user_syscalls = parse_user_defines(read_source('user/libc/include/sys_nr.h'))
+    kernel_errno = parse_kernel_errno_constants(read_source('include/bigos/errno.h'))
+    user_errno = parse_user_defines(read_source('user/libc/include/errno.h'))
+
+    assert user_syscalls == kernel_syscalls
+    assert user_errno == kernel_errno
+    assert user_syscalls['SYS_EXECVE'] == 27
+    assert user_errno['ENOENT'] == 2
+    assert user_errno['E2BIG'] == 7
+    assert user_errno['ENOEXEC'] == 8
 
 
 def test_syscall_abi_mapping_is_documented_in_arch_docs() -> None:

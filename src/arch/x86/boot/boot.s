@@ -106,6 +106,10 @@ build_pt_loop:
     rdmsr
     # set IA32_EFER.LME = 1
     bts $0x08, %eax
+    # set IA32_EFER.NXE = 1 so the NO_EXECUTE (bit 63) attribute used by user
+    # data/stack PTEs is a valid (not reserved) bit; without NXE any access to a
+    # NX-marked page raises a reserved-bit page fault.
+    bts $0x0b, %eax
     wrmsr
 
     # set cr4.PAE = 1

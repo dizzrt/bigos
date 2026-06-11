@@ -206,6 +206,27 @@ def test_build_current_artifacts_uses_saved_xmake_config(monkeypatch) -> None:
     ]
 
 
+def test_image_artifact_discovery_requires_default_userland(monkeypatch, tmp_path: Path) -> None:
+    kernel = write_bytes(tmp_path / 'kernel', b'kernel')
+    missing_init = tmp_path / 'missing-init.elf'
+    bin_dir = tmp_path / 'bin'
+
+    monkeypatch.setattr(boot_debug, 'DEFAULT_KERNEL', kernel)
+    monkeypatch.setitem(boot_debug.BOOT_ARTIFACTS, 'mbr', (write_bytes(tmp_path / 'mbr.bin', b'mbr'), 512))
+    monkeypatch.setitem(boot_debug.BOOT_ARTIFACTS, 'dbr', (write_bytes(tmp_path / 'dbr.bin', b'dbr'), 512))
+    monkeypatch.setitem(boot_debug.BOOT_ARTIFACTS, 'exdbr', (write_bytes(tmp_path / 'exdbr.bin', b'exdbr'), 4096))
+    monkeypatch.setitem(boot_debug.BOOT_ARTIFACTS, 'boot', (write_bytes(tmp_path / 'boot.bin', b'boot'), 0x80000))
+    monkeypatch.setattr(boot_debug, 'USER_INIT_ELF', missing_init)
+    monkeypatch.setattr(boot_debug, 'USER_BIN_DIR', bin_dir)
+
+    with pytest.raises(boot_debug.StageError, match='/boot/user/init.elf'):
+        boot_debug.get_artifacts(kernel)
+
+    write_bytes(missing_init, b'\x7fELF')
+    with pytest.raises(boot_debug.StageError, match='/bin/sh'):
+        boot_debug.get_artifacts(kernel)
+
+
 def test_run_parser_rejects_smoke_shortcuts() -> None:
     parser = boot_debug.make_parser()
 
@@ -280,10 +301,11 @@ def test_default_init_case_uses_marker_behavior_assertion_without_smoke_switch()
     assert all(option.endswith('=n') for option in command[2:])
     assert len(command) == 2 + len(boot_debug.SMOKE_OPTIONS)
 
-    # Pass criterion is the kernel BIGOS_INIT_ENTER/EXIT serial markers; the init
-    # binary stdout assertion is deferred to a later stage.
-    assert case.expected_marker == 'BIGOS_INIT_EXIT'
-    assert case.validation_markers == ('BIGOS_INIT_ENTER', 'BIGOS_INIT_EXIT')
+    # Stage 19: the default build packages /boot/user/init.elf + /bin/sh and the
+    # resident C PID-1 init forks + execve /bin/sh on normal boot (it does not
+    # exit), so the pass criterion is BIGOS_INIT_ENTER -> BIGOS_USER_EXEC.
+    assert case.expected_marker == 'BIGOS_USER_EXEC'
+    assert case.validation_markers == ('BIGOS_INIT_ENTER', 'BIGOS_USER_EXEC')
     assert 'no smoke switch' in case.proc_boundary
 
 
@@ -535,6 +557,7 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     assert '--skip-build' in xmake
     assert 'process.openv("python3", args)' in xmake
     assert 'option.get("arguments")' in xmake
+    assert 'add_deps("kernel", "boot-artifacts", "user-init-elf")' in xmake
     assert 'run_boot_debug("bochs", "build/test/bochs.serial.log",' in xmake
     assert 'run_boot_debug("qemu", "build/test/qemu.serial.log",' in xmake
     assert 'run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log",' in xmake

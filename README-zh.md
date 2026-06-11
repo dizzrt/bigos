@@ -3,19 +3,20 @@
 语言：[English](README.md) | 简体中文
 
 BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
-C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为具备最小用户态闭环的单核内核：
+C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为具备有界用户态闭环的单核内核：
 引导流程、文本/串口输出、中断/异常/syscall 处理、PIT timer tick、键盘驱动的
-TTY 输入路径、具备 bounded timer semantics 的内核线程调度器、`int 0x80` syscall 入口、默认关闭的
-ring3 用户程序 smoke、bounded ELF64 用户程序加载器、只读 fd/VFS 服务、
-VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管理。
+TTY 输入路径、具备 bounded timer semantics 的内核线程调度器、`int 0x80` syscall 入口、
+进程生命周期、fd/VFS 服务、可写 `/rw` 文件、pipe/dup、默认开启的 PID-1 init、
+最小用户态 crt0/libc、`/bin/sh`、bounded ELF64 用户程序加载器、VMA-backed 用户内存校验，
+以及一套相对完整的早期内核内存管理。
 
 本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
 
 ## 状态
 
 项目已从内核基础设施引导阶段，迭代为在 boot 路径、中断基础设施和早期内存管理之上，
-具备 timer、输入、调度、syscall、只读 block/exFAT 服务、bounded 用户 ELF
-加载和最小用户态 smoke 的单核内核。
+具备 timer、输入、调度、syscall、读写 VFS 原语、bounded 用户 ELF 加载、
+常驻 PID-1 init 和最小用户态运行时的单核内核。
 
 已经实现或部分实现：
 
@@ -25,7 +26,8 @@ VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管
 - VGA 文本模式输出、`kprintf`，以及用于确定性标记的 COM1 串口输出。
 - kernel-owned 静态 IDT、生成的汇编 ISR 桩，以及把 CPU exception、i8259 IRQ
   与 `int 0x80` syscall 向量分离的稳定 `InterruptFrame` dispatch ABI。
-- 诊断型 `#PF` 处理器：读取 `CR2` 并输出 `BIGOS_PAGE_FAULT` 标记。
+- `#PF` 处理器：读取 `CR2`，恢复受支持的用户 demand-zero/COW fault，并对不可恢复
+  的内核 fault 输出 `BIGOS_PAGE_FAULT` 标记。
 - 统一的早期致命诊断（`bigos::kpanic`/`khalt`）：在 COM1 与 VGA 输出稳定的
   `BIGOS_PANIC code=<code> source=<source>` 标记，然后关中断并停机。
 - i8259 PIC 驱动，以及 IRQ0 上的 PIT timer 驱动，提供单调 tick 和最小 `mdelay`
@@ -35,18 +37,21 @@ VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管
 - 单核内核线程调度器：1 页内核栈、x86_64 context switch、round-robin
   `yield()`、scheduler-owned idle 线程、wait queue、timeout sleep、
   preemption-disable guard，以及 bounded IRQ-return timer preemption。
-- `int 0x80` syscall 入口、最小寄存器 ABI 和 bounded dispatcher：
-  `SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE`、`SYS_EXIT`、`SYS_WAIT`、
-  `SYS_OPEN`、`SYS_READ`、`SYS_CLOSE`、`SYS_BRK` 和 `SYS_MAP_ANON`。
+- `int 0x80` syscall 入口、最小寄存器 ABI 和 bounded dispatcher，包含用户 libc
+  与 shell 使用的进程、fd/VFS、pipe/dup、身份/时间、信号和 `SYS_EXECVE` 调用。
 - 默认关闭的首个 ring3 用户程序 smoke：flat embedded image 通过 TSS/RSP0 与
   `iretq` 进入 ring3，并完成 `SYS_WRITE`/`SYS_EXIT` 闭环。
 - 默认关闭的用户 ELF smoke：bounded ELF64 `ET_EXEC` 镜像会被打包为
   `/boot/user/init.elf`，从 exFAT 读取、映射进派生用户地址空间，并进入 ring3。
+- 默认开启的常驻 C init 打包为 `/boot/user/init.elf`，通过 `fork` + `execve`
+  启动并重启 `/bin/sh`；默认关闭的 `userland_smoke` 会用
+  `BIGOS_USERLAND_PASSED` 验证 crt0、libc、fork/exec/wait、pipe、重定向和 malloc。
 - 进程生命周期核心：PID/parent-child 状态、wait/exit/reap 语义、process-local
   fd table、bounded exec image replacement，以及 exit 或 user fault 后的 safe teardown。
-- 只读内核 block/filesystem 路径和 VFS 壳层：同步 ATA PIO sector 读取、MBR exFAT
-  分区发现、只读 mount、绝对路径 lookup、fd-backed `open`/`read`/`close`，以及
-  面向受控 raw image 的 bounded file read。
+- 内核 block/filesystem 路径和 VFS 壳层：同步 ATA PIO sector 读取、MBR exFAT
+  分区发现、只读 exFAT boot assets、可写 `/rw` 文件、绝对路径 lookup、
+  fd-backed `open`/`read`/`write`/`close`，以及面向受控 raw image 的 bounded
+  file read/write。
 - 基于 buddy 的物理页分配器，并使用 early metadata arena 完成 bootstrap。
 - Slab/kmalloc 分配器：size class、动态 slab 回收、page-backed 大对象分配、
   可选 debug guard 和验证统计。
@@ -55,8 +60,8 @@ VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管
 - 用户地址空间 teardown 和 owned 运行时映射的空 PT/PD/PDPT 回收；高半区内核映射
   保持 borrowed。
 - Bounded VMA/user-memory API：stack/heap/image 元数据、VMA-backed syscall buffer
-  validation、`brk`、restricted anonymous mapping 和 stack-growth fault hook；这不是
-  general demand paging。
+  validation、`brk`、restricted anonymous mapping、demand-zero 用户页物化和 COW
+  写时分裂；这不是广泛 file-backed demand paging。
 - 显式分配 API：内核虚拟页使用 `alloc_kernel_pages(nr_pages, flags)`，
   物理 buddy 使用内部 `alloc_physical_order(order, flags)`。
 - 可切换的早期内存运行时自检（`bigos::mm::self_test`）。
@@ -67,12 +72,11 @@ VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管
 - UEFI bootloader、ESP 镜像生成和 OVMF/QEMU UEFI smoke test。
 - SMP、per-CPU run queue、跨 CPU migration、完整 priority/realtime scheduling
   和 POSIX scheduling policy。
-- 完整 POSIX 多进程模型：`fork`、signal、广泛进程策略，以及超出 bounded
-  argv/envp/user-ELF 路径的通用 exec 语义。
-- general demand paging、copy-on-write、file-backed `mmap`、广泛 mapping policy
-  和用户态 libc。
-- 可写文件系统、page cache、async I/O、目录变更、权限、相对路径/cwd，以及超出当前
-  同步只读 ATA PIO + exFAT/VFS 子集的广泛存储设备支持。
+- 完整 POSIX 多进程模型：广泛进程策略、超出当前 bounded 子集的 `fork` 语义、
+  `exec*` 全族、作业控制和终端进程组。
+- file-backed `mmap`、广泛 mapping policy、动态链接、共享库和完整 POSIX libc。
+- 完整可写文件系统、async I/O、相对路径/cwd、广泛目录变更语义，以及超出当前受控
+  ATA PIO + exFAT/VFS 子集的广泛存储设备支持。
 - 更广泛的设备驱动支持。
 - 完整的构建/安装自动化与 CI。
 
@@ -170,14 +174,15 @@ xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSE
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
 xmake f --fs_smoke=y          # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
 xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
+xmake f --userland_smoke=y    # BIGOS_USERLAND_SMOKE -> BIGOS_USERLAND_PASSED/FAILED
 ```
 
 `--mm_self_test` 会自动启用 `--slab_debug`。自检会在 COM1 与 VGA 输出
 `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` 标记。
-`--user_program_smoke` 和 `--user_elf_smoke` 会进入默认关闭的 user-program smoke
-路径；共享的 process lifecycle core 是常规内核子系统。ELF smoke 还会构建
-`build/bin/user/init.elf` 并打包为 `/boot/user/init.elf`。这些 smoke entry thread
-默认不参与普通启动。所有标记都写到 COM1 串口和 VGA。
+普通启动会打包 `/boot/user/init.elf`、`/bin/sh` 和 `/bin/*` 辅助程序，进入
+PID-1 init，并启动 `/bin/sh`；默认 headless 验证观察 `BIGOS_USER_EXEC`。
+`--user_program_smoke`、`--user_elf_smoke` 和 `--userland_smoke` 会选择默认关闭的
+用户程序验证路径，替代普通用户 init payload。所有标记都写到 COM1 串口和 VGA。
 
 当前 Legacy BIOS/MBR/exFAT 路径的本地 emulator 运行入口：
 
@@ -208,9 +213,9 @@ uv run python tools/boot_debug.py run
 
 helper 会执行 preflight 检查；如果不是从 xmake run target 调用，也可以构建 kernel
 和 boot artifacts。随后它在用户态生成 raw 磁盘镜像，写入 MBR、exFAT boot
-region、`/boot/boot.bin`、根目录 `kernel`、`/boot/fs_smoke.txt` 和可选
-`/boot/user/init.elf`，并在未指定 `--no-launch` 时启动选定 emulator。它不会构建
-UEFI loader、ESP 镜像、OVMF 配置或新存储驱动路径。
+region、`/boot/boot.bin`、根目录 `kernel`、`/boot/fs_smoke.txt`、
+`/boot/user/init.elf` 和打包的 `/bin/*` 用户程序，并在未指定 `--no-launch`
+时启动选定 emulator。它不会构建 UEFI loader、ESP 镜像、OVMF 配置或新存储驱动路径。
 
 默认生成物均位于 `build/` 下：
 

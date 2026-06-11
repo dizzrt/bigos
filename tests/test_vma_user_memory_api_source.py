@@ -121,8 +121,10 @@ def test_unified_page_fault_entry_decides_by_vma_metadata() -> None:
     assert "bigos::proc::fault_current_and_exit(-14)" in irq
 
     entry_body = proc[proc.index("bool try_handle_user_page_fault") : proc.index("int64_t install_fd_current")]
-    # Preconditions: running process, allocation-safe, present-bit gate.
-    assert "!bigos::sched::can_block()" in entry_body
+    # Preconditions: running process, allocation-safe, present-bit gate. Stage 19:
+    # a real ring3 #PF dispatches under the nonblocking guard with IF=0, so the
+    # gate is the allocation-safe can_allocate_in_fault() rather than can_block().
+    assert "!bigos::sched::can_allocate_in_fault()" in entry_body
     assert "(__error_code & 0x1) != 0" in entry_body
     # Locate the covering VMA and require anonymous backing.
     assert "internal_find_vma_mut(&process->vmas, page)" in entry_body

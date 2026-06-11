@@ -57,6 +57,14 @@ namespace bigos::sys {
         SYS_FSYNC = 24,        // (fd) -> 0, or -EBADF/-EIO
         SYS_MKDIR = 25,        // (path, mode) -> 0, or -EEXIST/-EACCES/-ENOSPC/-EROFS/-EINVAL
         SYS_UNLINK = 26,       // (path) -> 0, or -ENOENT/-EACCES/-EISDIR/-EROFS/-EINVAL
+        SYS_EXECVE = 27,       // (rdi=path, rsi=argv, rdx=envp) -> replaces the current
+                               // process image and enters the new program entry on
+                               // success (does not return); on failure returns a
+                               // deterministic negative errno (-ENOENT/-EACCES/-ENOEXEC/
+                               // -E2BIG/-EFAULT/-ENOMEM). argv/envp are NULL-terminated
+                               // user pointer arrays copied through VMA-backed validation
+                               // and bounded by EXEC_MAX_ARGC/EXEC_MAX_ENVC/
+                               // EXEC_MAX_STRING_BYTES.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

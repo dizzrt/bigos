@@ -58,6 +58,10 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_GETPID`（number=12）/ `SYS_GETPPID`（number=13）：返回当前进程的 `pid` / `parent_pid`。
 - `SYS_GETUID`（number=14）/ `SYS_GETGID`（number=15）：返回当前进程的 `uid` / `gid`。
 
+其后是 `SYS_KILL`（16）、`SYS_SIGACTION`（17）、`SYS_SIGPROCMASK`（18）、`SYS_SIGRETURN`（19）、`SYS_LSEEK`（20）、`SYS_PIPE`（21）、`SYS_DUP`（22）、`SYS_DUP2`（23）、`SYS_FSYNC`（24）、`SYS_MKDIR`（25）、`SYS_UNLINK`（26）。
+
+- `SYS_EXECVE`（number=27）：以 append-only 方式把内核内已有的当前进程镜像替换路径（`exec_current_from_elf_image` + 只读 VFS 读路径）暴露给 CPL3。ABI：`rdi` = 用户 `path`，`rsi` = `argv`（NULL 结尾用户指针数组），`rdx` = `envp`。path 受 `SYS_PATH_MAX_LEN` 约束，argv/envp 向量受 `EXEC_MAX_ARGC` / `EXEC_MAX_ENVC` / `EXEC_MAX_STRING_BYTES` 约束；所有用户缓冲先经 VMA-backed 校验拷入再使用。成功时以新 ELF64 `ET_EXEC` 镜像替换当前进程地址空间并进入新程序入口，因此不返回调用点。失败时返回确定性负 errno（`-ENOENT`、`-EACCES`、`-ENOEXEC`、`-E2BIG`、`-EFAULT`、`-ENOMEM`、`-EWOULDBLOCK`、`-EIO`），调用镜像可继续执行。与其他 fd/VFS syscall 一样，它在分配或进入同步存储 IO 前检查 `sched::can_block()` 守卫；不改动任何既有 syscall 号、寄存器约定、`VECTOR_SYSCALL` / DPL 布局或「syscall 不发 EOI」规则。
+
 syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
 
 ## 验证：默认关闭构建开关 + 确定性 marker

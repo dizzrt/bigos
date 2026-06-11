@@ -680,7 +680,12 @@ namespace {
                 memcpy((uint8_t *)direct + page_offset, __image + file_offset, copy_end - copy_vaddr);
             }
 
-            if (!map_user_page_for_process(__process, page, phys, __segment.attr, true))
+            // ELF segment pages live only in the process's own root; it is
+            // activated on ring3 entry and the image bytes were copied through the
+            // direct map above. Mapping into the active root too would pollute /
+            // collide with whatever root is current (e.g. the kernel root during
+            // an execve from another process), so do not duplicate there.
+            if (!map_user_page_for_process(__process, page, phys, __segment.attr, false))
                 goto fail;
             mapped = true;
             (void)mapped;
@@ -722,10 +727,51 @@ namespace {
         g_reap_head_pid = process->pid;
     }
 
+    // Minimal orphan reparenting to PID-1 init (decision 9). When a non-init
+    // process exits, walk its child chain and move every child onto init:
+    // rewrite parent_pid to init's pid and splice the child into init's
+    // first_child_pid chain. For children already in a terminal/zombie state,
+    // post SIGCHLD to init and wake the process wait queue so init's while(1)
+    // wait can reap them. Pure pointer rewiring over the existing
+    // parent/child/sibling fields: no allocation, no IO, no lock, cannot fail.
+    // When init is gone (g_init_process == nullptr, an abnormal path) it is
+    // skipped and the existing self-reap fallback in mark_zombie_or_reap_pending
+    // applies.
+    void reparent_children_to_init(bigos::proc::Process *__process) noexcept {
+        if (__process == nullptr)
+            return;
+        bigos::proc::Process *init = g_init_process;
+        if (init == nullptr || init == __process || init->pid == 0 || !init->table_published)
+            return;
+
+        uint32_t child_pid = __process->first_child_pid;
+        bool woke_init = false;
+        while (child_pid != 0) {
+            bigos::proc::Process *child = lookup_process(child_pid);
+            if (child == nullptr)
+                break;
+            const uint32_t next = child->next_sibling_pid;
+
+            child->parent_pid = init->pid;
+            child->next_sibling_pid = init->first_child_pid;
+            init->first_child_pid = child->pid;
+
+            if (child->state == bigos::proc::ProcessState::Zombie ||
+                child->state == bigos::proc::ProcessState::Terminated ||
+                child->state == bigos::proc::ProcessState::Faulted) {
+                (void)bigos::signal::kill(init, bigos::signal::SIGCHLD);
+                woke_init = true;
+            }
+            child_pid = next;
+        }
+        __process->first_child_pid = 0;
+        if (woke_init)
+            (void)bigos::sched::wake_all(&g_process_wait_queue);
+    }
+
     void mark_zombie_or_reap_pending(bigos::proc::Process *process) noexcept {
         if (process == nullptr)
             return;
-
         bigos::proc::Process *parent = lookup_process(process->parent_pid);
         // Child entering zombie (normal exit or signal/fault termination): set
         // SIGCHLD pending on the parent. Default action is Ignore so this never
@@ -1029,6 +1075,10 @@ namespace {
 
         g_current_process = child;
         child->state = bigos::proc::ProcessState::Running;
+        // Bind this kernel thread to the child process so the scheduler restores
+        // the correct ring3 context (current process / user CR3 / rsp0) whenever
+        // this thread is switched back in.
+        bigos::sched::set_current_user_process(child);
         // Capture the kernel root (active here on the kernel thread) so exit/fault
         // can switch back before teardown, identical to run_user_process.
         child->kernel_address_space_root = bigos::mm::read_cr3();
@@ -1356,7 +1406,7 @@ namespace bigos::proc {
                 error = UserElfLoadError::CopyFailed;
                 goto fail;
             }
-            if (!map_user_page_for_process(__process, stack_base, stack_phys, bigos::mm::page_attr::USER_DATA, true)) {
+            if (!map_user_page_for_process(__process, stack_base, stack_phys, bigos::mm::page_attr::USER_DATA, false)) {
                 free_user_frame(stack_phys);
                 error = UserElfLoadError::MapFailed;
                 goto fail;
@@ -1476,6 +1526,117 @@ namespace bigos::proc {
         return UserElfLoadError::Success;
     }
 
+    // Maps a read-only VFS open failure to a deterministic negative errno for the
+    // SYS_EXECVE path. NotFound -> -ENOENT so the shell PATH search can fall
+    // through to the next candidate; permission/directory failures -> -EACCES.
+    int64_t execve_open_errno(bigos::vfs::Status __status) noexcept {
+        switch (__status) {
+            case bigos::vfs::Status::NotFound:
+                return -bigos::ENOENT;
+            case bigos::vfs::Status::AccessDenied:
+                return -bigos::EACCES;
+            case bigos::vfs::Status::NotRegularFile:
+                return -bigos::EACCES;
+            case bigos::vfs::Status::NoMemory:
+                return -bigos::ENOMEM;
+            default:
+                return -bigos::ENOENT;
+        }
+    }
+
+    // Maps an ELF load failure to a deterministic negative errno. A malformed or
+    // unloadable image is -ENOEXEC; allocation/mapping exhaustion is -ENOMEM; an
+    // argv/envp/stack overflow is -E2BIG.
+    int64_t execve_load_errno(UserElfLoadError __error) noexcept {
+        switch (__error) {
+            case UserElfLoadError::OutOfMemory:
+            case UserElfLoadError::MapFailed:
+                return -bigos::ENOMEM;
+            case UserElfLoadError::CopyFailed:
+                return -bigos::E2BIG;
+            case UserElfLoadError::InvalidArgument:
+            case UserElfLoadError::UnsupportedElf:
+            case UserElfLoadError::BadHeader:
+            case UserElfLoadError::BadProgramHeader:
+            case UserElfLoadError::AddressOutOfRange:
+            case UserElfLoadError::SegmentOverlap:
+            case UserElfLoadError::UnsafePermissions:
+            case UserElfLoadError::EntryNotExecutable:
+            case UserElfLoadError::Success:
+                return -bigos::ENOEXEC;
+        }
+        return -bigos::ENOEXEC;
+    }
+
+    int64_t execve_current(const char *__path, const ExecArgs *__args) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr)
+            return -bigos::EFAULT;
+        // Synchronous block IO / allocation follows: refuse in non-blockable
+        // context per the same guard the other fd/VFS syscalls use.
+        if (!bigos::sched::can_block())
+            return -bigos::EWOULDBLOCK;
+
+        if (!bigos::vfs::initialized()) {
+            const bigos::vfs::Status init_status = bigos::vfs::init();
+            if (init_status != bigos::vfs::Status::Success)
+                return -bigos::EIO;
+        }
+
+        bigos::vfs::File *file = nullptr;
+        bigos::vfs::Status status = bigos::vfs::open_absolute(__path, bigos::vfs::OPEN_RDONLY, &file);
+        if (status != bigos::vfs::Status::Success)
+            return execve_open_errno(status);
+
+        const uint64_t file_size = file->vnode != nullptr ? file->vnode->size : 0;
+        if (file_size == 0 || file_size > USER_ELF_MAX_FILE_BYTES) {
+            bigos::vfs::release(file);
+            return -bigos::ENOEXEC;
+        }
+
+        void *image = bigos::kmalloc((size_t)file_size);
+        if (image == nullptr) {
+            bigos::vfs::release(file);
+            return -bigos::ENOMEM;
+        }
+
+        size_t bytes_read = 0;
+        status = bigos::vfs::read(file, image, (size_t)file_size, &bytes_read);
+        bigos::vfs::release(file);
+        if (status != bigos::vfs::Status::Success || bytes_read != file_size) {
+            bigos::free(image);
+            return -bigos::EIO;
+        }
+
+        // exec_current_from_elf_image refuses to replace the active root, so move
+        // onto the kernel address space first (the kernel stack stays mapped).
+        const uint64_t user_root = process->address_space_root;
+        if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+            bigos::mm::activate_address_space_root(process->kernel_address_space_root);
+
+        const UserElfLoadError error = exec_current_from_elf_image(image, file_size, __args);
+        bigos::free(image);
+        if (error != UserElfLoadError::Success) {
+            // exec_current_from_elf_image only tears down the old image on the rare
+            // teardown-failure path, which also marks the process a zombie. In that
+            // case the old image is gone, so exit the thread rather than returning
+            // to a dead address space.
+            if (process->state != ProcessState::Running) {
+                g_current_process = nullptr;
+                bigos::sched::thread_exit();
+            }
+            bigos::mm::activate_address_space_root(user_root);
+            return execve_load_errno(error);
+        }
+
+        // Success: the current process now owns the new image. Enter ring3 at the
+        // new entry on the freshly prepared initial stack; this does not return.
+        bigos::arch::x86::set_tss_rsp0(process->kernel_stack_top);
+        bigos::mm::activate_address_space_root(process->address_space_root);
+        bigos::serial_puts("BIGOS_USER_EXEC\n");
+        bigos::arch::x86::enter_user_mode(process->entry, process->initial_stack);
+    }
+
     [[noreturn]] void run_user_process(Process *__process) noexcept {
         if (__process == nullptr || __process->state != ProcessState::Created)
             halt_failed("BIGOS_USER_LOAD_FAILED invalid-process\n");
@@ -1487,6 +1648,9 @@ namespace bigos::proc {
 
         g_current_process = __process;
         __process->state = ProcessState::Running;
+        // Bind this kernel thread to the process so the scheduler restores the
+        // correct ring3 context (current process / user CR3 / rsp0) on resume.
+        bigos::sched::set_current_user_process(__process);
         __process->kernel_address_space_root = bigos::mm::read_cr3();
         bigos::arch::x86::set_tss_rsp0(__process->kernel_stack_top);
         bigos::serial_puts("BIGOS_USER_ENTER\n");
@@ -1498,6 +1662,36 @@ namespace bigos::proc {
 
     Process *current_process() noexcept {
         return g_current_process;
+    }
+
+    void restore_current_user_context(Process *__process) noexcept {
+        // A blocking syscall (e.g. wait/read) may switch to another user kernel
+        // thread that clobbers the global ring3 context: g_current_process, the
+        // active user CR3, and the TSS rsp0. When the original caller resumes in
+        // the syscall dispatcher it must re-establish its own context before the
+        // iretq back to ring3, otherwise a later demand fault sees the wrong (or
+        // null) current process and the wrong address space. Kernel mappings are
+        // shared across every root, so reading the process object here is safe
+        // regardless of the CR3 left by the thread that ran in between.
+        if (__process == nullptr || __process->state != ProcessState::Running) {
+            return;
+        }
+        g_current_process = __process;
+        bigos::arch::x86::set_tss_rsp0(__process->kernel_stack_top);
+        if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+            bigos::mm::activate_address_space_root(__process->address_space_root);
+    }
+
+    void prepare_context_switch_to(Process *__next_process) noexcept {
+        if (__next_process != nullptr) {
+            restore_current_user_context(__next_process);
+            return;
+        }
+
+        Process *current = g_current_process;
+        if (current != nullptr && current->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+            bigos::mm::activate_address_space_root(current->kernel_address_space_root);
+        g_current_process = nullptr;
     }
 
     Process *find_process(uint32_t __pid) noexcept {
@@ -1660,10 +1854,13 @@ namespace bigos::proc {
 
     bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept {
         Process *process = g_current_process;
-        // Allocation-safe, running-process precondition. Non-blocking contexts and
-        // non-running processes cannot materialize lazily and fall through to the
-        // deterministic CPL3 kill path in the caller.
-        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+        // Allocation-safe, running-process precondition. A real ring3 #PF reaches
+        // here under the nonblocking guard with IF=0, so can_block() would always
+        // be false; the materialization/COW path only allocates (never blocks),
+        // so it uses can_allocate_in_fault() instead. Non-running processes and
+        // idle/critical contexts still fall through to the deterministic CPL3 kill
+        // path in the caller.
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_allocate_in_fault())
             return false;
         const uint64_t page = page_down(__fault_address);
         // present bit set => either a copy-on-write write split or a genuine
@@ -1849,6 +2046,17 @@ namespace bigos::proc {
         // Child resumes from the parent's syscall frame with rax (return value) 0.
         child->fork_entry_frame = *__parent_frame;
         child->fork_entry_frame.rax = 0;
+        // The InterruptFrame.rsp/.ss slots are synthetic in isr_common (rsp holds
+        // a kernel pointer into the CPU iret frame and ss is 0); the real ring3
+        // rsp/ss the child must iretq to live in the CPU-pushed iret frame just
+        // beyond the struct (offsets 176/184). Capture them so the child resumes
+        // on the user stack with a valid user SS rather than a kernel rsp + null ss.
+        {
+            const uint64_t *iret_tail =
+                (const uint64_t *)((const uint8_t *)__parent_frame + sizeof(bigos::irq::InterruptFrame));
+            child->fork_entry_frame.rsp = iret_tail[0];
+            child->fork_entry_frame.ss = iret_tail[1];
+        }
         child->fork_entry_valid = true;
 
         if (!publish_process(child, parent->pid)) {
@@ -2057,6 +2265,9 @@ namespace bigos::proc {
         process->state = ProcessState::Faulted;
         process->exit_code = __reason;
         process->fault_reason = __reason;
+        // Reparent any surviving children to PID-1 init before this process
+        // becomes a zombie, so their later exits are reaped by init (decision 9).
+        reparent_children_to_init(process);
         mark_zombie_or_reap_pending(process);
         bigos::serial_puts("BIGOS_USER_PAGE_FAULT\n");
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
@@ -2070,6 +2281,7 @@ namespace bigos::proc {
 
         mark_current_faulted(__reason);
         g_current_process = nullptr;
+        bigos::sched::set_current_user_process(nullptr);
         bigos::sched::thread_exit();
     }
 
@@ -2080,16 +2292,20 @@ namespace bigos::proc {
 
         process->state = ProcessState::Terminated;
         process->exit_code = __code;
+        // Reparent any surviving children to PID-1 init before this process
+        // becomes a zombie, so their later exits are reaped by init (decision 9).
+        reparent_children_to_init(process);
         mark_zombie_or_reap_pending(process);
         bigos::serial_puts("BIGOS_USER_EXIT\n");
         // Default-on init normal exit: emit the BIGOS_INIT_EXIT marker and fall
         // through to the existing deferred-reap/idle path (decision 5: idle, not
-        // panic). This does not implement PID-1 restart/adoption.
+        // panic). init itself is the resident PID-1 and is not expected to exit.
         if (process == g_init_process)
             bigos::serial_puts("BIGOS_INIT_EXIT\n");
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::mm::activate_address_space_root(process->kernel_address_space_root);
         g_current_process = nullptr;
+        bigos::sched::set_current_user_process(nullptr);
         bigos::sched::thread_exit();
     }
 
@@ -2774,8 +2990,8 @@ namespace bigos::proc {
                 ok = false;
 
             sig::SigSet old_mask = 0;
-            if (sig::set_mask(&proc, sig::SIG_BLOCK, sig::signo_bit(sig::SIGKILL) | sig::signo_bit(sig::SIGUSR1),
-                    &old_mask) != 0)
+            if (sig::set_mask(
+                    &proc, sig::SIG_BLOCK, sig::signo_bit(sig::SIGKILL) | sig::signo_bit(sig::SIGUSR1), &old_mask) != 0)
                 ok = false;
             if ((proc.sig_mask & sig::signo_bit(sig::SIGKILL)) != 0)   // SIGKILL never blockable
                 ok = false;

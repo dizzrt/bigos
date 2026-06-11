@@ -5,6 +5,7 @@
 #include <bigos/sched.h>
 #include <bigos/time.h>
 #include <bigos/timer.h>
+#include <bigos/tty.h>
 #include <irq/interrupt.h>
 #ifdef BIGOS_USER_PROCESS
 #include <bigos/cred.h>
@@ -79,8 +80,11 @@ namespace sys {
         }
 
         static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
-            // Console fast path keeps its original behavior unchanged.
-            if (__fd == 1) {
+            // Console fast path: fd 1 with no installed file writes to the serial
+            // console. Conditional (mirroring the sys_read fd 0 path) so that once
+            // a pipe write end or redirected file is installed at fd 1 the write
+            // routes to that file instead of the console.
+            if (__fd == 1 && bigos::proc::file_for_fd_current(1) == nullptr) {
                 if (!bigos::proc::validate_user_buffer(__buffer, __len))
                     bigos::proc::fault_current_and_exit(-bigos::EFAULT);
                 char bounded[SYS_WRITE_MAX_LEN + 1];
@@ -152,6 +156,19 @@ namespace sys {
                 return 0;
             if (__len > SYS_IO_MAX_LEN || !bigos::proc::validate_user_io_buffer(__buffer, __len))
                 return -bigos::EFAULT;
+
+            // Console stdin fast path: fd 0 with no installed file reads from the
+            // TTY keyboard input ring (blocking until at least one byte). This
+            // lets the interactive shell read commands without a backing vnode.
+            if (__fd == 0 && bigos::proc::file_for_fd_current(0) == nullptr) {
+                char ch = 0;
+                const int r = bigos::terminal::read_char_blocking(&ch, 0);
+                if (r < 0)
+                    return -bigos::EIO;
+                if (!bigos::proc::copy_to_current_user_buffer(__buffer, &ch, 1))
+                    return -bigos::EFAULT;
+                return 1;
+            }
 
             char bounded[SYS_IO_MAX_LEN];
             size_t bytes_read = 0;
@@ -356,6 +373,81 @@ namespace sys {
             }
             return 0;
         }
+
+        // Copies a NULL-terminated user pointer array (argv/envp) plus each string
+        // into the kernel-side storage backing an ExecArgs. The pointer array is
+        // bounded by __max_count and each string by EXEC_MAX_STRING_BYTES; the
+        // copied strings live in __string_pool (sized EXEC_MAX_STRING_BYTES *
+        // __max_count) and the resulting kernel char* are written into __out.
+        // Returns the element count on success, or a negative errno (-EFAULT on a
+        // bad user pointer, -E2BIG when the bounds are exceeded).
+        static int64_t copy_user_string_vector(uint64_t __user_array, char **__out, char *__string_pool,
+            uint32_t __max_count) noexcept {
+            if (__user_array == 0) {
+                return 0;
+            }
+            uint32_t count = 0;
+            uint64_t pool_used = 0;
+            const uint64_t pool_size = (uint64_t)bigos::proc::EXEC_MAX_STRING_BYTES * __max_count;
+            for (;;) {
+                if (count >= __max_count)
+                    return -bigos::E2BIG;
+                uint64_t user_ptr = 0;
+                if (!bigos::proc::copy_current_user_buffer(
+                        __user_array + (uint64_t)count * sizeof(uint64_t), &user_ptr, sizeof(user_ptr)))
+                    return -bigos::EFAULT;
+                if (user_ptr == 0)
+                    break;
+                char *dst = __string_pool + pool_used;
+                uint64_t len = 0;
+                for (;;) {
+                    if (len >= bigos::proc::EXEC_MAX_STRING_BYTES || pool_used + len + 1 > pool_size)
+                        return -bigos::E2BIG;
+                    char ch = 0;
+                    if (!bigos::proc::copy_current_user_buffer(user_ptr + len, &ch, 1))
+                        return -bigos::EFAULT;
+                    dst[len] = ch;
+                    if (ch == 0)
+                        break;
+                    len++;
+                }
+                pool_used += len + 1;
+                __out[count] = dst;
+                count++;
+            }
+            return (int64_t)count;
+        }
+
+        // sys_execve: copy the user path/argv/envp into bounded kernel storage,
+        // then hand off to proc::execve_current which reads the ELF and replaces
+        // the current image (does not return on success). All user-buffer access
+        // goes through VMA-backed validation; failures are deterministic negative
+        // errno values with the caller left able to continue.
+        static int64_t sys_execve(uint64_t __path, uint64_t __argv, uint64_t __envp) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+
+            char *argv[bigos::proc::EXEC_MAX_ARGC + 1] = {};
+            char *envp[bigos::proc::EXEC_MAX_ENVC + 1] = {};
+            static char argv_pool[bigos::proc::EXEC_MAX_STRING_BYTES * bigos::proc::EXEC_MAX_ARGC];
+            static char envp_pool[bigos::proc::EXEC_MAX_STRING_BYTES * bigos::proc::EXEC_MAX_ENVC];
+
+            const int64_t argc = copy_user_string_vector(__argv, argv, argv_pool, bigos::proc::EXEC_MAX_ARGC);
+            if (argc < 0)
+                return argc;
+            const int64_t envc = copy_user_string_vector(__envp, envp, envp_pool, bigos::proc::EXEC_MAX_ENVC);
+            if (envc < 0)
+                return envc;
+            argv[argc] = nullptr;
+            envp[envc] = nullptr;
+
+            bigos::proc::ExecArgs args = {argv, (uint32_t)argc, envp, (uint32_t)envc};
+            return bigos::proc::execve_current(path, &args);
+        }
 #endif
     }   // namespace __detail
 
@@ -416,6 +508,14 @@ namespace sys {
                 break;
             case SYS_UNLINK:
                 result = __detail::sys_unlink(__frame->rdi);
+                break;
+            case SYS_EXECVE:
+                // execve replaces the current process image and enters the new
+                // program on success (does not return). On failure it returns a
+                // deterministic negative errno written back below. This software
+                // interrupt path sends no i8259 EOI and relaxes no gate/register
+                // convention.
+                result = __detail::sys_execve(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
             case SYS_BRK:
                 result = __detail::sys_brk(__frame->rdi);

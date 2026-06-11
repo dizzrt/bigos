@@ -1,4 +1,5 @@
 #include <bigos/console.h>
+#include <bigos/io.h>
 #include <bigos/keyboard.h>
 #include <bigos/sched.h>
 #include <bigos/tty.h>
@@ -75,8 +76,9 @@ namespace bigos::terminal {
             return sched::WAIT_INVALID;
 
         while (true) {
-            if (read_char(out))
+            if (read_char(out)) {
                 return 1;
+            }
 
             const int wait = sched::wait_queue_wait_until(&g_input_wait, &input_available, nullptr, timeout_ticks);
             if (wait < 0)

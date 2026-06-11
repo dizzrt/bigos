@@ -18,7 +18,7 @@ def test_public_allocator_contracts_are_documented() -> None:
         'free(const void *__p)',
     ):
         start = memory.index(token)
-        context = memory[max(0, start - 180):start + 160]
+        context = memory[max(0, start - 180) : start + 160]
         assert 'Non-IRQ-handler-safe' in context
 
     assert 'Global new/delete are ordinary kmalloc/free frontends and are non-IRQ-handler-safe.' in new_cc
@@ -44,7 +44,7 @@ def test_interrupt_guard_preserves_if_state_and_documents_scope() -> None:
     interrupt_h = read_source('include/irq/interrupt.h')
 
     guard_start = interrupt_h.index('class InterruptGuard')
-    guard_body = interrupt_h[guard_start:interrupt_h.index('void initIRQ()', guard_start)]
+    guard_body = interrupt_h[guard_start : interrupt_h.index('void initIRQ()', guard_start)]
 
     assert 'pushfq; popq %0' in guard_body
     assert 'RFLAGS_IF = 1ull << 9' in guard_body
@@ -103,10 +103,11 @@ def test_irq_handlers_avoid_ordinary_allocator_apis() -> None:
     isr = read_source('src/kernel/irq/isr.cc')
     interrupt = read_source('src/kernel/irq/interrupt.cc')
 
-    timer_body = isr[isr.index('implement_isr(timer)'):isr.index('implement_isr(keyboard)')]
-    keyboard_body = isr[isr.index('implement_isr(keyboard)'):isr.index('void init_isr_timer()')]
-    page_fault_body = interrupt[interrupt.index('static void page_fault_handler'):
-                                  interrupt.index('static void default_external_irq_handler')]
+    timer_body = isr[isr.index('implement_isr(timer)') : isr.index('implement_isr(keyboard)')]
+    keyboard_body = isr[isr.index('implement_isr(keyboard)') : isr.index('void init_isr_timer()')]
+    page_fault_body = interrupt[
+        interrupt.index('static bool page_fault_handler') : interrupt.index('static void default_external_irq_handler')
+    ]
 
     forbidden = (
         'kmalloc',

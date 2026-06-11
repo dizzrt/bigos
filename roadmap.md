@@ -49,20 +49,19 @@ BigOS 已完成早期 bring-up：一个带 smoke 验证、以同步为主的单�
 - 内存：buddy、slab/kmalloc、内核虚拟内存、direct map、用户地址空间派生/teardown、
   空 PT/PD/PDPT 回收、VMA 跟踪、`brk`、受限匿名映射、按 fault 的用户栈增长、基于
   VMA 的用户地址范围验证。
-- Storage/FS: synchronous read-only ATA PIO, MBR exFAT discovery, read-only
-  exFAT mount/path lookup, bounded file reads, a minimal read-only fd/VFS shell,
-  and `open`/`read`/`close`.
-- 存储/文件系统：同步只读 ATA PIO、MBR exFAT 发现、只读 exFAT mount/path lookup、
-  bounded file read、最小只读 fd/VFS 壳层、`open`/`read`/`close`。
-- User mode: a normal process-lifecycle core (bounded PID allocation, static
-  process table, parent/child linkage, `wait`/`exit`, safe zombie/reaper
-  teardown, a bounded ELF64 `exec` path with basic `argv`/`envp`). The
-  first-user-program and filesystem-backed ELF64 paths remain default-off
-  consumers behind `user_program_smoke` and `user_elf_smoke`.
-- 用户态：进程生命周期核心（bounded PID 分配、静态进程表、父子关系、
-  `wait`/`exit`、安全 zombie/reaper teardown、带基础 `argv`/`envp` 的 bounded
-  ELF64 `exec`）。首用户程序与文件系统 ELF64 路径仍是默认关闭的
-  `user_program_smoke` / `user_elf_smoke` 消费者。
+- Storage/FS: synchronous ATA PIO, MBR exFAT discovery, read-only exFAT boot
+  assets, writable `/rw` files, bounded file IO, pipes, dup/dup2, and fd-backed
+  `open`/`read`/`write`/`close`.
+- 存储/文件系统：同步 ATA PIO、MBR exFAT 发现、只读 exFAT boot assets、可写
+  `/rw` 文件、bounded file IO、pipe、dup/dup2，以及 fd-backed
+  `open`/`read`/`write`/`close`。
+- User mode: process lifecycle, `fork`/COW, signals, wait/exit/reap, orphan
+  adoption to PID-1, bounded ELF64 `exec` / `SYS_EXECVE`, default-on resident C
+  init, minimal user crt0/libc, `/bin/sh`, packaged `/bin/*`, and default-off
+  userland runtime smoke.
+- 用户态：进程生命周期、`fork`/COW、信号、wait/exit/reap、孤儿过继到 PID-1、
+  bounded ELF64 `exec` / `SYS_EXECVE`、默认开启的常驻 C init、最小用户态
+  crt0/libc、`/bin/sh`、打包的 `/bin/*`，以及默认关闭的用户态运行时 smoke。
 - Build/Validation: `xmake` is the primary build; smoke options via
   `xmake f ...=y`; QEMU/Bochs via `xmake run` and `tools/boot_debug.py`; the
   stage 9 runtime smoke matrix is productized with QEMU headless serial-marker
@@ -74,25 +73,25 @@ BigOS 已完成早期 bring-up：一个带 smoke 验证、以同步为主的单�
 ## Current Boundary / 当前边界
 
 BigOS is a controlled research kernel, not yet a general-purpose OS. It is
-single-core, synchronous, read-only-FS, no-fork, and no-signal, with no
-user-space libc. Crucially, normal boot never enters ring3: the only
-`run_user_process` call sites sit behind default-off smoke switches.
+single-core and mostly synchronous, with a bounded default userland and a
+minimal shell. It still lacks SMP, a complete POSIX process model, dynamic
+linking, a full libc, job control, broad `mmap`, relative paths/cwd, async IO,
+and broad storage/device support.
 
-BigOS 是受控研究内核，尚非通用 OS。它是单核、同步、只读文件系统、无 fork、
-无信号，且无用户态 libc。关键事实：normal boot 从不进入 ring3——唯一调用
-`run_user_process` 的位置都在默认关闭的 smoke 开关之后。
+BigOS 是受控研究内核，尚非通用 OS。它是单核、以同步为主，具备有界默认用户态和
+最小 shell。它仍缺少 SMP、完整 POSIX 进程模型、动态链接、完整 libc、作业控制、
+广泛 `mmap`、相对路径/cwd、async IO，以及广泛存储/设备支持。
 
 ```text
 Normal boot today / 当前 normal boot
   BIOS -> higher-half kernel -> mm/runtime init -> IRQ/timer/TTY
-       -> scheduler + preemption -> blocking/sleep -> int 0x80 (10 syscalls)
-       -> proc::init() -> sched::start() -> idle hlt
-          (user-mode entry exists ONLY behind user_program_smoke / user_elf_smoke)
+       -> scheduler + blocking/sleep -> int 0x80
+       -> proc::init() -> launch_init() -> /boot/user/init.elf (PID-1)
+       -> fork + execve /bin/sh -> interactive bounded shell
 
-Missing general / POSIX layer / 尚缺的通用 / POSIX 层
-  unify errno -> default-on init -> demand paging -> growable tables
-       -> fork/COW -> time & identity -> signals
-       -> writable FS + page cache + pipe -> userland/libc/shell
+Remaining general / POSIX layer / 尚缺的通用 / POSIX 层
+  full libc + dynamic linking -> broad mmap/file-backed paging
+       -> cwd/relative paths -> terminal job control -> SMP/async IO
   (parallel: arch abstraction · behavior-assertion testing)
 ```
 
@@ -286,18 +285,22 @@ Goal: general-purpose I/O semantics.
 
 ### Stage 19: Userland Runtime / libc / Shell / 阶段 19：用户态运行时 / libc / shell
 
-Status: proposed (the former `plan-userland-runtime`). Consumes Stages 15-18.
+Status: completed (archived as `2026-06-11-introduce-userland-runtime`). Consumes Stages 15-18.
 
-状态：建议中（原 `plan-userland-runtime`）。消费阶段 15-18。
+状态：已完成（已归档为 `2026-06-11-introduce-userland-runtime`）。消费阶段 15-18。
 
 Goal: the smallest usable userland.
 
 目标：最小可用用户态。
 
-- Minimal crt0, syscall wrappers, `/bin/sh`, and user test binaries.
-- 最小 crt0、syscall wrapper、`/bin/sh`、用户态测试二进制。
-- Place last because it builds on all the semantics above.
-- 放最后，因为它建立在上述全部语义之上。
+- Minimal crt0, syscall wrappers, errno mirror tests, `/bin/sh`, user test
+  binaries, and default-off `userland_smoke`.
+- 最小 crt0、syscall wrapper、errno 镜像测试、`/bin/sh`、用户态测试二进制，以及
+  默认关闭的 `userland_smoke`。
+- Default boot enters resident PID-1 init, which starts `/bin/sh`; this is
+  bounded userland, not a full POSIX distribution.
+- 默认启动进入常驻 PID-1 init，并启动 `/bin/sh`；这是有界用户态，不是完整 POSIX
+  发行环境。
 
 ## Continuous Concerns / 持续性关注
 

@@ -40,7 +40,11 @@ namespace irq {
             halt_cpu();
         }
 
-        static void page_fault_handler(InterruptFrame *__frame) noexcept {
+        // Returns true when the fault was a recoverable user fault that has been
+        // serviced and the faulting instruction should resume (the caller MUST
+        // then skip the default exception handler). Returns false (or does not
+        // return) for kernel faults and unrecoverable user faults.
+        static bool page_fault_handler(InterruptFrame *__frame) noexcept {
             const uint64_t fault_address = read_cr2();
             const uint64_t error = __frame->error_code;
 #ifdef BIGOS_USER_PROCESS
@@ -48,7 +52,7 @@ namespace irq {
 
             if (user_mode) {
                 if (bigos::proc::try_handle_user_page_fault(fault_address, error))
-                    return;
+                    return true;
                 bigos::proc::fault_current_and_exit(-14);
             }
 #endif
@@ -59,6 +63,7 @@ namespace irq {
                 (uint32_t)(error & 0x1), (uint32_t)((error >> 1) & 0x1), (uint32_t)((error >> 2) & 0x1),
                 (uint32_t)((error >> 3) & 0x1), (uint32_t)((error >> 4) & 0x1));
             halt_cpu();
+            return false;
         }
 
         static void default_external_irq_handler(InterruptFrame *__frame) noexcept {
@@ -136,9 +141,13 @@ namespace irq {
 
         if (__detail::is_cpu_exception(__frame->vector)) {
             __detail::NonblockingContextGuard nonblocking_guard;
-            // CPU exceptions never send an i8259 EOI.
-            if (__frame->vector == VECTOR_PAGE_FAULT)
-                __detail::page_fault_handler(__frame);
+            // CPU exceptions never send an i8259 EOI. A recoverable user page
+            // fault is serviced in place; resume the faulting instruction without
+            // falling through to the halting default exception handler.
+            if (__frame->vector == VECTOR_PAGE_FAULT) {
+                if (__detail::page_fault_handler(__frame))
+                    return;
+            }
 
             __detail::default_exception_handler(__frame);
             return;

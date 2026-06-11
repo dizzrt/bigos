@@ -64,6 +64,25 @@ an EOI:
 - `SYS_GETUID` (number=14) / `SYS_GETGID` (number=15): return the current process
   `uid` / `gid`.
 
+`SYS_KILL` (16), `SYS_SIGACTION` (17), `SYS_SIGPROCMASK` (18), `SYS_SIGRETURN`
+(19), `SYS_LSEEK` (20), `SYS_PIPE` (21), `SYS_DUP` (22), `SYS_DUP2` (23),
+`SYS_FSYNC` (24), `SYS_MKDIR` (25), and `SYS_UNLINK` (26) follow.
+
+- `SYS_EXECVE` (number=27): append-only exposure of the existing in-kernel image
+  replacement path (`exec_current_from_elf_image` + the read-only VFS read path)
+  to CPL3. ABI: `rdi` = user `path`, `rsi` = `argv` (NULL-terminated user pointer
+  array), `rdx` = `envp`. The path is bounded by `SYS_PATH_MAX_LEN` and the
+  argv/envp vectors by `EXEC_MAX_ARGC` / `EXEC_MAX_ENVC` / `EXEC_MAX_STRING_BYTES`;
+  all user buffers are copied through the VMA-backed validation path before use.
+  On success it replaces the current process address space with the new ELF64
+  `ET_EXEC` image and enters the new program entry, so it does not return to the
+  caller. On failure it returns a deterministic negative errno (`-ENOENT`,
+  `-EACCES`, `-ENOEXEC`, `-E2BIG`, `-EFAULT`, `-ENOMEM`, `-EWOULDBLOCK`, `-EIO`)
+  with the calling image left able to continue. Like the other fd/VFS syscalls it
+  checks the `sched::can_block()` guard before allocation or synchronous storage
+  IO, and it does not change any existing syscall number, register convention,
+  `VECTOR_SYSCALL` / DPL layout, or the "syscall sends no EOI" rule.
+
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 
 ## Validation: Default-Off Build Switches And Deterministic Markers

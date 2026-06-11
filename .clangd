@@ -9,3 +9,42 @@ CompileFlags:
     - -Iinclude
     - -Icpp/include
     - -Icpp/libsupc++/include
+---
+If:
+  PathMatch: user/.*\.c
+CompileFlags:
+  Remove:
+    - -std=c++17
+    - -fno-rtti
+    - -fno-exceptions
+  Add:
+    - --target=x86_64-elf
+    - -std=c17
+    - -ffreestanding
+    - -nostdlib
+    - -mno-red-zone
+    - -mno-sse
+    - -mno-sse2
+    - -mno-mmx
+    - -Iuser/libc/include
+
+---
+If:
+  PathMatch: user/.*\.h
+CompileFlags:
+  Remove:
+    - -std=c++17
+    - -fno-rtti
+    - -fno-exceptions
+  Add:
+    - --target=x86_64-elf
+    - -x
+    - c-header
+    - -std=c17
+    - -ffreestanding
+    - -nostdlib
+    - -mno-red-zone
+    - -mno-sse
+    - -mno-sse2
+    - -mno-mmx
+    - -Iuser/libc/include

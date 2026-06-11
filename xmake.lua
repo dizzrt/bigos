@@ -131,6 +131,12 @@ option("pipe_smoke")
     set_description("enable validation-only pipe / dup smoke marker")
 option_end()
 
+option("userland_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only userland runtime (crt0/libc/shell) smoke marker")
+option_end()
+
 add_includedirs("$(projectdir)/include")
 add_includedirs("$(projectdir)/cpp/include")
 add_includedirs("$(projectdir)/cpp/libsupc++/include")
@@ -243,26 +249,85 @@ target("boot-artifacts")
 target("user-init-elf")
     set_kind("phony")
     -- Default-on: normal boot now packages /boot/user/init.elf for launch_init.
-    -- user_elf_smoke continues to reuse the same artifact.
+    -- user_elf_smoke continues to reuse the same artifact. This target is
+    -- generalized to build user C programs (crt0 + minimal user libc) and link
+    -- them as static ET_EXEC ELF64 with -nostdlib -static. The default init is
+    -- the resident C init; the userland_smoke build instead links the smoke
+    -- validation program as /boot/user/init.elf so launch_init runs it as PID-1.
     set_default(true)
     on_build(function (target)
-        local user_srcdir = path.join("$(projectdir)", "user", "init")
+        import("core.base.option")
+
+        local projectdir = "$(projectdir)"
         local user_bindir = path.join("$(builddir)", "bin", "user")
         local user_tempdir = path.join("$(builddir)", "temp", "user")
+        local user_bin_subdir = path.join(user_bindir, "bin")
         os.mkdir(user_bindir)
         os.mkdir(user_tempdir)
-        local object = path.join(user_tempdir, "init.s.o")
-        local output = path.join(user_bindir, "init.elf")
-        os.exec("x86_64-elf-as -c %s -o %s", path.join(user_srcdir, "init.s"), object)
-        os.exec(
-            "x86_64-elf-ld -nostdlib -static -z max-page-size=0x1000 -T %s %s -o %s",
-            path.join(user_srcdir, "link.lds"),
-            object,
-            output
-        )
-        local size = os.filesize(output)
-        if size > 65536 then
-            raise("%s is too large: %d bytes > 65536 bytes", output, size)
+        os.mkdir(user_bin_subdir)
+
+        -- User C compile flags: freestanding, no host libc, no SSE/red-zone,
+        -- size-optimized to stay inside the bounded artifact limit.
+        local cflags = "-c -ffreestanding -nostdlib -mno-sse -mno-sse2 -mno-mmx " ..
+            "-mno-red-zone -fno-pic -fno-pie -Os -std=c17 -Wall -Wextra"
+        local libc_inc = path.join(projectdir, "user", "libc", "include")
+        local link_lds = path.join(projectdir, "user", "link.lds")
+
+        -- Keep the build-time bound aligned with USER_ELF_MAX_FILE_BYTES, which
+        -- is enforced again by launch_init/execve before loading user ELFs.
+        local size_limit = 64 * 1024
+
+        -- Compile crt0 once.
+        local crt0_obj = path.join(user_tempdir, "crt0.o")
+        os.exec("x86_64-elf-as -c %s -o %s", path.join(projectdir, "user", "crt0", "crt0.s"), crt0_obj)
+
+        -- Compile the user libc once into a list of object files.
+        local libc_srcs = {"syscall.c", "string.c", "malloc.c", "stdio.c", "env.c"}
+        local libc_objs = {}
+        for _, src in ipairs(libc_srcs) do
+            local obj = path.join(user_tempdir, "libc_" .. path.basename(src) .. ".o")
+            os.exec("x86_64-elf-gcc %s -I%s %s -o %s", cflags, libc_inc,
+                path.join(projectdir, "user", "libc", src), obj)
+            table.insert(libc_objs, obj)
+        end
+
+        -- Helper: compile a single C program with crt0 + libc and link as
+        -- static ET_EXEC ELF64; enforce the bounded size limit.
+        local function build_user_program(src, output)
+            local obj = path.join(user_tempdir, path.basename(src) .. ".o")
+            os.exec("x86_64-elf-gcc %s -I%s %s -o %s", cflags, libc_inc, src, obj)
+            local objs = crt0_obj .. " " .. obj
+            for _, lo in ipairs(libc_objs) do
+                objs = objs .. " " .. lo
+            end
+            os.exec("x86_64-elf-ld -nostdlib -static -z max-page-size=0x1000 -T %s %s -o %s",
+                link_lds, objs, output)
+            local size = os.filesize(output)
+            if size > size_limit then
+                raise("%s is too large: %d bytes > %d bytes", output, size, size_limit)
+            end
+        end
+
+        -- Always build the test binaries packaged under /bin.
+        build_user_program(path.join(projectdir, "user", "sh", "sh.c"),
+            path.join(user_bin_subdir, "sh"))
+        build_user_program(path.join(projectdir, "user", "bin", "echo.c"),
+            path.join(user_bin_subdir, "echo"))
+        build_user_program(path.join(projectdir, "user", "bin", "cat.c"),
+            path.join(user_bin_subdir, "cat"))
+
+        -- Select the PID-1 init image:
+        --   userland_smoke           -> userland validation program,
+        --   user_elf_smoke/user_program_smoke -> minimal print+exit smoke ELF
+        --                               (preserves BIGOS_USER_ENTER/EXIT),
+        --   otherwise                -> resident C init that launches /bin/sh.
+        local init_output = path.join(user_bindir, "init.elf")
+        if has_config("userland_smoke") then
+            build_user_program(path.join(projectdir, "user", "smoke", "userland_smoke.c"), init_output)
+        elseif has_config("user_elf_smoke") or has_config("user_program_smoke") then
+            build_user_program(path.join(projectdir, "user", "smoke", "elf_smoke.c"), init_output)
+        else
+            build_user_program(path.join(projectdir, "user", "init", "init.c"), init_output)
         end
     end)
 
@@ -375,6 +440,10 @@ target("kernel")
         add_defines("BIGOS_PIPE_SMOKE")
     end
 
+    if has_config("userland_smoke") then
+        add_defines("BIGOS_USERLAND_SMOKE")
+    end
+
     if is_mode("debug") then 
         set_symbols("debug")
     elseif is_mode("release") then
@@ -418,7 +487,7 @@ target("kernel")
 target("bochs")
     set_kind("phony")
     set_default(false)
-    add_deps("kernel", "boot-artifacts")
+    add_deps("kernel", "boot-artifacts", "user-init-elf")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
@@ -428,7 +497,7 @@ target("bochs")
 target("qemu")
     set_kind("phony")
     set_default(false)
-    add_deps("kernel", "boot-artifacts")
+    add_deps("kernel", "boot-artifacts", "user-init-elf")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
@@ -438,7 +507,7 @@ target("qemu")
 target("qemu-gdb")
     set_kind("phony")
     set_default(false)
-    add_deps("kernel", "boot-artifacts")
+    add_deps("kernel", "boot-artifacts", "user-init-elf")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
