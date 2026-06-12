@@ -11,7 +11,7 @@ def test_smoke_probe_programs_are_packaged_only_for_userland_smoke() -> None:
     xmake = read_source('xmake/user_package.lua')
     boot_debug = read_source('tools/boot_debug.py')
 
-    for name in ('args', 'env', 'out', 'errno', 'exit'):
+    for name in ('args', 'env', 'out', 'errno', 'exit', 'libc_subset'):
         assert f'"{name}"' in xmake
         assert f"'{name}'" in boot_debug
 
@@ -25,12 +25,38 @@ def test_smoke_probe_programs_are_packaged_only_for_userland_smoke() -> None:
     assert 'USER_BIN_MAX_BYTES = USER_INIT_ELF_MAX_BYTES' in boot_debug
 
 
+def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
+    libc = read_source('user/libc/include/libc.h')
+    stdio = read_source('user/libc/include/stdio.h')
+    stdlib = read_source('user/libc/include/stdlib.h')
+    string = read_source('user/libc/include/string.h')
+    unistd = read_source('user/libc/include/unistd.h')
+    fcntl = read_source('user/libc/include/fcntl.h')
+    wait = read_source('user/libc/include/sys/wait.h')
+
+    for include in ('"stdio.h"', '"stdlib.h"', '"string.h"', '"errno.h"',
+                    '"unistd.h"', '"fcntl.h"', '"sys/types.h"', '"sys/wait.h"'):
+        assert include in libc
+
+    assert 'typedef struct __bigos_FILE FILE;' in stdio
+    assert 'extern FILE *stderr;' in stdio
+    assert 'int fprintf(FILE *stream, const char *fmt, ...);' in stdio
+    assert 'fopen(' not in stdio and 'fclose(' not in stdio
+    assert 'void *malloc(size_t n);' in stdlib
+    assert 'char *getenv(const char *name);' in stdlib
+    assert 'int strncmp(const char *a, const char *b, size_t n);' in string
+    assert 'ssize_t write(int fd, const void *buf, size_t len);' in unistd
+    assert '#define O_CREAT' in fcntl
+    assert '#define WAIT_ANY' in wait
+
+
 def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
     args = read_source('user/smoke/bin/args.c')
     env = read_source('user/smoke/bin/env.c')
     out = read_source('user/smoke/bin/out.c')
     errno_probe = read_source('user/smoke/bin/errno.c')
     exit_probe = read_source('user/smoke/bin/exit.c')
+    libc_subset = read_source('user/smoke/bin/libc_subset.c')
 
     assert 'printf("smoke_args argc=%d\\n", argc);' in args
     assert 'strcmp(argv[1], "alpha")' in args
@@ -42,6 +68,13 @@ def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
     assert 'errno == ENOENT' in errno_probe
     assert 'record("smoke_errno open=-1 errno=2\\n")' in errno_probe
     assert 'return status;' in exit_probe
+    assert '#include "../../libc/include/stdio.h"' in libc_subset
+    assert '#include "../../libc/include/sys/wait.h"' in libc_subset
+    assert 'WAIT_ANY == 0' in libc_subset
+    assert 'fprintf(stderr, "smoke_libc_subset stderr errno=%d env=%s\\n"' in libc_subset
+    assert 'malloc((size_t)-64)' in libc_subset
+    assert 'memmove(buf + 2, buf, 4)' in libc_subset
+    assert 'errno != EFAULT' in libc_subset
 
 
 def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
@@ -53,7 +86,9 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'run_program("/bin/smoke/out"' in smoke
     assert 'run_program("/bin/smoke/errno"' in smoke
     assert 'run_program("/bin/smoke/exit"' in smoke
+    assert 'run_program("/bin/smoke/libc_subset"' in smoke
     assert 'require_file_contains("/rw/smoke_args.txt"' in smoke
+    assert 'require_file_contains("/rw/smoke_libc_subset.txt"' in smoke
     assert 'write_all_or_exit(input[1], "/bin/smoke/exit 7\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo shell-alive\\n");' in smoke
     assert 'unlink("/rw/smoke_args.txt")' in smoke

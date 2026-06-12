@@ -72,7 +72,7 @@ USER_INIT_ELF_PATH = '/boot/user/init.elf'
 USER_BIN_DIR = BUILD_DIR / 'bin' / 'user' / 'bin'
 USER_BIN_PROGRAMS = ('sh', 'echo', 'cat')
 USER_SMOKE_BIN_DIR = USER_BIN_DIR / 'smoke'
-USER_SMOKE_BIN_PROGRAMS = ('args', 'env', 'out', 'errno', 'exit')
+USER_SMOKE_BIN_PROGRAMS = ('args', 'env', 'out', 'errno', 'exit', 'libc_subset')
 USER_BIN_MAX_BYTES = USER_INIT_ELF_MAX_BYTES
 
 BUILD_TOOLS = (

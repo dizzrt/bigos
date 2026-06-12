@@ -15,6 +15,8 @@
  *   - file redirection through the writable /rw mount (open + dup2 + read back).
  *   - non-interactive /bin/sh execution of /bin/smoke probes, including
  *     stdout/stderr, errno reporting, and shell continuation after non-zero exit.
+ *   - the bounded libc subset probe for fine-grained headers, fprintf(stderr),
+ *     string/memory semantics, read-only environment, and allocator failure.
  */
 #include "libc.h"
 
@@ -244,6 +246,10 @@ static void test_smoke_programs(char **envp) {
     char *exit_argv[] = {(char *)"/bin/smoke/exit", (char *)"7", NULL};
     run_program("/bin/smoke/exit", exit_argv, envp);
     require_file_contains("/rw/smoke_exit.txt", "smoke_exit requested=7");
+
+    char *libc_argv[] = {(char *)"/bin/smoke/libc_subset", (char *)"alpha", NULL};
+    run_program("/bin/smoke/libc_subset", libc_argv, envp);
+    require_file_contains("/rw/smoke_libc_subset.txt", "smoke_libc_subset ok");
 }
 
 static void test_smoke_shell(char **envp) {

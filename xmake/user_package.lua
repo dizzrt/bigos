@@ -82,6 +82,7 @@ on_build(function()
             { "out", path.join(projectdir, "user", "smoke", "bin", "out.c") },
             { "errno", path.join(projectdir, "user", "smoke", "bin", "errno.c") },
             { "exit", path.join(projectdir, "user", "smoke", "bin", "exit.c") },
+            { "libc_subset", path.join(projectdir, "user", "smoke", "bin", "libc_subset.c") },
         }
         for _, program in ipairs(smoke_bin_programs) do
             build_user_program(program[2], path.join(user_smoke_bin_subdir, program[1]))

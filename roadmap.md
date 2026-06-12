@@ -187,15 +187,15 @@ runtime behavior checks, and environment-dependent checks.
 
 ### Stage 22: Minimal C Library Subset / 阶段 22：最小 C 标准库子集
 
-- Grow the freestanding userland support into a documented minimal C library
-  subset aligned with actual kernel syscall behavior and the needs of simple C
-  programs.
-- 将 freestanding 用户态支持推进为有文档边界的最小 C 标准库子集，并与实际内核 syscall
-  行为和简单 C 程序需求保持一致。
-- Boundary change: libc compatibility becomes a staged project goal. Preserved
-  boundaries: no locale, threads, complete hosted stdio, dynamic loader, or broad
-  standards conformance claim.
-- 边界变化：libc 兼容性成为阶段性项目目标。保持边界：不引入 locale、线程、完整 hosted
+- Status: complete. The freestanding userland support is now documented as a
+  minimal C library subset aligned with actual kernel syscall behavior and the
+  needs of simple C programs.
+- 状态：已完成。freestanding 用户态支持现在已被文档化为最小 C 标准库子集，并与实际内核
+  syscall 行为和简单 C 程序需求保持一致。
+- Boundary status: libc compatibility is now a staged project baseline.
+  Preserved boundaries: no locale, threads, complete hosted stdio, dynamic
+  loader, or broad standards conformance claim.
+- 边界状态：libc 兼容性现在是阶段性项目基线。保持边界：不引入 locale、线程、完整 hosted
   stdio、动态加载器，或广泛标准兼容声明。
 
 ### Stage 23: POSIX-Like Process And I/O Subset / 阶段 23：POSIX-like 进程与 I/O 子集

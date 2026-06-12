@@ -7,8 +7,9 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
 
 - `user/crt0/crt0.s`：用户入口 `_start`，消费 `kernel/core/proc/proc.cc` 中
   `copy_exec_args_to_stack` 生成的初始用户栈。
-- `user/libc`：最小 C 运行时支持，包括 syscall wrapper、errno 翻译、字符串/内存
-  函数、基于 `brk` 的 `malloc`/`free`、极简 stdio/printf，以及只读
+- `user/libc`：有界最小 C 标准库子集，包括 syscall wrapper、errno 翻译、
+  字符串/内存函数、基于 `brk` 的 `malloc`/`free`、带 opaque standard streams
+  的 fd-backed 极简 stdio、`printf`、`fprintf(stderr, ...)`，以及只读
   `environ`/`getenv`。
 - `user/init/init.c`：常驻 PID-1，通过 `fork` + `execve` 启动 `/bin/sh`，
   等待子进程，并在 shell 退出后重新拉起。
@@ -77,6 +78,31 @@ Shell 有意保持很小：
 本阶段不实现作业控制、后台进程、glob、变量展开、shell 脚本、子 shell、终端进程组、
 termios、完整 FILE API、动态链接或完整 POSIX libc。
 
+## 最小 libc 子集
+
+用户态 libc 为简单静态 C 程序暴露有文档边界的有界子集：
+
+- 头文件：`stdio.h`、`stdlib.h`、`string.h`、`errno.h`、`unistd.h`、
+  `fcntl.h`、`sys/types.h`、`sys/wait.h`，以及兼容用 umbrella 头
+  `libc.h`。
+- 类型与常量：`size_t`、`ssize_t`、`off_t`、`pid_t`、`NULL`、已实现的
+  open flags、seek 常量、`WAIT_ANY`，以及与 `include/bigos/errno.h` 保持一致
+  的 errno 数值。
+- Syscall wrapper：内核负 errno 返回会翻译为用户态正 `errno`，并返回 `-1` 或
+  接口文档化的失败哨兵；成功 wrapper 不会清零或改写既有 `errno`。
+- 字符串与内存：子集包含已实现的有界例程，例如 `strlen`、`strcmp`、
+  `strncmp`、`memcpy`、`memset` 和 overlap-safe `memmove`。NULL 指针输入仍遵循
+  普通 C 前置条件，BigOS 不额外承诺 hosted 安全检查。
+- 堆：`malloc` 返回 16 字节对齐的可写内存；有界失败时返回 `NULL`，且不破坏
+  既有块。`free(NULL)` 无副作用。分配器不承诺线程安全、完整 coalescing、
+  `realloc` 或 hosted allocator 行为。
+- Stdio：`stdin`、`stdout`、`stderr` 只是 fd `0`、`1`、`2` 的 opaque handle。
+  `putchar`、`puts`、`printf` 和 `fprintf(stderr, ...)` 基于 fd/write，支持
+  `%s`、`%d`、`%x`、`%c` 与 `%%`；不提供 `fopen`、`fclose`、完整 buffering、
+  locale、浮点格式化、宽字符或 hosted `FILE` 语义。
+- 环境：`envp`、`environ` 与 `getenv` 只读。本阶段不实现 `setenv`、`putenv`
+  或 `unsetenv`。
+
 ## 简单 C 程序基线
 
 简单 C 程序基线将简单静态 C 程序作为用户可见兼容基线，但仍保持在现有 freestanding
@@ -90,8 +116,10 @@ runtime 边界内：
   是 fd `1`，确定性错误可以写到 fd `2`。
 - 环境：`envp`、`environ` 和 `getenv` 只读。若没有提供环境变量，程序必须确定性报告空边界。
 - Smoke-only 探针：`/bin/smoke/args`、`/bin/smoke/env`、`/bin/smoke/out`、
-  `/bin/smoke/errno` 和 `/bin/smoke/exit` 在启用 `userland_smoke` 时分别覆盖参数传递、
-  环境报告、stdout/stderr、wrapper 失败加 `errno`，以及请求的退出状态。
+  `/bin/smoke/errno`、`/bin/smoke/exit` 和 `/bin/smoke/libc_subset` 在启用
+  `userland_smoke` 时分别覆盖参数传递、环境报告、stdout/stderr、wrapper 失败加
+  `errno`、请求的退出状态、细粒度 libc 头文件、`fprintf(stderr, ...)`、
+  字符串/内存边界和有界堆行为。
 
 该基线不新增 kernel syscall、不修改 `int 0x80` 寄存器 ABI、不改变 boot 或磁盘布局、
 不引入动态链接，也不声称提供 hosted libc 或完整 POSIX shell 行为。
@@ -120,10 +148,12 @@ xmake f --userland_smoke=y
 uv run python tools/boot_debug.py run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
 ```
 
-`BIGOS_USERLAND_PASSED` 验证非交互运行时路径。简单 C 程序基线增加面向 smoke-only C 探针的行为断言：
-smoke 会观察它们的 stdout/stderr，验证参数和环境报告，验证失败 wrapper 的 `errno` 翻译，
-观察请求的退出码探针，并通过 `/bin/sh` 运行探针以确认 shell 在外部程序非零退出后继续运行。
-交互控制台可用性还保留 default-init headless marker 断言（`BIGOS_USER_EXEC`），并增加可选的手工或
-emulator-input 检查，用于观察文本 console 上的 prompt、输入回显、backspace feedback 和命令输出。
-若本地 display、ROM、keyboard input 或 injection 能力不可用，需要将交互部分记录为 skipped
-或 blocked，并写明替代 source/build/headless 检查和剩余 console-usability 风险。
+`BIGOS_USERLAND_PASSED` 验证非交互运行时路径。简单 C 程序基线增加面向 smoke-only
+C 探针的行为断言：smoke 会观察它们的 stdout/stderr，验证参数和环境报告，验证失败
+wrapper 的 `errno` 翻译以及成功路径不改写 `errno`，观察请求的退出码探针，检查有界
+libc subset 探针，并通过 `/bin/sh` 运行探针以确认 shell 在外部程序非零退出后继续运行。
+交互控制台可用性还保留 default-init headless marker 断言（`BIGOS_USER_EXEC`），并增加
+可选的手工或 emulator-input 检查，用于观察文本 console 上的 prompt、输入回显、
+backspace feedback 和命令输出。若本地 display、ROM、keyboard input 或 injection 能力不可用，
+需要将交互部分记录为 skipped 或 blocked，并写明替代 source/build/headless 检查和剩余
+console-usability 风险。

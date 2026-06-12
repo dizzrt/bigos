@@ -8,9 +8,10 @@ environment.
 
 - `user/crt0/crt0.s`: user entry `_start`. It consumes the initial stack produced
   by `copy_exec_args_to_stack` in `kernel/core/proc/proc.cc`.
-- `user/libc`: minimal C runtime support, syscall wrappers, errno translation,
-  string/memory helpers, `brk`-backed `malloc`/`free`, tiny stdio/printf, and
-  read-only `environ`/`getenv`.
+- `user/libc`: bounded minimal C library subset, syscall wrappers, errno
+  translation, string/memory helpers, `brk`-backed `malloc`/`free`, tiny
+  fd-backed stdio with opaque standard streams, `printf`,
+  `fprintf(stderr, ...)`, and read-only `environ`/`getenv`.
 - `user/init/init.c`: resident PID-1. It starts `/bin/sh` with
   `fork` + `execve`, waits for children, and restarts the shell when it exits.
 - `user/sh/sh.c`: bounded interactive shell with builtins, PATH lookup,
@@ -89,6 +90,35 @@ This does not implement job control, background processes, globbing, variable
 expansion, shell scripts, sub-shells, terminal process groups, termios, a full
 FILE API, dynamic linking, or a complete POSIX libc.
 
+## Minimal libc Subset
+
+The user libc exposes a documented bounded subset for simple static C programs:
+
+- Headers: `stdio.h`, `stdlib.h`, `string.h`, `errno.h`, `unistd.h`,
+  `fcntl.h`, `sys/types.h`, `sys/wait.h`, plus the compatibility umbrella
+  `libc.h`.
+- Types and constants: `size_t`, `ssize_t`, `off_t`, `pid_t`, `NULL`, the
+  implemented open flags, seek constants, `WAIT_ANY`, and errno values mirrored
+  from `include/bigos/errno.h`.
+- Syscall wrappers: negative kernel errno returns become positive user `errno`
+  and `-1` or the documented failure sentinel; successful wrappers do not clear
+  or rewrite an existing `errno` value.
+- Strings and memory: the subset includes the implemented bounded routines such
+  as `strlen`, `strcmp`, `strncmp`, `memcpy`, `memset`, and overlap-safe
+  `memmove`. Null pointer inputs keep ordinary C preconditions and are not given
+  extra BigOS-specific safety promises.
+- Heap: `malloc` returns 16-byte-aligned writable memory or `NULL` on bounded
+  failure without corrupting existing blocks. `free(NULL)` is a no-op. The
+  allocator does not promise thread safety, complete coalescing, `realloc`, or
+  hosted allocator behavior.
+- Stdio: `stdin`, `stdout`, and `stderr` are opaque handles for fd `0`, `1`, and
+  `2` only. `putchar`, `puts`, `printf`, and `fprintf(stderr, ...)` are fd/write
+  based and support `%s`, `%d`, `%x`, `%c`, and `%%`; there is no `fopen`,
+  `fclose`, full buffering, locale, floating-point formatting, wide-character
+  support, or hosted `FILE` semantics.
+- Environment: `envp`, `environ`, and `getenv` are read-only. This stage does
+  not implement `setenv`, `putenv`, or `unsetenv`.
+
 ## Simple C Program Baseline
 
 The simple C program baseline treats simple static C programs as a user-visible compatibility
@@ -103,9 +133,11 @@ baseline, still within the existing freestanding runtime boundary:
 - Environment: `envp`, `environ`, and `getenv` are read-only. If no environment
   is supplied, programs must report that empty boundary deterministically.
 - Smoke-only probes: `/bin/smoke/args`, `/bin/smoke/env`, `/bin/smoke/out`,
-  `/bin/smoke/errno`, and `/bin/smoke/exit` cover argument handoff, environment
-  reporting, stdout/stderr, wrapper failure plus `errno`, and requested exit
-  status when `userland_smoke` is enabled.
+  `/bin/smoke/errno`, `/bin/smoke/exit`, and `/bin/smoke/libc_subset` cover
+  argument handoff, environment reporting, stdout/stderr, wrapper failure plus
+  `errno`, requested exit status, fine-grained libc headers,
+  `fprintf(stderr, ...)`, string/memory boundaries, and bounded heap behavior
+  when `userland_smoke` is enabled.
 
 This baseline does not add kernel syscalls, change the `int 0x80` register ABI,
 change boot or disk layout, introduce dynamic linking, or claim hosted libc or
@@ -139,15 +171,16 @@ xmake f --userland_smoke=y
 uv run python tools/boot_debug.py run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
 ```
 
-`BIGOS_USERLAND_PASSED` validates the non-interactive runtime path. The simple C program baseline adds
-behavior assertions for the smoke-only C probes: the smoke observes their
-stdout/stderr, verifies argument and environment reporting, verifies `errno`
-translation through a failing wrapper, observes the requested exit-code probe,
-and runs probes through `/bin/sh` to confirm the shell continues after a non-zero
-external program. Interactive console usability also keeps the default-init headless marker
-assertion (`BIGOS_USER_EXEC`) while adding optional manual or emulator-input
-checks for prompt visibility, input echo, backspace feedback, and command output
-on the text console. When local display, ROM, keyboard input, or injection
-support is unavailable, record the interactive portion as skipped or blocked
-with the substitute source/build/headless checks and remaining console-usability
-risk.
+`BIGOS_USERLAND_PASSED` validates the non-interactive runtime path. The simple C
+program baseline adds behavior assertions for the smoke-only C probes: the smoke
+observes their stdout/stderr, verifies argument and environment reporting,
+verifies `errno` translation through failing wrappers and success paths that do
+not rewrite `errno`, observes the requested exit-code probe, checks the bounded
+libc subset probe, and runs probes through `/bin/sh` to confirm the shell
+continues after a non-zero external program. Interactive console usability also
+keeps the default-init headless marker assertion (`BIGOS_USER_EXEC`) while
+adding optional manual or emulator-input checks for prompt visibility, input
+echo, backspace feedback, and command output on the text console. When local
+display, ROM, keyboard input, or injection support is unavailable, record the
+interactive portion as skipped or blocked with the substitute
+source/build/headless checks and remaining console-usability risk.

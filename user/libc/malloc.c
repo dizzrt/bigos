@@ -8,7 +8,7 @@
 #include "libc.h"
 
 #define ALIGN_UP(x, a) (((x) + ((a) - 1)) & ~((a) - 1))
-#define HEADER_SIZE 16 /* keeps 16-byte payload alignment */
+#define HEADER_SIZE    16 /* keeps 16-byte payload alignment */
 
 typedef struct Block {
     size_t size; /* payload size (excludes header) */
@@ -32,6 +32,8 @@ static int heap_init(void) {
 static Block *g_free_list = NULL;
 
 static void *heap_extend(size_t bytes) {
+    if (bytes > (size_t)-1 - (size_t)(unsigned long)g_heap_end)
+        return NULL;
     char *old_end = g_heap_end;
     char *new_end = old_end + bytes;
     void *result = brk_raw(new_end);
@@ -46,7 +48,11 @@ void *malloc(size_t n) {
         n = 1;
     if (!heap_init())
         return NULL;
+    if (n > (size_t)-1 - 15)
+        return NULL;
     size_t payload = ALIGN_UP(n, 16);
+    if (payload > (size_t)-1 - HEADER_SIZE)
+        return NULL;
 
     /* First-fit search of the free list. */
     Block **link = &g_free_list;
