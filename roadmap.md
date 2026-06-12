@@ -10,13 +10,14 @@ implementation, validation, or change-tracking documents.
 本文档是 BigOS 在当前有界用户态基线之后的规划入口。它只在高层概述已完成能力，
 并为后续工作留出清晰入口。它不替代详细架构、实现、验证或变更追踪文档。
 
-Project goal: grow BigOS from the current x86_64 research kernel into a
-more general-purpose, POSIX-compatible, multi-architecture kernel. The current
-runnable implementation remains x86_64-only and tied to the existing legacy
-boot/storage path.
+Project goal: grow BigOS from the current x86_64 research kernel toward a more
+general-purpose, multi-architecture kernel with explicitly bounded POSIX-like
+compatibility subsets. The current runnable implementation remains x86_64-only
+and tied to the existing legacy boot/storage path.
 
-项目目标：将 BigOS 从当前 x86_64 研究内核逐步推进为更通用、兼容 POSIX、支持多架构
-的内核。当前可运行实现仍是 x86_64-only，并绑定在现有 legacy boot/storage 路径上。
+项目目标：将 BigOS 从当前 x86_64 研究内核逐步推进为更通用、支持多架构，并具备明确有界
+POSIX-like 兼容子集的内核。当前可运行实现仍是 x86_64-only，并绑定在现有 legacy
+boot/storage 路径上。
 
 ## Current Implementation Summary / 当前实现概述
 
@@ -200,16 +201,17 @@ runtime behavior checks, and environment-dependent checks.
 
 ### Stage 23: POSIX-Like Process And I/O Subset / 阶段 23：POSIX-like 进程与 I/O 子集
 
-- Stabilize the bounded UNIX-like behavior around process lifecycle, image
-  replacement, waiting, fd inheritance, pipes, duplication, redirection, signals,
-  time, identity, and shell command execution.
-- 稳定围绕进程生命周期、镜像替换、等待、fd 继承、pipe、duplication、重定向、signals、
-  time、identity 和 shell 命令执行的有界 UNIX-like 行为。
-- Boundary change: the POSIX-compatible goal is refined into an explicit bounded
-  process/I/O subset. Preserved boundaries: no sessions, terminal process groups,
-  job control, complete permissions model, or complete POSIX process model.
-- 边界变化：将 POSIX-compatible 目标细化为明确的有界进程/I/O 子集。保持边界：不引入
-  session、terminal process group、作业控制、完整权限模型或完整 POSIX 进程模型。
+- Status: complete. The bounded UNIX-like behavior around process lifecycle,
+  image replacement, waiting, fd inheritance, pipes, duplication, redirection,
+  signals, time, identity, and shell command execution is now a staged baseline.
+- 状态：已完成。围绕进程生命周期、镜像替换、等待、fd 继承、pipe、duplication、重定向、
+  signals、time、identity 和 shell 命令执行的有界 UNIX-like 行为现在是阶段性基线。
+- Boundary status: earlier POSIX-like planning language is narrowed into an
+  explicit bounded process/I/O subset. Preserved boundaries: no sessions,
+  terminal process groups, job control, complete permissions model, or complete
+  POSIX process model.
+- 边界状态：早期 POSIX-like 规划表述已收窄为明确的有界进程/I/O 子集。保持边界：
+  不引入 session、terminal process group、作业控制、完整权限模型或完整 POSIX 进程模型。
 
 ### Stage 24: Bounded Runtime Filesystem Usability / 阶段 24：有界运行时文件系统可用性
 

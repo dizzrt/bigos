@@ -384,6 +384,24 @@ namespace sys {
             return 0;
         }
 
+        static int64_t sys_wait(uint64_t __pid, uint64_t __status_out) noexcept {
+            if (__status_out != 0 && !bigos::proc::validate_user_io_buffer(__status_out, sizeof(int)))
+                return -bigos::EFAULT;
+
+            int64_t kernel_status = 0;
+            const int64_t waited_pid = bigos::proc::wait_current(
+                (uint32_t)__pid, __status_out != 0 ? &kernel_status : nullptr);
+            if (waited_pid < 0)
+                return waited_pid;
+
+            if (__status_out != 0) {
+                const int user_status = (int)kernel_status;
+                if (!bigos::proc::copy_to_current_user_buffer(__status_out, &user_status, sizeof(user_status)))
+                    return -bigos::EFAULT;
+            }
+            return waited_pid;
+        }
+
         // Copies a NULL-terminated user pointer array (argv/envp) plus each string
         // into the kernel-side storage backing an ExecArgs. The pointer array is
         // bounded by __max_count and each string by EXEC_MAX_STRING_BYTES; the
@@ -487,7 +505,7 @@ namespace sys {
             case SYS_EXIT:
                 bigos::proc::exit_current((int64_t)__frame->rdi);
             case SYS_WAIT:
-                result = bigos::proc::wait_current((uint32_t)__frame->rdi, nullptr);
+                result = __detail::sys_wait(__frame->rdi, __frame->rsi);
                 break;
             case SYS_OPEN:
                 result = __detail::sys_open(__frame->rdi, __frame->rsi, __frame->rdx);

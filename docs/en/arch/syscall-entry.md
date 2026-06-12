@@ -47,7 +47,7 @@ The mapping of syscall number, arguments, return value, and `InterruptFrame` fie
 - `SYS_GET_TICK` (number=1): returns `bigos::timer::ticks()` monotonic tick to validate the return-register path. `timer::ticks()` is stably exposed by `include/bigos/timer.h` and is a context-agnostic bounded read, so it is used instead of `SYS_DEBUG_NOOP`.
 - `SYS_WRITE` (number=2): supports only the early console sink (currently fixed `fd=1`). Before reading the user buffer, it checks low-half range, page-table present/user bits, and maximum length `SYS_WRITE_MAX_LEN`; then it writes bounded content to serial/VGA and returns a deterministic byte count or `-bigos::EFAULT`.
 - `SYS_EXIT` (number=3): records the current user process exit code, marks it terminated, restores the kernel address space, and enters the scheduler's deferred-reclamation exit path. This syscall does not return to terminated user instructions.
-- `SYS_WAIT` (number=4): waits for child process state when the caller can block, or returns the deterministic wait error for unsupported/nonblocking contexts.
+- `SYS_WAIT` (number=4): waits for child process state when the caller can block, optionally copies the bounded raw exit status to a user `int*`, or returns the deterministic wait error for unsupported/nonblocking contexts.
 - `SYS_OPEN` (number=5): copies a bounded NUL-terminated user path, accepts only read-only flags, opens through the VFS shell, and returns a process-local fd.
 - `SYS_READ` (number=6): validates the user destination range, reads through the process fd table and VFS file offset into a bounded kernel buffer, copies out, and returns the byte count.
 - `SYS_CLOSE` (number=7): closes the process-local fd and drops the open-file reference.

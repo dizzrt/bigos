@@ -103,7 +103,11 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
 }
 
 pid_t wait(pid_t pid) {
-    return (pid_t)errno_translate(syscall1(SYS_WAIT, (long)(unsigned)pid));
+    return wait_status(pid, NULL);
+}
+
+pid_t wait_status(pid_t pid, int *status) {
+    return (pid_t)errno_translate(syscall2(SYS_WAIT, (long)(unsigned)pid, (long)status));
 }
 
 int pipe(int fds[2]) {

@@ -19,6 +19,7 @@ int close(int fd);
 void exit(int code) __attribute__((noreturn));
 pid_t fork(void);
 int execve(const char *path, char *const argv[], char *const envp[]);
+pid_t wait_status(pid_t pid, int *status);
 int pipe(int fds[2]);
 int dup(int oldfd);
 int dup2(int oldfd, int newfd);

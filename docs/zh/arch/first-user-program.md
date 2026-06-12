@@ -96,7 +96,7 @@ x86_64 运行期 user mode 支持由 `kernel/core/proc/user_mode.cc` / `user_mod
 - `VECTOR_SYSCALL = 0x80` 是唯一放宽为 DPL=3 的 IDT gate；exception/IRQ gates 不放宽。
 - `SYS_WRITE` 验证用户 buffer 范围、present/user bit 和最大长度，然后输出 `BIGOS_USER_WRITE_SYSCALL`；非法用户 buffer 会 fault 当前进程，并使用同一个 safe reaper 边界。
 - `SYS_EXIT` 标记当前进程 terminated/reap-pending、记录 exit code、恢复 kernel root，并进入 scheduler 延后回收退出路径。
-- `SYS_WAIT` 暴露最小 wait ABI，并与其它可阻塞 syscall 路径使用同一个 `sched::can_block()` guard。普通用户进程 syscall 在 scheduler context 和 IF 状态允许时可以阻塞；不支持的上下文返回确定性 wait 错误。
+- `SYS_WAIT` 暴露最小 wait ABI，包括可选的有界 raw exit status copy-out，并与其它可阻塞 syscall 路径使用同一个 `sched::can_block()` guard。普通用户进程 syscall 在 scheduler context 和 IF 状态允许时可以阻塞；不支持的上下文返回确定性 wait 错误。
 - 用户态 `#PF` 通过 saved `CS` 的 CPL 识别。受支持的 VMA-backed demand-zero 与 COW
   fault 由 bounded 用户 fault 路径处理；非法或不支持的 fault 输出
   `BIGOS_USER_PAGE_FAULT`，标记进程 faulted/reap-pending，并使用 safe reaper 边界。

@@ -47,7 +47,7 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_GET_TICK`（number=1）：返回 `bigos::timer::ticks()` 单调 tick，验证返回值寄存器路径。`timer::ticks()` 已通过 `include/bigos/timer.h` 稳定暴露，是 context-agnostic bounded read，故选用它而非 `SYS_DEBUG_NOOP`。
 - `SYS_WRITE`（number=2）：仅支持早期 console sink（当前固定 `fd=1`），在读取用户 buffer 前检查低半区范围、页表 present/user bit 和最大长度 `SYS_WRITE_MAX_LEN`，再把 bounded 内容输出到 serial/VGA，并返回确定性字节数或 `-bigos::EFAULT`。
 - `SYS_EXIT`（number=3）：记录当前用户进程 exit code，标记 terminated，恢复内核地址空间并转入 scheduler 的延后回收退出路径；该 syscall 不返回到已终止用户指令流。
-- `SYS_WAIT`（number=4）：在调用方可阻塞时等待子进程状态；不支持或不可阻塞上下文返回确定性 wait 错误。
+- `SYS_WAIT`（number=4）：在调用方可阻塞时等待子进程状态，可选地把有界 raw exit status 拷贝到用户 `int*`；不支持或不可阻塞上下文返回确定性 wait 错误。
 - `SYS_OPEN`（number=5）：复制有界 NUL 结尾用户 path，只接受 read-only flags，经 VFS 壳层 open，并返回 process-local fd。
 - `SYS_READ`（number=6）：验证用户目标 range，经进程 fd table 与 VFS file offset 读取到有界 kernel buffer，再 copy out，并返回 byte count。
 - `SYS_CLOSE`（number=7）：关闭 process-local fd 并 drop open-file reference。

@@ -1,0 +1,143 @@
+## ADDED Requirements
+
+### Requirement: 有界 POSIX-like 进程与 I/O 子集边界
+
+BigOS SHALL define its current UNIX-like compatibility target as a bounded POSIX-like process and I/O subset. This subset MUST cover process lifecycle, image replacement, waiting, fd inheritance, standard fd behavior, pipe, fd duplication, redirection, signals, time/identity queries, shell command execution, user-visible output, and error reporting. This subset MUST NOT claim support for sessions, terminal process groups, job control, termios, a complete permissions model, a complete POSIX process model, dynamic linking, a complete POSIX libc, SMP, async I/O, or broad file-backed `mmap`.
+
+#### Scenario: bounded subset is documented as the compatibility target
+
+- **WHEN** BigOS documentation or OpenSpec artifacts describe POSIX-like process and I/O behavior
+- **THEN** they MUST describe the behavior as a bounded subset
+- **AND** they MUST NOT imply complete POSIX process, terminal, shell, libc, permission, SMP, async I/O, or storage support
+
+#### Scenario: simple programs can rely on the subset boundary
+
+- **WHEN** a simple statically linked C program uses only the documented process and I/O subset
+- **THEN** it MUST be able to rely on the documented syscall wrapper, fd, wait, signal, time/identity, and shell-observable behavior
+- **AND** it MUST NOT require a hosted runtime, dynamic loader, shared library, complete POSIX libc, job control, or terminal process group support
+
+### Requirement: 进程生命周期与镜像替换组合语义稳定
+
+BigOS SHALL provide bounded process lifecycle behavior for simple user programs. A user process MUST be able to exit with a status, be waited for by an eligible parent, be reaped without leaving a reusable process table slot permanently occupied, and replace its image through the existing static user ELF execution path while preserving the documented argument, environment, fd inheritance, and error semantics.
+
+#### Scenario: parent observes child exit status
+
+- **WHEN** a parent process starts a child that exits with a bounded status value
+- **THEN** a wait operation by the eligible parent MUST observe the child completion
+- **AND** the observed status MUST reflect the child exit status according to the documented bounded wait encoding
+
+#### Scenario: exec replaces the current image
+
+- **WHEN** a user process successfully performs image replacement with a packaged static user program
+- **THEN** the process MUST enter the replacement program with documented arguments and environment
+- **AND** inherited file descriptors that are not explicitly closed by the process MUST remain available according to the subset boundary
+
+#### Scenario: failed exec reports an error without corrupting the caller
+
+- **WHEN** image replacement fails because the target is missing, invalid, or outside the supported user ELF subset
+- **THEN** the syscall wrapper MUST report failure through the documented return value and errno path
+- **AND** the caller MUST remain a valid user process unless the failure occurs after a documented no-return transition point
+
+### Requirement: fd inheritance, duplication, redirection, and standard streams are composable
+
+BigOS SHALL provide bounded fd semantics that compose across process creation, image replacement, shell command execution, and simple C programs. fd 0, fd 1, and fd 2 MUST represent the documented standard input, output, and error paths when present. fd duplication and redirection MUST affect only the intended fd mappings, MUST preserve unrelated open descriptors, and MUST expose failures through documented errno behavior.
+
+#### Scenario: child inherits standard descriptors
+
+- **WHEN** a shell or parent process starts a simple user program without explicit redirection
+- **THEN** the child program MUST inherit usable standard fd mappings for input, output, and error where the parent provides them
+- **AND** output written to stdout or stderr MUST be observable through the current console, shell, or serial/log validation path
+
+#### Scenario: duplication preserves the referenced open file description
+
+- **WHEN** a process duplicates an open fd into another fd slot
+- **THEN** the duplicated fd MUST refer to the same bounded underlying object as the source fd
+- **AND** closing one duplicate MUST NOT invalidate other still-open duplicates
+
+#### Scenario: redirection changes only the target command fd mapping
+
+- **WHEN** the shell launches a command with supported redirection syntax
+- **THEN** the target command MUST observe the redirected fd mapping for the affected standard stream
+- **AND** unrelated fd mappings in the shell or parent path MUST remain valid after the command setup succeeds or fails
+
+### Requirement: pipe I/O supports bounded command composition
+
+BigOS SHALL support bounded pipe I/O for simple process and shell composition. A pipe MUST provide separate read and write endpoints, MUST transfer bytes in FIFO order within the documented buffering limits, MUST expose EOF when all write endpoints are closed, and MUST report endpoint or capacity failures through documented error behavior instead of corrupting unrelated fd state.
+
+#### Scenario: pipe transfers data between related processes
+
+- **WHEN** one process writes bytes to a pipe write endpoint and another process reads from the matching read endpoint
+- **THEN** the reader MUST observe the bytes in FIFO order within the bounded pipe semantics
+- **AND** the operation MUST NOT require async I/O, SMP, job control, or terminal process group support
+
+#### Scenario: closing all writers exposes EOF to readers
+
+- **WHEN** all write endpoints for a pipe have been closed
+- **THEN** subsequent reads from the remaining read endpoint MUST observe documented EOF behavior after buffered data is consumed
+- **AND** unrelated file descriptors MUST remain usable
+
+#### Scenario: shell pipe command composition is observable
+
+- **WHEN** the shell launches a supported command composition that connects stdout of one command to stdin of another through a pipe
+- **THEN** data produced by the upstream command MUST be available to the downstream command through the pipe
+- **AND** the combined behavior MUST be observable through command output, exit status, or deterministic validation logs
+
+### Requirement: signals, time, and identity remain bounded user-visible primitives
+
+BigOS SHALL expose bounded signals, time, and identity primitives as part of the POSIX-like process/I/O subset. Signal delivery MUST remain within the implemented user process model, time queries MUST return documented monotonic or wall-clock values supported by the current kernel, and identity queries MUST return stable bounded identity values. These primitives MUST NOT imply a complete POSIX permission model, process group model, session model, or terminal control model.
+
+#### Scenario: signal delivery is observable by a user process
+
+- **WHEN** a user process receives a supported signal under the documented signal subset
+- **THEN** the process MUST observe the signal through the implemented delivery or termination semantics
+- **AND** the behavior MUST remain bounded to the current single-core process model
+
+#### Scenario: time query returns a documented value
+
+- **WHEN** a simple C program invokes a supported time syscall wrapper
+- **THEN** the program MUST receive a value consistent with the documented BigOS time primitive
+- **AND** the query MUST NOT require hosted OS services or external clock infrastructure beyond the current kernel support
+
+#### Scenario: identity query returns bounded identity values
+
+- **WHEN** a simple C program invokes supported identity syscall wrappers
+- **THEN** the program MUST receive stable bounded identity values for the current process context
+- **AND** those values MUST NOT imply complete POSIX users, groups, credentials, permissions, sessions, or process groups
+
+### Requirement: shell command execution uses the bounded subset
+
+BigOS SHALL make the default interactive shell a bounded consumer of the POSIX-like process/I/O subset. The shell MUST provide visible command execution behavior for packaged user programs, MUST route supported input/output/redirection/pipe behavior through documented fd and process semantics, and MUST report unsupported or failed operations through observable errors without claiming full POSIX shell compatibility.
+
+#### Scenario: shell launches a packaged program
+
+- **WHEN** a user enters the name of a packaged supported user program at the interactive shell
+- **THEN** the shell MUST attempt to execute the program through the documented process and image replacement path
+- **AND** the command output and completion MUST be observable through the text console, serial/log validation path, or deterministic runtime output
+
+#### Scenario: shell reports unsupported command behavior
+
+- **WHEN** a user requests a command, redirection, pipe, or syntax form outside the bounded supported subset
+- **THEN** the shell MUST report failure or unsupported behavior through an observable error path
+- **AND** the shell MUST NOT imply support for job control, background jobs, full POSIX shell grammar, terminal process groups, or sessions
+
+### Requirement: 行为导向验证覆盖组合路径
+
+BigOS SHALL provide a layered validation path for the bounded POSIX-like process and I/O subset. Validation MUST cover source/spec consistency, buildability, and runtime-observable behavior for process lifecycle, exec, wait, fd inheritance, duplication, redirection, pipe, signals, time/identity, shell command execution, and user-visible error reporting. Environment-dependent checks MAY be skipped only with an explicit record of the missing emulator, toolchain, display/ROM dependency, or disk image configuration and the remaining risk.
+
+#### Scenario: runtime validation observes process and fd behavior
+
+- **WHEN** the process/I/O subset runtime validation runs in a configured emulator environment
+- **THEN** it MUST observe at least one combined process lifecycle, exec/wait, fd inheritance, and output/error reporting path
+- **AND** the result MUST be decidable from runtime output, exit status, serial/log output, or another deterministic low-level signal
+
+#### Scenario: runtime validation observes pipe or redirection behavior
+
+- **WHEN** the shell or user-program validation exercises supported pipe or redirection behavior
+- **THEN** the validation MUST observe that data reaches the intended fd or command endpoint
+- **AND** unrelated fd state MUST remain usable after the operation
+
+#### Scenario: unavailable environment-dependent validation is recorded
+
+- **WHEN** QEMU, Bochs, the x86_64 cross-toolchain, display/ROM dependencies, or disk image configuration are unavailable
+- **THEN** the corresponding runtime validation MAY be skipped
+- **AND** the validation record MUST identify the missing condition, substitute checks that were run, and remaining risk

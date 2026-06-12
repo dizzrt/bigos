@@ -99,4 +99,6 @@ def test_wait_exit_zombie_reap_and_nonblocking_context_rules() -> None:
     assert 'bigos::sched::wait_queue_wait_until(&g_process_wait_queue' in proc
     assert 'mark_reap_pending(match);' in proc
     assert 'SYS_WAIT = 4' in syscall_h
-    assert 'bigos::proc::wait_current((uint32_t)__frame->rdi, nullptr)' in syscall
+    assert 'static int64_t sys_wait(uint64_t __pid, uint64_t __status_out) noexcept' in syscall
+    assert 'bigos::proc::wait_current(' in syscall
+    assert 'copy_to_current_user_buffer(__status_out, &user_status, sizeof(user_status))' in syscall

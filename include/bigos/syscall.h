@@ -33,7 +33,7 @@ namespace bigos::sys {
         SYS_GET_TICK = 1,      // return the monotonic kernel tick via rax
         SYS_WRITE = 2,         // fd, user buffer, bounded length -> deterministic write result
         SYS_EXIT = 3,          // exit code -> terminate current user process, does not return
-        SYS_WAIT = 4,          // pid or WAIT_ANY -> child pid, or deterministic negative wait error
+        SYS_WAIT = 4,          // pid or WAIT_ANY, optional int* status -> child pid, or negative wait error
         SYS_OPEN = 5,          // user path, read-only flags -> process-local fd
         SYS_READ = 6,          // fd, user buffer, bounded length -> deterministic read result
         SYS_CLOSE = 7,         // fd -> close current process descriptor

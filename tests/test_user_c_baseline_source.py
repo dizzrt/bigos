@@ -48,6 +48,7 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'ssize_t write(int fd, const void *buf, size_t len);' in unistd
     assert '#define O_CREAT' in fcntl
     assert '#define WAIT_ANY' in wait
+    assert 'pid_t wait_status(pid_t pid, int *status);' in wait
 
 
 def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
@@ -85,11 +86,18 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'run_program("/bin/smoke/env"' in smoke
     assert 'run_program("/bin/smoke/out"' in smoke
     assert 'run_program("/bin/smoke/errno"' in smoke
-    assert 'run_program("/bin/smoke/exit"' in smoke
+    assert 'run_program_expect("/bin/smoke/exit"' in smoke
     assert 'run_program("/bin/smoke/libc_subset"' in smoke
+    assert 'wait_status(pid, &status)' in smoke
     assert 'require_file_contains("/rw/smoke_args.txt"' in smoke
     assert 'require_file_contains("/rw/smoke_libc_subset.txt"' in smoke
     assert 'write_all_or_exit(input[1], "/bin/smoke/exit 7\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "echo redir-ok > /rw/smoke_shell_redir.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/cat < /rw/smoke_shell_redir.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "| /bin/cat\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo shell-alive\\n");' in smoke
     assert 'unlink("/rw/smoke_args.txt")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_io.txt", "sh: syntax error near |")' in smoke
     assert 'bounded /bin/smoke C programs' in boot_debug
