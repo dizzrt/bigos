@@ -38,6 +38,13 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 
 `default-init` 是不依赖任何 smoke 开关的行为断言 case：它以默认配置（所有 smoke 选项设为 `=n`）构建，并断言 normal boot 到达常驻 PID-1 init 和 `/bin/sh`，以 `BIGOS_USER_EXEC` 作为 QEMU headless marker。缺失该 marker 即判定为失败，不会被重新解读为通过。
 
+Stage 20 的交互 console 验证叠加在该 case 之上。自动化 QEMU headless run 继续使用
+serial/log marker 断言，不要求图形 display、手工键盘输入或 emulator scancode
+injection。若 graphical QEMU、Bochs、手工键盘输入或 input injection 可用，validation
+notes 应记录 backend、display/input method、输入命令、观察到的 prompt/echo/output
+和结果。若这些能力不可用，需要将交互部分标记为 skipped 或 blocked，并记录替代的
+source-level、build、headless 检查以及剩余 console-usability 风险。
+
 `blocking-primitives` case 在最终 pass marker 前还会输出 `BIGOS_BLOCKING_WAIT_BLOCKED`、`BIGOS_BLOCKING_WAKE_SENT`、`BIGOS_BLOCKING_WAIT_RESUMED`、`BIGOS_BLOCKING_TIMEOUT_BLOCKED` 与 `BIGOS_BLOCKING_TIMEOUT_EXPIRED` 中间 marker。它使用 synthetic TTY producer，因此 QEMU headless 自动验证不依赖手工键盘输入；若执行可选手工键盘验证，需要单独记录。
 
 `scheduler-semantics` case 在最终 pass marker 前还会输出 `BIGOS_SCHED_SEMANTICS_START`、`BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED` 与 `BIGOS_SCHED_SEMANTICS_PREEMPTED` 中间 marker。它验证 time-slice expiry 与 timer-driven IRQ-return reschedule，不会启用 memory、filesystem、user-program、user-ELF 或 broad smoke 选项。由于该 case 涉及 IRQ/timer/context-switch 行为，validation notes 需要记录 QEMU headless 串口日志，以及 Bochs 或 QEMU+Bochs 交叉验证是执行还是跳过。

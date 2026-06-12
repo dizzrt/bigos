@@ -64,14 +64,17 @@ rdx = char *const envp[]
 Shell 有意保持很小：
 
 - 内建命令：`exit` 和 `echo`。
+- Prompt：只在 stdin 与 stdout 仍连接到默认 console fast path 时显示确定性的 `$ `。
+- 输入反馈：printable character、newline 和 backspace 由 `read(0, ...)` 返回后的非中断 shell consumer 回显。
 - 命令查找：包含 `/` 的路径直接执行；其他命令按 `PATH` 尝试，默认回退 `/bin`。
 - 执行方式：外部命令通过 `fork` + `execve` + `wait` 运行。
 - 管道：支持一个 `a | b` 单级管道。
 - 重定向：每条命令最多一个输入 `< file` 和一个输出 `> file`。
+- 输出：builtin、子进程 stdout 和确定性的可恢复错误都使用现有 fd/syscall 路径；未重定向时，默认 fd `1` 与 fd `2` 会到达可见 console。
 - 容量：行长、参数数量、PATH 候选数量与路径长度都在 `user/sh/sh.c` 中有固定上限。
 
 本阶段不实现作业控制、后台进程、glob、变量展开、shell 脚本、子 shell、终端进程组、
-完整 FILE API、动态链接或完整 POSIX libc。
+termios、完整 FILE API、动态链接或完整 POSIX libc。
 
 ## 构建与打包
 
@@ -95,5 +98,8 @@ xmake f --userland_smoke=y
 uv run python tools/boot_debug.py run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
 ```
 
-`BIGOS_USERLAND_PASSED` 验证非交互运行时路径。交互 shell 检查仍需要带显示的模拟器
-或注入键盘输入。
+`BIGOS_USERLAND_PASSED` 验证非交互运行时路径。Stage 20 还保留 default-init
+headless marker 断言（`BIGOS_USER_EXEC`），并增加可选的手工或 emulator-input 检查，
+用于观察文本 console 上的 prompt、输入回显、backspace feedback 和命令输出。若本地
+display、ROM、keyboard input 或 injection 能力不可用，需要将交互部分记录为 skipped
+或 blocked，并写明替代 source/build/headless 检查和剩余 console-usability 风险。

@@ -150,3 +150,31 @@ def test_console_api_wraps_vga_without_serial_mirroring() -> None:
     assert "if (__ch == '\\b')" in vga
     assert 'void bigos::kput(char c)' in io
     assert 'driver::video::vga::write(c);' in io
+
+
+def test_default_user_stdout_and_stderr_reach_visible_console() -> None:
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+
+    assert '#include <bigos/console.h>' in syscall
+    assert '(__fd == 1 || __fd == 2)' in syscall
+    assert 'bigos::proc::file_for_fd_current((uint32_t)__fd) == nullptr' in syscall
+    assert 'serial_puts("BIGOS_USER_WRITE_SYSCALL\\n");' in syscall
+    assert 'serial_puts(bounded);' in syscall
+    assert 'CR3_ROOT_MASK' in syscall
+    assert 'const uint64_t active_root = bigos::mm::read_cr3();' in syscall
+    assert 'process->kernel_address_space_root' in syscall
+    assert 'bigos::mm::activate_address_space_root(process->kernel_address_space_root);' in syscall
+    assert 'bigos::terminal::console_write(bounded);' in syscall
+    assert 'bigos::mm::activate_address_space_root(active_root);' in syscall
+
+
+def test_keyboard_irq_echo_stays_in_non_interrupt_shell_consumer() -> None:
+    body = keyboard_handler_body()
+    shell = read_source('user/sh/sh.c')
+
+    assert 'write_all(1, echo);' in shell
+    assert 'write_all(1, "\\b");' in shell
+    assert 'write_all(1, "\\n");' in shell
+    assert 'should_echo_input' in shell
+    assert 'write_all' not in body
+    assert 'console_write' not in body

@@ -46,10 +46,10 @@ BigOS 当前提供一个经过 smoke 验证、单核、以同步为主、具备�
   duplication.
 - 最小存储与文件系统层，包括同步块 I/O、只读启动资产、有界可写运行时区域、
   page/buffer cache、pipe 和 fd duplication。
-- A minimal freestanding userland with resident init behavior, a small shell,
-  basic libc-style support, and small packaged user programs.
-- 最小 freestanding 用户态，包括常驻 init 行为、小型 shell、基础 libc 风格支持和小型
-  用户程序。
+- A minimal freestanding userland with resident init behavior, an interactive
+  text-console shell, basic libc-style support, and small packaged user programs.
+- 最小 freestanding 用户态，包括常驻 init 行为、交互式文本控制台 shell、基础 libc
+  风格支持和小型用户程序。
 
 ## Current Boundary / 当前边界
 
@@ -66,10 +66,11 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
   运行时等价能力。
 - Execution model: single-core, mostly synchronous, bounded userland, no SMP.
 - 执行模型：单核、以同步为主、有界用户态、无 SMP。
-- Userland: minimal static user programs, no dynamic linking/shared libraries,
-  no job control, no terminal process groups, no complete POSIX libc.
-- 用户态：最小静态用户程序，无动态链接/共享库、无作业控制、无终端进程组、
-  无完整 POSIX libc。
+- Userland: minimal static user programs and a bounded interactive console path,
+  no dynamic linking/shared libraries, no job control, no terminal process
+  groups, no complete POSIX libc.
+- 用户态：最小静态用户程序与有界交互式控制台路径，无动态链接/共享库、无作业控制、
+  无终端进程组、无完整 POSIX libc。
 - Source organization: kernel implementation and freestanding userland are
   separate top-level domains; future planning should preserve that boundary.
 - 源码组织：内核实现与 freestanding 用户态是分离的顶层域；后续规划应保持这一边界。
@@ -159,15 +160,15 @@ runtime behavior checks, and environment-dependent checks.
 
 ### Stage 20: Interactive Console Usability / 阶段 20：交互式控制台可用性
 
-- Make the default bounded userland shell usable from the runtime text console,
-  including visible prompts, typed input echo, and command output, while
-  preserving bounded serial/log validation.
-- 让默认有界用户态 shell 可从运行时文本控制台使用，包括可见 prompt、输入回显和命令输出，
-  同时保留有界串口/日志验证。
-- Boundary change: default console I/O becomes a user-visible interactive path.
+- Status: complete. The default bounded userland shell is usable from the
+  runtime text console, including visible prompts, typed input echo, and command
+  output, while bounded serial/log validation remains preserved.
+- 状态：已完成。默认有界用户态 shell 已可从运行时文本控制台使用，包括可见 prompt、
+  输入回显和命令输出，同时保留有界串口/日志验证。
+- Boundary status: default console I/O is now a user-visible interactive path.
   Preserved boundaries: no full POSIX terminal, job control, termios, SMP, or new
   boot/architecture runtime parity.
-- 边界变化：默认 console I/O 成为用户可见的交互路径。保持边界：不引入完整 POSIX
+- 边界状态：默认 console I/O 现在是用户可见的交互路径。保持边界：不引入完整 POSIX
   terminal、作业控制、termios、SMP，或新的 boot/architecture 运行时等价能力。
 
 ### Stage 21: Minimal C Program Baseline / 阶段 21：最小 C 程序运行基线

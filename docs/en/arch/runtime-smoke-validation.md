@@ -42,6 +42,16 @@ that normal boot reaches resident PID-1 init and `/bin/sh`, using
 `BIGOS_USER_EXEC` as the QEMU headless marker. Missing that marker is a failure
 and is not reinterpreted as a pass.
 
+Stage 20 interactive console validation layers on top of this case. Automated
+QEMU headless runs continue to use serial/log marker assertions and do not
+require graphical display, manual keyboard input, or emulator scancode
+injection. When graphical QEMU, Bochs, manual keyboard input, or input injection
+is available, validation notes should record the backend, display/input method,
+typed command, observed prompt/echo/output, and result. If those capabilities
+are unavailable, mark the interactive portion skipped or blocked and record the
+source-level, build, and headless checks used as substitutes plus the remaining
+console-usability risk.
+
 The `blocking-primitives` case emits intermediate markers `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, and `BIGOS_BLOCKING_TIMEOUT_EXPIRED` before the final pass marker. It uses a synthetic TTY producer, so automated QEMU headless validation does not require manual keyboard input; optional manual keyboard validation should be recorded separately when performed.
 
 The `scheduler-semantics` case emits intermediate markers `BIGOS_SCHED_SEMANTICS_START`, `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED`, and `BIGOS_SCHED_SEMANTICS_PREEMPTED` before the final pass marker. It exercises time-slice expiry and timer-driven IRQ-return reschedule without enabling memory, filesystem, user-program, user-ELF, or broad smoke options. Because it touches IRQ/timer/context-switch behavior, validation notes should record QEMU headless serial logs and whether Bochs or QEMU+Bochs cross-validation was executed or skipped.

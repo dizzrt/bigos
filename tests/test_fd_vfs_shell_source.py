@@ -149,3 +149,40 @@ def test_existing_smokes_use_vfs_open_read_close_path() -> None:
     assert 'bigos::vfs::release(file);' in fs_smoke
     assert 'bigos::vfs::open_absolute(bigos::proc::USER_ELF_SMOKE_PATH' in user_elf
     assert 'bigos::vfs::read(file, image' in user_elf
+
+
+def test_shell_prompts_only_for_default_console_stdio() -> None:
+    shell = read_source('user/sh/sh.c')
+
+    assert 'static int fd_has_installed_file(int fd)' in shell
+    assert 'int dup_fd = dup(fd);' in shell
+    assert 'return !fd_has_installed_file(0) && !fd_has_installed_file(1);' in shell
+    assert 'int interactive = is_interactive_session();' in shell
+    assert 'if (interactive)\n            write_all(1, prompt);' in shell
+    assert 'read_line(line, sizeof(line), interactive)' in shell
+
+
+def test_shell_line_editor_is_bounded_and_non_irq_userland_echo() -> None:
+    shell = read_source('user/sh/sh.c')
+
+    assert 'static int read_line(char *buf, int cap, int interactive)' in shell
+    assert "if (ch == '\\b' || ch == 0x7f)" in shell
+    assert 'len--;' in shell
+    assert 'write_all(1, "\\b");' in shell
+    assert 'write_all(1, "\\n");' in shell
+    assert 'should_echo_input(ch)' in shell
+    assert 'while (n > 0 && ch != \'\\n\')' in shell
+    assert 'return -1;' in shell
+
+
+def test_shell_errors_and_builtin_redirection_use_fd_paths() -> None:
+    shell = read_source('user/sh/sh.c')
+
+    assert 'static void sh_error(const char *prefix, const char *detail)' in shell
+    assert 'write_all(2, prefix);' in shell
+    assert 'write_all(2, detail);' in shell
+    assert 'static int run_builtin(int argc, char **argv, int out_fd)' in shell
+    assert 'int fd = out_fd >= 0 ? out_fd : 1;' in shell
+    assert 'if (run_builtin(n, args, out_fd))' in shell
+    assert 'sh: line too long' in shell
+    assert 'sh: command not found: ' in shell

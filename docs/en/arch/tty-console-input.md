@@ -14,6 +14,7 @@ keyboard IRQ1
   -> terminal::enqueue_input()
   -> non-interrupt consumer read_char()/drain()
   -> optional blocking consumer read_char_blocking()
+  -> default user stdin when fd 0 has no installed file
 ```
 
 The keyboard ISR reads one scancode byte, updates fixed decoder state, and enqueues supported characters into the TTY input buffer. On a successful enqueue, the TTY layer may wake one blocked reader through the bounded scheduler wakeup helper. The ISR does not call `kprintf()`, `kput()`, VGA/serial output, dynamic allocation, blocking waits, `mdelay()`, filesystem, syscall, user-mode paths, or direct context switching.
@@ -43,9 +44,11 @@ The blocking API is valid only from ordinary running kernel-thread context where
 
 The automated blocking smoke uses a synthetic producer that calls `terminal::enqueue_input()` and therefore exercises the same TTY wakeup path without requiring manual keyboard input. Manual keyboard validation remains optional and should record emulator input capability when used.
 
+Stage 20 connects the same blocking consumer to default user stdin: when a user process reads fd `0` and no file or pipe is installed there, `SYS_READ` blocks on the TTY ring and returns one bounded byte to user space. If fd `0` is replaced by a pipe or file through `dup2()` or redirection, reads use the normal fd/VFS path instead of the default console.
+
 ## Console Output Boundary
 
-Ordinary runtime text output uses `terminal::console_put()` and `terminal::console_write()`. The current backend writes only VGA text mode and does not mirror to COM1 serial by default. Serial stays reserved for bounded markers, smokes, and fatal diagnostics.
+Ordinary runtime text output uses `terminal::console_put()` and `terminal::console_write()`. The current backend writes VGA text mode. Stage 20 routes user writes to fd `1` or fd `2` through this visible console when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
 
 Basic control-character behavior:
 
@@ -76,9 +79,17 @@ optional syscall / scheduler / user-program smoke
 sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 ```
 
-`serial_init()` explicitly brings up early COM1 on the ordinary boot path, so default serial markers no longer depend on indirect initialization from `mm_self_test()` or similar paths. `terminal::init_tty()` initializes the input ring, console-ready flag, and keyboard decoder state. `irq::initIRQ()` then initializes IDT/PIC and registers timer/keyboard handlers. PIC initialization masks all IRQ lines by default; timer IRQ0 is still unmasked by timer initialization, while keyboard IRQ1 is unmasked only when `BIGOS_KEYBOARD_SMOKE` is explicitly enabled. Default boot therefore does not depend on keyboard input.
+`serial_init()` explicitly brings up early COM1 on the ordinary boot path, so default serial markers no longer depend on indirect initialization from `mm_self_test()` or similar paths. `terminal::init_tty()` initializes the input ring, console-ready flag, and keyboard decoder state. `irq::initIRQ()` then initializes IDT/PIC and registers timer/keyboard handlers. PIC initialization masks all IRQ lines by default; timer IRQ0 is still unmasked by timer initialization, while keyboard IRQ1 is unmasked for the default interactive shell path after the handler is registered. Automated headless validation still does not require manual keyboard input.
+
+## Minimal Interactive Console
+
+The default interactive shell path intentionally stays below POSIX terminal scope:
+
+- Keyboard IRQ1 only decodes and enqueues supported bytes, then performs the bounded TTY wakeup.
+- Printable input, newline feedback, and backspace feedback are produced by the non-interrupt shell consumer after `read(0, ...)` returns.
+- `/bin/sh` shows its deterministic `$ ` prompt only when fd `0` and fd `1` are still bound to the default console fast paths; pipes or redirected files suppress the prompt.
+- stdout and stderr are visible on VGA text mode through fd `1` and fd `2` when those descriptors are not redirected.
 
 ## Non-Goals
 
-This stage does not implement a scheduler, blocking reads, wait queues, multiple TTYs, full ANSI/VT terminal behavior, line editing, command history, shell, syscall, user mode, USB HID, APIC/IOAPIC, SMP, or internationalized keyboard layouts.
-Stage 10 adds only the minimal kernel-thread blocking consumer described above; it still does not implement line discipline, POSIX terminal reads, fd/VFS integration, user-visible blocking IO, cancellation, or full process lifecycle ownership.
+This path does not implement multiple TTYs, full ANSI/VT terminal behavior, command history, termios, job control, terminal process groups, USB HID, APIC/IOAPIC, SMP, or internationalized keyboard layouts. The minimal fd integration covers only the default console fast paths for bounded userland and does not introduce `/dev/tty`, a general character-device filesystem, terminal signals, cancellation, async I/O, or full POSIX terminal reads.

@@ -67,17 +67,24 @@ The user libc mirror headers `user/libc/include/sys_nr.h` and
 The shell is intentionally small:
 
 - Builtins: `exit` and `echo`.
+- Prompt: deterministic `$ ` only when stdin and stdout are still connected to
+  the default console fast paths.
+- Input feedback: printable characters, newline, and backspace are echoed from
+  the non-interrupt shell consumer after `read(0, ...)` returns.
 - Command lookup: paths containing `/` execute directly; other names are tried
   against `PATH`, with `/bin` as the default.
 - Execution: external commands run via `fork` + `execve` + `wait`.
 - Pipes: one `a | b` stage.
 - Redirection: one input `< file` and one output `> file` per command.
+- Output: builtins, child stdout, and deterministic recoverable errors use the
+  existing fd/syscall path; default fd `1` and fd `2` reach the visible console
+  when not redirected.
 - Capacity: line length, argument count, PATH candidates, and path lengths are
   fixed upper bounds in `user/sh/sh.c`.
 
 This does not implement job control, background processes, globbing, variable
-expansion, shell scripts, sub-shells, terminal process groups, a full FILE API,
-dynamic linking, or a complete POSIX libc.
+expansion, shell scripts, sub-shells, terminal process groups, termios, a full
+FILE API, dynamic linking, or a complete POSIX libc.
 
 ## Build and Packaging
 
@@ -104,6 +111,10 @@ xmake f --userland_smoke=y
 uv run python tools/boot_debug.py run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
 ```
 
-`BIGOS_USERLAND_PASSED` validates the non-interactive runtime path. Manual
-interactive shell checks still require an emulator display or injected keyboard
-input.
+`BIGOS_USERLAND_PASSED` validates the non-interactive runtime path. Stage 20 also
+keeps the default-init headless marker assertion (`BIGOS_USER_EXEC`) while adding
+optional manual or emulator-input checks for prompt visibility, input echo,
+backspace feedback, and command output on the text console. When local display,
+ROM, keyboard input, or injection support is unavailable, record the interactive
+portion as skipped or blocked with the substitute source/build/headless checks
+and remaining console-usability risk.

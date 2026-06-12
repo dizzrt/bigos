@@ -16,10 +16,45 @@
 #define SH_PATH_MAX     256
 #define SH_DEFAULT_PATH "/bin"
 
+static int fd_has_installed_file(int fd) {
+    int dup_fd = dup(fd);
+    if (dup_fd >= 0) {
+        close(dup_fd);
+        return 1;
+    }
+    return errno != EBADF;
+}
+
+static int is_interactive_session(void) {
+    return !fd_has_installed_file(0) && !fd_has_installed_file(1);
+}
+
+static void write_all(int fd, const char *s) {
+    size_t len = strlen(s);
+    while (len > 0) {
+        ssize_t n = write(fd, s, len);
+        if (n <= 0)
+            return;
+        s += n;
+        len -= (size_t)n;
+    }
+}
+
+static void sh_error(const char *prefix, const char *detail) {
+    write_all(2, prefix);
+    if (detail != NULL)
+        write_all(2, detail);
+    write_all(2, "\n");
+}
+
+static int should_echo_input(char ch) {
+    return ch == '\t' || (ch >= ' ' && ch < 0x7f);
+}
+
 /* Reads one newline-terminated line from stdin into buf (bounded by cap-1).
  * Returns the length, 0 on EOF with no data, or -1 on an over-length line
  * (the remainder of the line is drained). */
-static int read_line(char *buf, int cap) {
+static int read_line(char *buf, int cap, int interactive) {
     int len = 0;
     for (;;) {
         char ch;
@@ -27,8 +62,18 @@ static int read_line(char *buf, int cap) {
         if (n <= 0)
             return len > 0 ? len : 0;
         if (ch == '\n') {
+            if (interactive)
+                write_all(1, "\n");
             buf[len] = 0;
             return len;
+        }
+        if (ch == '\b' || ch == 0x7f) {
+            if (len > 0) {
+                len--;
+                if (interactive)
+                    write_all(1, "\b");
+            }
+            continue;
         }
         if (len >= cap - 1) {
             /* Drain the rest of the over-length line. */
@@ -37,6 +82,10 @@ static int read_line(char *buf, int cap) {
             return -1;
         }
         buf[len++] = ch;
+        if (interactive && should_echo_input(ch)) {
+            char echo[2] = {ch, 0};
+            write_all(1, echo);
+        }
     }
 }
 
@@ -114,7 +163,7 @@ static void exec_with_path(const char *cmd, char **argv) {
 static void run_external(char **argv, int in_fd, int out_fd) {
     pid_t pid = fork();
     if (pid < 0) {
-        printf("sh: fork failed\n");
+        sh_error("sh: fork failed", NULL);
         return;
     }
     if (pid == 0) {
@@ -132,14 +181,14 @@ static void run_external(char **argv, int in_fd, int out_fd) {
             execve(direct, argv, environ);
         else if (rc == 0)
             exec_with_path(argv[0], argv);
-        printf("sh: command not found: %s\n", argv[0]);
+        sh_error("sh: command not found: ", argv[0]);
         exit(127);
     }
     wait(pid);
 }
 
 /* Handles builtins. Returns 1 if handled, 0 otherwise. */
-static int run_builtin(int argc, char **argv) {
+static int run_builtin(int argc, char **argv, int out_fd) {
     if (strcmp(argv[0], "exit") == 0) {
         int code = 0;
         if (argc > 1) {
@@ -157,14 +206,15 @@ static int run_builtin(int argc, char **argv) {
         exit(code);
     }
     if (strcmp(argv[0], "echo") == 0) {
+        int fd = out_fd >= 0 ? out_fd : 1;
         for (int i = 1; i < argc; i++) {
             if (i > 1)
-                putchar(' ');
+                write_all(fd, " ");
             size_t len = strlen(argv[i]);
             if (len != 0)
-                write(1, argv[i], len);
+                write(fd, argv[i], len);
         }
-        putchar('\n');
+        write_all(fd, "\n");
         return 1;
     }
     return 0;
@@ -180,24 +230,24 @@ static int apply_redirects(char **argv, int *argc, int *in_fd, int *out_fd) {
     for (int r = 0; r < *argc; r++) {
         if (strcmp(argv[r], ">") == 0) {
             if (r + 1 >= *argc) {
-                printf("sh: syntax error near >\n");
+                sh_error("sh: syntax error near >", NULL);
                 return -1;
             }
             int fd = open(argv[r + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) {
-                printf("sh: cannot open %s\n", argv[r + 1]);
+                sh_error("sh: cannot open ", argv[r + 1]);
                 return -1;
             }
             *out_fd = fd;
             r++;
         } else if (strcmp(argv[r], "<") == 0) {
             if (r + 1 >= *argc) {
-                printf("sh: syntax error near <\n");
+                sh_error("sh: syntax error near <", NULL);
                 return -1;
             }
             int fd = open(argv[r + 1], O_RDONLY, 0);
             if (fd < 0) {
-                printf("sh: cannot open %s\n", argv[r + 1]);
+                sh_error("sh: cannot open ", argv[r + 1]);
                 return -1;
             }
             *in_fd = fd;
@@ -292,13 +342,13 @@ static int write_echo_to_fd(int fd, char **argv) {
 static void run_pipe(char **left, char **right) {
     int fds[2];
     if (pipe(fds) < 0) {
-        printf("sh: pipe failed\n");
+        sh_error("sh: pipe failed", NULL);
         return;
     }
     if (move_pipe_fds_from_stdio(fds) < 0) {
         close(fds[0]);
         close(fds[1]);
-        printf("sh: pipe fd setup failed\n");
+        sh_error("sh: pipe fd setup failed", NULL);
         return;
     }
 
@@ -308,7 +358,7 @@ static void run_pipe(char **left, char **right) {
         if (lpid < 0) {
             close(fds[0]);
             close(fds[1]);
-            printf("sh: fork failed\n");
+            sh_error("sh: fork failed", NULL);
             return;
         }
         if (lpid == 0) {
@@ -316,7 +366,7 @@ static void run_pipe(char **left, char **right) {
                 exit(126);
             close(fds[0]);
             close(fds[1]);
-            if (run_builtin(argv_count(left), left))
+            if (run_builtin(argv_count(left), left, -1))
                 exit(0);
             char direct[SH_PATH_MAX];
             int rc = build_direct_path(left[0], direct);
@@ -324,7 +374,7 @@ static void run_pipe(char **left, char **right) {
                 execve(direct, left, environ);
             else if (rc == 0)
                 exec_with_path(left[0], left);
-            printf("sh: command not found: %s\n", left[0]);
+            sh_error("sh: command not found: ", left[0]);
             exit(127);
         }
     }
@@ -335,7 +385,7 @@ static void run_pipe(char **left, char **right) {
         close(fds[1]);
         if (lpid > 0)
             wait(lpid);
-        printf("sh: fork failed\n");
+        sh_error("sh: fork failed", NULL);
         return;
     }
     if (rpid == 0) {
@@ -343,7 +393,7 @@ static void run_pipe(char **left, char **right) {
             exit(126);
         close(fds[0]);
         close(fds[1]);
-        if (run_builtin(argv_count(right), right))
+        if (run_builtin(argv_count(right), right, -1))
             exit(0);
         char direct[SH_PATH_MAX];
         int rc = build_direct_path(right[0], direct);
@@ -351,7 +401,7 @@ static void run_pipe(char **left, char **right) {
             execve(direct, right, environ);
         else if (rc == 0)
             exec_with_path(right[0], right);
-        printf("sh: command not found: %s\n", right[0]);
+        sh_error("sh: command not found: ", right[0]);
         exit(127);
     }
 
@@ -377,11 +427,13 @@ int main(int argc, char **argv, char **envp) {
     char *args[SH_MAX_ARGC + 1];
 
     for (;;) {
+        int interactive = is_interactive_session();
         const char *prompt = "$ ";
-        write(1, prompt, 2);
-        int len = read_line(line, sizeof(line));
+        if (interactive)
+            write_all(1, prompt);
+        int len = read_line(line, sizeof(line), interactive);
         if (len < 0) {
-            printf("sh: line too long\n");
+            sh_error("sh: line too long", NULL);
             continue;
         }
         if (len == 0)
@@ -389,7 +441,7 @@ int main(int argc, char **argv, char **envp) {
 
         int n = tokenize(line, args);
         if (n < 0) {
-            printf("sh: too many arguments\n");
+            sh_error("sh: too many arguments", NULL);
             continue;
         }
         if (n == 0)
@@ -400,20 +452,24 @@ int main(int argc, char **argv, char **envp) {
             args[pipe_idx] = NULL;
             char **right = &args[pipe_idx + 1];
             if (args[0] == NULL || right[0] == NULL) {
-                printf("sh: syntax error near |\n");
+                sh_error("sh: syntax error near |", NULL);
                 continue;
             }
             run_pipe(args, right);
             continue;
         }
 
-        if (run_builtin(n, args))
-            continue;
-
         int in_fd, out_fd;
         if (apply_redirects(args, &n, &in_fd, &out_fd) != 0)
             continue;
         if (n == 0) {
+            if (in_fd >= 0)
+                close(in_fd);
+            if (out_fd >= 0)
+                close(out_fd);
+            continue;
+        }
+        if (run_builtin(n, args, out_fd)) {
             if (in_fd >= 0)
                 close(in_fd);
             if (out_fd >= 0)

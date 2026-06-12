@@ -1,6 +1,7 @@
 #include <bigos/syscall.h>
 
 #include <bigos/io.h>
+#include <bigos/console.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/sched.h>
 #include <bigos/time.h>
@@ -21,6 +22,7 @@ namespace sys {
         // syscall path observable to the source-level checks and the optional
         // emulator smoke without depending on any user-mode buffer.
         constexpr const char *SYSCALL_WRITE_MARKER = "BIGOS_SYSCALL_WRITE\n";
+        constexpr uint64_t CR3_ROOT_MASK = 0x000ffffffffff000ull;
 
         // sys_debug_write: emit a kernel-internal bounded buffer through the
         // existing serial/console path. This stage does NOT validate any pointer
@@ -80,11 +82,11 @@ namespace sys {
         }
 
         static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
-            // Console fast path: fd 1 with no installed file writes to the serial
-            // console. Conditional (mirroring the sys_read fd 0 path) so that once
-            // a pipe write end or redirected file is installed at fd 1 the write
-            // routes to that file instead of the console.
-            if (__fd == 1 && bigos::proc::file_for_fd_current(1) == nullptr) {
+            // Default console fast path: fd 1/2 with no installed file writes to
+            // the visible runtime console while preserving the serial marker path
+            // used by headless validation. Once a pipe or redirected file is
+            // installed at the descriptor, writes route through the fd table.
+            if ((__fd == 1 || __fd == 2) && bigos::proc::file_for_fd_current((uint32_t)__fd) == nullptr) {
                 if (!bigos::proc::validate_user_buffer(__buffer, __len))
                     bigos::proc::fault_current_and_exit(-bigos::EFAULT);
                 char bounded[SYS_WRITE_MAX_LEN + 1];
@@ -93,6 +95,14 @@ namespace sys {
                 bounded[__len] = 0;
                 serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
                 serial_puts(bounded);
+                const uint64_t active_root = bigos::mm::read_cr3();
+                const bigos::proc::Process *process = bigos::proc::current_process();
+                if (process != nullptr && process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
+                    (active_root & CR3_ROOT_MASK) != (process->kernel_address_space_root & CR3_ROOT_MASK))
+                    bigos::mm::activate_address_space_root(process->kernel_address_space_root);
+                bigos::terminal::console_write(bounded);
+                if ((bigos::mm::read_cr3() & CR3_ROOT_MASK) != (active_root & CR3_ROOT_MASK))
+                    bigos::mm::activate_address_space_root(active_root);
                 return (int64_t)__len;
             }
 
