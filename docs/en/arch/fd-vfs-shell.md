@@ -10,7 +10,7 @@ and the minimal userland runtime.
 - `include/bigos/fs/vfs.h` defines the public shell: `Vnode`, `File`,
   `FileOperations`, read-only open flags, deterministic status codes, and
   `init`/`open_absolute`/`read`/`release`.
-- `src/kernel/fs/vfs.cc` owns one root mount. `vfs::init()` initializes the ATA
+- `kernel/core/fs/vfs.cc` owns one root mount. `vfs::init()` initializes the ATA
   PIO primary-master block device, discovers the existing MBR exFAT partition,
   mounts it read-only, and publishes the root only after the mount succeeds.
 - The exFAT backend is an adapter over `find_exfat_partition`, `mount_exfat`,

@@ -27,7 +27,7 @@
 
 ## Skipped Or Blocked Checks
 
-- Full `uv run pytest`: 144 passed, 1 failed in an unrelated pre-existing `tests/test_user_address_space_vmem_source.py` assertion against `src/kernel/proc/proc.cc`; this change did not edit that source path.
+- Full `uv run pytest`: 144 passed, 1 failed in an unrelated pre-existing `tests/test_user_address_space_vmem_source.py` assertion against `kernel/core/proc/proc.cc`; this change did not edit that source path.
 - Full `uv run ruff check`: blocked by pre-existing style drift in unrelated tests (`test_address_space_lifecycle_source.py`, `test_bilingual_docs_layout.py`, `test_first_user_program_source.py`, `test_memory_correctness_source.py`). Changed Python files pass scoped ruff checks.
 - Full `uv run ruff format --check`: blocked by pre-existing unrelated formatting drift plus changed files before scoped formatting. Changed Python files pass scoped format check after formatting.
 - Bochs or QEMU+Bochs cross-validation: not run in this session. QEMU headless marker smoke, source checks, OpenSpec validation, pyright, and cross build were used as substitutes. Residual risk remains for Bochs-specific timer/keyboard IRQ and port-IO behavior.

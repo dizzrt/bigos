@@ -5,6 +5,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
@@ -18,7 +30,7 @@ def test_launch_init_is_declared_with_neutral_init_path_constant() -> None:
 
 
 def test_launch_init_reuses_vfs_elf_load_chain_and_emits_enter_marker() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'void launch_init(void *) noexcept {' in proc
     assert 'bigos::vfs::init();' in proc
@@ -32,7 +44,7 @@ def test_launch_init_reuses_vfs_elf_load_chain_and_emits_enter_marker() -> None:
 
 
 def test_launch_init_degrades_deterministically_via_panic() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'BIGOS_INIT_LOAD_FAILED ' in proc
     assert 'USER_ELF_MAX_FILE_BYTES' in proc
@@ -40,7 +52,7 @@ def test_launch_init_degrades_deterministically_via_panic() -> None:
 
 
 def test_init_normal_exit_emits_exit_marker_then_idle_not_panic() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     # BIGOS_INIT_EXIT is emitted from the existing exit path and falls through to
     # the deferred reaper / idle scheduling, not a panic.
@@ -70,9 +82,9 @@ def smoke_guard_depth_before(source: str, needle: str) -> int:
 
 
 def test_launch_init_and_call_site_have_no_ifdef_guard() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
     proc_h = read_source('include/bigos/proc.h')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     # The launch_init call site in kernel() must not be wrapped by any smoke
     # #ifdef block.
@@ -100,9 +112,11 @@ def test_user_init_elf_target_is_default_on() -> None:
 
 def test_existing_user_smoke_switches_and_markers_are_preserved() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
-    assert 'if has_config("user_program_smoke") then\n        add_defines("BIGOS_USER_PROGRAM_SMOKE")' in xmake
-    assert 'if has_config("user_elf_smoke") then\n        add_defines("BIGOS_USER_ELF_SMOKE")' in xmake
+    assert 'if has_config("user_program_smoke") then' in xmake
+    assert 'add_defines("BIGOS_USER_PROGRAM_SMOKE")' in xmake
+    assert 'if has_config("user_elf_smoke") then' in xmake
+    assert 'add_defines("BIGOS_USER_ELF_SMOKE")' in xmake
     assert '#ifdef BIGOS_USER_ELF_SMOKE' in kernel
     assert '#ifdef BIGOS_USER_PROGRAM_SMOKE' in kernel

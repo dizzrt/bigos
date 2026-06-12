@@ -3,17 +3,17 @@
 ## 已通过
 
 - `xmake`（默认配置，`--timer_smoke=n --mm_self_test=n`）
-  - 结果：timer/IRQ/kernel 源码编译通过；`src/kernel/timer/timer.cc`、`src/kernel/irq/isr.cc`、`src/kernel/irq/interrupt.cc`、`src/kernel/irq/interrupt.s` 均重新编译成功。
+  - 结果：timer/IRQ/kernel 源码编译通过；`kernel/core/timer/timer.cc`、`kernel/core/irq/isr.cc`、`kernel/core/irq/interrupt.cc`、`kernel/core/irq/interrupt.s` 均重新编译成功。
 - `xmake f --timer_smoke=y --mm_self_test=n && xmake`
   - 结果：timer smoke 构建通过；`strings build/kernel | grep -c BIGOS_TIMER_IRQ` 为 `1`，确认 bounded marker 已编入 smoke 构建。
 - `uv run pytest tests/test_timer_irq_foundation_source.py`
   - 结果：9 passed。新增/更新覆盖：`on_tick()` 存在且被 timer handler 调用、handler 不再直写 `g_ticks`、tick 状态定义在 timer TU、`mdelay()`/tick 轮询不在任何 ISR handler body、三类 timer API 上下文契约注释、ISR ABI 不变量（寄存器保存顺序、error-code 占位、16 字节栈对齐、external IRQ 单次 EOI、exception 不发 EOI）。
 - `uv run pytest`
   - 结果：46 passed。
-- `clang++ -std=c++17 -ffreestanding -mno-red-zone -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/kernel/timer/timer.cc src/kernel/irq/isr.cc src/kernel/irq/interrupt.cc`
+- `clang++ -std=c++17 -ffreestanding -mno-red-zone -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/core/timer/timer.cc kernel/core/irq/isr.cc kernel/core/irq/interrupt.cc`
   - 结果：无输出，退出码 0。
 - IDE diagnostics
-  - 结果：`src/kernel/irq/isr.cc` 等修改文件无诊断。
+  - 结果：`kernel/core/irq/isr.cc` 等修改文件无诊断。
 - `openspec validate harden-timer-irq-runtime-path --strict`
   - 结果：Change valid。
 

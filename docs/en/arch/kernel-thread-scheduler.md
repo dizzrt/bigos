@@ -53,7 +53,7 @@ Stage 4 ordinary kernel threads use a fixed 1-page kernel stack by default, and 
 
 ## Context Switch
 
-`switch_context(uint64_t *old_sp, uint64_t new_sp)` (`src/kernel/sched/switch.s`) saves the current thread's callee-saved registers and stack pointer into `*old_sp`, loads the target stack, and `ret`s into its saved return point. Cooperative `yield()`/`thread_exit()` still use it directly. IRQ-return preemption uses a scheduler-owned bridge after EOI; the bridge saves the interrupted thread's current kernel stack continuation and later resumes it so the original `InterruptFrame` is restored by `isr_common` before `iretq`.
+`switch_context(uint64_t *old_sp, uint64_t new_sp)` (`kernel/core/sched/switch.s`) saves the current thread's callee-saved registers and stack pointer into `*old_sp`, loads the target stack, and `ret`s into its saved return point. Cooperative `yield()`/`thread_exit()` still use it directly. IRQ-return preemption uses a scheduler-owned bridge after EOI; the bridge saves the interrupted thread's current kernel stack continuation and later resumes it so the original `InterruptFrame` is restored by `isr_common` before `iretq`.
 
 `create_kernel_thread()` preconstructs a new thread stack. The first time it is scheduled, `switch_context` returns into scheduler-owned `thread_trampoline`; the trampoline enables interrupts and calls the thread entry. If the entry returns, control enters `thread_exit()`.
 

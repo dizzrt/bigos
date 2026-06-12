@@ -4,6 +4,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
@@ -32,7 +44,7 @@ def test_thread_and_sched_headers_declare_bounded_state_and_context_contracts() 
 
 
 def test_default_kernel_thread_stack_is_one_page_without_build_switch() -> None:
-    sched = read_source('src/kernel/sched/sched.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
     xmake = read_source('xmake.lua')
 
     assert 'KERNEL_THREAD_STACK_PAGES = 1' in sched
@@ -44,7 +56,7 @@ def test_default_kernel_thread_stack_is_one_page_without_build_switch() -> None:
 
 
 def test_terminated_threads_defer_reclamation() -> None:
-    sched = read_source('src/kernel/sched/sched.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
 
     exit_start = sched.index('void thread_exit()')
     exit_end = sched.index('void start()')
@@ -58,7 +70,7 @@ def test_terminated_threads_defer_reclamation() -> None:
 
 
 def test_create_failure_path_obeys_allocator_contract() -> None:
-    sched = read_source('src/kernel/sched/sched.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
 
     create_start = sched.index('ThreadId create_kernel_thread')
     create_end = sched.index('void yield()')
@@ -70,8 +82,8 @@ def test_create_failure_path_obeys_allocator_contract() -> None:
 
 
 def test_context_switch_symbol_saves_callee_saved_set() -> None:
-    switch_s = read_source('src/kernel/sched/switch.s')
-    sched = read_source('src/kernel/sched/sched.cc')
+    switch_s = read_source('kernel/core/sched/switch.s')
+    sched = read_source('kernel/core/sched/sched.cc')
 
     assert '.globl switch_context' in switch_s
     assert 'switch_context:' in switch_s
@@ -100,8 +112,8 @@ def test_context_switch_symbol_saves_callee_saved_set() -> None:
 
 
 def test_cooperative_switch_does_not_touch_interrupt_frame_abi() -> None:
-    switch_s = read_source('src/kernel/sched/switch.s')
-    interrupt_s = read_source('src/kernel/irq/interrupt.s')
+    switch_s = read_source('kernel/core/sched/switch.s')
+    interrupt_s = read_source('kernel/core/irq/interrupt.s')
 
     # The cooperative switch must not redefine the ISR entry/iretq path.
     assert 'iretq' not in switch_s
@@ -111,7 +123,7 @@ def test_cooperative_switch_does_not_touch_interrupt_frame_abi() -> None:
 
 
 def test_yield_is_round_robin_single_core() -> None:
-    sched = read_source('src/kernel/sched/sched.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
 
     yield_start = sched.index('void yield()')
     yield_end = sched.index('void thread_exit()')
@@ -127,8 +139,8 @@ def test_yield_is_round_robin_single_core() -> None:
 def test_context_switch_prepares_next_address_space_before_loading_stack() -> None:
     # sched_h = read_source('include/bigos/sched.h')
     proc_h = read_source('include/bigos/proc.h')
-    sched = read_source('src/kernel/sched/sched.cc')
-    proc = read_source('src/kernel/proc/proc.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'void prepare_context_switch_to(Process *__next_process) noexcept;' in proc_h
     assert 'prepare_address_space_for_next' in sched
@@ -142,7 +154,7 @@ def test_context_switch_prepares_next_address_space_before_loading_stack() -> No
         ('void thread_exit()', 'void start()'),
     ):
         body = sched[sched.index(start_token) : sched.index(end_token)]
-        prepare_index = body.index('prepare_address_space_for_next(next);')
+        prepare_index = body.index('prepare_address_space_before_switch(next);')
         switch_index = body.index('switch_context(')
         assert prepare_index < switch_index
 
@@ -153,8 +165,8 @@ def test_context_switch_prepares_next_address_space_before_loading_stack() -> No
 
 
 def test_idle_thread_replaces_naked_kernel_halt_loop() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
-    sched = read_source('src/kernel/sched/sched.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
 
     # kernel() must enter the scheduler instead of an unmanaged hlt loop.
     assert 'bigos::sched::start();' in kernel
@@ -174,7 +186,7 @@ def test_idle_thread_replaces_naked_kernel_halt_loop() -> None:
 
 
 def test_kernel_init_order_is_unchanged_before_scheduler() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     init_mem_index = kernel.index('bigos::init_mem(boot_info);')
     init_tty_index = kernel.index('bigos::terminal::init_tty();')
@@ -186,8 +198,8 @@ def test_kernel_init_order_is_unchanged_before_scheduler() -> None:
 
 
 def test_timer_irq_records_bounded_intent_without_preemption() -> None:
-    isr = read_source('src/kernel/irq/isr.cc')
-    sched = read_source('src/kernel/sched/sched.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
 
     timer_body = isr[isr.index('implement_isr(timer)') : isr.index('implement_isr(keyboard)')]
     assert 'bigos::timer::on_tick();' in timer_body
@@ -202,8 +214,8 @@ def test_timer_irq_records_bounded_intent_without_preemption() -> None:
 
 
 def test_irq_paths_do_not_allocate_scheduler_objects() -> None:
-    isr = read_source('src/kernel/irq/isr.cc')
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     timer_body = isr[isr.index('implement_isr(timer)') : isr.index('implement_isr(keyboard)')]
     keyboard_body = isr[isr.index('implement_isr(keyboard)') : isr.index('void init_isr_timer()')]
@@ -230,7 +242,7 @@ def test_irq_paths_do_not_allocate_scheduler_objects() -> None:
 
 def test_scheduler_smoke_is_default_off_and_bounded() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     option_index = xmake.index('option("scheduler_smoke")')
     default_index = xmake.index('set_default(false)', option_index)
@@ -248,8 +260,8 @@ def test_scheduler_smoke_is_default_off_and_bounded() -> None:
 def test_blocking_primitives_are_intrusive_and_context_guarded() -> None:
     thread_h = read_source('include/bigos/thread.h')
     sched_h = read_source('include/bigos/sched.h')
-    sched = read_source('src/kernel/sched/sched.cc')
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     assert 'Blocked' in thread_h
     assert 'Sleeping' in thread_h
@@ -267,7 +279,7 @@ def test_blocking_primitives_are_intrusive_and_context_guarded() -> None:
 
 
 def test_wait_queue_wakeup_and_timeout_paths_are_allocation_free() -> None:
-    sched = read_source('src/kernel/sched/sched.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
 
     wait_start = sched.index('int wait_queue_wait_until')
     wake_start = sched.index('uint32_t wake_one')
@@ -293,7 +305,7 @@ def test_wait_queue_wakeup_and_timeout_paths_are_allocation_free() -> None:
 
 def test_blocking_smoke_is_default_off_and_deterministic() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     option_index = xmake.index('option("blocking_smoke")')
     default_index = xmake.index('set_default(false)', option_index)

@@ -1,14 +1,14 @@
 ## Why
 
 当前 normal boot 永远不会进入 ring3：唯一调用 `run_user_process` 的位置都藏在默认关闭的
-`user_program_smoke` / `user_elf_smoke` 开关之后（见 [kernel.cc](src/kernel/kernel.cc#L337-L345)）。这意味着进程 / `exec` / VFS / ELF 加载这些核心能力只在 smoke
+`user_program_smoke` / `user_elf_smoke` 开关之后（见 [kernel.cc](kernel/core/kernel.cc#L337-L345)）。这意味着进程 / `exec` / VFS / ELF 加载这些核心能力只在 smoke
 构建里被偶发验证，而非默认路径上被持续运行。Stage 14.5 是后续所有 POSIX 工作（demand
 paging、fork/COW、信号、可写 FS、userland）的前置起跑线：必须先让 normal boot 真正运行一个
 用户进程，并借此启动「行为断言测试」轨道。
 
 ## What Changes
 
-- 在 [proc::init()](src/kernel/kernel.cc#L323) 与 [sched::start()](src/kernel/kernel.cc#L350) 之间，新增一个**默认开启、无
+- 在 [proc::init()](kernel/core/kernel.cc#L323) 与 [sched::start()](kernel/core/kernel.cc#L350) 之间，新增一个**默认开启、无
   `#ifdef` 守卫**的 `launch_init()`：复用现有 `vfs::init` -> 读取
   `/boot/user/init.elf` -> `create_elf_user_process` -> `run_user_process` 路径，使其从
   smoke `#ifdef` 中解放出来，成为 normal boot 的固定步骤。
@@ -39,8 +39,8 @@ paging、fork/COW、信号、可写 FS、userland）的前置起跑线：必须�
 
 ## Impact
 
-- 受影响子系统：kernel 入口（`src/kernel/kernel.cc`）、proc（init 启动 / 退出语义，
-  `src/kernel/proc/`）、构建系统（`xmake.lua` 默认打包 `/boot/user/init.elf`）、boot
+- 受影响子系统：kernel 入口（`kernel/core/kernel.cc`）、proc（init 启动 / 退出语义，
+  `kernel/core/proc/`）、构建系统（`xmake.lua` 默认打包 `/boot/user/init.elf`）、boot
   打包流程（`tools/boot_debug.py` 与磁盘镜像安装）、Stage 9 smoke 矩阵与验证脚本。
 - 受影响 API / 代码：新增内核内部 `launch_init` 入口；复用 `vfs::init`、
   `bigos::proc::create_elf_user_process`、`bigos::proc::run_user_process`、

@@ -4,7 +4,7 @@
 - [x] 1.2 把 `Process` 的内联 `FdEntry fd_table[MAX_FDS]` 改为可增长 fd 存储字段（堆分配指针 + 容量/计数），保持 `FdEntry` 语义不变；保留对外 API 函数签名不变。
 - [x] 1.3 在 `Process` 内嵌注册节点指针（`reg_next` / `reg_prev`）以支撑侵入式双向链表注册结构，节点随 `Process` 对象一起分配；不破坏既有 `Process` 字段布局假设，确认不引入异常/RTTI/hosted 依赖。
 
-## 2. 进程注册与对象生命周期（src/kernel/proc/proc.cc）
+## 2. 进程注册与对象生命周期（kernel/core/proc/proc.cc）
 
 - [x] 2.1 把 `g_process_table[MAX_PROCESSES]` 改为侵入式双向链表注册结构（全局链表头 + `Process` 内嵌节点），重写 `lookup_process` / `publish_process` / `unpublish_process` 以遍历/增删链表，并以 `MAX_PROCESSES_SOFT_LIMIT` 约束；保持父子链与 PID 语义不变。
 - [x] 2.2 新增 `alloc_process_object()`（`kmalloc` + 清零）与 `free_process_object()`（`free`），定义分配失败返回 `nullptr` 的确定性降级。
@@ -12,7 +12,7 @@
 - [x] 2.4 在 `reap_pending_processes` 末尾、`unpublish_process` 且确认无引用后释放进程对象内存；确保不产生悬垂指针。
 - [x] 2.5 替换 `launch_init` 的 `static Process init_process` 为堆分配对象，并处理 PID-1 语义下分配失败的确定性降级（沿用 `launch_init_failed` panic 边界仅用于 init 缺失/非法，分配失败按既有失败约定处理）。
 
-## 3. fd 表可增长（src/kernel/proc/proc.cc）
+## 3. fd 表可增长（kernel/core/proc/proc.cc）
 
 - [x] 3.1 实现 fd 存储的随进程分配与回收，`install_fd_current` 复用最低空位或按需增长，达到软上限或增长失败返回 `-EMFILE`。
 - [x] 3.2 调整 `read_fd_current` / `close_fd_current` / `close_all_fds` / `close_on_exec_fds` 按当前容量遍历，保持 close-on-exec、引用释放各一次的语义不变。

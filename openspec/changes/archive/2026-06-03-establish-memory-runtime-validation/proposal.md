@@ -21,7 +21,7 @@
 
 ## Impact
 
-- 影响子系统：`src/mm` 内存管理、`src/kernel/kernel.cc` 早期初始化路径、`tools/boot_debug.py` 或相邻 boot 验证工具、`tests` 源码级/脚本级验证。
+- 影响子系统：`kernel/mm` 内存管理、`kernel/core/kernel.cc` 早期初始化路径、`tools/boot_debug.py` 或相邻 boot 验证工具、`tests` 源码级/脚本级验证。
 - 架构假设：x86_64 long mode、当前单核关中断早期 kernel 环境、既有 self-mapping 页表布局和 `KVMEM_BASE` 不变。
 - 工具链假设：优先使用 `x86_64-elf-*` 交叉工具链、`xmake`、`uv run pytest`、Bochs；缺失 Bochs 或 ROM 时必须记录未运行 runtime smoke 的原因。
 - API 影响：不改变 `kmalloc()`、`alloc_kernel_pages()`、`free_pages()`、`alloc_physical_order()` 的公开语义。

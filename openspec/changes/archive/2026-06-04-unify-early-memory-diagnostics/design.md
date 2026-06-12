@@ -3,14 +3,14 @@
 BigOS 已进入内存与中断基础设施较完整的阶段，但早期致命失败处理散落在多个文件中，
 模式不统一：
 
-- `src/kernel/irq/interrupt.cc`：`halt_cpu()` 先 `disableIRQ()` 再 `while(true){hlt}`；
+- `kernel/core/irq/interrupt.cc`：`halt_cpu()` 先 `disableIRQ()` 再 `while(true){hlt}`；
   异常/`#PF` 分别打印 `BIGOS_EXCEPTION` / `BIGOS_PAGE_FAULT` 后调用 `halt_cpu()`。
-- `src/mm/buddy.cc`：`halt_memory_handoff_failed()` 打印 `"invalid boot memory map"`
+- `kernel/mm/buddy.cc`：`halt_memory_handoff_failed()` 打印 `"invalid boot memory map"`
   （无 `BIGOS_` 前缀），`halt_early_metadata_exhausted()` 打印 arena 用量后裸 `hlt`，
   二者均未先关中断。
-- `src/mm/slab.cc` / `src/mm/kmem.cc`：`BIGOS_SLAB_DEBUG` guard 直接打印
+- `kernel/mm/slab.cc` / `kernel/mm/kmem.cc`：`BIGOS_SLAB_DEBUG` guard 直接打印
   `"slab debug guard: ..."`（无前缀）后裸 `hlt`。
-- `src/mm/self_test.cc`：`fail(stage)` 打印 `BIGOS_MM_SELF_TEST_FAILED stage=` 后裸 `hlt`。
+- `kernel/mm/self_test.cc`：`fail(stage)` 打印 `BIGOS_MM_SELF_TEST_FAILED stage=` 后裸 `hlt`。
 
 约束：freestanding（无 libc/异常/RTTI）、单核、早期关中断、无 scheduler/SMP/用户态。
 输出后端只有 VGA 文本模式和 COM1 串口。不得改动 boot 固定地址、linker 布局、
@@ -49,7 +49,7 @@ marker 前缀一致。**备选**：保留各处 `halt_cpu()` 仅统一字符串�
 
 ### D2: 放置位置与命名空间
 
-头文件 `include/bigos/panic.h`，实现 `src/kernel/bigos/panic.cc`，命名空间 `bigos`，
+头文件 `include/bigos/panic.h`，实现 `kernel/core/bigos/panic.cc`，命名空间 `bigos`，
 依赖既有 `bigos::serial_puts` / `bigos::kprintf`（`bigos/io.h`）。
 
 **理由**：与现有 `io.cc`/`utils.cc` 同层，保持公共头最小。**备选**：放入 `bigos::mm`
@@ -97,7 +97,7 @@ allocator 统计（复用 `print_slab_stats()`、early arena 用量）。默认�
 ### D7: 本 change 不接入 boot 早期路径
 
 统一 panic 设施的接入范围限定为 kernel 运行时与 mm/irq 路径。boot 早期代码
-（含 `src/arch/x86/boot/boot.cc`、`boot.s` 等长模式切换前后路径）**不**在本 change
+（含 `kernel/arch/x86/boot/boot.cc`、`boot.s` 等长模式切换前后路径）**不**在本 change
 纳入，保留其现有失败/停机方式。
 
 **理由**：boot 早期处于不同地址空间与运行时环境（无 higher-half kernel 上下文、
@@ -119,12 +119,12 @@ allocator 统计（复用 `print_slab_stats()`、early arena 用量）。默认�
 
 ## Migration Plan
 
-1. 新增 `include/bigos/panic.h` + `src/kernel/bigos/panic.cc`，实现 `kpanic` 与错误码。
+1. 新增 `include/bigos/panic.h` + `kernel/core/bigos/panic.cc`，实现 `kpanic` 与错误码。
 2. 迁移 IRQ：`halt_cpu()` 改为调用统一停机原语；异常/`#PF` 诊断行保留在原处。
 3. 迁移 mm：buddy 两处 halt、slab/kmem guard halt、self-test `fail` 改用统一设施；
    为 buddy/slab guard 路径补 `BIGOS_PANIC` 前缀与错误码。
 4. 全仓核对裸 `while(true){hlt}` 致命模板是否已收敛；boot 早期路径
-   （`src/arch/x86/boot/*`）按 D7 不纳入，保留现状，`kernel()` idle 循环为正常停机
+   （`kernel/arch/x86/boot/*`）按 D7 不纳入，保留现状，`kernel()` idle 循环为正常停机
    非致命路径不动。
 5. 验证：xmake 交叉构建；`page_fault_smoke` 触发后 Bochs 观察停机 marker；
    `mm_self_test` 成功/失败 marker 不变；clang/clangd 辅助检查；更新/核对 tests。

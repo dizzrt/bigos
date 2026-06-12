@@ -87,7 +87,7 @@ BigOS SHALL 将现有分散的致命停机路径迁移到统一诊断设施，�
 
 #### Scenario: 不残留独立致命停机模板
 
-- **WHEN** 开发者搜索内核运行时与 `src/mm`、`src/kernel/irq` 的致命停机路径
+- **WHEN** 开发者搜索内核运行时与 `kernel/mm`、`kernel/core/irq` 的致命停机路径
 - **THEN** 致命停机统一经由 `bigos::kpanic` 或其停机原语
 - **AND** 不存在缺少关中断或缺少 `BIGOS_` 前缀的独立 `while(true){hlt}` 致命片段
 

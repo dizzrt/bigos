@@ -14,7 +14,7 @@
   以 POSIX 习惯的 `errno`（正值）与按惯例取负后写入返回寄存器的语义为基准。
 - 让 `include/bigos/syscall.h`、`include/bigos/proc.h` 中现有的 `SYS_E*`、
   `FD_E*`、`WAIT_E*` 重复常量统一引用 `bigos/errno.h` 的单一定义。
-- 更新所有引用点（`src/kernel/syscall/syscall.cc`、`src/kernel/proc/proc.cc`
+- 更新所有引用点（`kernel/core/syscall/syscall.cc`、`kernel/core/proc/proc.cc`
   等）改用统一错误码符号，删除按子系统前缀的重复别名。
 - 同步更新受影响文档（`docs/en`/`docs/zh` 的 syscall-entry、fd-vfs-shell）与相关
   source-contract 测试中对错误码符号名的断言。
@@ -34,11 +34,11 @@
 
 ## Impact
 
-- 受影响子系统：syscall 入口（`src/kernel/syscall`）、进程与 fd/VFS 子系统
-  （`src/kernel/proc`、`src/kernel/fs`）。
+- 受影响子系统：syscall 入口（`kernel/core/syscall`）、进程与 fd/VFS 子系统
+  （`kernel/core/proc`、`kernel/core/fs`）。
 - 受影响头文件：新增 `include/bigos/errno.h`；修改 `include/bigos/syscall.h`、
   `include/bigos/proc.h`。
-- 受影响实现：`src/kernel/syscall/syscall.cc`、`src/kernel/proc/proc.cc` 及其他错误码
+- 受影响实现：`kernel/core/syscall/syscall.cc`、`kernel/core/proc/proc.cc` 及其他错误码
   引用点。
 - 受影响测试：`tests/test_syscall_entry_source.py`、`tests/test_fd_vfs_shell_source.py`
   及其他断言错误码符号名的 source-contract 测试。

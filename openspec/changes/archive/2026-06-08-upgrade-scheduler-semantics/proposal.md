@@ -28,7 +28,7 @@ BigOS 已完成单核协作式调度、阻塞/睡眠原语、PIT tick、IRQ/exce
 
 ## Impact
 
-- 受影响子系统：`src/kernel/sched`、`include/bigos/sched.h`、`include/bigos/thread.h`、`src/kernel/timer`、`include/bigos/timer.h`、`src/kernel/irq`、`include/irq/interrupt.h`、`src/kernel/sched/switch.s`、`src/kernel/irq/interrupt.s`、runtime smoke matrix 和相关测试/文档。
+- 受影响子系统：`kernel/core/sched`、`include/bigos/sched.h`、`include/bigos/thread.h`、`kernel/core/timer`、`include/bigos/timer.h`、`kernel/core/irq`、`include/irq/interrupt.h`、`kernel/core/sched/switch.s`、`kernel/core/irq/interrupt.s`、runtime smoke matrix 和相关测试/文档。
 - 架构假设：仅 x86_64 单核 Legacy BIOS/MBR/exFAT 路径；不引入 SMP、IPI、per-CPU run queue、跨 CPU locking、TLB shootdown 或 UEFI/OVMF backend。
 - 内存假设：IRQ path、preemption path 和 context switch path 不通过普通 allocator 分配/释放 scheduler 对象；线程栈、TCB、run queue 节点和 wait queue linkage 仍由非中断上下文或既有所有权管理。
 - emulator 与工具链假设：继续使用 `xmake`、`x86_64-elf-*` 工具链和 QEMU headless serial-marker smoke；涉及 IRQ/timer/port-IO/context-switch 行为时，在可用环境下使用 Bochs 或 QEMU+Bochs 交叉验证。

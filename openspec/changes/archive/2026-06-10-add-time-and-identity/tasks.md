@@ -1,13 +1,13 @@
 ## 1. CMOS RTC 一次性读取驱动
 
-- [x] 1.1 在 `include/drivers/rtc/` 与 `src/drivers/rtc/` 新增 CMOS RTC 驱动：经端口 0x70（index）/0x71（data）读取秒/分/时/日/月/年，读取前轮询状态寄存器 A 的 UIP 位（带有界上限），读状态寄存器 B 判断 BCD 与 12/24 小时制并归一化字段。
+- [x] 1.1 在 `include/drivers/rtc/` 与 `kernel/drivers/rtc/` 新增 CMOS RTC 驱动：经端口 0x70（index）/0x71（data）读取秒/分/时/日/月/年，读取前轮询状态寄存器 A 的 UIP 位（带有界上限），读状态寄存器 B 判断 BCD 与 12/24 小时制并归一化字段。
 - [x] 1.2 实现字段范围校验（月 1-12、日 1-31、时 0-23、分/秒 0-59 等），校验失败或 UIP 轮询超限时返回失败结果，世纪固定按 2000 处理。
 - [x] 1.3 RTC 驱动仅暴露「读一次」API，确保不注册 IRQ8、不做周期轮询；限定端口访问在该 TU 内，保持与 PIT/i8259 一致的低层 IO 风格。
 - [x] 1.4 接口与硬件访问安全审查：端口 IO 顺序、UIP 轮询有界、无 IRQ 上下文调用、可见失败而非阻塞。
 
 ## 2. 墙钟时间模块
 
-- [x] 2.1 新增 `include/bigos/time.h` 与 `src/kernel/time/`（或并入 timer 子系统）：实现 `time::init()` 在 tick 可用后读一次 RTC，换算为 Unix epoch 秒（含 `days_from_civil` 类民用日期到秒的转换）记为 `boot_unix_time`，并记录 `boot_tick = timer::ticks()`。
+- [x] 2.1 新增 `include/bigos/time.h` 与 `kernel/core/time/`（或并入 timer 子系统）：实现 `time::init()` 在 tick 可用后读一次 RTC，换算为 Unix epoch 秒（含 `days_from_civil` 类民用日期到秒的转换）记为 `boot_unix_time`，并记录 `boot_tick = timer::ticks()`。
 - [x] 2.2 实现只读查询 API：`boot_unix_time()` 与 `current_unix_time() = boot_unix_time + (ticks() - boot_tick) / TIMER_HZ`，保证查询路径不触硬件、不分配、不阻塞且单调不减。
 - [x] 2.3 实现 RTC 无效时确定性退化：`boot_unix_time = 0`，发射固定 marker（如 `BIGOS_RTC_INVALID`）到 COM1/VGA，绝不 panic/阻塞/分配。
 - [x] 2.4 在内核启动序列中（timer init 之后、`proc::init()` 之前）调用 `time::init()`；确认初始化顺序正确、墙钟基准在进程创建前就绪。
@@ -24,7 +24,7 @@
 ## 4. 只读身份/时间查询 syscall
 
 - [x] 4.1 在 [syscall.h](include/bigos/syscall.h) 的 `SyscallNumber` 末尾追加 `SYS_GET_TIME = 11`、`SYS_GETPID = 12`、`SYS_GETPPID = 13`、`SYS_GETUID = 14`、`SYS_GETGID = 15`，不改动既有号位与寄存器 ABI 注释。
-- [x] 4.2 在 [syscall.cc](src/kernel/syscall/syscall.cc) 的 `dispatch` 增加对应分支：`SYS_GET_TIME` 回写 `current_unix_time()`，其余回写当前进程 pid/parent_pid/uid/gid；全部只读、不发 EOI、不阻塞、不分配。
+- [x] 4.2 在 [syscall.cc](kernel/core/syscall/syscall.cc) 的 `dispatch` 增加对应分支：`SYS_GET_TIME` 回写 `current_unix_time()`，其余回写当前进程 pid/parent_pid/uid/gid；全部只读、不发 EOI、不阻塞、不分配。
 - [x] 4.3 中断/ABI 审查：确认新增分支不发送 i8259 EOI、不改变 `InterruptFrame` 用法与 rax 返回约定，向量布局与 DPL 设置不变。
 
 ## 5. 验证开关与 smoke

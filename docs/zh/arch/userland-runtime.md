@@ -5,7 +5,7 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
 
 ## 组件
 
-- `user/crt0/crt0.s`：用户入口 `_start`，消费 `src/kernel/proc/proc.cc` 中
+- `user/crt0/crt0.s`：用户入口 `_start`，消费 `kernel/core/proc/proc.cc` 中
   `copy_exec_args_to_stack` 生成的初始用户栈。
 - `user/libc`：最小 C 运行时支持，包括 syscall wrapper、errno 翻译、字符串/内存
   函数、基于 `brk` 的 `malloc`/`free`、极简 stdio/printf，以及只读

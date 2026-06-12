@@ -1,6 +1,6 @@
 ## 1. 实现 launch_init 内核入口
 
-- [x] 1.1 在 `src/kernel/proc/`（或 kernel.cc 内）新增无 `#ifdef` 守卫的 `launch_init`，复用 `vfs::init` -> `open_absolute("/boot/user/init.elf")` -> bounded 读入 -> `create_elf_user_process` -> `run_user_process`
+- [x] 1.1 在 `kernel/core/proc/`（或 kernel.cc 内）新增无 `#ifdef` 守卫的 `launch_init`，复用 `vfs::init` -> `open_absolute("/boot/user/init.elf")` -> bounded 读入 -> `create_elf_user_process` -> `run_user_process`
 - [x] 1.2 在 `kernel()` 中于 `bigos::proc::init()` 之后、`bigos::sched::start()` 之前调用 `launch_init`，且不被任何 smoke `#ifdef` 包裹
 - [x] 1.3 进入 ring3 前发出 `BIGOS_INIT_ENTER` 串口 marker
 - [x] 1.4 引入中性常量 `INIT_ELF_PATH` 指向 `/boot/user/init.elf` 供 `launch_init` 使用，保留 `USER_ELF_SMOKE_PATH` 不变（决策 3）

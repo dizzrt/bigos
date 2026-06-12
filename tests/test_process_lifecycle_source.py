@@ -4,25 +4,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_process_core_builds_outside_smoke_and_initializes_normally() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
-    proc = read_source('src/kernel/proc/proc.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'add_defines("BIGOS_USER_PROCESS")' in xmake
-    assert 'add_files("src/kernel/proc/**.cc")' in xmake
-    assert 'if has_config("user_program_smoke") then\n        add_defines("BIGOS_USER_PROGRAM_SMOKE")' in xmake
-    assert 'if has_config("user_elf_smoke") then\n        add_defines("BIGOS_USER_ELF_SMOKE")' in xmake
+    assert 'add_files("$(projectdir)/kernel/core/proc/**.cc")' in xmake
+    assert 'if has_config("user_program_smoke") then' in xmake
+    assert 'add_defines("BIGOS_USER_PROGRAM_SMOKE")' in xmake
+    assert 'if has_config("user_elf_smoke") then' in xmake
+    assert 'add_defines("BIGOS_USER_ELF_SMOKE")' in xmake
     assert 'bigos::proc::init();' in kernel
     assert 'BIGOS_PROC_INIT' in proc
 
 
 def test_bounded_pid_table_parent_child_and_publication_rules() -> None:
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     # The former fixed 16-process array is replaced by an intrusive list bounded
     # by a configurable soft limit; PID/parent-child/publication rules are kept.
@@ -44,7 +58,7 @@ def test_bounded_pid_table_parent_child_and_publication_rules() -> None:
 
 def test_process_object_and_fd_storage_are_heap_allocated_and_growable() -> None:
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     # Process objects come from the kernel heap and are freed on reap; fd storage
     # is a growable heap array, both bounded by configurable soft limits.
@@ -60,9 +74,9 @@ def test_process_object_and_fd_storage_are_heap_allocated_and_growable() -> None
 
 def test_wait_exit_zombie_reap_and_nonblocking_context_rules() -> None:
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
     syscall_h = read_source('include/bigos/syscall.h')
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
     errno_h = read_source('include/bigos/errno.h')
 
     for token in (

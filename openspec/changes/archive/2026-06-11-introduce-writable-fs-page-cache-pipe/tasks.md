@@ -1,6 +1,6 @@
 ## 1. 块缓冲缓存（buffer cache）
 
-- [x] 1.1 新增块缓冲缓存头与实现（落在 `src/kernel/fs/bcache` 一层）：定义 `BufferBlock`（dev、block_no、data、valid、dirty、ref_count、LRU 链接）与固定块大小（扇区大小的固定倍数），缓存数据页用 `alloc_kernel_pages`，缓存条目数为有界编译期常量。
+- [x] 1.1 新增块缓冲缓存头与实现（落在 `kernel/core/fs/bcache` 一层）：定义 `BufferBlock`（dev、block_no、data、valid、dirty、ref_count、LRU 链接）与固定块大小（扇区大小的固定倍数），缓存数据页用 `alloc_kernel_pages`，缓存条目数为有界编译期常量。
 - [x] 1.2 实现 `get(dev, block_no)`（命中返回；未命中分配并经 `block::read_sectors` 装入并标 valid）、`put(block)`（释放引用）、`mark_dirty(block)`、`sync(block)`/`sync_all()`（脏块经块写路径回写并清 dirty），全部 O(1)/有界、无递归落盘。
 - [x] 1.3 实现确定性淘汰：优先淘汰 `ref_count==0` 的干净块；唯一可复用为脏块时先 `sync` 回写再复用；无可淘汰块返回 `nullptr` -> 上层 `-ENOMEM`/`-ENOSPC`，不死等阻塞、不在 IRQ 上下文落盘。
 - [x] 1.4 上下文边界：装入/落盘只在可阻塞进程上下文进行；提供/记录由 syscall 层在分配/进入同步块 IO 前检查调度阻塞守卫的约定。
@@ -22,7 +22,7 @@
 
 ## 4. 管道与 fd 复制（pipe / dup / dup2）
 
-- [x] 4.1 实现管道核心（`src/kernel/ipc` 或 `src/kernel/fs`）：有界环形缓冲、读/写端引用计数、读 `read_wq` 与写 `write_wq` 等待队列；读端/写端各自的 `FileOperations`（读端 read、写端 write，`lseek` 返回 `-ESPIPE`）。
+- [x] 4.1 实现管道核心（`kernel/core/ipc` 或 `kernel/core/fs`）：有界环形缓冲、读/写端引用计数、读 `read_wq` 与写 `write_wq` 等待队列；读端/写端各自的 `FileOperations`（读端 read、写端 write，`lseek` 返回 `-ESPIPE`）。
 - [x] 4.2 实现阻塞读写：读空且写端开 -> `read_wq` 阻塞、写入后唤醒；写满且读端开 -> `write_wq` 阻塞、读出后唤醒；阻塞只在可阻塞进程上下文，不可阻塞上下文确定性失败。
 - [x] 4.3 实现 EOF/EPIPE：写端全关 -> 读返回 0；读端全关 -> 写返回 `-EPIPE`（`SIGPIPE` 投递为可选增强，依赖信号能力可用时）；端引用计数归零时确定性唤醒对端并回收管道对象。
 - [x] 4.4 实现 `dup`/`dup2`：新 fd 指向同一 `File`、共享 offset、增 `File.ref_count`；`dup2` 先关闭已打开的 newfd 一次；close 减引用、归零释放；非法 fd 返回 `-EBADF`、无可用 fd 返回 `-EMFILE`。
@@ -31,19 +31,19 @@
 ## 5. fd/VFS 壳层扩展
 
 - [x] 5.1 在 [vfs.h](include/bigos/fs/vfs.h) 的 `FileOperations` 追加 `write` 与 `lseek` op、`File` 追加 `writable` 标志（追加字段，不破坏既有 `read`/`close` 与 `File` 布局），扩展 `open_absolute` 接受可写/创建 flags 与 `O_CREAT` 的 mode/owner 入参。
-- [x] 5.2 在 [vfs.cc](src/kernel/fs/vfs.cc) 接线 `bigfs` 写后端与管道端 `File`；只读 exFAT 后端的 `write` op 返回 `-EROFS`；新增 `vfs::Status` 取值（`ReadOnlyFs`/`NoSpace`/`AccessDenied`/`NotSeekable` 等）映射到 [errno.h](include/bigos/errno.h)。
+- [x] 5.2 在 [vfs.cc](kernel/core/fs/vfs.cc) 接线 `bigfs` 写后端与管道端 `File`；只读 exFAT 后端的 `write` op 返回 `-EROFS`；新增 `vfs::Status` 取值（`ReadOnlyFs`/`NoSpace`/`AccessDenied`/`NotSeekable` 等）映射到 [errno.h](include/bigos/errno.h)。
 - [x] 5.3 确认现有只读 open/read/close 与只读 exFAT 行为零改动；fd 层支持管道端 `File` 与 `dup`/`dup2` 引用计数共享、exec 继承/close-on-exec。
 
 ## 6. syscall 接线
 
 - [x] 6.1 在 [syscall.h](include/bigos/syscall.h) 的 `SyscallNumber` 末尾追加 `SYS_LSEEK = 20`、`SYS_PIPE = 21`、`SYS_DUP = 22`、`SYS_DUP2 = 23`、`SYS_FSYNC = 24`、`SYS_MKDIR = 25`、`SYS_UNLINK = 26`（最终集合以 spec 为准），不改动既有号位与寄存器 ABI 注释。
-- [x] 6.2 在 [syscall.cc](src/kernel/syscall/syscall.cc) 的 `dispatch` 增加分支：`SYS_PIPE`/`SYS_DUP`/`SYS_DUP2`/`SYS_LSEEK`/`SYS_FSYNC`/`SYS_MKDIR`/`SYS_UNLINK`；扩展 `SYS_OPEN` 接受可写/创建 flags 与 mode、`SYS_WRITE` 支持写入文件/管道 fd；涉及分配/同步块 IO/阻塞的分支先检查调度阻塞守卫，全部不发 EOI。
+- [x] 6.2 在 [syscall.cc](kernel/core/syscall/syscall.cc) 的 `dispatch` 增加分支：`SYS_PIPE`/`SYS_DUP`/`SYS_DUP2`/`SYS_LSEEK`/`SYS_FSYNC`/`SYS_MKDIR`/`SYS_UNLINK`；扩展 `SYS_OPEN` 接受可写/创建 flags 与 mode、`SYS_WRITE` 支持写入文件/管道 fd；涉及分配/同步块 IO/阻塞的分支先检查调度阻塞守卫，全部不发 EOI。
 - [x] 6.3 在 [errno.h](include/bigos/errno.h) 补齐缺失错误码（`EROFS`/`ENOSPC`/`EACCES`/`EPIPE`/`ESPIPE`/`EEXIST`/`EISDIR`/`EMFILE`/`EFAULT` 等），保持单一来源、不重复定义。
 - [x] 6.4 中断/ABI 审查：确认新增/扩展分支不发送 i8259 EOI、不放宽异常/IRQ 门 DPL、不改变 rax 返回约定与向量布局；扩展 `SYS_OPEN`/`SYS_WRITE` 仅扩展语义不改号位。
 
 ## 7. 权限强制点接线
 
-- [x] 7.1 在可写 FS 的 open（写/创建）、`write`、`mkdir`、`unlink` 执行前接入 [cred.cc](src/kernel/proc/cred.cc) 的 `may_access(...)` 作为实际强制点；确认其判定逻辑（root 放行、owner/group/other 匹配、非法输入拒绝）零改动。
+- [x] 7.1 在可写 FS 的 open（写/创建）、`write`、`mkdir`、`unlink` 执行前接入 [cred.cc](kernel/core/proc/cred.cc) 的 `may_access(...)` 作为实际强制点；确认其判定逻辑（root 放行、owner/group/other 匹配、非法输入拒绝）零改动。
 - [x] 7.2 审查强制点：拒绝时不修改文件系统状态、返回确定性 `-EACCES`；只读后端写请求返回 `-EROFS`（按 spec 文档化顺序）；`O_CREAT` 新文件 owner 取调用进程身份、mode 取调用方传入。
 
 ## 8. 验证开关与 smoke

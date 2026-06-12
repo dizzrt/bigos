@@ -4,12 +4,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_cmos_rtc_driver_reads_once_with_bounded_uip_and_validation() -> None:
     rtc_h = read_source('include/drivers/rtc/cmos_rtc.h')
-    rtc = read_source('src/drivers/rtc/cmos_rtc.cc')
+    rtc = read_source('kernel/drivers/rtc/cmos_rtc.cc')
 
     # Ports 0x70 (index) / 0x71 (data) and the one-shot read-only API.
     assert 'CMOS_INDEX_PORT = 0x70' in rtc_h
@@ -34,7 +46,7 @@ def test_cmos_rtc_driver_reads_once_with_bounded_uip_and_validation() -> None:
 
 
 def test_cmos_rtc_does_not_register_irq8_or_poll_periodically() -> None:
-    rtc = read_source('src/drivers/rtc/cmos_rtc.cc')
+    rtc = read_source('kernel/drivers/rtc/cmos_rtc.cc')
 
     # No IRQ8 registration, no enable_irq, no scheduler/blocking in the driver TU.
     for token in ('enable_irq', 'I8259_IRQ_RTC', 'register_handler', 'sleep_for', 'on_tick'):
@@ -43,7 +55,7 @@ def test_cmos_rtc_does_not_register_irq8_or_poll_periodically() -> None:
 
 def test_wall_clock_module_api_and_conversion() -> None:
     time_h = read_source('include/bigos/time.h')
-    time_cc = read_source('src/kernel/time/time.cc')
+    time_cc = read_source('kernel/core/time/time.cc')
 
     assert 'void init() noexcept;' in time_h
     assert 'int64_t boot_unix_time() noexcept;' in time_h
@@ -59,7 +71,7 @@ def test_wall_clock_module_api_and_conversion() -> None:
 
 def test_wall_clock_degrades_deterministically_on_rtc_failure() -> None:
     time_h = read_source('include/bigos/time.h')
-    time_cc = read_source('src/kernel/time/time.cc')
+    time_cc = read_source('kernel/core/time/time.cc')
 
     assert 'RTC_INVALID_BASELINE = 0' in time_h
     assert 'BIGOS_RTC_INVALID' in time_h
@@ -71,7 +83,7 @@ def test_wall_clock_degrades_deterministically_on_rtc_failure() -> None:
 
 
 def test_time_init_runs_after_timer_and_before_proc_init() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     enable_irq_index = kernel.index('bigos::irq::enableIRQ();')
     time_init_index = kernel.index('bigos::time::init();')
@@ -96,7 +108,7 @@ def test_process_carries_identity_quad_and_start_timestamp() -> None:
 
 
 def test_identity_initialized_on_creation_and_inherited_on_fork() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     # Both non-fork creation paths default to root and record the wall clock.
     assert proc.count('__process->uid = bigos::cred::ROOT_UID;') == 2
@@ -112,7 +124,7 @@ def test_identity_initialized_on_creation_and_inherited_on_fork() -> None:
 
 
 def test_exec_preserves_identity_and_start_timestamp() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     # exec copies a fixed set of fields from `prepared` back into the process and
     # must NOT copy the identity quad or start timestamp (so they are preserved).
@@ -123,7 +135,7 @@ def test_exec_preserves_identity_and_start_timestamp() -> None:
 
 def test_credential_decision_primitives_are_pure() -> None:
     cred_h = read_source('include/bigos/cred.h')
-    cred = read_source('src/kernel/proc/cred.cc')
+    cred = read_source('kernel/core/proc/cred.cc')
 
     assert 'ROOT_UID = 0' in cred_h
     assert 'enum class Access' in cred_h
@@ -161,7 +173,7 @@ def test_identity_time_syscall_numbers_appended_after_fork() -> None:
 
 
 def test_identity_time_syscall_dispatch_branches() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     dispatch_body = syscall[syscall.index('void dispatch(') :]
     assert 'case SYS_GET_TIME:' in dispatch_body
@@ -179,7 +191,7 @@ def test_identity_time_syscall_dispatch_branches() -> None:
 
 
 def test_identity_time_syscalls_obey_interrupt_context_contract() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     # The new query helpers must not allocate, block, or send an EOI.
     for token in ('kmalloc', 'alloc_kernel_pages', 'free_pages', 'send_eoi'):
@@ -189,8 +201,8 @@ def test_identity_time_syscalls_obey_interrupt_context_contract() -> None:
 def test_time_identity_smoke_switch_and_marker_present() -> None:
     xmake = read_source('xmake.lua')
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
-    kernel = read_source('src/kernel/kernel.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     option_index = xmake.index('option("time_identity_smoke")')
     default_index = xmake.index('set_default(false)', option_index)

@@ -4,12 +4,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_pit_constants_and_programming_are_explicit() -> None:
     pit_h = read_source('include/drivers/timer/pit.h')
-    pit_cc = read_source('src/drivers/timer/pit.cc')
+    pit_cc = read_source('kernel/drivers/timer/pit.cc')
 
     assert 'CHANNEL0_DATA_PORT = 0x40' in pit_h
     assert 'COMMAND_PORT = 0x43' in pit_h
@@ -27,7 +39,7 @@ def test_pit_constants_and_programming_are_explicit() -> None:
 
 def test_timer_irq0_handler_is_registered_before_unmask() -> None:
     interrupt_h = read_source('include/irq/interrupt.h')
-    isr = read_source('src/kernel/irq/isr.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
 
     assert 'IRQ_LINE_TIMER = 0' in interrupt_h
     assert 'VECTOR_TIMER = I8259_MASTER_VECTOR_BASE + IRQ_LINE_TIMER' in interrupt_h
@@ -43,9 +55,9 @@ def test_timer_irq0_handler_is_registered_before_unmask() -> None:
 
 
 def test_timer_handler_does_not_send_pic_eoi_or_allocate() -> None:
-    isr = read_source('src/kernel/irq/isr.cc')
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
-    timer_cc = read_source('src/kernel/timer/timer.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
+    timer_cc = read_source('kernel/core/timer/timer.cc')
     timer_h = read_source('include/bigos/timer.h')
 
     handler_start = isr.index('implement_isr(timer)')
@@ -83,7 +95,7 @@ def test_timer_handler_does_not_send_pic_eoi_or_allocate() -> None:
 
 
 def test_mdelay_and_tick_polling_not_in_any_isr_handler_body() -> None:
-    isr = read_source('src/kernel/irq/isr.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
 
     timer_start = isr.index('implement_isr(timer)')
     keyboard_start = isr.index('implement_isr(keyboard)')
@@ -99,8 +111,8 @@ def test_mdelay_and_tick_polling_not_in_any_isr_handler_body() -> None:
 
 
 def test_timer_self_test_and_irq_enable_boundaries() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
-    isr = read_source('src/kernel/irq/isr.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
 
     self_test_index = kernel.index('bigos::mm::self_test();')
     init_irq_index = kernel.index('bigos::irq::initIRQ();')
@@ -113,15 +125,15 @@ def test_timer_self_test_and_irq_enable_boundaries() -> None:
 
 def test_timer_smoke_is_default_off_gated_and_bounded() -> None:
     xmake = read_source('xmake.lua')
-    # timer = read_source('src/kernel/timer/timer.cc')
+    # timer = read_source('kernel/core/timer/timer.cc')
 
     option_index = xmake.index('option("timer_smoke")')
     default_index = xmake.index('set_default(false)', option_index)
     define_index = xmake.index('add_defines("BIGOS_TIMER_SMOKE")')
 
     assert option_index < default_index < define_index
-    assert 'driver::irqchip::i8259::enable_irq(IRQ_LINE_TIMER);' in read_source('src/kernel/irq/isr.cc')
-    isr = read_source('src/kernel/irq/isr.cc')
+    assert 'driver::irqchip::i8259::enable_irq(IRQ_LINE_TIMER);' in read_source('kernel/core/irq/isr.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
     assert '#ifdef BIGOS_TIMER_SMOKE' in isr
     assert 'TIMER_SMOKE_MARKER_LIMIT = 3' in isr
     assert 'if (bigos::timer::ticks() <= TIMER_SMOKE_MARKER_LIMIT)' in isr
@@ -130,7 +142,7 @@ def test_timer_smoke_is_default_off_gated_and_bounded() -> None:
 
 def test_timer_delay_api_documents_busy_wait_semantics() -> None:
     timer_h = read_source('include/bigos/timer.h')
-    timer_cc = read_source('src/kernel/timer/timer.cc')
+    timer_cc = read_source('kernel/core/timer/timer.cc')
     docs = read_source('docs/en/arch/timer-irq-foundation.md')
 
     assert 'void mdelay(uint64_t milliseconds) noexcept;' in timer_h
@@ -150,8 +162,8 @@ def test_timer_api_context_contracts_are_documented() -> None:
 
 
 def test_isr_abi_invariants_are_preserved() -> None:
-    interrupt_s = read_source('src/kernel/irq/interrupt.s')
-    interrupt_cc = read_source('src/kernel/irq/interrupt.cc')
+    interrupt_s = read_source('kernel/core/irq/interrupt.s')
+    interrupt_cc = read_source('kernel/core/irq/interrupt.cc')
 
     common_start = interrupt_s.index('isr_common:')
     common_end = interrupt_s.index('.data', common_start)

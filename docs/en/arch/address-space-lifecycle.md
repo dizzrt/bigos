@@ -4,7 +4,7 @@ This stage adds bounded reclamation for runtime-created page tables and the defa
 
 ## Page-Table Ownership
 
-`src/mm/vmem.cc` keeps a static `PageTableMetadata` table. The table records:
+`kernel/mm/vmem.cc` keeps a static `PageTableMetadata` table. The table records:
 
 - Owner category: kernel vmem dynamic mappings or a derived user address space.
 - Page-table level: PML4, PDPT, PD, or PT.

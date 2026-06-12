@@ -19,9 +19,9 @@ source on the current BIOS + i8259 path.
 ## Tick Ownership And API Context Contract
 
 Tick state ownership lives in the timer translation unit. The monotonic counter
-`bigos::timer::__detail::g_ticks` is defined in `src/kernel/timer/timer.cc`, and
+`bigos::timer::__detail::g_ticks` is defined in `kernel/core/timer/timer.cc`, and
 the IRQ layer interacts with it only through the timer API. The IRQ0 handler in
-`src/kernel/irq/isr.cc` advances the tick by calling the timer-owned
+`kernel/core/irq/isr.cc` advances the tick by calling the timer-owned
 `bigos::timer::on_tick()`; it does not mutate `g_ticks` directly.
 
 The early timer APIs have explicit execution-context contracts:
@@ -60,7 +60,7 @@ threads from IRQ return.
 
 ## ISR ABI Runtime Invariants
 
-The ISR entry path (`src/kernel/irq/interrupt.s`) preserves the following ABI
+The ISR entry path (`kernel/core/irq/interrupt.s`) preserves the following ABI
 invariants without changing the `InterruptFrame` layout or register-save order:
 
 - General-purpose registers are saved in reverse `InterruptFrame` field order

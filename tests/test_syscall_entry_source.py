@@ -5,6 +5,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
@@ -85,7 +97,7 @@ def test_syscall_abi_mapping_is_documented_in_arch_docs() -> None:
 
 
 def test_irq_dispatch_recognizes_syscall_vector_without_eoi() -> None:
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     assert 'is_syscall_vector' in interrupt
     assert '__vector == VECTOR_SYSCALL' in interrupt
@@ -103,7 +115,7 @@ def test_irq_dispatch_recognizes_syscall_vector_without_eoi() -> None:
 
 
 def test_syscall_dispatch_reads_rax_and_routes_known_numbers() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     # number read from InterruptFrame.rax, result written back to InterruptFrame.rax.
     assert 'const uint64_t number = __frame->rax;' in syscall
@@ -121,7 +133,7 @@ def test_syscall_dispatch_reads_rax_and_routes_known_numbers() -> None:
 
 
 def test_syscall_dispatch_unknown_number_returns_deterministic_error() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     default_index = syscall.index('default:')
     enosys_index = syscall.index('result = -bigos::ENOSYS;', default_index)
@@ -133,7 +145,7 @@ def test_syscall_dispatch_unknown_number_returns_deterministic_error() -> None:
 
 
 def test_debug_write_syscall_emits_marker_from_bounded_kernel_buffer() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     assert 'BIGOS_SYSCALL_WRITE' in syscall
     assert 'serial_puts(kernel_buffer);' in syscall
@@ -144,14 +156,14 @@ def test_debug_write_syscall_emits_marker_from_bounded_kernel_buffer() -> None:
 
 
 def test_get_tick_syscall_returns_monotonic_tick_via_return_register() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     assert 'sys_get_tick' in syscall
     assert 'bigos::timer::ticks()' in syscall
 
 
 def test_syscall_path_obeys_interrupt_context_contract() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     forbidden_tokens = (
         'kmalloc',
@@ -167,9 +179,9 @@ def test_syscall_path_obeys_interrupt_context_contract() -> None:
 
 
 def test_stage_does_not_enter_ring3_or_switch_cr3() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
-    kernel = read_source('src/kernel/kernel.cc')
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     # Syscall dispatch itself does not perform ring3 entry or load user code.
     for source in (syscall, interrupt):
@@ -183,8 +195,8 @@ def test_stage_does_not_enter_ring3_or_switch_cr3() -> None:
 
 
 def test_stage_does_not_change_idt_dpl_or_add_user_gdt_tss_or_syscall_msr() -> None:
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     # Only syscall vector gets the DPL=3 trap gate, preserving IF for fd/VFS
     # syscalls that pass sched::can_block() in ordinary process context.
@@ -201,7 +213,7 @@ def test_stage_does_not_change_idt_dpl_or_add_user_gdt_tss_or_syscall_msr() -> N
 
 def test_syscall_smoke_is_default_off_gated_and_bounded() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     option_index = xmake.index('option("syscall_smoke")')
     default_index = xmake.index('set_default(false)', option_index)
@@ -218,7 +230,7 @@ def test_syscall_smoke_is_default_off_gated_and_bounded() -> None:
 
 
 def test_syscall_smoke_runs_in_non_interrupt_context_after_irq_init() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     init_irq_index = kernel.index('bigos::irq::initIRQ();')
     smoke_call_index = kernel.index('syscall_smoke();')

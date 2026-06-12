@@ -30,7 +30,7 @@ BigOS 目前只能在 Legacy BIOS bootloader 路径中使用一次性的 exFAT �
 
 ## Impact
 
-- 影响子系统：`src/drivers` 新增块设备/ATA 读取后端，`src/kernel` 新增基础 FS/exFAT runtime，必要时新增 `include/bigos` 或 `include/drivers` 公共头。
+- 影响子系统：`kernel/drivers` 新增块设备/ATA 读取后端，`kernel/core` 新增基础 FS/exFAT runtime，必要时新增 `include/bigos` 或 `include/drivers` 公共头。
 - 影响构建：`xmake.lua` 新增默认关闭的 `fs_smoke` 或等价开关；smoke 仍通过 `xmake f ...` 持久化并由 `xmake run bochs-sdl2` / `xmake run bochs` 启动。
 - 影响工具：`tools/boot_debug.py` 或测试镜像生成逻辑可复用现有 exFAT raw image 布局，提供用于 kernel FS smoke 的固定测试文件。
 - 影响诊断：失败路径使用统一 panic/marker 机制；runtime smoke 输出稳定 `BIGOS_FS_EXFAT_READ_*` marker。

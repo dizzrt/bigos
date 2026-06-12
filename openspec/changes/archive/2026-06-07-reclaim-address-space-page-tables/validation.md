@@ -10,7 +10,7 @@
 
 - Passed: toolchain discovery found `x86_64-elf-gcc`, `x86_64-elf-g++`, `xmake`, and `bochs`.
 - Passed: `xmake` default build (`build ok`).
-- Passed: `xmake f --user_program_smoke=y && xmake` (`build ok`), covering `src/kernel/proc/**`, syscall exit/fault, and address-space teardown wiring.
+- Passed: `xmake f --user_program_smoke=y && xmake` (`build ok`), covering `kernel/core/proc/**`, syscall exit/fault, and address-space teardown wiring.
 
 ## Runtime Smoke
 
@@ -20,8 +20,8 @@
 
 ## Static Diagnostics
 
-- Passed: VS Code diagnostics for `src/mm/vmem.cc`, `src/kernel/proc/proc.cc`, `src/kernel/syscall/syscall.cc`, `src/kernel/irq/interrupt.cc`, and `src/kernel/sched/sched.cc`.
-- Passed: `clang++ -target x86_64-elf -std=c++17 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -nostdinc++ -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/mm/vmem.cc src/kernel/proc/proc.cc src/kernel/syscall/syscall.cc src/kernel/irq/interrupt.cc src/kernel/sched/sched.cc -DBIGOS_USER_PROGRAM_SMOKE`.
+- Passed: VS Code diagnostics for `kernel/mm/vmem.cc`, `kernel/core/proc/proc.cc`, `kernel/core/syscall/syscall.cc`, `kernel/core/irq/interrupt.cc`, and `kernel/core/sched/sched.cc`.
+- Passed: `clang++ -target x86_64-elf -std=c++17 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -nostdinc++ -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/mm/vmem.cc kernel/core/proc/proc.cc kernel/core/syscall/syscall.cc kernel/core/irq/interrupt.cc kernel/core/sched/sched.cc -DBIGOS_USER_PROGRAM_SMOKE`.
 - Note: `clangd` binary is present, but no `compile_commands.json` exists; editor diagnostics were used as the clangd auxiliary signal.
 
 ## OpenSpec

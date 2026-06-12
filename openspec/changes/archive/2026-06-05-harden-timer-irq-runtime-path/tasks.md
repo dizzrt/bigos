@@ -1,19 +1,19 @@
 ## 1. 迁移 tick 状态并引入受控 timer API
 
-- [x] 1.1 在 `src/kernel/timer/timer.cc` 定义 `volatile tick_t g_ticks`（保留 `bigos::timer::__detail`），并从 `src/kernel/irq/isr.cc` 移除该定义。
-- [x] 1.2 在 `src/kernel/timer/timer.cc` 实现 IRQ-context-safe 的 `bigos::timer::on_tick() noexcept`，仅递增单调 tick，不分配/阻塞/IO/EOI。
+- [x] 1.1 在 `kernel/core/timer/timer.cc` 定义 `volatile tick_t g_ticks`（保留 `bigos::timer::__detail`），并从 `kernel/core/irq/isr.cc` 移除该定义。
+- [x] 1.2 在 `kernel/core/timer/timer.cc` 实现 IRQ-context-safe 的 `bigos::timer::on_tick() noexcept`，仅递增单调 tick，不分配/阻塞/IO/EOI。
 - [x] 1.3 在 `include/bigos/timer.h` 声明 `on_tick()`，并为 `on_tick()`/`ticks()`/`mdelay()` 补充上下文调用契约注释（IRQ-only / 任意上下文只读 / 仅 IRQ-enabled 非中断上下文）。
 
 ## 2. 收敛 IRQ0 handler
 
-- [x] 2.1 修改 `src/kernel/irq/isr.cc` 的 `implement_isr(timer)`，改为调用 `bigos::timer::on_tick()`，移除 `++bigos::timer::__detail::g_ticks`。
+- [x] 2.1 修改 `kernel/core/irq/isr.cc` 的 `implement_isr(timer)`，改为调用 `bigos::timer::on_tick()`，移除 `++bigos::timer::__detail::g_ticks`。
 - [x] 2.2 保留 `BIGOS_TIMER_SMOKE` 下 bounded `serial_puts("BIGOS_TIMER_IRQ\n")` marker，确认 marker 逻辑不进入 `on_tick()`。
 - [x] 2.3 确认 handler 仍不直接发送 i8259 EOI，EOI 仍由 `irq_dispatch` 在 handler 返回后统一发送。
 
 ## 3. 固化 ISR ABI 不变量（验证为主，不改 ABI）
 
-- [x] 3.1 复核 `src/kernel/irq/interrupt.s` 的栈 16 字节对齐、通用寄存器按 `InterruptFrame` 字段顺序保存/恢复、error-code 占位槽，必要时仅补注释不改布局。
-- [x] 3.2 复核 `src/kernel/irq/interrupt.cc` 的 exception 不发 EOI、external IRQ 单次 EOI 后 `iretq` 返回边界。
+- [x] 3.1 复核 `kernel/core/irq/interrupt.s` 的栈 16 字节对齐、通用寄存器按 `InterruptFrame` 字段顺序保存/恢复、error-code 占位槽，必要时仅补注释不改布局。
+- [x] 3.2 复核 `kernel/core/irq/interrupt.cc` 的 exception 不发 EOI、external IRQ 单次 EOI 后 `iretq` 返回边界。
 
 ## 4. 更新源码级测试
 

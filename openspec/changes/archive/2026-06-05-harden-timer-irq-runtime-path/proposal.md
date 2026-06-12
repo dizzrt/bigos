@@ -1,6 +1,6 @@
 ## Why
 
-阶段 1 的 `add-timer-irq-foundation` 已实现并归档：PIT channel 0 + i8259 IRQ0 已默认开启，IRQ0 handler 直接递增 `bigos::timer::__detail::g_ticks`，`timer::ticks()` 读取该 counter，`timer::mdelay()` 在其上 busy-wait。为快速完成 bring-up，handler 当前是一段保守的 inline 实现：tick 状态定义在 `src/kernel/irq/isr.cc` 而非 timer translation unit，handler 跨命名空间直接写 `g_ticks`，受控的 timer 内部 API（如 `timer::on_tick()`）被刻意省略，源码级测试甚至断言 `bigos::timer::on_tick();` 不存在。
+阶段 1 的 `add-timer-irq-foundation` 已实现并归档：PIT channel 0 + i8259 IRQ0 已默认开启，IRQ0 handler 直接递增 `bigos::timer::__detail::g_ticks`，`timer::ticks()` 读取该 counter，`timer::mdelay()` 在其上 busy-wait。为快速完成 bring-up，handler 当前是一段保守的 inline 实现：tick 状态定义在 `kernel/core/irq/isr.cc` 而非 timer translation unit，handler 跨命名空间直接写 `g_ticks`，受控的 timer 内部 API（如 `timer::on_tick()`）被刻意省略，源码级测试甚至断言 `bigos::timer::on_tick();` 不存在。
 
 在进入阶段 2（keyboard/TTY 默认启用 IRQ1）之前，需要在不引入 scheduler、抢占、SMP 或用户态的前提下，把这条保守路径打磨成更干净、可验证的 timer/IRQ runtime path，明确 IRQ-context 安全边界并补齐 ISR ABI 的 runtime 证据，降低后续阶段再次耦合未硬化 IRQ 路径的风险。
 
@@ -27,8 +27,8 @@
 
 ## Impact
 
-- 影响 IRQ/timer 子系统：`src/kernel/irq/isr.cc`（handler 改为调用 `on_tick()`、tick 状态迁出）、`src/kernel/timer/timer.cc` 与 `include/bigos/timer.h`（新增 `on_tick()` 及上下文契约注释）、`src/kernel/irq/interrupt.cc`（dispatch/EOI 边界复核）。
-- 影响 ISR ABI 汇编：`src/kernel/irq/interrupt.s` 的栈对齐与寄存器保存约束需被源码级/runtime 验证覆盖；本 change 不改变 ABI，只补齐验证与不变量记录。
+- 影响 IRQ/timer 子系统：`kernel/core/irq/isr.cc`（handler 改为调用 `on_tick()`、tick 状态迁出）、`kernel/core/timer/timer.cc` 与 `include/bigos/timer.h`（新增 `on_tick()` 及上下文契约注释）、`kernel/core/irq/interrupt.cc`（dispatch/EOI 边界复核）。
+- 影响 ISR ABI 汇编：`kernel/core/irq/interrupt.s` 的栈对齐与寄存器保存约束需被源码级/runtime 验证覆盖；本 change 不改变 ABI，只补齐验证与不变量记录。
 - 影响测试与工具：更新 `tests/test_timer_irq_foundation_source.py` 相关断言，新增覆盖 `on_tick` 存在、handler 经 `on_tick` 更新 tick、`mdelay` 不在 IRQ handler 调用、ISR ABI 不变量的源码级检查；Bochs 可用时复用 `tools/boot_debug.py` serial marker 做 bounded runtime smoke。
 - 影响文档：更新 `docs/en/arch/timer-irq-foundation.md`，补充 timer/IRQ runtime 契约与上下文边界。
 - 架构假设：仍为单核、x86_64 legacy BIOS + i8259 PIC + PIT 8253/8254 + Bochs 路径；不引入 scheduler、抢占、SMP、APIC/IOAPIC/HPET 或用户态。

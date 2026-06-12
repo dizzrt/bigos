@@ -66,7 +66,7 @@ CPU exception handler、fatal diagnostic path 和 syscall dispatch 内部默认�
 
 ## Risks / Trade-offs
 
-- [Risk] IRQ-return switch 破坏 `InterruptFrame` 或 generated ISR frame layout -> Mitigation: 实现前审查 `include/irq/interrupt.h`、`src/kernel/irq/interrupt.s`、`src/kernel/sched/switch.s`，增加源码级 frame/order 检查，并记录 validation artifact。
+- [Risk] IRQ-return switch 破坏 `InterruptFrame` 或 generated ISR frame layout -> Mitigation: 实现前审查 `include/irq/interrupt.h`、`kernel/core/irq/interrupt.s`、`kernel/core/sched/switch.s`，增加源码级 frame/order 检查，并记录 validation artifact。
 - [Risk] EOI 顺序错误导致丢 IRQ、重复 EOI 或 nested interrupt 异常 -> Mitigation: 外部 IRQ handler 完成后仍只发送一次 EOI；scheduler switch boundary 明确在 EOI 之后或经文档化顺序执行，CPU exception/syscall 不发送 EOI。
 - [Risk] 在 scheduler/run queue/wait queue 临界区被抢占导致队列损坏 -> Mitigation: preemption-disable depth 覆盖所有状态转换；pending reschedule 延后到最外层 enable 后处理。
 - [Risk] timer IRQ path 过重影响 interrupt latency -> Mitigation: IRQ hook 只做 tick accounting、slice decrement 和 pending 标记；不分配、不释放、不阻塞、不 bulk 输出、不访问 filesystem/user mode。

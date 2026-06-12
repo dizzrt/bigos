@@ -22,7 +22,7 @@
 
 ## Impact
 
-- 影响子系统：`src/mm/buddy.*`、`src/mm/kmem.*`、`src/mm/memdef.h`，可能影响 boot handoff memory map 消费路径和内存初始化诊断输出。
+- 影响子系统：`kernel/mm/buddy.*`、`kernel/mm/kmem.*`、`kernel/mm/memdef.h`，可能影响 boot handoff memory map 消费路径和内存初始化诊断输出。
 - 架构假设：x86_64 freestanding kernel，BootInfo v2/v1 memory map 已规范化，低 2 MiB 和 kernel 映像仍保留不释放。
 - 内存布局假设：arena 必须来自明确保留或初始化期安全使用的内存，不得覆盖 `0x0500..0x9fff` handoff/page-table 区、`0x100000` boot 页表 backing、`0x1000000` kernel load base 或 kernel 映像范围。
 - API 影响：不改变公开内存 API；新增接口应优先保持在 `bigos::mm::__detail` 或内部源文件作用域。

@@ -31,7 +31,7 @@
 
 ## Impact
 
-- 受影响子系统：`src/mm`、`include/bigos/memory.h` 或相关内存 public headers、`src/kernel/irq`、`src/kernel/kernel.cc` 初始化顺序、`docs/en/arch` 内存/中断文档、`tests` 源码级验证。
+- 受影响子系统：`kernel/mm`、`include/bigos/memory.h` 或相关内存 public headers、`kernel/core/irq`、`kernel/core/kernel.cc` 初始化顺序、`docs/en/arch` 内存/中断文档、`tests` 源码级验证。
 - 架构假设：x86_64、单核、Legacy BIOS/i8259、kernel-owned IDT、无 scheduler、无 SMP、无用户态地址空间。
 - 内存布局假设：保持 higher-half kernel、kernel heap/vmalloc 区、direct map 区和页表 self-mapping 现有布局不变。
 - 工具链/模拟器假设：继续使用 xmake、`x86_64-elf-g++`、`uv run pytest`、OpenSpec 校验；Bochs runtime smoke 如不可稳定运行，需在 validation 中记录原因和剩余风险。

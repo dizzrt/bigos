@@ -47,7 +47,7 @@ run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表�
 
 ## Context Switch
 
-`switch_context(uint64_t *old_sp, uint64_t new_sp)`（`src/kernel/sched/switch.s`）保存当前线程的 callee-saved 寄存器与栈指针到 `*old_sp`，加载目标线程栈并 `ret` 进入其保存的返回点。cooperative `yield()` / `thread_exit()` 仍直接使用它。IRQ-return preemption 使用 scheduler-owned bridge，在 EOI 之后保存被中断线程的当前内核栈 continuation，稍后恢复它，让原始 `InterruptFrame` 继续由 `isr_common` 恢复并通过 `iretq` 返回。
+`switch_context(uint64_t *old_sp, uint64_t new_sp)`（`kernel/core/sched/switch.s`）保存当前线程的 callee-saved 寄存器与栈指针到 `*old_sp`，加载目标线程栈并 `ret` 进入其保存的返回点。cooperative `yield()` / `thread_exit()` 仍直接使用它。IRQ-return preemption 使用 scheduler-owned bridge，在 EOI 之后保存被中断线程的当前内核栈 continuation，稍后恢复它，让原始 `InterruptFrame` 继续由 `isr_common` 恢复并通过 `iretq` 返回。
 
 新线程栈由 `create_kernel_thread()` 预构造：首次被调度时 `switch_context` 的 `ret` 进入 scheduler-owned `thread_trampoline`，trampoline 先开启中断，再调用线程入口函数；入口返回时进入 `thread_exit()`。
 

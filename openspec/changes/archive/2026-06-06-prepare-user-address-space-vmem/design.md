@@ -3,7 +3,7 @@
 阶段 4 完成后，内核已具备 cooperative 内核线程与单核 round-robin 调度。下一步迈向用户态前，
 需要把当前“仅服务内核”的页表代码抽象成显式的 map/unmap primitive，并定义 user/kernel 页属性策略。
 
-当前页表实现位于 `src/mm/vmem.cc`：
+当前页表实现位于 `kernel/mm/vmem.cc`：
 
 - 内核拥有静态 PML4，物理地址 `KERNEL_PML4_ADDR = 0x2000`，并通过递归 self-mapping
   （`SELF_MAPPING_BASE = 0xffff800000000000`）访问各级页表。

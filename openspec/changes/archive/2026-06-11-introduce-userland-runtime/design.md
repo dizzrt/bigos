@@ -1,6 +1,6 @@
 ## Context
 
-阶段 18 完成后，内核侧支撑真实用户态所需的语义已基本齐备：进程生命周期与安全回收、`fork`/COW（阶段 16）、信号（阶段 17）、墙钟与 uid/gid（阶段 16.5）、可写 FS + 页缓存 + `pipe`/`dup`/`dup2`/`lseek`（阶段 18），以及内核内已存在但尚未经 syscall 暴露的当前进程镜像替换入口 `exec_current_from_elf_image`（[proc.cc](src/kernel/proc/proc.cc) 第 1419 行）。`launch_init`（[proc.cc](src/kernel/proc/proc.cc) 第 1065 行）已经在 normal boot 默认加载 `/boot/user/init.elf` 并进入 ring3，初始用户栈布局由 `copy_exec_args_to_stack`（[proc.cc](src/kernel/proc/proc.cc) 第 829 行）按 `[argc][argv...NULL][envp...NULL][strings]` 布置、初始 SP 指向 `argc`。
+阶段 18 完成后，内核侧支撑真实用户态所需的语义已基本齐备：进程生命周期与安全回收、`fork`/COW（阶段 16）、信号（阶段 17）、墙钟与 uid/gid（阶段 16.5）、可写 FS + 页缓存 + `pipe`/`dup`/`dup2`/`lseek`（阶段 18），以及内核内已存在但尚未经 syscall 暴露的当前进程镜像替换入口 `exec_current_from_elf_image`（[proc.cc](kernel/core/proc/proc.cc) 第 1419 行）。`launch_init`（[proc.cc](kernel/core/proc/proc.cc) 第 1065 行）已经在 normal boot 默认加载 `/boot/user/init.elf` 并进入 ring3，初始用户栈布局由 `copy_exec_args_to_stack`（[proc.cc](kernel/core/proc/proc.cc) 第 829 行）按 `[argc][argv...NULL][envp...NULL][strings]` 布置、初始 SP 指向 `argc`。
 
 但用户态仍是裸的：唯一用户程序是手写汇编 `init`（[user/init/init.s](user/init/init.s)），没有 C 运行时（crt0）、没有 syscall wrapper 库、没有 `/bin/sh`。本设计要在这些内核能力之上建立**最小可用用户态**，并把唯一缺失的内核暴露点 `SYS_EXECVE` 以 append-only 方式补上。
 
@@ -38,7 +38,7 @@
 默认 `/boot/user/init.elf` 改为一个链接了 crt0/libc 的最小 C init，承担真实 PID-1 语义：`fork` 子进程并在子进程 `execve("/bin/sh", ...)`，父 init 进入 `while(1) wait(...)` 常驻循环，回收所有退出的子进程（含被过继到 PID-1 的孤儿/僵尸）；当 `/bin/sh` 退出时 init 可重新 `fork`+`execve` 拉起 shell（重启策略在 tasks 固定，至少不得让 PID-1 退出）。init 自身的 `fork`/`execve`/`wait` 失败走确定性报错并经现有 `BIGOS_INIT_*`/panic 边界处理。`launch_init` 内核加载路径不变，只是被加载的 init 程序语义从"打印并退出"升级为"常驻派生 + 收割"。
 - 替代方案 A：内核 `launch_init` 直接加载 `/bin/sh`。否决：把 shell 路径硬编码进内核、弱化 PID-1 语义，且 PID-1 即 sh 时无人收割孤儿。
 - 替代方案 B：init 经 `SYS_EXECVE` 自替换为 `/bin/sh`（PID-1 变成 sh）。否决：实现虽更简单，但 PID-1 一旦退出系统就无 init、且孤儿无人回收，不符合真实 init 语义。
-- 依赖（已核查）：常驻收割依赖"父进程先退出时孤儿被过继到 PID-1"的内核语义，而该语义**当前未实现**——[proc.cc](src/kernel/proc/proc.cc) `exit_current` 不 reparent 子进程，`mark_zombie_or_reap_pending` 在父不存在时直接自我回收（孤儿被静默回收、无人可 `wait`），且第 2087 行注释明示 "does not implement PID-1 restart/adoption"。因此**本阶段补齐最小过继接线**（见决策 9），而非仅记录差距。
+- 依赖（已核查）：常驻收割依赖"父进程先退出时孤儿被过继到 PID-1"的内核语义，而该语义**当前未实现**——[proc.cc](kernel/core/proc/proc.cc) `exit_current` 不 reparent 子进程，`mark_zombie_or_reap_pending` 在父不存在时直接自我回收（孤儿被静默回收、无人可 `wait`），且第 2087 行注释明示 "does not implement PID-1 restart/adoption"。因此**本阶段补齐最小过继接线**（见决策 9），而非仅记录差距。
 
 ### 决策 9：补齐最小孤儿过继到 PID-1（init）接线
 在进程退出路径补一段最小 reparent：当一个进程退出时（`exit_current`/`fault_current_and_exit` -> 标记 zombie/reap 之前），遍历其 `first_child_pid` 兄弟链，把每个尚存活/僵尸的子进程 `parent_pid` 改为 `g_init_process->pid` 并挂入 init 的 `first_child_pid` 链；随后对每个已是 Zombie 的被过继子进程，向 init 投递 `SIGCHLD` 并 `wake_all(&g_process_wait_queue)`，使 init 的 `while(1) wait` 能收到并回收。复用现有 `Process.parent_pid`/`first_child_pid`/`next_sibling_pid` 字段与现有 sibling 链维护逻辑（参考 `publish_process`/`unpublish_process` 的挂链/摘链方式），不新增数据结构、不引入锁、不改 `wait_current` 既有遍历语义（它本就遍历父的子链，过继后孤儿自然落入 init 的子链）。

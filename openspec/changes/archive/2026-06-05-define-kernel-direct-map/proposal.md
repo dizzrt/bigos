@@ -32,7 +32,7 @@
 
 ## Impact
 
-- 受影响子系统：内存初始化与页表映射（`src/mm`）、公共内存头文件（`include/mm` 或
+- 受影响子系统：内存初始化与页表映射（`kernel/mm`）、公共内存头文件（`include/mm` 或
   `include/bigos`）、内核内存布局文档/注释、内存 runtime self-test。
 - 受影响地址布局：新增 direct-map 虚拟区间；不移动 `0xffffffff80000000` higher-half
   kernel base、boot 固定地址、`KERNEL_PML4_ADDR`、recursive self-mapping window、

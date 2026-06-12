@@ -5,11 +5,11 @@
 ```text
 i8259 IRQ0 fires
   -> interrupt.s stub: push regs, build InterruptFrame, align stack, call irq_dispatch
-  -> irq_dispatch(frame)            # src/kernel/irq/interrupt.cc
+  -> irq_dispatch(frame)            # kernel/core/irq/interrupt.cc
        -> is_i8259_external_irq?
        -> spurious check
        -> handler = isr_list[vector] (= isr_timer)
-       -> isr_timer(frame)          # src/kernel/irq/isr.cc
+       -> isr_timer(frame)          # kernel/core/irq/isr.cc
             ++bigos::timer::__detail::g_ticks;   # 直接裸写
             [BIGOS_TIMER_SMOKE] bounded serial_puts("BIGOS_TIMER_IRQ")
        -> i8259::send_eoi(irq_line) # dispatch 统一发送 EOI
@@ -18,12 +18,12 @@ i8259 IRQ0 fires
 
 关键现状与约束：
 
-- tick 状态 `volatile tick_t g_ticks` 定义在 [isr.cc](`src/kernel/irq/isr.cc`)（`timer::__detail` 命名空间），但物理上落在 IRQ translation unit 而非 timer translation unit。
-- IRQ0 handler 直接 `++bigos::timer::__detail::g_ticks`，没有受控的 `timer::on_tick()` 封装；[timer.cc](`src/kernel/timer/timer.cc`) 只暴露 `ticks()` 和 `mdelay()`。
+- tick 状态 `volatile tick_t g_ticks` 定义在 [isr.cc](`kernel/core/irq/isr.cc`)（`timer::__detail` 命名空间），但物理上落在 IRQ translation unit 而非 timer translation unit。
+- IRQ0 handler 直接 `++bigos::timer::__detail::g_ticks`，没有受控的 `timer::on_tick()` 封装；[timer.cc](`kernel/core/timer/timer.cc`) 只暴露 `ticks()` 和 `mdelay()`。
 - 现有源码级测试 [test_timer_irq_foundation_source.py](`tests/test_timer_irq_foundation_source.py`) 显式断言 `bigos::timer::on_tick();` 不存在、handler 直写 `g_ticks`，因此硬化必须同步更新这些断言。
-- EOI 已由 [irq_dispatch](`src/kernel/irq/interrupt.cc`) 在 handler 返回后统一发送，handler 不直接 EOI。
-- `mdelay()` 在 [timer.cc](`src/kernel/timer/timer.cc`) 中 busy-wait 轮询 `ticks()`，依赖 IRQ0 持续推进 tick——在 IRQ disabled 或 IRQ context 中调用会死循环。
-- ISR ABI（栈对齐、寄存器保存、`InterruptFrame` layout、error-code 槽）由 [interrupt.s](`src/kernel/irq/interrupt.s`) 与 [interrupt.h](`include/irq/interrupt.h`) 共同约定，目前缺少针对 runtime 行为的明确不变量记录与验证。
+- EOI 已由 [irq_dispatch](`kernel/core/irq/interrupt.cc`) 在 handler 返回后统一发送，handler 不直接 EOI。
+- `mdelay()` 在 [timer.cc](`kernel/core/timer/timer.cc`) 中 busy-wait 轮询 `ticks()`，依赖 IRQ0 持续推进 tick——在 IRQ disabled 或 IRQ context 中调用会死循环。
+- ISR ABI（栈对齐、寄存器保存、`InterruptFrame` layout、error-code 槽）由 [interrupt.s](`kernel/core/irq/interrupt.s`) 与 [interrupt.h](`include/irq/interrupt.h`) 共同约定，目前缺少针对 runtime 行为的明确不变量记录与验证。
 
 约束：单核、早期可关中断、无 scheduler/SMP/用户态；不得移动任何 boot/linker/memory 地址或改变 IDT/`InterruptFrame` ABI 形状。
 
@@ -49,7 +49,7 @@ i8259 IRQ0 fires
 
 ### Decision: 恢复受控 timer 内部 API `on_tick()` 并迁移 tick 状态
 
-`g_ticks` 的定义与递增逻辑 SHALL 归位到 timer translation unit（`src/kernel/timer/timer.cc`，状态保留在 `bigos::timer::__detail`）。新增 IRQ-context-safe 的 `bigos::timer::on_tick() noexcept`，只做最小工作：原子地（在单核关中断 IRQ context 下即简单递增）推进单调 tick counter。IRQ0 handler 改为调用 `bigos::timer::on_tick()`，不再出现 `++bigos::timer::__detail::g_ticks`。
+`g_ticks` 的定义与递增逻辑 SHALL 归位到 timer translation unit（`kernel/core/timer/timer.cc`，状态保留在 `bigos::timer::__detail`）。新增 IRQ-context-safe 的 `bigos::timer::on_tick() noexcept`，只做最小工作：原子地（在单核关中断 IRQ context 下即简单递增）推进单调 tick counter。IRQ0 handler 改为调用 `bigos::timer::on_tick()`，不再出现 `++bigos::timer::__detail::g_ticks`。
 
 理由：阶段 1 为规避“在高频 IRQ0 handler 中跨 translation unit 调用尚未充分 runtime 验证的 timer 内部函数”而采用裸写；阶段 1.5 的目标正是在稳定 oracle 下验证该跨 TU 调用，从而恢复封装、收敛所有权、为阶段 4 scheduler tick hook 预留干净落点。
 
@@ -100,7 +100,7 @@ i8259 IRQ0 fires
 
 ## Migration Plan
 
-1. 在 `src/kernel/timer/timer.cc` 定义 `g_ticks` 与 `on_tick()`，从 `isr.cc` 移除 `g_ticks` 定义。
+1. 在 `kernel/core/timer/timer.cc` 定义 `g_ticks` 与 `on_tick()`，从 `isr.cc` 移除 `g_ticks` 定义。
 2. 在 `include/bigos/timer.h` 声明 `on_tick()` 并补充三个 API 的上下文契约注释。
 3. 修改 IRQ0 handler 调用 `bigos::timer::on_tick()`，保留 `BIGOS_TIMER_SMOKE` bounded marker。
 4. 复核 `interrupt.cc`/`interrupt.s` 的 EOI 与寄存器保存边界，补充必要注释（不改 ABI）。

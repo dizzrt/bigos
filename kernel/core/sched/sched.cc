@@ -15,7 +15,7 @@
 NAMESPACE_BIGOS_BEG
 namespace sched {
 
-    // x86_64 cooperative context switch (src/kernel/sched/switch.s). Saves the
+    // x86_64 cooperative context switch (kernel/core/sched/switch.s). Saves the
     // System V callee-saved set plus rsp at *old_sp and loads new_sp. Must be
     // called with maskable interrupts disabled.
     extern "C" void switch_context(uint64_t *__old_sp, uint64_t __new_sp) noexcept;

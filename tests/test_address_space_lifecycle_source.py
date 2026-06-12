@@ -4,11 +4,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_page_table_ownership_metadata_and_publish_order() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     for token in (
         'enum class PageTableOwner',
@@ -31,7 +43,7 @@ def test_page_table_ownership_metadata_and_publish_order() -> None:
 
 
 def test_map_unmap_accounting_and_empty_table_reclaim() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     map_start = vmem.index('static bool map_single_page')
     map_body = vmem[map_start : vmem.index('static uint64_t *direct_table', map_start)]
@@ -47,7 +59,9 @@ def test_map_unmap_accounting_and_empty_table_reclaim() -> None:
     assert 'decrement_present_entry(pt_phys)' in unmap_body
     assert 'reclaim_active_empty_tables(root_phys, __vaddr, PageTableOwner::KernelVmem)' in unmap_body
 
-    reclaim_body = vmem[vmem.index('static bool reclaim_active_empty_tables') : vmem.index('static bool teardown_user_low_half')]
+    reclaim_body = vmem[
+        vmem.index('static bool reclaim_active_empty_tables') : vmem.index('static bool teardown_user_low_half')
+    ]
     assert 'PageTableLevel::Pt' in reclaim_body
     assert 'PageTableLevel::Pd' in reclaim_body
     assert 'PageTableLevel::Pdpt' in reclaim_body
@@ -58,7 +72,7 @@ def test_map_unmap_accounting_and_empty_table_reclaim() -> None:
 
 def test_user_teardown_preserves_borrowed_high_half_and_rejects_active_root() -> None:
     memory = read_source('include/bigos/memory.h')
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     assert 'bool teardown_user_address_space(uint64_t __root_phys) noexcept;' in memory
     assert 'leaves copied kernel' in memory
@@ -83,10 +97,10 @@ def test_user_teardown_preserves_borrowed_high_half_and_rejects_active_root() ->
 
 def test_process_exit_fault_and_reaper_are_safe_boundaries() -> None:
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
-    syscall = read_source('src/kernel/syscall/syscall.cc')
-    sched = read_source('src/kernel/sched/sched.cc')
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     for token in (
         'bool reap_pending;',

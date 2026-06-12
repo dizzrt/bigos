@@ -1,14 +1,14 @@
 ## 1. 修复前确认
 
 - [x] 1.1 复查 `proposal.md`、`design.md` 和 `specs/kernel-memory-correctness/spec.md`，确认本 change 只处理 VMem 布局语义、map/unmap 生命周期、失败回滚和 buddy split 元数据失败。
-- [x] 1.2 复查 `src/mm/vmem.cc`、`src/mm/vmem.h`、`src/mm/buddy.cc`、`src/mm/buddy.h`、`src/mm/memdef.h` 和 `include/bigos/memory.h`，记录当前 `alloc_kernel_pages()`、`free_pages()`、`set_paging()`、`alloc_physical_order()` 的调用关系。
+- [x] 1.2 复查 `kernel/mm/vmem.cc`、`kernel/mm/vmem.h`、`kernel/mm/buddy.cc`、`kernel/mm/buddy.h`、`kernel/mm/memdef.h` 和 `include/bigos/memory.h`，记录当前 `alloc_kernel_pages()`、`free_pages()`、`set_paging()`、`alloc_physical_order()` 的调用关系。
 - [x] 1.3 确认本 change 不移动 `KVMEM_BASE`、`KVMEM_LEN`、`KERNEL_PML4_ADDR`、self-mapping 地址、低 2 MiB 保留区、kernel load base 或 higher-half base。
 - [x] 1.4 确认本 change 不引入 scheduler、IRQ enable、SMP、direct map、用户态地址空间、页权限模型扩展、页表页回收框架或旧 allocator alias。
 - [x] 1.5 确认本 change 保留 `free_pages()` 名称，不把 API polish rename 混入 VMem 生命周期修复。
 
 ## 2. VMem 布局语义
 
-- [x] 2.1 在 `src/mm/vmem.cc` 或相邻头文件中补充简短注释，明确 `KVMEM_BASE` / `KVMEM_LEN` 管理 kernel heap/vmalloc-style virtual allocation 区，不是 direct map。
+- [x] 2.1 在 `kernel/mm/vmem.cc` 或相邻头文件中补充简短注释，明确 `KVMEM_BASE` / `KVMEM_LEN` 管理 kernel heap/vmalloc-style virtual allocation 区，不是 direct map。
 - [x] 2.2 保持 `alloc_kernel_pages(nr_pages, flags)` 的公开页数语义不变，确认普通调用方仍不需要直接理解 `_GFM_PRE_PAGING`。
 - [x] 2.3 复查 `memdef.h` 中 `_GFM_PRE_PAGING` 注释，确保其语义仍限定为内部/低层预映射策略。
 - [x] 2.4 复查 `include/bigos/memory.h` 中 `free_pages()` 注释，确认它仍明确配对 `alloc_kernel_pages()`，但不重命名为 `free_kernel_pages()`。
@@ -74,8 +74,8 @@
 - `uv run pytest tests/test_memory_correctness_source.py`：通过，12 passed。
 - `openspec validate --all`：通过，10 passed, 0 failed。
 - `xmake`：通过；保留既有 warning：命令行 macro whitespace、kernel LOAD segment RWX、`$(buildir)` deprecated。
-- `clang++ --target=x86_64-elf -std=c++17 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -Iinclude -Icpp/include -Icpp/libsupc++/include -Isrc -fsyntax-only src/mm/vmem.cc src/mm/buddy.cc`：通过；首次缺少 `cpp/libsupc++/include` 时 `<new>` 未找到，补充项目 freestanding C++ include 后通过。
-- `GetDiagnostics`：`src/mm/vmem.cc`、`src/mm/vmem.h`、`src/mm/buddy.cc`、`tests/test_memory_correctness_source.py` 当前无诊断。
+- `clang++ --target=x86_64-elf -std=c++17 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -Iinclude -Icpp/include -Icpp/libsupc++/include -Isrc -fsyntax-only kernel/mm/vmem.cc kernel/mm/buddy.cc`：通过；首次缺少 `cpp/libsupc++/include` 时 `<new>` 未找到，补充项目 freestanding C++ include 后通过。
+- `GetDiagnostics`：`kernel/mm/vmem.cc`、`kernel/mm/vmem.h`、`kernel/mm/buddy.cc`、`tests/test_memory_correctness_source.py` 当前无诊断。
 - `uv run python tools/boot_debug.py run --no-launch`：通过，kernel build、boot build、raw image 和 generated bochsrc 均生成成功；Bochs launch 按 `--no-launch` 跳过。
 - Bochs runtime smoke：未运行。原因是当前工具链路径已验证到 boot asset 生成，但本次没有可自动判定 `init_mem()` 后启动输出的非交互 bounded smoke oracle；剩余风险是 emulator runtime bootability 未被本次会话直接观察。
 - 边界复查：未移动 `KVMEM_BASE`、`KVMEM_LEN`、`KERNEL_PML4_ADDR`、self-mapping 地址、低 2 MiB 保留、kernel load base 或 higher-half base；未引入 direct map、scheduler、IRQ/SMP 假设、旧 allocator alias、`free_kernel_pages()` rename 或空页表页回收框架。

@@ -9,7 +9,7 @@ CR3 约定均不变。
 
 ## 块缓冲缓存
 
-`bigos::bcache`（`include/bigos/fs/bcache.h`、`src/kernel/fs/bcache.cc`）以
+`bigos::bcache`（`include/bigos/fs/bcache.h`、`kernel/core/fs/bcache.cc`）以
 `(BlockDevice*, block_no)` 为键缓存固定大小块。块大小为一个扇区（512 字节），
 容量为有界编译期常量（`CACHE_BLOCKS`）。缓存数据页用 `alloc_kernel_pages` 配合
 `_GFM_PRE_PAGING` 一次性分配。
@@ -35,7 +35,7 @@ WRITE SECTORS EXT 加 FLUSH CACHE EXT，复用现有 BSY/DRDY/DRQ 轮询时序�
 
 ## 可写文件系统（`bigfs`）
 
-`bigos::bigfs`（`include/bigos/fs/bigfs.h`、`src/kernel/fs/bigfs.cc`）是挂载在
+`bigos::bigfs`（`include/bigos/fs/bigfs.h`、`kernel/core/fs/bigfs.cc`）是挂载在
 `/rw` 的最小可写文件系统，与只读 exFAT 挂载并存。默认承载介质为 RAM-backed
 `BlockDevice`（决策 9），整条写路径因此可端到端跑通而不触碰磁盘镜像。布局（以
 512 字节块计）：超级块、inode 位图、数据块位图、inode 表、数据区。全程有界：固定
@@ -71,7 +71,7 @@ owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端�
 
 ## 管道
 
-`bigos::ipc`（`include/bigos/ipc/pipe.h`、`src/kernel/ipc/pipe.cc`）提供有界环形
+`bigos::ipc`（`include/bigos/ipc/pipe.h`、`kernel/core/ipc/pipe.cc`）提供有界环形
 缓冲管道与一对相连的读端/写端 `File`。缓冲空且写端开时读阻塞、写入后唤醒；缓冲满
 且读端开时写阻塞、读出后唤醒。阻塞只在可阻塞进程上下文进行，不可阻塞上下文确定性
 失败。写端全关后读返回 0（EOF）；读端全关后写返回 `-EPIPE`（`SIGPIPE` 投递为可选

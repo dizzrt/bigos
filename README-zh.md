@@ -87,19 +87,19 @@ TTY 输入路径、具备 bounded timer semantics 的内核线程调度器、`in
 |-- cpp               内核 C++ 支持库、KTL、libsupc++ 子集
 |-- include           公共内核头文件和小型 libc 风格头文件子集
 |-- user              freestanding 用户 crt0/libc、init、shell、bin 与 smoke
-|-- src               boot、kernel、drivers、mm、runtime 等实现源码
+|-- kernel            内核实现源码
 |   |-- arch/x86/boot x86 引导代码、MBR/DBR 和 ELF 加载器
-|   |-- drivers       VGA、i8259 PIC、PIT timer、ATA PIO 等硬件驱动
-|   |-- kernel        内核入口及子系统：irq、timer、terminal（console/
+|   |-- core          内核入口及子系统：irq、timer、terminal（console/
 |   |                 keyboard/tty）、sched、syscall、proc、fs、底层 IO
+|   |-- drivers       VGA、i8259 PIC、PIT timer、ATA PIO 等硬件驱动
 |   |-- mm            buddy、slab、kmalloc、虚拟内存和 direct map 代码
 |   `-- runtime       运行时启动汇编源码对象
 |-- tools             boot 磁盘安装工具等开发辅助脚本
 |-- openspec          OpenSpec 项目配置
 |-- tests             验证测试和本地测试资产
 |-- link.lds          内核链接脚本
-|-- toolchains.lua    xmake 交叉工具链定义
-|-- xmake.lua         主构建配置
+|-- xmake             拆分后的 xmake include 与交叉工具链定义
+|-- xmake.lua         主构建入口
 `-- bigos.py          辅助命令工具
 ```
 
@@ -143,9 +143,9 @@ kernel()
 
 关键文件：
 
-- `src/arch/x86/boot/boot.s`：早期 CPU 模式切换并跳转到内核。
-- `src/arch/x86/boot/boot.cc`：磁盘读取、exFAT 查找、ELF 加载。
-- `src/kernel/kernel.cc`：主内核入口。
+- `kernel/arch/x86/boot/boot.s`：早期 CPU 模式切换并跳转到内核。
+- `kernel/arch/x86/boot/boot.cc`：磁盘读取、exFAT 查找、ELF 加载。
+- `kernel/core/kernel.cc`：主内核入口。
 - `link.lds`：高半区内核布局。
 - `docs/zh/arch/x86-boot-layout.md`：当前 Legacy BIOS 地址和 handoff 布局。
 - `docs/zh/arch/uefi-boot-blueprint.md`：未来 UEFI 兼容蓝图；这是项目规划，
@@ -338,16 +338,16 @@ xmake run bochs -- --display none
 当前可运行 backend 是 Legacy BIOS；UEFI 作为未来并行 backend 记录在
 `docs/zh/arch/uefi-boot-blueprint.md` 中。
 
-- `src/arch/x86/boot/mbr.s`：第一阶段引导代码。
-- `src/arch/x86/boot/dbr_exfat.s`：exFAT 引导扇区代码。
-- `src/arch/x86/boot/exdbr_exfat.s`：扩展 exFAT 引导代码。
-- `src/arch/x86/boot/boot.s`：模式切换、早期页表、转入长模式。
-- `src/arch/x86/boot/boot.cc`：ATA 磁盘读取、exFAT 目录扫描、ELF64 加载。
+- `kernel/arch/x86/boot/mbr.s`：第一阶段引导代码。
+- `kernel/arch/x86/boot/dbr_exfat.s`：exFAT 引导扇区代码。
+- `kernel/arch/x86/boot/exdbr_exfat.s`：扩展 exFAT 引导代码。
+- `kernel/arch/x86/boot/boot.s`：模式切换、早期页表、转入长模式。
+- `kernel/arch/x86/boot/boot.cc`：ATA 磁盘读取、exFAT 目录扫描、ELF64 加载。
 - `tools/install.py`：用于将引导扇区写入虚拟磁盘镜像的辅助工具。
 
 ### 内核入口
 
-`src/kernel/kernel.cc` 当前执行的运行时设置：
+`kernel/core/kernel.cc` 当前执行的运行时设置：
 
 - 清空 VGA 文本屏幕并初始化 COM1 串口输出。
 - 调用 `bigos::init_mem()`。
@@ -363,23 +363,23 @@ xmake run bochs -- --display none
 
 ### 内存管理
 
-内存子系统位于 `src/mm/`，是内核中最完善的部分。公开 API 通过命名区分分配层级：
+内存子系统位于 `kernel/mm/`，是内核中最完善的部分。公开 API 通过命名区分分配层级：
 内核虚拟页使用页数语义 `alloc_kernel_pages(nr_pages, flags)`，内部物理分配使用
 buddy order 语义 `alloc_physical_order(order, flags)`，旧的混合语义 alias 已移除。
 
-- `src/mm/buddy.cc` / `src/mm/buddy.h`：解析 BIOS 内存映射，划分 DMA/DMA32/NORMAL
+- `kernel/mm/buddy.cc` / `kernel/mm/buddy.h`：解析 BIOS 内存映射，划分 DMA/DMA32/NORMAL
   区域，管理物理页块，并使用 early metadata arena 完成 bootstrap，使初始化不依赖
   动态 slab 扩容。
-- `src/mm/slab.cc` / `src/mm/slab.h`：size class 缓存、`kmalloc/free`、动态 slab
+- `kernel/mm/slab.cc` / `kernel/mm/slab.h`：size class 缓存、`kmalloc/free`、动态 slab
   回收、page-backed 大对象分配、可选 debug guard 和统计。
-- `src/mm/kmem.cc` / `src/mm/kmem.h`：kmalloc/free 集成与 cache 接线。
-- `src/mm/vmem.cc` / `src/mm/vmem.h`：first-fit 内核虚拟区间、四级页表映射、
+- `kernel/mm/kmem.cc` / `kernel/mm/kmem.h`：kmalloc/free 集成与 cache 接线。
+- `kernel/mm/vmem.cc` / `kernel/mm/vmem.h`：first-fit 内核虚拟区间、四级页表映射、
   释放时清除 PTE 并刷新 TLB。
-- `src/mm/memory.cc`：公开内存 API 入口。
-- `src/mm/self_test.cc`：可切换的早期运行时自检，输出确定性
+- `kernel/mm/memory.cc`：公开内存 API 入口。
+- `kernel/mm/self_test.cc`：可切换的早期运行时自检，输出确定性
   `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` 标记。
 - `include/bigos/memory.h`：暴露公共内存分配 API。
-- `src/mm/memdef.h`：定义 mm 私有的页大小、buddy 阶数和分配标志。
+- `kernel/mm/memdef.h`：定义 mm 私有的页大小、buddy 阶数和分配标志。
 
 自检用法见 `docs/zh/arch/memory-runtime-validation.md`。
 
@@ -388,11 +388,11 @@ buddy order 语义 `alloc_physical_order(order, flags)`，旧的混合语义 ali
 中断子系统结合了汇编桩和 C++ 描述符。内核在开启可屏蔽中断前加载 kernel-owned
 静态 IDT，并通过稳定的 `InterruptFrame` dispatch ABI 路由所有 ISR 入口。
 
-- `src/kernel/irq/interrupt.s`：生成的 ISR 入口桩。
-- `src/kernel/irq/interrupt.cc`：IDT 初始化、异常分发、外部 IRQ 分发，以及
+- `kernel/core/irq/interrupt.s`：生成的 ISR 入口桩。
+- `kernel/core/irq/interrupt.cc`：IDT 初始化、异常分发、外部 IRQ 分发，以及
   `int 0x80` syscall 向量路由。
-- `src/drivers/irqchip/i8259.cc`：PIC remap、屏蔽和 EOI 支持。
-- `src/kernel/irq/isr.cc`：诊断型 `#PF` 处理器、timer IRQ0 tick 钩子和
+- `kernel/drivers/irqchip/i8259.cc`：PIC remap、屏蔽和 EOI 支持。
+- `kernel/core/irq/isr.cc`：诊断型 `#PF` 处理器、timer IRQ0 tick 钩子和
   keyboard IRQ1 处理器。
 - `include/irq/interrupt.h`：描述符布局、`InterruptFrame` 和向量常量。
 - `docs/zh/arch/interrupt-exception-foundation.md`：当前中断/异常设计、非目标和验证记录。
@@ -405,8 +405,8 @@ CPU exception（`0x00`-`0x1f`）、remap 后的 i8259 IRQ（`0x20`-`0x2f`）和 
 
 PIT 在 IRQ0 上驱动周期性 tick。
 
-- `src/drivers/timer/pit.cc` / `include/drivers/timer/pit.h`：PIT channel-0 设置。
-- `src/kernel/timer/timer.cc` / `include/bigos/timer.h`：从 IRQ 上下文通过
+- `kernel/drivers/timer/pit.cc` / `include/drivers/timer/pit.h`：PIT channel-0 设置。
+- `kernel/core/timer/timer.cc` / `include/bigos/timer.h`：从 IRQ 上下文通过
   `on_tick()` 推进的单调 `ticks()` 计数，以及最小 `mdelay` 忙等。`timer_smoke`
   开关输出有界 `BIGOS_TIMER_IRQ` 标记。
 
@@ -414,11 +414,11 @@ PIT 在 IRQ0 上驱动周期性 tick。
 
 键盘输入从 IRQ1 处理器经 scancode 解码进入定容 TTY 输入缓冲；console 输出走 VGA。
 
-- `src/kernel/terminal/keyboard.cc` / `include/bigos/keyboard.h`：US Set 1
+- `kernel/core/terminal/keyboard.cc` / `include/bigos/keyboard.h`：US Set 1
   scancode 解码与修饰键跟踪；IRQ 只做 bounded decode 和 ring buffer handoff。
-- `src/kernel/terminal/tty.cc` / `include/bigos/tty.h`：TTY 输入入队和
+- `kernel/core/terminal/tty.cc` / `include/bigos/tty.h`：TTY 输入入队和
   `terminal::init_tty()`。
-- `src/kernel/terminal/console.cc` / `include/bigos/console.h`：基于 VGA backend
+- `kernel/core/terminal/console.cc` / `include/bigos/console.h`：基于 VGA backend
   的 console 输出。
 
 ### 调度器
@@ -426,11 +426,11 @@ PIT 在 IRQ0 上驱动周期性 tick。
 单核 round-robin 内核线程调度器，包含 cooperative switch 路径、wait queue、
 timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
 
-- `src/kernel/sched/sched.cc` / `include/bigos/sched.h`：TCB、round-robin run
+- `kernel/core/sched/sched.cc` / `include/bigos/sched.h`：TCB、round-robin run
   queue、intrusive wait/sleep list、`create_kernel_thread()`、`yield()`、
   `thread_exit()`、`sleep_for()`、wakeup API、preemption guard 和 `start()`
   （将 boot 上下文收编为 idle 线程）。
-- `src/kernel/sched/switch.s`：x86_64 callee-saved context switch。
+- `kernel/core/sched/switch.s`：x86_64 callee-saved context switch。
 - timer IRQ 统计普通线程 time slice、唤醒到期 sleeper，并记录 bounded reschedule
   intent。外部 IRQ return 只有在 handler 完成、单次 EOI 已发送且 scheduler guard
   允许后才可能切换。
@@ -439,7 +439,7 @@ timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
 
 ### 系统调用
 
-- `src/kernel/syscall/syscall.cc` / `include/bigos/syscall.h`：`int 0x80`
+- `kernel/core/syscall/syscall.cc` / `include/bigos/syscall.h`：`int 0x80`
   dispatcher 和最小寄存器 ABI（number 在 `rax`，参数在 `rdi/rsi/rdx/r10/r8/r9`，
   返回值在 `rax`）。实现 `SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE`、
   `SYS_EXIT`、`SYS_WAIT`、fd/VFS `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`、`SYS_BRK`、
@@ -452,14 +452,14 @@ timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
 生命周期核心作为普通内核子系统编译。普通启动进入常驻 PID-1 init 和 `/bin/sh`；
 `user_program_smoke`、`user_elf_smoke` 和 `userland_smoke` 只选择默认关闭的验证 payload。
 
-- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`：bounded process model、PID
+- `kernel/core/proc/proc.cc` / `include/bigos/proc.h`：bounded process model、PID
   分配、parent/child 链接、wait status、zombie/reap-pending lifecycle、
   process-local fd table、VMA/heap metadata、VMA-backed user-buffer validation、
   `brk`、restricted anonymous mapping、demand-zero 物化、bounded `fork`/COW、
   signal 状态、用户地址空间派生、安全 teardown/reaping、flat embedded 用户镜像映射，
   以及面向 `/boot/user/init.elf`、`execve`、PID-1 init 和默认关闭用户态 smoke 的
   bounded ELF64 `ET_EXEC` prepare/exec 路径。
-- `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
+- `kernel/core/proc/user_mode.cc` / `kernel/core/proc/user_mode.s` /
   `include/bigos/user_mode.h`：GDT/TSS/RSP0 设置和 `iretq` ring3 entry。
 - Demand paging 与 COW 仅针对当前 bounded anonymous 用户映射实现；广泛
   file-backed `mmap`、动态链接、作业控制和完整 POSIX libc 仍不在范围内。
@@ -468,9 +468,9 @@ timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
 
 VGA 文本模式和 COM1 串口是当前输出后端。
 
-- `src/drivers/video/vga.cc`：文本缓冲区写入、光标移动、清屏。
-- `src/kernel/bigos/io.cc`：端口 IO 封装、`kprintf` 和串口输出。
-- `src/kernel/bigos/utils.cc`：整数转字符串等小型辅助函数。
+- `kernel/drivers/video/vga.cc`：文本缓冲区写入、光标移动、清屏。
+- `kernel/core/bigos/io.cc`：端口 IO 封装、`kprintf` 和串口输出。
+- `kernel/core/bigos/utils.cc`：整数转字符串等小型辅助函数。
 
 ### 内核 C++ 支持
 

@@ -23,7 +23,7 @@
 - `uv run python tools/boot_debug.py run --skip-build --no-launch --image build/test/os.raw`
 - `uv run python tools/boot_debug.py validate-image --image build/test/os.raw`
 - `openspec validate load-user-elf-program --strict`
-- VS Code diagnostics for `src/kernel/proc/proc.cc`, `src/kernel/kernel.cc`, and `tools/boot_debug.py`: no diagnostics.
+- VS Code diagnostics for `kernel/core/proc/proc.cc`, `kernel/core/kernel.cc`, and `tools/boot_debug.py`: no diagnostics.
 
 ## Runtime Smoke
 

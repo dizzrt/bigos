@@ -1,0 +1,46 @@
+---@diagnostic disable: undefined-global
+
+local function run_boot_debug(emulator, serial_log, target_args, process)
+    local args = {"tools/boot_debug.py", "run", "--emulator", emulator, "--skip-build", "--serial-log", serial_log}
+    local first_arg = target_args[1] == "--" and 2 or 1
+    for index = first_arg, #target_args do
+        local arg = target_args[index]
+        table.insert(args, arg)
+    end
+    local proc = process.openv("python3", args)
+    local _, status = proc:wait()
+    proc:close()
+    if status ~= 0 then
+        error(string.format("boot_debug.py failed with exit code %d", status))
+    end
+end
+
+target("bochs")
+    set_kind("phony")
+    set_default(false)
+    add_deps("kernel", "boot-artifacts", "user-init-elf")
+    on_run(function (target)
+        import("core.base.option")
+        import("core.base.process")
+        run_boot_debug("bochs", "build/test/bochs.serial.log", option.get("arguments") or {}, process)
+    end)
+
+target("qemu")
+    set_kind("phony")
+    set_default(false)
+    add_deps("kernel", "boot-artifacts", "user-init-elf")
+    on_run(function (target)
+        import("core.base.option")
+        import("core.base.process")
+        run_boot_debug("qemu", "build/test/qemu.serial.log", option.get("arguments") or {}, process)
+    end)
+
+target("qemu-gdb")
+    set_kind("phony")
+    set_default(false)
+    add_deps("kernel", "boot-artifacts", "user-init-elf")
+    on_run(function (target)
+        import("core.base.option")
+        import("core.base.process")
+        run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log", option.get("arguments") or {}, process)
+    end)

@@ -40,8 +40,8 @@
 
 ## 6. 验证
 
-- [x] 6.1 使用预期 `x86_64-elf-*` 工具链运行 `src/arch/x86/boot` 的窄范围 boot build，或记录工具链不可用情况。记录：本机 `x86_64-elf-gcc`/`ld` 可见但编译/链接进程被 host `Killed: 9` 终止；已补充 assembler syntax 与 clang target syntax 检查。
+- [x] 6.1 使用预期 `x86_64-elf-*` 工具链运行 `kernel/arch/x86/boot` 的窄范围 boot build，或记录工具链不可用情况。记录：本机 `x86_64-elf-gcc`/`ld` 可见但编译/链接进程被 host `Killed: 9` 终止；已补充 assembler syntax 与 clang target syntax 检查。
 - [x] 6.2 对修改后的 installer 代码运行 Python 检查：`uv run ruff check`、`uv run ruff format --check`、`uv run pyright` 和 `uv run pytest`，或记录项目工具不可用情况。
-- [x] 6.3 bootloader 变更后运行主项目构建（`xmake` 或文档化等价命令），或记录缺失 cross-toolchain 的限制。记录：`xmake` 运行后在 unrelated `src/kernel/irq/interrupt.s` 阶段因 host `Killed: 9` 终止。
+- [x] 6.3 bootloader 变更后运行主项目构建（`xmake` 或文档化等价命令），或记录缺失 cross-toolchain 的限制。记录：`xmake` 运行后在 unrelated `kernel/core/irq/interrupt.s` 阶段因 host `Killed: 9` 终止。
 - [x] 6.4 当 `test/bochsrc.bxrc` 和磁盘镜像已针对本机配置时，运行 Bochs boot smoke test。记录：本机未发现 `bochs`。
 - [x] 6.5 在可行范围内验证负向场景：缺失 `boot.bin`、缺失 `kernel`、boot binary 超大，以及模拟 unsupported exFAT placement。

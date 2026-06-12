@@ -1,6 +1,6 @@
 ## 1. 页表 ownership 与回收模型
 
-- [x] 1.1 梳理当前 `src/mm` 页表 map/unmap、`free_pages()`、user root-targeted mapping 和 direct-map 访问路径，记录哪些页表页是 static/borrowed，哪些可以成为动态 owned 页表页。
+- [x] 1.1 梳理当前 `kernel/mm` 页表 map/unmap、`free_pages()`、user root-targeted mapping 和 direct-map 访问路径，记录哪些页表页是 static/borrowed，哪些可以成为动态 owned 页表页。
 - [x] 1.2 设计并实现动态页表页 metadata，至少表达 owner/category、level、physical frame、present-entry count 或等价可验证不变量。
 - [x] 1.3 将 metadata 创建接入中间页表页分配路径，确保 publish present descriptor 前已完成 ownership 登记。
 - [x] 1.4 为 metadata 分配失败、页表页分配失败和 descriptor 写入失败补齐 rollback 或 deterministic fatal path，禁止留下未追踪的 reclaimable present descriptor。
@@ -51,7 +51,7 @@
 
 - [x] 7.1 确认本地具备 `x86_64-elf-gcc`、`x86_64-elf-g++`、xmake、Bochs 和需要的 ROM/disk image 配置；缺失时在验证记录中明确 blocker 和剩余风险。
 - [x] 7.2 运行默认 `xmake`，确认未启用 smoke 时默认 boot 构建不受 process teardown 和页表回收 wiring 影响。
-- [x] 7.3 运行 `xmake f --user_program_smoke=y` 后的最窄构建，确认 `src/kernel/proc/**`、syscall exit/fault 和 address-space teardown 代码可编译。
+- [x] 7.3 运行 `xmake f --user_program_smoke=y` 后的最窄构建，确认 `kernel/core/proc/**`、syscall exit/fault 和 address-space teardown 代码可编译。
 - [x] 7.4 在 Bochs/serial oracle 可用时运行用户程序 smoke，观察 `BIGOS_USER_EXIT` 或新增 deterministic reclaim marker；不可用时记录命令、失败点、环境缺失和 bootability 风险。
 - [x] 7.5 如修改 memory self-test 或新增内存 smoke，运行对应 `xmake f --mm_self_test=y` 与 `uv run python tools/boot_debug.py ... --expect-serial-marker ...`；不可用时记录原因。
 - [x] 7.6 运行 `openspec validate reclaim-address-space-page-tables --strict`，修复 proposal/design/spec/tasks 中的格式或 requirement 问题。

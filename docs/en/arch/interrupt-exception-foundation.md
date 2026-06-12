@@ -83,8 +83,8 @@ Passed checks:
 - `uv run pytest`: 31 passed.
 - `xmake`: default build passed, with existing command-line whitespace warning, `$(buildir)` deprecation warning, and RWX LOAD segment linker warning.
 - `xmake f --mm_self_test=n --page_fault_smoke=y && xmake && xmake f --mm_self_test=n --page_fault_smoke=n`: validation-only `#PF` trigger build passed and the option was restored to default off.
-- `x86_64-elf-g++ -std=c++17 -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/kernel/irq/interrupt.cc src/kernel/irq/isr.cc src/kernel/kernel.cc src/drivers/irqchip/i8259.cc`: passed.
-- IDE diagnostics: no diagnostics in `include/irq/interrupt.h`, `src/kernel/irq/interrupt.cc`, `src/kernel/irq/isr.cc`, or `src/kernel/kernel.cc`.
+- `x86_64-elf-g++ -std=c++17 -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/core/irq/interrupt.cc kernel/core/irq/isr.cc kernel/core/kernel.cc kernel/drivers/irqchip/i8259.cc`: passed.
+- IDE diagnostics: no diagnostics in `include/irq/interrupt.h`, `kernel/core/irq/interrupt.cc`, `kernel/core/irq/isr.cc`, or `kernel/core/kernel.cc`.
 
 Runtime smokes not completed:
 

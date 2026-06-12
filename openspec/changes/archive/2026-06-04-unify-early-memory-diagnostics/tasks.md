@@ -4,33 +4,33 @@
   mm-buddy/mm-slab/mm-arena/mm-vmem/self-test/irq-exception/irq-pagefault/generic
   分域，boot 早期段按 D7 预留不连线）与 `[[noreturn]] noexcept` 的
   `kpanic(code, source, fmt, ...)` 入口，include 最小化。
-- [x] 1.2 新增 `src/kernel/bigos/panic.cc`：实现 `kpanic`，先用常量字符串
+- [x] 1.2 新增 `kernel/core/bigos/panic.cc`：实现 `kpanic`，先用常量字符串
   `serial_puts` 输出固定首行 `BIGOS_PANIC code=<code> source=<source>`（键=值空格
   分隔，code 十六进制，对齐 `BIGOS_EXCEPTION` 风格），再 `kprintf` 输出变参上下文到
   后续行（串口与 VGA），最后 `disableIRQ()` + `while(true){hlt}`。
 - [x] 1.3 提供“仅 marker + 停机”的轻量重载/宏，以及可选 `kpanic_with_mm_stats`
   形式（复用现有只读统计源，禁止动态分配）。
-- [x] 1.4 确认 `panic.cc` 被 `xmake.lua` 的 `src/kernel/**.cc` glob 纳入构建。
+- [x] 1.4 确认 `panic.cc` 被 `xmake.lua` 的 `kernel/core/**.cc` glob 纳入构建。
 
 ## 2. 中断与异常路径收敛
 
-- [x] 2.1 `src/kernel/irq/interrupt.cc`：将 `halt_cpu()` 改为复用统一关中断+停机原语，
+- [x] 2.1 `kernel/core/irq/interrupt.cc`：将 `halt_cpu()` 改为复用统一关中断+停机原语，
   保留 `BIGOS_EXCEPTION` 与 `BIGOS_PAGE_FAULT` 诊断输出不变。
 - [x] 2.2 复查异常/`#PF`/unknown vector 路径：致命停机统一经由 `kpanic`/停机原语，
   非致命路径（`default_external_irq_handler`、`unknown_vector_handler`）行为不变。
 
 ## 3. 内存致命路径收敛
 
-- [x] 3.1 `src/mm/buddy.cc`：`halt_memory_handoff_failed()` 与
+- [x] 3.1 `kernel/mm/buddy.cc`：`halt_memory_handoff_failed()` 与
   `halt_early_metadata_exhausted()` 改用 `kpanic`，补 `BIGOS_PANIC` 前缀与错误码，
   保留 arena 用量诊断为上下文行；停机前先关中断。
-- [x] 3.2 `src/mm/slab.cc` 与 `src/mm/kmem.cc`：`BIGOS_SLAB_DEBUG` guard 的 halt 分支
+- [x] 3.2 `kernel/mm/slab.cc` 与 `kernel/mm/kmem.cc`：`BIGOS_SLAB_DEBUG` guard 的 halt 分支
   改用 `kpanic`，将 `"slab debug guard: ..."` 转为带前缀的 panic 上下文与错误码。
-- [x] 3.3 `src/mm/self_test.cc`：`fail(stage)` 改用统一停机原语，保留
+- [x] 3.3 `kernel/mm/self_test.cc`：`fail(stage)` 改用统一停机原语，保留
   `BIGOS_MM_SELF_TEST_FAILED stage=<stage>` 输出契约不变。
-- [x] 3.4 全仓核对 `src/kernel`、`src/mm`、`src/kernel/irq` 不再残留缺关中断或缺
+- [x] 3.4 全仓核对 `kernel/core`、`kernel/mm`、`kernel/core/irq` 不再残留缺关中断或缺
   `BIGOS_` 前缀的独立 `while(true){hlt}` 致命片段；`kernel()` 末尾 idle 循环属正常
-  停机非致命路径，保持不变；boot 早期路径（`src/arch/x86/boot/*`）按 D7 不纳入本
+  停机非致命路径，保持不变；boot 早期路径（`kernel/arch/x86/boot/*`）按 D7 不纳入本
   change，保留现状。
 
 ## 4. 内存安全/中断安全审查

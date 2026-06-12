@@ -1,6 +1,6 @@
 ## Context
 
-当前 `src/kernel/proc` 已能创建 embedded first-user-program smoke 和 filesystem-backed ELF smoke，并能通过 `int 0x80` 执行 `SYS_WRITE`/`SYS_EXIT`、处理 CPL3 fault、切回 kernel CR3 并延后回收资源。但该路径仍由 `BIGOS_USER_PROCESS` smoke 开关控制，依赖固定 PID、单个 `g_current_process`、单个 `g_reap_pending_process`，不具备常规进程表、父子关系、`wait` 或 general `exec argv/envp` 语义。
+当前 `kernel/core/proc` 已能创建 embedded first-user-program smoke 和 filesystem-backed ELF smoke，并能通过 `int 0x80` 执行 `SYS_WRITE`/`SYS_EXIT`、处理 CPL3 fault、切回 kernel CR3 并延后回收资源。但该路径仍由 `BIGOS_USER_PROCESS` smoke 开关控制，依赖固定 PID、单个 `g_current_process`、单个 `g_reap_pending_process`，不具备常规进程表、父子关系、`wait` 或 general `exec argv/envp` 语义。
 
 阶段 12 的设计目标是在不引入 `fork`、COW、fd/VFS、demand paging 或 POSIX 大面策略的前提下，把这条 smoke runtime 提升为普通内核子系统。实现必须继续保持 x86_64 单核、Legacy BIOS/MBR/exFAT、read-only filesystem、同步加载、safe teardown 和 freestanding 约束。
 
@@ -23,7 +23,7 @@
 
 ## Decisions
 
-- 常规 process core 与 smoke entry 分离。将 PID、进程表、生命周期状态、父子链表、wait queue 和 reaper queue 编译为常规内核能力；embedded/user-ELF smoke 只负责触发特定启动场景。替代方案是继续让 `src/kernel/proc` 只随 smoke 编译，但这会阻塞 fd/VFS 和 VMA 后续阶段复用进程所有权。
+- 常规 process core 与 smoke entry 分离。将 PID、进程表、生命周期状态、父子链表、wait queue 和 reaper queue 编译为常规内核能力；embedded/user-ELF smoke 只负责触发特定启动场景。替代方案是继续让 `kernel/core/proc` 只随 smoke 编译，但这会阻塞 fd/VFS 和 VMA 后续阶段复用进程所有权。
 - 使用固定容量或显式有界的单核进程表。第一版通过稳定 PID 和 bounded table/list 避免动态增长策略、锁复杂度和 SMP 语义；容量耗尽时返回确定性错误或 panic/marker。替代方案是使用无限动态表，但会把 allocator failure、reclaim 和 fork 前置得过早。
 - 将 `exit` 与 resource teardown 分离。`SYS_EXIT` 和用户 fault 只记录 status、切换到安全 kernel root、使当前执行流不可返回，并唤醒等待者；真正释放 user root、用户页、dynamic page-table pages、kernel stack 和 process object 必须在 safe reaper 上下文执行。替代方案是在 syscall/fault 当前栈上立即释放，但会破坏现有 active stack/CR3 安全边界。
 - `wait` 复用现有 blocking primitives，并收敛为单一 syscall 形态。第一版只提供 `wait(pid, status*)`；`pid == BIGOS_WAIT_ANY` 表示等待任一子进程，其他非零 PID 表示等待指定子进程，不额外引入独立 `wait_any()` syscall。父进程等待子进程时进入可唤醒 wait queue；子进程进入 zombie 时 wake parent。若无可等待子进程则返回确定性错误；若有匹配子进程但尚未退出则阻塞。替代方案是 busy polling 或暴露多个 wait variants，但前者破坏阶段 10 blocking 模型，后者会过早扩大 POSIX wait 面。

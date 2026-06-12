@@ -1,6 +1,6 @@
 # User Address-Space Page Table Preparation
 
-This stage abstracts the page-table code in `src/mm/vmem.cc`, previously limited to kernel ranges, into explicit map/unmap primitives. It defines user/kernel page-attribute policy and minimal user address-space root derivation. Default helpers still do not switch CR3 implicitly; the default-off first-user-program runtime path explicitly activates the derived root before entering ring3.
+This stage abstracts the page-table code in `kernel/mm/vmem.cc`, previously limited to kernel ranges, into explicit map/unmap primitives. It defines user/kernel page-attribute policy and minimal user address-space root derivation. Default helpers still do not switch CR3 implicitly; the default-off first-user-program runtime path explicitly activates the derived root before entering ring3.
 
 ## Explicit Page-Attribute Primitives
 
@@ -35,7 +35,7 @@ These primitives are non-interrupt-context-only. They use `InterruptGuard` while
 
 ## EFER.NXE State And NX Degradation
 
-The current long-mode entry path in `src/arch/x86/boot/boot.s` sets only `LME` (bit 8) in `IA32_EFER` (MSR `0xc0000080`), and **does not enable NXE (bit 11)**. Therefore, the NX bit is currently mainly an attribute-encoding check and must not be relied on for runtime non-executable enforcement. The first user program still maps data/BSS/stack as `USER_DATA`, but runtime NX enforcement is left to a later enable-NXE change.
+The current long-mode entry path in `kernel/arch/x86/boot/boot.s` sets only `LME` (bit 8) in `IA32_EFER` (MSR `0xc0000080`), and **does not enable NXE (bit 11)**. Therefore, the NX bit is currently mainly an attribute-encoding check and must not be relied on for runtime non-executable enforcement. The first user program still maps data/BSS/stack as `USER_DATA`, but runtime NX enforcement is left to a later enable-NXE change.
 
 **Remaining risk**: if future code incorrectly relies on NX hardware enforcement before NXE is enabled, hardware will not enforce it. This stage covers that gap with source-level encoding checks and explicit documentation.
 

@@ -19,8 +19,8 @@
   别名，删除独立数值定义，保证数值不变
 - [x] 3.2 修改 `include/bigos/proc.h`：`FD_E*`、`WAIT_E*` 改为引用 `bigos/errno.h`
   的取负别名，删除独立数值定义，保证数值不变
-- [x] 3.3 更新 `src/kernel/syscall/syscall.cc` 等引用点改用统一错误码符号
-- [x] 3.4 更新 `src/kernel/proc/proc.cc`、`src/kernel/fs/` 等引用点改用统一错误码符号
+- [x] 3.3 更新 `kernel/core/syscall/syscall.cc` 等引用点改用统一错误码符号
+- [x] 3.4 更新 `kernel/core/proc/proc.cc`、`kernel/core/fs/` 等引用点改用统一错误码符号
 - [x] 3.5 复查并移除残留的冗余前缀别名（如同值的 `SYS_EBADF` 与 `FD_EBADF` 不再
   各自独立定义）
 

@@ -1,8 +1,8 @@
 ## 1. 设计与边界确认
 
 - [x] 1.1 复查 `proposal.md`、`design.md` 和 spec delta，确认本 change 只成熟化 slab 生命周期，不引入并发 allocator。
-- [x] 1.2 复查 `src/mm/slab.*`、`src/mm/kmem.*`、`src/mm/vmem.*` 和 `include/bigos/memory.h`，记录当前 small-object、dynamic slab 和 `free()` 分发路径。
-- [x] 1.3 复查 `src/mm/buddy.cc` early metadata arena baseline，确认初始化期 `PageBlock`/list node 仍由 arena 提供，当前 change 不改变 arena 来源、容量、生命周期或 BootInfo memory map ABI。
+- [x] 1.2 复查 `kernel/mm/slab.*`、`kernel/mm/kmem.*`、`kernel/mm/vmem.*` 和 `include/bigos/memory.h`，记录当前 small-object、dynamic slab 和 `free()` 分发路径。
+- [x] 1.3 复查 `kernel/mm/buddy.cc` early metadata arena baseline，确认初始化期 `PageBlock`/list node 仍由 arena 提供，当前 change 不改变 arena 来源、容量、生命周期或 BootInfo memory map ABI。
 - [x] 1.4 确认本 change 不移动 `KVMEM_BASE`、self-mapping 地址、boot/linker 地址或公开页分配 API。
 
 ## 2. 统计与 Debug 基础
@@ -56,8 +56,8 @@
 - `uv run pytest tests/test_memory_correctness_source.py`：通过，21 passed，覆盖 large allocation header/fallback、空 slab 回收、perfect-fit 禁用语义、debug guard 开关和 runtime self-test 源码路径。
 - `openspec validate --all`：通过，12 passed，change/spec delta 可解析。
 - `xmake`：通过；保留既有 warning：`ISO C++11 requires whitespace after the macro name`、`build/kernel has a LOAD segment with RWX permissions`、`$(buildir) has been deprecated`。
-- `clang++ -target x86_64-elf -std=c++17 -ffreestanding -fno-rtti -fno-exceptions -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/mm/slab.cc src/mm/kmem.cc src/mm/self_test.cc`：通过。
-- IDE diagnostics：`src/mm/slab.cc`、`src/mm/slab.h`、`src/mm/kmem.cc`、`src/mm/self_test.cc`、`include/bigos/memory.h` 均无诊断。
+- `clang++ -target x86_64-elf -std=c++17 -ffreestanding -fno-rtti -fno-exceptions -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/mm/slab.cc kernel/mm/kmem.cc kernel/mm/self_test.cc`：通过。
+- IDE diagnostics：`kernel/mm/slab.cc`、`kernel/mm/slab.h`、`kernel/mm/kmem.cc`、`kernel/mm/self_test.cc`、`include/bigos/memory.h` 均无诊断。
 - `uv run python tools/boot_debug.py run --no-launch`：通过，生成 `build/test/os.raw` 和 `build/test/bochsrc.bxrc`。
 - `uv run python tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED`：未通过，Bochs 启动后等待 serial marker 超时，且未生成 `build/test/serial.log`；运行后遗留的 `build/test/os.raw.lock` 已清理。该现象与既有历史验证记录一致，剩余风险是 runtime marker 未在本地 Bochs 环境中确认。
 - `git diff` 复查：未引入 scheduler/IRQ/SMP allocator、direct map、用户态 heap、完整 `kmem_cache_create()` API，也未移动 `KVMEM_BASE`、self-mapping、boot/linker 地址或公开页分配 API。

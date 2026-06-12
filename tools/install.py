@@ -5,7 +5,7 @@ from getopt import GetoptError, getopt
 from typing import BinaryIO
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-BOOT_SOURCE_DIR = os.path.join(PROJECT_ROOT, 'src', 'arch', 'x86', 'boot')
+BOOT_SOURCE_DIR = os.path.join(PROJECT_ROOT, 'kernel', 'arch', 'x86', 'boot')
 VDISK_PATH = os.path.join(PROJECT_ROOT, 'build', 'os.vhd')
 MBR_PATH = ''
 DBR_PATH = ''

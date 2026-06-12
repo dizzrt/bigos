@@ -1,6 +1,6 @@
 ## 1. ABI 与当前状态审查
 
-- [x] 1.1 审查 `include/irq/interrupt.h`、`src/kernel/irq/interrupt.s`、`src/kernel/irq/interrupt.cc`、`src/kernel/sched/switch.s` 和 `src/kernel/sched/sched.cc`，记录 `InterruptFrame`、ISR stack layout、context-switch frame、EOI 顺序和 idle ownership 的不可破坏边界。
+- [x] 1.1 审查 `include/irq/interrupt.h`、`kernel/core/irq/interrupt.s`、`kernel/core/irq/interrupt.cc`、`kernel/core/sched/switch.s` 和 `kernel/core/sched/sched.cc`，记录 `InterruptFrame`、ISR stack layout、context-switch frame、EOI 顺序和 idle ownership 的不可破坏边界。
 - [x] 1.2 审查 timer IRQ0、scheduler tick hook、blocked/sleeping wakeup、TTY/keyboard wakeup 和 syscall dispatch 的当前上下文规则，列出哪些路径可抢占、不可抢占、可阻塞或禁止阻塞。
 - [x] 1.3 确认 Stage 11 不改变 boot layout、link address、IDT vector、syscall vector `0x80`、page-table layout、disk image layout、ATA PIO/exFAT 读路径或现有 smoke marker 含义。
 

@@ -1,20 +1,20 @@
 ## ADDED Requirements
 
-### Requirement: Implementation sources live under src
+### Requirement: Implementation sources live under kernel
 
-BigOS SHALL keep concrete implementation sources for kernel runtime, architecture-specific boot code, memory management, device drivers, and startup runtime objects under `src/`, while keeping the freestanding C++ support library under top-level `cpp/`.
+BigOS SHALL keep concrete implementation sources for kernel runtime, architecture-specific boot code, memory management, device drivers, and startup runtime objects under `kernel/`, while keeping the freestanding C++ support library under top-level `cpp/`.
 
 #### Scenario: Developer inspects implementation layout
 
 - **WHEN** a developer lists the repository root after the layout migration
-- **THEN** concrete implementation directories for `kernel`, `mm`, `drivers`, `arch`, and runtime startup objects are discoverable under `src/`
+- **THEN** concrete implementation directories for `kernel`, `mm`, `drivers`, `arch`, and runtime startup objects are discoverable under `kernel/`
 - **AND** C++ support implementation and headers remain discoverable under top-level `cpp/`
 - **AND** the repository root no longer contains those implementation directories as active source roots
 
 #### Scenario: Build system collects implementation sources
 
 - **WHEN** the primary build configuration is evaluated
-- **THEN** it collects kernel, memory-management, driver, architecture, and runtime startup sources from the migrated `src/` paths
+- **THEN** it collects kernel, memory-management, driver, architecture, and runtime startup sources from the migrated `kernel/` paths
 - **AND** it collects C++ support sources from the preserved top-level `cpp/` paths
 - **AND** it does not rely on stale top-level implementation source paths
 
@@ -25,12 +25,12 @@ BigOS SHALL keep public kernel headers, freestanding C header subsets, and C++ s
 #### Scenario: Existing public include style remains valid
 
 - **WHEN** source files include public headers such as `<bigos/io.h>`, `<bigos/memory.h>`, `<irq/interrupt.h>`, `<arch/x86/boot/boot_info.h>`, `<ktl/list.h>`, `<drivers/video/vga.h>`, or `<drivers/irqchip/i8259.h>`
-- **THEN** the configured include search paths resolve those headers without requiring source files to include `src/` in public include directives
+- **THEN** the configured include search paths resolve those headers without requiring source files to include `kernel/` in public include directives
 - **AND** KTL, `bits`, `ext`, and libsupc++ public or semi-public C++ support headers are resolved from documented `cpp/` include roots
 
 #### Scenario: Public API boundary is reviewed
 
-- **WHEN** implementation files are moved under `src/`
+- **WHEN** implementation files are moved under `kernel/`
 - **THEN** headers that remain public are available through documented include roots
 - **AND** C++ support headers remain under `cpp/include` or `cpp/libsupc++/include` instead of being folded into the top-level kernel `include/`
 - **AND** private implementation headers are either kept with their subsystem or explicitly documented as implementation-only include roots
@@ -43,13 +43,13 @@ BigOS SHALL keep project assets that are not concrete implementation sources at 
 
 - **WHEN** a developer opens the repository root after the migration
 - **THEN** build entry files, linker script, tools, documentation, tests, OpenSpec files, repository automation, and project metadata remain discoverable from top-level semantic paths
-- **AND** `src/` contains implementation source organization rather than becoming a catch-all project directory
+- **AND** `kernel/` contains implementation source organization rather than becoming a catch-all project directory
 
 #### Scenario: Boot install helper lives with developer tools
 
 - **WHEN** the boot disk-image install helper is migrated
 - **THEN** it is discoverable under top-level `tools/`
-- **AND** its documentation or path handling continues to identify the related `src/arch/x86/boot` inputs and disk-image assumptions
+- **AND** its documentation or path handling continues to identify the related `kernel/arch/x86/boot` inputs and disk-image assumptions
 
 ### Requirement: Runtime behavior remains unchanged
 
@@ -79,7 +79,7 @@ BigOS SHALL update active documentation, archived OpenSpec path references, Open
 #### Scenario: Documentation describes migrated layout
 
 - **WHEN** a developer reads the active README, project guide, or OpenSpec project context after the migration
-- **THEN** the documented repository structure points to the new `src/` implementation paths
+- **THEN** the documented repository structure points to the new `kernel/` implementation paths
 - **AND** the documentation distinguishes implementation source paths from public headers, tests, docs, tooling, and build entry files
 
 #### Scenario: Archived OpenSpec paths are refreshed

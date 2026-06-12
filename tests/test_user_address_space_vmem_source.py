@@ -4,6 +4,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
@@ -41,7 +53,7 @@ def test_map_unmap_primitives_are_declared_with_context_contracts() -> None:
 
 
 def test_primitive_accepts_explicit_attr_and_guards_writes() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     # map primitive applies the explicit attribute on the leaf PTE.
     assert 'static bool map_single_page(uint64_t __vaddr, uint64_t __phys, uint64_t __attr) noexcept' in vmem
@@ -61,7 +73,7 @@ def test_primitive_accepts_explicit_attr_and_guards_writes() -> None:
 
 
 def test_unmap_primitive_clears_pte_and_flushes_tlb() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     unmap_start = vmem.index('void unmap_page(uint64_t __vaddr) noexcept')
     unmap_body = vmem[unmap_start : vmem.index('uint64_t derive_user_address_space_root', unmap_start)]
@@ -72,7 +84,7 @@ def test_unmap_primitive_clears_pte_and_flushes_tlb() -> None:
 
 
 def test_kernel_range_uses_primitive_with_supervisor_default() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     map_start = vmem.index('bool VMem::map_kernel_range(MemoryBlock *__mblk) noexcept')
     map_end = vmem.index('void VMem::unmap_kernel_range', map_start)
@@ -87,13 +99,13 @@ def test_kernel_range_uses_primitive_with_supervisor_default() -> None:
 
 
 def test_kernel_default_attr_is_bitwise_equivalent_to_legacy_pte() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
     # The legacy supervisor present+writable encoding remains documented.
     assert '#define DEFAULT_ATTR_PTE   0x0000000000000003ul' in vmem
 
 
 def test_user_root_copies_higher_half_and_zeros_lower_half() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     start = vmem.index('uint64_t derive_user_address_space_root() noexcept')
     end = vmem.index('VMem::rollback_kernel_range', start)
@@ -109,9 +121,9 @@ def test_user_root_copies_higher_half_and_zeros_lower_half() -> None:
 
 
 def test_derivation_does_not_switch_cr3_and_runtime_activation_is_explicit() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
     memory = read_source('include/bigos/memory.h')
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     derive_start = vmem.index('uint64_t derive_user_address_space_root() noexcept')
     derive_end = vmem.index('bool map_page_in_root', derive_start)
@@ -126,8 +138,8 @@ def test_derivation_does_not_switch_cr3_and_runtime_activation_is_explicit() -> 
 
 def test_user_vmem_smoke_marker_is_wired() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
-    vmem = read_source('src/mm/vmem.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     # Default-off build switch.
     assert 'option("user_vmem_smoke")' in xmake
@@ -152,7 +164,7 @@ def test_user_vmem_smoke_marker_is_wired() -> None:
 
 def test_nxe_state_and_degradation_are_recorded() -> None:
     doc = read_source('docs/en/arch/user-address-space-vmem.md')
-    boot = read_source('src/arch/x86/boot/boot.s')
+    boot = read_source('kernel/arch/x86/boot/boot.s')
 
     # boot.s enables LME but not NXE; doc must record the degradation.
     assert 'bts $0x08, %eax' in boot  # EFER.LME

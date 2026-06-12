@@ -4,12 +4,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_user_elf_smoke_is_default_off_and_separate_from_embedded_smoke() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
     proc_h = read_source('include/bigos/proc.h')
 
     option_index = xmake.index('option("user_elf_smoke")')
@@ -17,8 +29,9 @@ def test_user_elf_smoke_is_default_off_and_separate_from_embedded_smoke() -> Non
     define_index = xmake.index('add_defines("BIGOS_USER_ELF_SMOKE")')
     assert option_index < default_index < define_index
     assert 'add_defines("BIGOS_USER_PROCESS")' in xmake
-    assert 'add_files("src/kernel/proc/**.cc")' in xmake
-    assert 'if has_config("user_program_smoke") then\n        add_defines("BIGOS_USER_PROGRAM_SMOKE")' in xmake
+    assert 'add_files("$(projectdir)/kernel/core/proc/**.cc")' in xmake
+    assert 'if has_config("user_program_smoke") then' in xmake
+    assert 'add_defines("BIGOS_USER_PROGRAM_SMOKE")' in xmake
     assert 'BIGOS_USER_ELF_LOAD_PASSED' in kernel
     assert 'bigos::proc::USER_ELF_SMOKE_PATH' in kernel
     assert 'bigos::vfs::open_absolute(bigos::proc::USER_ELF_SMOKE_PATH' in kernel
@@ -27,7 +40,7 @@ def test_user_elf_smoke_is_default_off_and_separate_from_embedded_smoke() -> Non
 
 
 def test_user_elf_header_program_header_and_address_bounds_are_checked() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     for token in (
         'ELF_MAGIC',
@@ -48,7 +61,7 @@ def test_user_elf_header_program_header_and_address_bounds_are_checked() -> None
 
 
 def test_user_elf_rejects_unsupported_segments_overlap_wx_and_bad_entry() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'phdr->type == PT_DYNAMIC || phdr->type == PT_INTERP || phdr->type == PT_TLS' in proc
     assert 'is_writable_executable(phdr->flags)' in proc
@@ -58,7 +71,7 @@ def test_user_elf_rejects_unsupported_segments_overlap_wx_and_bad_entry() -> Non
 
 
 def test_user_elf_maps_pages_with_explicit_attrs_and_zero_fills_bss() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'segment_attr(uint32_t __flags)' in proc
     assert 'attr |= bigos::mm::page_attr::WRITABLE | bigos::mm::page_attr::NO_EXECUTE;' in proc
@@ -77,8 +90,8 @@ def test_user_elf_maps_pages_with_explicit_attrs_and_zero_fills_bss() -> None:
 
 
 def test_user_elf_failure_paths_release_owned_resources_and_keep_reaper_boundary() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
-    sched = read_source('src/kernel/sched/sched.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    sched = read_source('kernel/core/sched/sched.cc')
 
     assert 'goto fail;' in proc
     assert 'free_user_frame(phys);' in proc
@@ -91,8 +104,8 @@ def test_user_elf_failure_paths_release_owned_resources_and_keep_reaper_boundary
 
 def test_user_elf_exec_prepare_commit_and_argv_envp_bounds_are_source_checked() -> None:
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
-    kernel = read_source('src/kernel/kernel.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     for token in (
         'constexpr uint32_t EXEC_MAX_ARGC = 8;',

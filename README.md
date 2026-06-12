@@ -104,19 +104,19 @@ Not implemented or still skeletal:
 |-- cpp               kernel C++ support library, KTL, libsupc++ subset
 |-- include           public kernel headers and small libc-style header subset
 |-- user              freestanding user crt0/libc, init, shell, bins, and smoke
-|-- src               implementation sources for boot, kernel, drivers, mm, runtime
+|-- kernel            kernel implementation sources
 |   |-- arch/x86/boot x86 boot code, MBR/DBR, and ELF loader
-|   |-- drivers       hardware drivers such as VGA, i8259 PIC, PIT, and ATA PIO
-|   |-- kernel        kernel entry and subsystems: irq, timer, terminal (console/
+|   |-- core          kernel entry and subsystems: irq, timer, terminal (console/
 |   |                 keyboard/tty), sched, syscall, proc, fs, low-level IO
+|   |-- drivers       hardware drivers such as VGA, i8259 PIC, PIT, and ATA PIO
 |   |-- mm            buddy, slab, kmalloc, virtual memory, and direct map code
 |   `-- runtime       runtime startup assembly source objects
 |-- tools             developer helpers such as the boot disk install tool
 |-- openspec          OpenSpec project configuration
 |-- tests             validation tests and local test assets
 |-- link.lds          kernel linker script
-|-- toolchains.lua    xmake cross-toolchain definition
-|-- xmake.lua         primary build configuration
+|-- xmake             split xmake includes and cross-toolchain definition
+|-- xmake.lua         primary build entry
 `-- bigos.py          auxiliary command helper
 ```
 
@@ -162,9 +162,9 @@ kernel()
 
 Key files:
 
-- `src/arch/x86/boot/boot.s`: early CPU mode switch and jump to the kernel.
-- `src/arch/x86/boot/boot.cc`: disk read, exFAT lookup, ELF loading.
-- `src/kernel/kernel.cc`: main kernel entry.
+- `kernel/arch/x86/boot/boot.s`: early CPU mode switch and jump to the kernel.
+- `kernel/arch/x86/boot/boot.cc`: disk read, exFAT lookup, ELF loading.
+- `kernel/core/kernel.cc`: main kernel entry.
 - `link.lds`: higher-half kernel layout.
 - `docs/en/arch/x86-boot-layout.md`: current Legacy BIOS address and handoff layout.
 - `docs/en/arch/uefi-boot-blueprint.md`: future UEFI compatibility blueprint; this is
@@ -370,16 +370,16 @@ provide an exFAT partition containing a file named `kernel`.
 The current runnable backend is Legacy BIOS; UEFI is documented as a future
 parallel backend in `docs/en/arch/uefi-boot-blueprint.md`.
 
-- `src/arch/x86/boot/mbr.s`: first-stage boot code.
-- `src/arch/x86/boot/dbr_exfat.s`: exFAT boot-sector code.
-- `src/arch/x86/boot/exdbr_exfat.s`: extended exFAT boot code.
-- `src/arch/x86/boot/boot.s`: mode switching, early page tables, and transfer to long mode.
-- `src/arch/x86/boot/boot.cc`: ATA disk reads, exFAT directory scan, and ELF64 load.
+- `kernel/arch/x86/boot/mbr.s`: first-stage boot code.
+- `kernel/arch/x86/boot/dbr_exfat.s`: exFAT boot-sector code.
+- `kernel/arch/x86/boot/exdbr_exfat.s`: extended exFAT boot code.
+- `kernel/arch/x86/boot/boot.s`: mode switching, early page tables, and transfer to long mode.
+- `kernel/arch/x86/boot/boot.cc`: ATA disk reads, exFAT directory scan, and ELF64 load.
 - `tools/install.py`: helper for writing boot sectors into a virtual disk image.
 
 ### Kernel Entry
 
-`src/kernel/kernel.cc` performs the current runtime setup:
+`kernel/core/kernel.cc` performs the current runtime setup:
 
 - Clears the VGA text screen and initializes COM1 serial output.
 - Calls `bigos::init_mem()`.
@@ -397,25 +397,25 @@ parallel backend in `docs/en/arch/uefi-boot-blueprint.md`.
 
 ### Memory Management
 
-The memory subsystem lives under `src/mm/` and is the most developed part of the
+The memory subsystem lives under `kernel/mm/` and is the most developed part of the
 kernel. The public API distinguishes allocation layers by name: kernel virtual
 pages use page-count semantics through `alloc_kernel_pages(nr_pages, flags)`,
 while internal physical allocation uses buddy-order semantics through
 `alloc_physical_order(order, flags)`. Legacy mixed-semantics aliases were removed.
 
-- `src/mm/buddy.cc` / `src/mm/buddy.h`: parse the BIOS memory map, separate
+- `kernel/mm/buddy.cc` / `kernel/mm/buddy.h`: parse the BIOS memory map, separate
   DMA/DMA32/NORMAL zones, manage physical page blocks, and use an early metadata
   arena for bootstrap so initialization does not depend on dynamic slab growth.
-- `src/mm/slab.cc` / `src/mm/slab.h`: size-class caches, `kmalloc/free`, dynamic
+- `kernel/mm/slab.cc` / `kernel/mm/slab.h`: size-class caches, `kmalloc/free`, dynamic
   slab reclaim, page-backed large allocations, optional debug guards, and stats.
-- `src/mm/kmem.cc` / `src/mm/kmem.h`: kmalloc/free integration and cache wiring.
-- `src/mm/vmem.cc` / `src/mm/vmem.h`: first-fit kernel virtual ranges, 4-level
+- `kernel/mm/kmem.cc` / `kernel/mm/kmem.h`: kmalloc/free integration and cache wiring.
+- `kernel/mm/vmem.cc` / `kernel/mm/vmem.h`: first-fit kernel virtual ranges, 4-level
   page-table mapping, and PTE clear plus TLB invalidation on free.
-- `src/mm/memory.cc`: public memory API entry points.
-- `src/mm/self_test.cc`: switchable early runtime self-test with deterministic
+- `kernel/mm/memory.cc`: public memory API entry points.
+- `kernel/mm/self_test.cc`: switchable early runtime self-test with deterministic
   `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED` markers.
 - `include/bigos/memory.h`: exposes the public allocation API.
-- `src/mm/memdef.h`: defines mm-private page size, buddy order, and allocation flags.
+- `kernel/mm/memdef.h`: defines mm-private page size, buddy order, and allocation flags.
 
 See `docs/en/arch/memory-runtime-validation.md` for self-test usage.
 
@@ -425,11 +425,11 @@ The interrupt subsystem combines assembly stubs and C++ descriptors. The kernel
 loads a kernel-owned static IDT before enabling maskable interrupts and routes
 all ISR entries through a stable `InterruptFrame` dispatch ABI.
 
-- `src/kernel/irq/interrupt.s`: generated ISR entry stubs.
-- `src/kernel/irq/interrupt.cc`: IDT initialization, exception dispatch, external
+- `kernel/core/irq/interrupt.s`: generated ISR entry stubs.
+- `kernel/core/irq/interrupt.cc`: IDT initialization, exception dispatch, external
   IRQ dispatch, and routing of the `int 0x80` syscall vector.
-- `src/drivers/irqchip/i8259.cc`: PIC remap, masking, and EOI support.
-- `src/kernel/irq/isr.cc`: diagnostic `#PF` handler, the timer IRQ0 tick hook,
+- `kernel/drivers/irqchip/i8259.cc`: PIC remap, masking, and EOI support.
+- `kernel/core/irq/isr.cc`: diagnostic `#PF` handler, the timer IRQ0 tick hook,
   and the keyboard IRQ1 handler.
 - `include/irq/interrupt.h`: descriptor layout, `InterruptFrame`, and vector constants.
 - `docs/en/arch/interrupt-exception-foundation.md`: current interrupt/exception
@@ -444,8 +444,8 @@ while exception and external IRQ gates remain ring0-only.
 
 The PIT drives a periodic IRQ0 tick.
 
-- `src/drivers/timer/pit.cc` / `include/drivers/timer/pit.h`: PIT channel-0 setup.
-- `src/kernel/timer/timer.cc` / `include/bigos/timer.h`: a monotonic `ticks()`
+- `kernel/drivers/timer/pit.cc` / `include/drivers/timer/pit.h`: PIT channel-0 setup.
+- `kernel/core/timer/timer.cc` / `include/bigos/timer.h`: a monotonic `ticks()`
   counter advanced from IRQ context via `on_tick()`, and a minimal `mdelay`
   busy-wait. The `timer_smoke` switch emits a bounded `BIGOS_TIMER_IRQ` marker.
 
@@ -454,12 +454,12 @@ The PIT drives a periodic IRQ0 tick.
 Keyboard input flows from the IRQ1 handler through scancode decode into a
 fixed-capacity TTY input buffer; console output routes through VGA.
 
-- `src/kernel/terminal/keyboard.cc` / `include/bigos/keyboard.h`: US Set 1
+- `kernel/core/terminal/keyboard.cc` / `include/bigos/keyboard.h`: US Set 1
   scancode decode with modifier tracking; the IRQ does only bounded decode and a
   ring-buffer handoff.
-- `src/kernel/terminal/tty.cc` / `include/bigos/tty.h`: TTY input enqueue and
+- `kernel/core/terminal/tty.cc` / `include/bigos/tty.h`: TTY input enqueue and
   `terminal::init_tty()`.
-- `src/kernel/terminal/console.cc` / `include/bigos/console.h`: console output
+- `kernel/core/terminal/console.cc` / `include/bigos/console.h`: console output
   over the VGA backend.
 
 ### Scheduler
@@ -467,11 +467,11 @@ fixed-capacity TTY input buffer; console output routes through VGA.
 A single-core round-robin kernel-thread scheduler with cooperative switch paths,
 wait queues, timeout sleep, and guarded IRQ-return timer preemption.
 
-- `src/kernel/sched/sched.cc` / `include/bigos/sched.h`: TCBs, a round-robin run
+- `kernel/core/sched/sched.cc` / `include/bigos/sched.h`: TCBs, a round-robin run
   queue, intrusive wait/sleep lists, `create_kernel_thread()`, `yield()`,
   `thread_exit()`, `sleep_for()`, wakeup APIs, preemption guards, and `start()`
   (which adopts the boot context as the idle thread).
-- `src/kernel/sched/switch.s`: the x86_64 callee-saved context switch.
+- `kernel/core/sched/switch.s`: the x86_64 callee-saved context switch.
 - The timer IRQ accounts ordinary-thread time slices, wakes expired sleepers,
   and records bounded reschedule intent. External IRQ return may switch only
   after handler completion, a single EOI, and scheduler guard approval.
@@ -480,7 +480,7 @@ wait queues, timeout sleep, and guarded IRQ-return timer preemption.
 
 ### System Calls
 
-- `src/kernel/syscall/syscall.cc` / `include/bigos/syscall.h`: the `int 0x80`
+- `kernel/core/syscall/syscall.cc` / `include/bigos/syscall.h`: the `int 0x80`
   dispatcher and minimal register ABI (number in `rax`, args in
   `rdi/rsi/rdx/r10/r8/r9`, return in `rax`). Implements `SYS_DEBUG_WRITE`,
   `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, `SYS_WAIT`, fd/VFS
@@ -495,7 +495,7 @@ The lifecycle core is compiled as a normal kernel subsystem. Normal boot enters
 resident PID-1 init and `/bin/sh`; `user_program_smoke`, `user_elf_smoke`, and
 `userland_smoke` only select default-off validation payloads.
 
-- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a bounded process model,
+- `kernel/core/proc/proc.cc` / `include/bigos/proc.h`: a bounded process model,
   PID allocation, parent/child linkage, wait status, zombie/reap-pending
   lifecycle, process-local fd table, VMA/heap metadata, VMA-backed user-buffer
   validation, `brk`, restricted anonymous mapping, demand-zero materialization,
@@ -503,7 +503,7 @@ resident PID-1 init and `/bin/sh`; `user_program_smoke`, `user_elf_smoke`, and
   teardown/reaping, mapping of a flat embedded user image, and bounded ELF64
   `ET_EXEC` prepare/exec paths for `/boot/user/init.elf`, `execve`, PID-1 init,
   and default-off user smokes.
-- `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
+- `kernel/core/proc/user_mode.cc` / `kernel/core/proc/user_mode.s` /
   `include/bigos/user_mode.h`: GDT/TSS/RSP0 setup and the `iretq` ring3 entry.
 - Demand paging and COW are implemented only for the current bounded anonymous
   user mappings; broad file-backed `mmap`, dynamic linking, job control, and a
@@ -513,9 +513,9 @@ resident PID-1 init and `/bin/sh`; `user_program_smoke`, `user_elf_smoke`, and
 
 VGA text mode and COM1 serial are the current output backends.
 
-- `src/drivers/video/vga.cc`: text buffer writes, cursor movement, screen clearing.
-- `src/kernel/bigos/io.cc`: port IO wrappers, `kprintf`, and serial output.
-- `src/kernel/bigos/utils.cc`: small helpers such as integer-to-string conversion.
+- `kernel/drivers/video/vga.cc`: text buffer writes, cursor movement, screen clearing.
+- `kernel/core/bigos/io.cc`: port IO wrappers, `kprintf`, and serial output.
+- `kernel/core/bigos/utils.cc`: small helpers such as integer-to-string conversion.
 
 ### Kernel C++ Support
 

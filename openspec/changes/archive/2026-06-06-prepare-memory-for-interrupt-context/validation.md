@@ -8,7 +8,7 @@
 - `xmake`
   - 结果：通过。
   - 覆盖：默认配置下 kernel C++/assembly 目标构建。
-- `x86_64-elf-g++ -std=c++17 -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/mm/buddy.cc src/mm/slab.cc src/mm/vmem.cc src/mm/kmem.cc cpp/libsupc++/new.cc src/kernel/irq/interrupt.cc`
+- `x86_64-elf-g++ -std=c++17 -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/mm/buddy.cc kernel/mm/slab.cc kernel/mm/vmem.cc kernel/mm/kmem.cc cpp/libsupc++/new.cc kernel/core/irq/interrupt.cc`
   - 结果：通过。
   - 覆盖：新增/修改的 memory/IRQ guard 相关 C++ 源和头的 freestanding 语法检查。
 - `openspec validate prepare-memory-for-interrupt-context --strict`

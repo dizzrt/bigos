@@ -4,12 +4,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_user_program_smoke_is_default_off_and_wired_to_scheduler() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     option_index = xmake.index('option("user_program_smoke")')
     default_index = xmake.index('set_default(false)', option_index)
@@ -22,21 +34,23 @@ def test_user_program_smoke_is_default_off_and_wired_to_scheduler() -> None:
 
 
 def test_flat_embedded_image_has_no_fs_or_block_dependency() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
     doc = read_source('docs/en/arch/first-user-program.md')
 
     assert 'FIRST_USER_CODE' in proc
     assert 'Flat embedded image' in proc
     assert 'BIGOS_USER_WRITE' in proc
     assert 'flat blob' in doc
-    blob_section = proc[proc.index('constexpr uint8_t FIRST_USER_CODE') : proc.index('bigos::proc::Process *g_current_process')]
+    blob_section = proc[
+        proc.index('constexpr uint8_t FIRST_USER_CODE') : proc.index('bigos::proc::Process *g_current_process')
+    ]
     for token in ('open(', 'read(', 'exfat', 'block-device'):
         assert token not in blob_section
 
 
 def test_process_model_records_identity_address_space_stack_and_exit_state() -> None:
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     for token in (
         'uint32_t pid;',
@@ -62,7 +76,7 @@ def test_process_model_records_identity_address_space_stack_and_exit_state() -> 
 
 
 def test_loader_maps_code_data_bss_and_stack_with_user_attributes() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'derive_user_address_space_root()' in proc
     assert 'map_page_in_root(' in proc
@@ -74,8 +88,8 @@ def test_loader_maps_code_data_bss_and_stack_with_user_attributes() -> None:
 
 def test_x86_user_mode_keeps_kernel_selectors_and_builds_iret_frame() -> None:
     user_mode_h = read_source('include/bigos/user_mode.h')
-    user_mode_cc = read_source('src/kernel/proc/user_mode.cc')
-    user_mode_s = read_source('src/kernel/proc/user_mode.s')
+    user_mode_cc = read_source('kernel/core/proc/user_mode.cc')
+    user_mode_s = read_source('kernel/core/proc/user_mode.s')
 
     assert 'KERNEL_CODE_SELECTOR = 0x08' in user_mode_h
     assert 'KERNEL_DATA_SELECTOR = 0x10' in user_mode_h
@@ -88,16 +102,18 @@ def test_x86_user_mode_keeps_kernel_selectors_and_builds_iret_frame() -> None:
 
 
 def test_syscall_gate_user_buffer_exit_and_fault_boundaries() -> None:
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
-    syscall = read_source('src/kernel/syscall/syscall.cc')
-    proc = read_source('src/kernel/proc/proc.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'PRESENT_RING3_TRAP_GATE = 0xef00' in interrupt
     assert 'if (i == VECTOR_SYSCALL)' in interrupt
     assert 'driver::irqchip::i8259::send_eoi' in interrupt
 
     syscall_start = interrupt.index('if (__detail::is_syscall_vector(__frame->vector))')
-    syscall_body = interrupt[syscall_start : interrupt.index('__detail::unknown_vector_handler(__frame);', syscall_start)]
+    syscall_body = interrupt[
+        syscall_start : interrupt.index('__detail::unknown_vector_handler(__frame);', syscall_start)
+    ]
     assert 'send_eoi' not in syscall_body
 
     assert 'validate_user_buffer(__buffer, __len)' in syscall
@@ -111,7 +127,7 @@ def test_syscall_gate_user_buffer_exit_and_fault_boundaries() -> None:
 
 def test_layout_abi_constants_are_not_moved() -> None:
     link = read_source('link.lds')
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
     interrupt_h = read_source('include/irq/interrupt.h')
 
     assert '. = 0xffffffff80000000;' in link

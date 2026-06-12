@@ -1,6 +1,6 @@
 ## 1. 修复前确认
 
-- [x] 1.1 复查 `src/mm` 初始化顺序，确认本 change 不移动 boot/linker 地址、不引入 IRQ enable、scheduler 或 SMP 假设。
+- [x] 1.1 复查 `kernel/mm` 初始化顺序，确认本 change 不移动 boot/linker 地址、不引入 IRQ enable、scheduler 或 SMP 假设。
 - [x] 1.2 记录当前 `kmalloc`、`alloc_pages`、`alloc_physical_pages` 的调用关系，标出页数与 buddy order 的传递点，并制定本 change 内的 API 拆分迁移清单。
 - [x] 1.3 检查现有 `xmake`、`x86_64-elf-*`、Bochs 和 disk image 路径是否可用，记录不可用工具及剩余验证风险。
 

@@ -1,7 +1,7 @@
 ## 1. 构建边界和进程核心
 
-- [x] 1.1 调整 `xmake.lua`，让 `src/kernel/proc` 的常规 lifecycle core 在非 `user_program_smoke`/`user_elf_smoke` 配置下可编译，同时保持 smoke entry 和 user image artifact 仍由显式开关控制
-- [x] 1.2 拆分 `include/bigos/proc.h` 与 `src/kernel/proc` 中的 smoke-only entry、ELF loader、user-mode entry、process core 边界，保证 public header 只暴露最小 lifecycle API
+- [x] 1.1 调整 `xmake.lua`，让 `kernel/core/proc` 的常规 lifecycle core 在非 `user_program_smoke`/`user_elf_smoke` 配置下可编译，同时保持 smoke entry 和 user image artifact 仍由显式开关控制
+- [x] 1.2 拆分 `include/bigos/proc.h` 与 `kernel/core/proc` 中的 smoke-only entry、ELF loader、user-mode entry、process core 边界，保证 public header 只暴露最小 lifecycle API
 - [x] 1.3 增加 `proc::init()` 或等价初始化路径，明确初始化顺序位于 memory、scheduler、syscall/user-mode prerequisites 之后，且不改变 boot/linker/page-table 地址常量
 - [x] 1.4 将固定 PID 和单实例 `g_current_process`/`g_reap_pending_process` 替换为单核有界 PID allocator、process table、current process 指针和可迭代 reap/zombie tracking
 - [x] 1.5 为 `Process` 增加 parent/child linkage、owned resource metadata、exit/fault status、zombie/reap 状态和 process-table publication/rollback 规则

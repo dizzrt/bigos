@@ -28,7 +28,7 @@ BigOS 当前已经具备单核协作式调度、PIT tick、TTY 输入、syscall 
 
 ## Impact
 
-- 受影响子系统：`src/kernel/sched`、`include/bigos/sched.h`、`include/bigos/thread.h`、`src/kernel/timer`、`include/bigos/timer.h`、`src/kernel/terminal`、`include/bigos/tty.h`、`src/kernel/irq` 中与上下文规则相关的调用边界，以及 smoke/validation helper。
+- 受影响子系统：`kernel/core/sched`、`include/bigos/sched.h`、`include/bigos/thread.h`、`kernel/core/timer`、`include/bigos/timer.h`、`kernel/core/terminal`、`include/bigos/tty.h`、`kernel/core/irq` 中与上下文规则相关的调用边界，以及 smoke/validation helper。
 - 架构假设：仅 x86_64 单核 Legacy BIOS 路径；不修改 IDT vector、`InterruptFrame` ABI、syscall vector `0x80`、i8259 EOI 语义或 context-switch callee-saved frame 布局。
 - 内存假设：等待队列节点和线程状态存储由初始化期或非中断上下文分配；IRQ handler 不通过普通 allocator 创建/销毁 wait object、TCB 或 queue node。
 - emulator 与工具链假设：继续使用 `xmake`、`x86_64-elf-*` 工具链和 QEMU headless marker smoke；涉及 IRQ/timer/port-IO 语义时在可用环境下保留 Bochs 或 QEMU+Bochs 交叉验证。

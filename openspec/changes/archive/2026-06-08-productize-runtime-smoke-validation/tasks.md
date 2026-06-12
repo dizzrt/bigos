@@ -2,7 +2,7 @@
 
 - [x] 1.1 盘点现有 runtime smoke 开关、编译边界、预期 COM1/VGA marker、case-specific timeout 和输出日志路径。
 - [x] 1.2 定义阶段 9 runtime smoke matrix，至少包含 memory self-test、timer IRQ、scheduler、syscall、read-only filesystem、first user program、filesystem-backed user ELF 的窄 case。
-- [x] 1.3 为 `user_program_smoke` 和 `user_elf_smoke` case 明确记录 `src/kernel/proc/**` 编译边界和非默认 boot 边界。
+- [x] 1.3 为 `user_program_smoke` 和 `user_elf_smoke` case 明确记录 `kernel/core/proc/**` 编译边界和非默认 boot 边界。
 - [x] 1.4 确认矩阵定义不会改变现有 smoke 默认关闭语义、marker 字符串、boot image layout 或内核运行时 ABI。
 
 ## 2. Runner And Artifact

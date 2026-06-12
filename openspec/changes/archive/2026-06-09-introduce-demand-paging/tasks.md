@@ -3,13 +3,13 @@
 - [x] 1.1 在 `proc.h`/`proc.cc` 引入统一用户态缺页入口（如 `try_handle_user_page_fault(fault_addr, error_code)`），承接现有 `try_handle_current_stack_fault` 的职责，按覆盖该页的 VMA 的 purpose/backing/growth/permissions 决定恢复策略
 - [x] 1.2 抽出共享的「匿名单页零物化」辅助（分配用户帧、`zero_frame`、`map_user_page_for_process`、推进 `materialized_*`），供栈/堆/匿名复用
 - [x] 1.3 将向下增长栈的物化改写为统一入口下的一个分支，保留原有 `materialized_start` 边界与权限语义
-- [x] 1.4 修改 `page_fault_handler`（[interrupt.cc](src/kernel/irq/interrupt.cc#L42-L61)）调用统一入口；用户态恢复失败 -> `fault_current_and_exit`，CPL0 缺页保持 `BIGOS_PAGE_FAULT` 诊断 + halt
+- [x] 1.4 修改 `page_fault_handler`（[interrupt.cc](kernel/core/irq/interrupt.cc#L42-L61)）调用统一入口；用户态恢复失败 -> `fault_current_and_exit`，CPL0 缺页保持 `BIGOS_PAGE_FAULT` 诊断 + halt
 - [x] 1.5 回归现有 `user_program_smoke` / `user_elf_smoke` / `fs_smoke`，确认仅切换入口不改变行为
 
 ## 2. 匿名 backing 惰性物化
 
-- [x] 2.1 将 `map_anonymous_current`（[proc.cc](src/kernel/proc/proc.cc#L1280-L1341)）改为仅登记非重叠 VMA 与 `anon_next`，不再 eager 逐页分配映射；保持 unsupported 请求确定性拒绝与无部分发布
-- [x] 2.2 将 `brk_current` 扩展（[proc.cc](src/kernel/proc/proc.cc#L1255-L1278)）改为仅更新 `heap_break` 与堆 VMA 边界元数据，不 eager 映射；扩展失败仅元数据回滚保持旧边界
+- [x] 2.1 将 `map_anonymous_current`（[proc.cc](kernel/core/proc/proc.cc#L1280-L1341)）改为仅登记非重叠 VMA 与 `anon_next`，不再 eager 逐页分配映射；保持 unsupported 请求确定性拒绝与无部分发布
+- [x] 2.2 将 `brk_current` 扩展（[proc.cc](kernel/core/proc/proc.cc#L1255-L1278)）改为仅更新 `heap_break` 与堆 VMA 边界元数据，不 eager 映射；扩展失败仅元数据回滚保持旧边界
 - [x] 2.3 修正 `brk` 收缩与进程 teardown/reclaim，仅 unmap 真正已物化的页（依据 `materialized_*`），避免对未物化页执行 unmap/free
 - [x] 2.4 确认 ELF 数据/BSS 等零填充范围在统一入口下按匿名惰性物化（如适用），不破坏既有 ELF 加载与权限
 

@@ -6,7 +6,7 @@ self-test）与 irq（异常/`#PF`）中的致命停机路径收敛到单一入�
 
 ## 入口
 
-- 头文件：`include/bigos/panic.h`；实现：`src/kernel/bigos/panic.cc`；命名空间 `bigos`。
+- 头文件：`include/bigos/panic.h`；实现：`kernel/core/bigos/panic.cc`；命名空间 `bigos`。
 - `bigos::khalt()`：统一停机原语，先 `cli` 关闭可屏蔽中断，再进入 `hlt` 循环，
   `[[noreturn]]`。供已自行输出诊断 marker 的路径复用。
 - `bigos::kpanic(code, source[, fmt, ...])`：先用常量字符串输出固定首行 marker
@@ -36,6 +36,6 @@ self-test）与 irq（异常/`#PF`）中的致命停机路径收敛到单一入�
 
 ## 接入范围
 
-仅覆盖 kernel 运行时与 mm/irq 路径。boot 早期代码（`src/arch/x86/boot/*`）不在本设施
+仅覆盖 kernel 运行时与 mm/irq 路径。boot 早期代码（`kernel/arch/x86/boot/*`）不在本设施
 接入，保留其现有失败/停机方式。`kernel()` 末尾的 idle `hlt` 循环为正常停机非致命路径，
 不受影响。

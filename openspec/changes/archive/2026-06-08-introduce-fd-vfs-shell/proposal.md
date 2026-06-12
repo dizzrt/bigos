@@ -26,7 +26,7 @@ BigOS 已完成常规进程生命周期、bounded ELF64 `exec`、blocking primit
 
 ## Impact
 
-- 受影响子系统：`src/kernel/fs`、新增或调整的 VFS/fd headers、`src/kernel/proc`、`include/bigos/proc.h`、`src/kernel/syscall`、`include/bigos/syscall.h`、现有 exFAT 读取路径、`xmake.lua`、runtime smoke matrix、source-level tests 和相关文档。
+- 受影响子系统：`kernel/core/fs`、新增或调整的 VFS/fd headers、`kernel/core/proc`、`include/bigos/proc.h`、`kernel/core/syscall`、`include/bigos/syscall.h`、现有 exFAT 读取路径、`xmake.lua`、runtime smoke matrix、source-level tests 和相关文档。
 - 架构假设：仅 x86_64 单核 Legacy BIOS/MBR/exFAT 路径；保留 `int 0x80` syscall vector、`InterruptFrame` ABI、GDT/TSS/RSP0、kernel higher-half、direct map、KVMEM 和 recursive self-mapping 常量。
 - 内存与阻塞假设：fd/VFS 操作只能在允许阻塞的进程或普通内核上下文执行；不得在 IRQ、preemption-disabled scheduler critical section 或 panic path 中分配 fd/file/vnode 对象或执行可能阻塞的磁盘读取。
 - 磁盘/文件系统假设：第一版只挂载当前 raw image 内的 MBR/exFAT 只读卷；路径 lookup 和 file read 仍受现有 exFAT bounds 限制；不改变 ATA PIO 同步读、MBR partition discovery 或 exFAT on-disk 支持范围。

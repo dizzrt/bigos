@@ -1,7 +1,7 @@
 ## 1. Scheduler 基础结构
 
 - [x] 1.1 新增 `include/bigos/sched.h`、`include/bigos/thread.h` 或等价 public header，声明线程状态、线程入口类型、创建/启动/yield API，并标注 non-interrupt-context 与单核限制。
-- [x] 1.2 新增 `src/kernel/sched/` 或等价目录，定义 TCB、线程 ID、saved context、栈范围、run queue 节点、idle 线程记录和 scheduler 全局状态。
+- [x] 1.2 新增 `kernel/core/sched/` 或等价目录，定义 TCB、线程 ID、saved context、栈范围、run queue 节点、idle 线程记录和 scheduler 全局状态。
 - [x] 1.3 选择固定容量或 intrusive run queue 表示方式，确保 queue 节点生命周期由 TCB 持有，不依赖 IRQ handler 中的动态分配。
 - [x] 1.4 在 `xmake.lua` 中注册新增 C++/assembly 源文件，保持 freestanding C++17、无异常、无 RTTI 构建假设。
 
@@ -25,7 +25,7 @@
 - [x] 4.1 实现单核 round-robin `yield()`，在至少一个 peer runnable thread 存在时切换到下一个 runnable thread。
 - [x] 4.2 实现 `sched::start()` 或等价入口，将 boot/current context 纳入 scheduler 状态，并启动第一个 runnable thread。
 - [x] 4.3 实现 scheduler-owned idle thread，用 `hlt` 替代 `kernel()` 尾部裸循环，并文档化 idle 运行时的 IF/IRQ readiness 假设。
-- [x] 4.4 修改 `src/kernel/kernel.cc`，保持现有 memory/self-test/TTY/IRQ 初始化顺序不变，在 `irq::enableIRQ()` 后进入 scheduler start path。
+- [x] 4.4 修改 `kernel/core/kernel.cc`，保持现有 memory/self-test/TTY/IRQ 初始化顺序不变，在 `irq::enableIRQ()` 后进入 scheduler start path。
 
 ## 5. Timer 与 IRQ 集成
 

@@ -3,8 +3,8 @@
 `harden-memory-correctness` 修复了内存管理的若干不变量，并初步引入 `alloc_kernel_pages(nr_pages, flags)` 与 `alloc_physical_order(order, flags)`。但当前代码仍保留旧别名和遗留声明：
 
 - `include/bigos/memory.h` 仍公开 `alloc_pages(uint32_t __pages, gfm_t __gfm)`。
-- `src/mm/buddy.h` 仍声明 `alloc_physical_pages(uint32_t __order, gfm_t __gfm)` 与 `free_physical_pages()`。
-- `src/mm/kmem.h` 仍声明未实现或未使用的 `kmem_cache_alloc()`、`kmem_memory_alloc_pages()`。
+- `kernel/mm/buddy.h` 仍声明 `alloc_physical_pages(uint32_t __order, gfm_t __gfm)` 与 `free_physical_pages()`。
+- `kernel/mm/kmem.h` 仍声明未实现或未使用的 `kmem_cache_alloc()`、`kmem_memory_alloc_pages()`。
 - `_GFM_PRE_PAGING` 仍暴露为普通 `gfm_t` flag，容易让调用方误以为 `kmalloc()` 是否可访问取决于外部传参。
 
 本 change 不改变当前内存管理分层：
@@ -82,9 +82,9 @@ kmalloc/new
 ## Migration Plan
 
 1. 删除 `include/bigos/memory.h` 中 `alloc_pages()` 声明，保留并注释 `alloc_kernel_pages()` 与 `free_pages()` 的配对语义。
-2. 删除 `src/mm/vmem.cc` 中 `alloc_pages()` wrapper，确认仓库内无调用点。
-3. 删除 `src/mm/buddy.h` 与 `src/mm/buddy.cc` 中 `alloc_physical_pages()`、`free_physical_pages()` wrapper，迁移所有调用点到 `alloc_physical_order()`、`free_physical_order()`。
-4. 清理 `src/mm/kmem.h` 中未实现或未使用的 allocator 遗留声明。
+2. 删除 `kernel/mm/vmem.cc` 中 `alloc_pages()` wrapper，确认仓库内无调用点。
+3. 删除 `kernel/mm/buddy.h` 与 `kernel/mm/buddy.cc` 中 `alloc_physical_pages()`、`free_physical_pages()` wrapper，迁移所有调用点到 `alloc_physical_order()`、`free_physical_order()`。
+4. 清理 `kernel/mm/kmem.h` 中未实现或未使用的 allocator 遗留声明。
 5. 检查 `_GFM_PRE_PAGING` 使用点，确保普通 `kmalloc/new` 调用方不需要传入该 flag。
 6. 增加或更新源码级测试，扫描旧 alias、遗留声明和误用调用点。
 7. 运行 `xmake`、OpenSpec 校验、clang/clangd 辅助诊断；Bochs 可用时执行 boot smoke test。

@@ -16,28 +16,28 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
 
 ## Important Directories
 
-- `src/arch/x86/boot`: boot sectors, long-mode transition, and ELF loader.
-- `src/kernel`: kernel entry and subsystems:
-  - `src/kernel/irq`: IDT, exception/IRQ/syscall dispatch, ISR stubs.
-  - `src/kernel/timer`: monotonic tick and `mdelay`.
-  - `src/kernel/terminal`: console output, keyboard scancode decode, TTY input.
-  - `src/kernel/sched`: single-core scheduler, wait queues, timeout sleep,
+- `kernel/arch/x86/boot`: boot sectors, long-mode transition, and ELF loader.
+- `kernel/core`: kernel entry and subsystems:
+  - `kernel/core/irq`: IDT, exception/IRQ/syscall dispatch, ISR stubs.
+  - `kernel/core/timer`: monotonic tick and `mdelay`.
+  - `kernel/core/terminal`: console output, keyboard scancode decode, TTY input.
+  - `kernel/core/sched`: single-core scheduler, wait queues, timeout sleep,
     guarded IRQ-return preemption, and context-switch assembly.
-  - `src/kernel/syscall`: `int 0x80` dispatcher and ABI.
-  - `src/kernel/proc`: bounded process model, growable fd table, VMA/heap
+  - `kernel/core/syscall`: `int 0x80` dispatcher and ABI.
+  - `kernel/core/proc`: bounded process model, growable fd table, VMA/heap
     metadata, demand-zero/COW handling, `fork`, signals, identity/time state,
     ring3 user-mode entry, `execve`, resident PID-1 init launch, safe
     teardown/reaping, and bounded ELF64 user-program loading. Flat
     first-user-program, filesystem-backed user ELF, and userland runtime entries
     remain default-off smoke consumers.
-  - `src/kernel/fs`: VFS shell over exFAT and RAM-backed `/rw`, path lookup,
+  - `kernel/core/fs`: VFS shell over exFAT and RAM-backed `/rw`, path lookup,
     fd-backed open/read/write/close/lseek/fsync, writable `bigfs`, block buffer
     cache, and bounded file reads/writes.
-  - `src/kernel/bigos`: low-level IO, panic, and utility helpers.
-- `src/mm`: buddy allocator, slab allocator, `kmalloc/free`, virtual memory, and
+  - `kernel/core/bigos`: low-level IO, panic, and utility helpers.
+- `kernel/mm`: buddy allocator, slab allocator, `kmalloc/free`, virtual memory, and
   the kernel direct map, including owned empty page-table reclamation.
-- `src/drivers`: VGA text mode, i8259 PIC, PIT timer, and ATA PIO block drivers.
-- `src/runtime`: startup assembly source objects.
+- `kernel/drivers`: VGA text mode, i8259 PIC, PIT timer, and ATA PIO block drivers.
+- `kernel/runtime`: startup assembly source objects.
 - `user`: freestanding user crt0/libc, PID-1 init, `/bin/sh`, small user
   binaries, and default-off userland smoke source.
 - `tools`: developer helper scripts such as the boot disk install tool.
@@ -122,8 +122,8 @@ Normal boot packages `/boot/user/init.elf`, `/bin/sh`, and bounded `/bin/*`
 programs, enters resident PID-1 init, and starts `/bin/sh`; QEMU headless default
 validation observes `BIGOS_USER_EXEC`. `--user_program_smoke`,
 `--user_elf_smoke`, and `--userland_smoke` select default-off user-program
-validation paths in place of the normal init payload. `src/kernel/proc/**`,
-`src/kernel/fs/**`, and `user/**` are normal Stage 19 baseline subsystems; smoke
+validation paths in place of the normal init payload. `kernel/core/proc/**`,
+`kernel/core/fs/**`, and `user/**` are normal Stage 19 baseline subsystems; smoke
 switches only select extra validation entry points or marker programs.
 
 For bounded emulator smoke against memory markers:
@@ -189,40 +189,40 @@ Notes:
 
 ## Low-Level Risk Areas
 
-- Boot flow: `src/arch/x86/boot/boot.s`, `src/arch/x86/boot/boot.cc`,
+- Boot flow: `kernel/arch/x86/boot/boot.s`, `kernel/arch/x86/boot/boot.cc`,
   `link.lds`.
-- Memory initialization order: `src/mm/kmem.cc`, `src/mm/buddy.cc`,
-  `src/mm/vmem.cc`, `src/mm/slab.cc`, `src/mm/memory.cc`.
+- Memory initialization order: `kernel/mm/kmem.cc`, `kernel/mm/buddy.cc`,
+  `kernel/mm/vmem.cc`, `kernel/mm/slab.cc`, `kernel/mm/memory.cc`.
 - Memory API layering (page-count vs buddy-order semantics) and the early
   metadata arena used during buddy bootstrap: do not reintroduce removed
   mixed-semantics aliases or make bootstrap depend on dynamic slab growth.
-- Interrupt descriptors and ISR calling convention: `src/kernel/irq/interrupt.s`,
-  `src/kernel/irq/interrupt.cc`, `include/irq/interrupt.h`. Keep the kernel-owned
+- Interrupt descriptors and ISR calling convention: `kernel/core/irq/interrupt.s`,
+  `kernel/core/irq/interrupt.cc`, `include/irq/interrupt.h`. Keep the kernel-owned
   static IDT, the `InterruptFrame` layout, and the exception-vs-IRQ EOI split.
   The syscall IDT gate (`int 0x80`) is DPL=3 while exception/IRQ gates stay
   ring0-only; the syscall path must not send an i8259 EOI.
-- Timer and scheduler context switch: `src/kernel/timer/timer.cc`,
-  `src/drivers/timer/pit.cc`, `src/kernel/sched/sched.cc`,
-  `src/kernel/sched/switch.s`. Keep `timer::on_tick()` IRQ-context-safe, keep
+- Timer and scheduler context switch: `kernel/core/timer/timer.cc`,
+  `kernel/drivers/timer/pit.cc`, `kernel/core/sched/sched.cc`,
+  `kernel/core/sched/switch.s`. Keep `timer::on_tick()` IRQ-context-safe, keep
   scheduler wait/sleep lists allocation-free in IRQ context, preserve
   preemption-disable and IRQ-return reschedule guards, and preserve the
   callee-saved context-switch frame layout and idle-thread ownership of halt.
-- Syscall entry and user mode: `src/kernel/syscall/syscall.cc`,
-  `src/kernel/proc/proc.cc`, `src/kernel/proc/user_mode.cc`,
-  `src/kernel/proc/user_mode.s`. Preserve the minimal syscall ABI, the GDT/TSS
+- Syscall entry and user mode: `kernel/core/syscall/syscall.cc`,
+  `kernel/core/proc/proc.cc`, `kernel/core/proc/user_mode.cc`,
+  `kernel/core/proc/user_mode.s`. Preserve the minimal syscall ABI, the GDT/TSS
   and RSP0 setup, the `iretq` ring3 entry, and explicit CR3 switching; never
   access unmapped VGA/MMIO under a user CR3.
 - Process, fd/VFS, and user-memory boundaries: `include/bigos/proc.h`,
-  `include/bigos/syscall.h`, `include/bigos/fs/vfs.h`, `src/kernel/fs/vfs.cc`,
-  and `src/kernel/proc/proc.cc`. Keep process lifecycle, fd table, `brk`,
+  `include/bigos/syscall.h`, `include/bigos/fs/vfs.h`, `kernel/core/fs/vfs.cc`,
+  and `kernel/core/proc/proc.cc`. Keep process lifecycle, fd table, `brk`,
   restricted anonymous mapping, demand paging, bounded `fork`/COW, signals,
   time/identity, writable `/rw`, pipes/dup, userland runtime, and VMA-backed
   user-buffer validation bounded; do not imply a complete POSIX process model,
   broad file-backed `mmap`, dynamic linking, job control, full libc, persistent
   writable filesystems, async I/O, SMP, or broad storage/device support.
-- Driver port IO and hardware state: `src/drivers/video/vga.cc`,
-  `src/drivers/irqchip/i8259.cc`, `src/drivers/timer/pit.cc`,
-  `src/kernel/bigos/io.cc` (VGA and COM1 serial).
+- Driver port IO and hardware state: `kernel/drivers/video/vga.cc`,
+  `kernel/drivers/irqchip/i8259.cc`, `kernel/drivers/timer/pit.cc`,
+  `kernel/core/bigos/io.cc` (VGA and COM1 serial).
 - C++ runtime behavior: `cpp/libsupc++`, `cpp/ktl`, global constructors, and
   `new/delete`.
 

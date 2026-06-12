@@ -14,10 +14,10 @@
   - 结果：timer smoke 构建通过。
 - `xmake f --timer_smoke=y --mm_self_test=n && xmake`
   - 结果：修复 ISR 栈对齐并恢复默认 IRQ0 unmask 后，timer smoke 构建通过。
-- `clang++ -std=c++17 -ffreestanding -mno-red-zone -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/drivers/timer/pit.cc src/kernel/timer/timer.cc src/kernel/irq/isr.cc`
+- `clang++ -std=c++17 -ffreestanding -mno-red-zone -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/drivers/timer/pit.cc kernel/core/timer/timer.cc kernel/core/irq/isr.cc`
   - 结果：无输出，退出码 0。
 - IDE diagnostics
-  - 结果：`include/drivers/timer/pit.h`、`src/drivers/timer/pit.cc`、`include/bigos/timer.h`、`src/kernel/timer/timer.cc`、`src/kernel/irq/isr.cc`、`include/irq/interrupt.h` 无诊断。
+  - 结果：`include/drivers/timer/pit.h`、`kernel/drivers/timer/pit.cc`、`include/bigos/timer.h`、`kernel/core/timer/timer.cc`、`kernel/core/irq/isr.cc`、`include/irq/interrupt.h` 无诊断。
 - `openspec validate add-timer-irq-foundation --strict`
   - 结果：Change valid。
 

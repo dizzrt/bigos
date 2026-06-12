@@ -4,6 +4,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
@@ -19,8 +31,8 @@ def test_pte_cow_marker_is_centralized_and_unique() -> None:
 
 def test_frame_refcount_table_declared_and_initialized_after_direct_map() -> None:
     memory = read_source('include/bigos/memory.h')
-    vmem = read_source('src/mm/vmem.cc')
-    kmem = read_source('src/mm/kmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
+    kmem = read_source('kernel/mm/kmem.cc')
 
     for token in (
         'void init_frame_refcount() noexcept;',
@@ -45,16 +57,18 @@ def test_frame_refcount_table_declared_and_initialized_after_direct_map() -> Non
 
 
 def test_teardown_uses_reference_counted_release() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
-    low_half = vmem[vmem.index('static bool teardown_user_low_half') : vmem.index('static void rollback_direct_map_range')]
+    low_half = vmem[
+        vmem.index('static bool teardown_user_low_half') : vmem.index('static void rollback_direct_map_range')
+    ]
     # Leaf frames go through the reference-count-aware release, not a raw free.
     assert 'bigos::mm::frame_ref_dec_and_maybe_free(leaf_phys);' in low_half
 
 
 def test_remap_and_leaf_accessor_present() -> None:
     memory = read_source('include/bigos/memory.h')
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     assert 'bool remap_user_page_in_root(' in memory
     assert 'bool read_user_leaf_in_root(' in memory
@@ -67,7 +81,7 @@ def test_remap_and_leaf_accessor_present() -> None:
 
 def test_sys_fork_number_and_dispatch_branch() -> None:
     syscall_h = read_source('include/bigos/syscall.h')
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     # SYS_FORK is appended right after SYS_MAP_ANON = 9.
     assert 'SYS_MAP_ANON = 9' in syscall_h
@@ -82,7 +96,7 @@ def test_sys_fork_number_and_dispatch_branch() -> None:
 
 def test_fork_clone_and_cow_split_implemented() -> None:
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'int64_t fork_current(const bigos::irq::InterruptFrame *__parent_frame) noexcept;' in proc_h
     assert 'bool fork_entry_valid;' in proc_h
@@ -108,17 +122,25 @@ def test_fork_clone_and_cow_split_implemented() -> None:
     assert 'MAX_FDS_SOFT_LIMIT' in fd_body
 
     # COW write-split branch in the unified page-fault handler.
-    split_body = proc[proc.index('bool cow_split_current(Process *__process, uint64_t __page, const VmaEntry *__vma) noexcept {') : proc.index('int64_t fork_current(')]
+    split_body = proc[
+        proc.index(
+            'bool cow_split_current(Process *__process, uint64_t __page, const VmaEntry *__vma) noexcept {'
+        ) : proc.index('int64_t fork_current(')
+    ]
     assert 'frame_ref_is_shared(old_phys)' in split_body
     assert 'frame_ref_dec_and_maybe_free(old_phys)' in split_body
 
-    fault_body = proc[proc.index('bool try_handle_user_page_fault(') : proc.index('bool cow_split_current(Process *__process, uint64_t __page, const VmaEntry *__vma) noexcept {')]
+    fault_body = proc[
+        proc.index('bool try_handle_user_page_fault(') : proc.index(
+            'bool cow_split_current(Process *__process, uint64_t __page, const VmaEntry *__vma) noexcept {'
+        )
+    ]
     assert 'page_attr::PTE_COW' in fault_body
     assert 'cow_split_current(process, page, cow_vma)' in fault_body
 
 
 def test_fork_failure_rolls_back_and_returns_negative_errno() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     fork_body = proc[proc.index('int64_t fork_current(') : proc.index('int64_t install_fd_current(')]
     # Deterministic negative errno on each failure path; no panic.
@@ -138,8 +160,8 @@ def test_fork_failure_rolls_back_and_returns_negative_errno() -> None:
 def test_fork_cow_smoke_switch_and_marker_present() -> None:
     xmake = read_source('xmake.lua')
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
-    kernel = read_source('src/kernel/kernel.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     assert 'option("fork_cow_smoke")' in xmake
     assert 'add_defines("BIGOS_FORK_COW_SMOKE")' in xmake

@@ -4,12 +4,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_exception_dispatch_does_not_send_pic_eoi() -> None:
-    interrupt_s = read_source('src/kernel/irq/interrupt.s')
-    interrupt_cc = read_source('src/kernel/irq/interrupt.cc')
+    interrupt_s = read_source('kernel/core/irq/interrupt.s')
+    interrupt_cc = read_source('kernel/core/irq/interrupt.cc')
 
     assert 'outb' not in interrupt_s
     assert 'I8259_EOI' not in interrupt_s
@@ -24,8 +36,8 @@ def test_exception_dispatch_does_not_send_pic_eoi() -> None:
 
 def test_i8259_spurious_irq7_is_checked_before_default_handler() -> None:
     pic_h = read_source('include/drivers/irqchip/i8259.h')
-    pic = read_source('src/drivers/irqchip/i8259.cc')
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    pic = read_source('kernel/drivers/irqchip/i8259.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     assert 'bool is_spurious_irq(uint8_t __irq) noexcept;' in pic_h
     assert 'void acknowledge_spurious_irq(uint8_t __irq) noexcept;' in pic_h
@@ -41,7 +53,7 @@ def test_i8259_spurious_irq7_is_checked_before_default_handler() -> None:
 
 
 def test_keyboard_irq_handler_is_registered_before_unmask() -> None:
-    isr = read_source('src/kernel/irq/isr.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
     xmake = read_source('xmake.lua')
 
     register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
@@ -59,7 +71,7 @@ def test_keyboard_irq_handler_is_registered_before_unmask() -> None:
 
 
 def test_memory_self_test_stays_before_irq_pic_and_enable() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     serial_init_index = kernel.index('bigos::serial_init();')
     init_mem_index = kernel.index('bigos::init_mem(boot_info);')
@@ -73,7 +85,7 @@ def test_memory_self_test_stays_before_irq_pic_and_enable() -> None:
 
 
 def test_page_fault_handler_is_diagnostic_only() -> None:
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     handler_start = interrupt.index('static bool page_fault_handler')
     handler_end = interrupt.index('static void default_external_irq_handler')
@@ -96,7 +108,7 @@ def test_page_fault_handler_is_diagnostic_only() -> None:
 
 
 def test_kernel_runtime_idt_uses_static_storage_and_lidt() -> None:
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     assert 'INTRDescriptor kernel_idt[IRQ_COUNT];' in interrupt
     assert 'INTRDescriptor *idt = (INTRDescriptor *)IDT_BASE' not in interrupt
@@ -105,7 +117,7 @@ def test_kernel_runtime_idt_uses_static_storage_and_lidt() -> None:
 
 
 def test_isr_common_aligns_stack_before_cpp_dispatch() -> None:
-    interrupt_s = read_source('src/kernel/irq/interrupt.s')
+    interrupt_s = read_source('kernel/core/irq/interrupt.s')
 
     frame_index = interrupt_s.index('movq %rsp, %rdi')
     save_index = interrupt_s.index('movq %rsp, %rax', frame_index)
@@ -120,7 +132,7 @@ def test_isr_common_aligns_stack_before_cpp_dispatch() -> None:
 
 
 def test_isr_common_preserves_interrupted_rax_before_using_scratch() -> None:
-    interrupt_s = read_source('src/kernel/irq/interrupt.s')
+    interrupt_s = read_source('kernel/core/irq/interrupt.s')
 
     common_start = interrupt_s.index('isr_common:')
     save_rax_index = interrupt_s.index('pushq %rax', common_start)

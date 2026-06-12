@@ -60,7 +60,7 @@ BigOS 当前已经形成多个默认关闭的 runtime smoke：memory self-test�
 - `xmake f` 配置在 case 之间残留 -> runner 必须在每个 case 前显式设置需要的 smoke，并在文档中说明如何恢复默认配置或记录当前配置。
 - QEMU 与 Bochs 行为差异掩盖硬件边界问题 -> 对 boot、IRQ、timer、ATA PIO、port IO 相关变更保留 Bochs 或 QEMU+Bochs 交叉验证要求，并在不可用时记录剩余风险。
 - 本地缺少 `x86_64-elf-*`、QEMU、Bochs、ROM/display 或 `uv` -> validation artifact 必须记录缺失工具、跳过 case、已执行替代检查和剩余风险，不得把未运行的 smoke 标记为通过。
-- User-mode 和 filesystem-backed ELF smoke 编译 `src/kernel/proc/**` -> 矩阵必须将这些 case 与普通 boot/runtime case 分开，避免误认为 proc subsystem 是默认内核路径。
+- User-mode 和 filesystem-backed ELF smoke 编译 `kernel/core/proc/**` -> 矩阵必须将这些 case 与普通 boot/runtime case 分开，避免误认为 proc subsystem 是默认内核路径。
 - 串口 marker 缺失可能来自启动失败、超时或配置错误 -> runner 输出必须包含 expected marker、serial log path、timeout/exit 状态和失败阶段，便于定位。
 
 ## Migration Plan

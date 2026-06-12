@@ -4,7 +4,7 @@
 每个 OpenSpec change 必须（MUST）包含与其影响的子系统、语言和构建产物匹配的验证任务。验证任务必须（MUST）足够具体，能够判断该 change 已执行检查、因明确原因跳过检查，或被不可用工具阻塞。
 
 #### Scenario: Change 影响内核运行时代码
-- **WHEN** OpenSpec change 修改 `src/kernel`、`src/mm`、`src/drivers`、`cpp`、`include`、`src/arch` 或 `src/runtime` 下的内核运行时代码
+- **WHEN** OpenSpec change 修改 `kernel/core`、`kernel/mm`、`kernel/drivers`、`cpp`、`include`、`kernel/arch` 或 `kernel/runtime` 下的内核运行时代码
 - **THEN** 其 tasks 必须（MUST）包含适用于受影响区域的构建、静态检查、emulator smoke test 或 targeted low-level test
 
 #### Scenario: Change 仅修改文档

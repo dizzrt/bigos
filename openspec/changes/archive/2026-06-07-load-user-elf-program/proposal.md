@@ -22,7 +22,7 @@
 
 ## Impact
 
-- 受影响子系统：`src/kernel/proc`、`src/kernel/syscall`、`src/mm` 用户地址空间 map/teardown、`src/kernel/fs`/block read 调用路径、xmake smoke 配置、`tools/boot_debug.py` 相关 image 验证资产。
+- 受影响子系统：`kernel/core/proc`、`kernel/core/syscall`、`kernel/mm` 用户地址空间 map/teardown、`kernel/core/fs`/block read 调用路径、xmake smoke 配置、`tools/boot_debug.py` 相关 image 验证资产。
 - 新增或扩展 API：用户 ELF loader 内部 API、ELF smoke 入口、用户程序产物安装/查找约定，以及 loader 到 `Process` 创建/回收路径的错误返回。
 - 依赖能力：阶段 5 syscall entry、阶段 6 first user program runtime、阶段 6.5 address-space lifecycle、阶段 7 block/fs read。
 - 架构假设：单核 x86_64、4KiB page、当前 higher-half kernel/direct map/KVMEM/self-mapping 布局不变，`int 0x80` syscall gate 可由 CPL3 进入，exception/IRQ gate 仍保持 ring0-only。

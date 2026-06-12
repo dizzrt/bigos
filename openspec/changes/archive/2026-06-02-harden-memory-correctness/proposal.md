@@ -1,6 +1,6 @@
 ## Why
 
-当前 `src/mm` 已经具备 buddy、slab/kmalloc 和内核虚拟内存雏形，但多个早期正确性问题会影响启动后的动态分配、页表映射和 allocator 元数据一致性。现在先收敛为单核、关中断、无 scheduler 的早期内核内存管理加固，避免后续 IRQ、驱动或 C++ 容器继续建立在不稳定的分配语义上。
+当前 `kernel/mm` 已经具备 buddy、slab/kmalloc 和内核虚拟内存雏形，但多个早期正确性问题会影响启动后的动态分配、页表映射和 allocator 元数据一致性。现在先收敛为单核、关中断、无 scheduler 的早期内核内存管理加固，避免后续 IRQ、驱动或 C++ 容器继续建立在不稳定的分配语义上。
 
 ## What Changes
 
@@ -20,7 +20,7 @@
 
 ## Impact
 
-- 受影响子系统：`src/mm` 内存管理模块，包括 `buddy.cc/.h`、`slab.cc/.h`、`kmem.cc/.h`、`vmem.cc/.h`、`memdef.h` 和公开入口 `include/bigos/memory.h`。
+- 受影响子系统：`kernel/mm` 内存管理模块，包括 `buddy.cc/.h`、`slab.cc/.h`、`kmem.cc/.h`、`vmem.cc/.h`、`memdef.h` 和公开入口 `include/bigos/memory.h`。
 - 受影响调用方：全局 `operator new/delete`、KTL 容器、未来驱动或内核组件通过 `kmalloc/free` 与 `alloc_pages/free_pages` 使用内存。
 - API 影响：本 change 会拆分页分配接口，调用方需要迁移到按页数分配 kernel virtual pages 的 API 或按 order 分配 physical pages 的内部 API。
 - 架构假设：x86_64 long mode、4 KiB 页、现有 boot-stage PML4 位于物理 `0x2000`，现有 self-mapping 地址公式在本 change 中只修正确性，不重新设计布局。

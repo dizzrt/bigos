@@ -23,7 +23,7 @@ BigOS 目前只能分别运行内核构建、boot 局部构建、镜像写入和
 ## Impact
 
 - 受影响子系统：boot 构建与安装工具、开发者启动调试流程、测试/本地镜像资产生成流程。
-- 主要代码位置：`tools/` 中新增或扩展启动调试脚本和 raw image/exFAT 写入逻辑；`src/arch/x86/boot/Makefile`、顶层 `Makefile` 或 `xmake.lua` 可增加便捷入口但不改变现有构建语义。
+- 主要代码位置：`tools/` 中新增或扩展启动调试脚本和 raw image/exFAT 写入逻辑；`kernel/arch/x86/boot/Makefile`、顶层 `Makefile` 或 `xmake.lua` 可增加便捷入口但不改变现有构建语义。
 - 架构假设：目标为 x86_64 BIOS 启动路径，保留 MBR、exFAT DBR、extended DBR、`boot.bin`、ELF64 `kernel` 的链路。
 - 内存布局假设：保留 `boot.s`/`boot.cc` 现有加载地址和高半区内核地址 `0xffffffff80000000`。
 - 磁盘布局假设：脚本生成固定 raw disk image，包含一个 exFAT 分区、`/boot/boot.bin` 文件和根目录 `kernel` 文件，并满足现有 bootloader 只支持的连续文件/目录约束。

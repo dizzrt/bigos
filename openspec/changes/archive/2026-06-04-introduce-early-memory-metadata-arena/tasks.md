@@ -1,14 +1,14 @@
 ## 1. 设计与边界确认
 
 - [x] 1.1 复查 `proposal.md`、`design.md` 和 spec delta，确认本 change 只处理 buddy 初始化元数据 arena。
-- [x] 1.2 复查 `docs/en/arch/x86-boot-layout.md`、BootInfo handoff、`src/mm/buddy.cc` 和 `src/mm/kmem.cc`，记录不能覆盖的固定地址和初始化顺序。
+- [x] 1.2 复查 `docs/en/arch/x86-boot-layout.md`、BootInfo handoff、`kernel/mm/buddy.cc` 和 `kernel/mm/kmem.cc`，记录不能覆盖的固定地址和初始化顺序。
 - [x] 1.3 明确第一版 arena 使用静态 buffer、BootInfo usable region 切分或其它方式，并记录容量估算依据。
 
 ## 2. Arena 基础设施
 
 - [x] 2.1 新增 early metadata arena 类型和初始化入口，保证 freestanding-safe、无 libc/异常/RTTI 依赖。
 - [x] 2.2 为 arena 增加对齐分配、容量统计和耗尽检测。
-- [x] 2.3 将 arena 接口限制在 `src/mm` 内部或 `bigos::mm::__detail`，避免扩大公开内存 API。
+- [x] 2.3 将 arena 接口限制在 `kernel/mm` 内部或 `bigos::mm::__detail`，避免扩大公开内存 API。
 - [x] 2.4 在容量不足时输出明确诊断并安全 halt 或返回 fatal init failure。
 
 ## 3. Buddy 初始化迁移
@@ -45,7 +45,7 @@
 - `uv run pytest tests/test_memory_correctness_source.py`：通过，17 passed。
 - `openspec validate --all`：通过，12 passed / 0 failed。
 - `xmake`：通过；仍有既有 `ISO C++11 requires whitespace after the macro name`、`LOAD segment with RWX permissions`、`$(buildir)` deprecated warning。
-- `clang++ --target=x86_64-elf -std=c++17 -ffreestanding -fno-rtti -fno-exceptions -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/mm/buddy.cc`：通过。
-- IDE diagnostics：`src/mm/buddy.cc`、`tests/test_memory_correctness_source.py` 无有效诊断。
+- `clang++ --target=x86_64-elf -std=c++17 -ffreestanding -fno-rtti -fno-exceptions -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/mm/buddy.cc`：通过。
+- IDE diagnostics：`kernel/mm/buddy.cc`、`tests/test_memory_correctness_source.py` 无有效诊断。
 - `uv run python tools/boot_debug.py run --memory-self-test --no-launch`：通过，生成 `build/test/os.raw`、`build/test/bochsrc.bxrc`，配置 COM1 serial log 路径。
 - `uv run python tools/boot_debug.py run --memory-self-test --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED --smoke-timeout 30`：未通过，Bochs 可启动但等待 serial marker 超时，且未生成 `build/test/serial.log`；运行后遗留的 generated `os.raw.lock` 已清理。

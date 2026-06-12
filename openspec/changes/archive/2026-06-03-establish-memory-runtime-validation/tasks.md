@@ -1,13 +1,13 @@
 ## 1. 设计与接入点确认
 
 - [x] 1.1 复查 `proposal.md`、`design.md` 和 spec delta，确认本 change 只增加内存 runtime 验证，不改变 allocator 策略。
-- [x] 1.2 复查 `src/kernel/kernel.cc`、`src/mm` 和 boot debug 工具，确认 `init_mem()` 后、IRQ 初始化前的 self-test 接入点。
+- [x] 1.2 复查 `kernel/core/kernel.cc`、`kernel/mm` 和 boot debug 工具，确认 `init_mem()` 后、IRQ 初始化前的 self-test 接入点。
 - [x] 1.3 确认本 change 不移动 boot 地址、linker 地址、self-mapping 地址、`KVMEM_BASE` 或 kernel load base。
 
 ## 2. Memory Self-Test 实现
 
 - [x] 2.1 增加可开关的内存 self-test 编译配置，默认不改变普通 kernel boot 行为。
-- [x] 2.2 在 `src/mm` 中实现 self-test 入口，覆盖 `kmalloc/free` 代表性 size class 分配、写入和释放。
+- [x] 2.2 在 `kernel/mm` 中实现 self-test 入口，覆盖 `kmalloc/free` 代表性 size class 分配、写入和释放。
 - [x] 2.3 扩展 self-test 覆盖 `alloc_kernel_pages/free_pages` 的 1 页、多页和跨页表边界可写性检查。
 - [x] 2.4 扩展 self-test 覆盖内部 `alloc_physical_order/free_physical_order` 的低 order 分配释放和 `g_nr_free_pages()` 恢复。
 - [x] 2.5 为 self-test 成功和失败路径输出固定 marker，失败时输出阶段并安全 halt。

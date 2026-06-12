@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import sys
 from io import StringIO
 from pathlib import Path
@@ -219,7 +220,7 @@ def test_image_artifact_discovery_requires_default_userland(monkeypatch, tmp_pat
     monkeypatch.setattr(boot_debug, 'USER_INIT_ELF', missing_init)
     monkeypatch.setattr(boot_debug, 'USER_BIN_DIR', bin_dir)
 
-    with pytest.raises(boot_debug.StageError, match='/boot/user/init.elf'):
+    with pytest.raises(boot_debug.StageError, match=re.escape('/boot/user/init.elf')):
         boot_debug.get_artifacts(kernel)
 
     write_bytes(missing_init, b'\x7fELF')
@@ -284,8 +285,8 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
         boot_debug.case_by_id('filesystem-read').timeout_seconds
         > boot_debug.case_by_id('memory-self-test').timeout_seconds
     )
-    assert 'src/kernel/proc/**' in boot_debug.case_by_id('first-user-program').proc_boundary
-    assert 'src/kernel/proc/**' in boot_debug.case_by_id('filesystem-user-elf').proc_boundary
+    assert 'kernel/core/proc/**' in boot_debug.case_by_id('first-user-program').proc_boundary
+    assert 'kernel/core/proc/**' in boot_debug.case_by_id('filesystem-user-elf').proc_boundary
     assert 'synthetic TTY producer' in boot_debug.case_by_id('blocking-primitives').proc_boundary
     assert 'BIGOS_BLOCKING_TIMEOUT_EXPIRED' in boot_debug.case_by_id('blocking-primitives').validation_markers
 
@@ -541,7 +542,17 @@ def test_qemu_serial_marker_timeout_cleans_process_group(tmp_path: Path, monkeyp
 
 
 def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
-    xmake = (PROJECT_ROOT / 'xmake.lua').read_text(encoding='utf-8')
+    xmake_files = [
+        PROJECT_ROOT / 'xmake.lua',
+        PROJECT_ROOT / 'xmake/options.lua',
+        PROJECT_ROOT / 'xmake/common.lua',
+        PROJECT_ROOT / 'xmake/boot_artifacts.lua',
+        PROJECT_ROOT / 'xmake/user_package.lua',
+        PROJECT_ROOT / 'xmake/runtime.lua',
+        PROJECT_ROOT / 'xmake/kernel.lua',
+        PROJECT_ROOT / 'xmake/run_targets.lua',
+    ]
+    xmake = '\n'.join(path.read_text(encoding='utf-8') for path in xmake_files)
 
     assert 'target("bochs-sdl2")' not in xmake
     assert 'target("bochs")' in xmake

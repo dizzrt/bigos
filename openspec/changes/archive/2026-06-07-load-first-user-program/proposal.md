@@ -35,7 +35,7 @@
 
 ## Impact
 
-- 受影响子系统：`src/kernel/sched` 或等价调度路径、`src/kernel/irq` 的 IDT/syscall/#PF 处理、`src/kernel/sys` syscall dispatch、`src/mm/vmem` 用户地址空间 primitive、`src/kernel/kernel.cc` 初始化与 smoke wiring、`xmake.lua` 构建开关、`tests` 源码级检查和 `docs/en/arch` 架构文档。
+- 受影响子系统：`kernel/core/sched` 或等价调度路径、`kernel/core/irq` 的 IDT/syscall/#PF 处理、`kernel/core/sys` syscall dispatch、`kernel/mm/vmem` 用户地址空间 primitive、`kernel/core/kernel.cc` 初始化与 smoke wiring、`xmake.lua` 构建开关、`tests` 源码级检查和 `docs/en/arch` 架构文档。
 - 架构假设：x86_64、单核、Legacy BIOS/i8259/PIT、kernel-owned 静态 IDT、当前 GDT 可扩展为用户段/TSS 所需布局；不引入 SMP 或 APIC。
 - 内存假设：kernel higher-half、direct map、KVMEM 和 self-mapping 地址布局保持不变；用户低半区映射独立；用户程序镜像和用户栈均由非中断上下文创建。
 - 中断/上下文假设：进入 ring3 前已完成 IDT、syscall gate、TSS/内核栈或等价机制；外部 IRQ EOI 语义不变；syscall path 不是外部 IRQ，不发送 i8259 EOI。

@@ -70,6 +70,9 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
   no job control, no terminal process groups, no complete POSIX libc.
 - 用户态：最小静态用户程序，无动态链接/共享库、无作业控制、无终端进程组、
   无完整 POSIX libc。
+- Source organization: kernel implementation and freestanding userland are
+  separate top-level domains; future planning should preserve that boundary.
+- 源码组织：内核实现与 freestanding 用户态是分离的顶层域；后续规划应保持这一边界。
 - Memory/file model: bounded anonymous demand paging/COW and bounded writable
   runtime storage, but no broad file-backed `mmap`, no persistent full writable
   filesystem, no async I/O, and no broad storage/device support.

@@ -4,7 +4,7 @@ BigOS provides one freestanding-safe early fatal diagnostic facility. It consoli
 
 ## Entry Points
 
-- Header: `include/bigos/panic.h`; implementation: `src/kernel/bigos/panic.cc`; namespace: `bigos`.
+- Header: `include/bigos/panic.h`; implementation: `kernel/core/bigos/panic.cc`; namespace: `bigos`.
 - `bigos::khalt()`: unified halt primitive. It first disables maskable interrupts with `cli`, then enters a `hlt` loop. It is `[[noreturn]]` and is used by paths that already emitted their diagnostic marker.
 - `bigos::kpanic(code, source[, fmt, ...])`: emits a fixed first-line marker through constant strings, `BIGOS_PANIC code=<code> source=<source>` (COM1 + VGA), optionally emits formatted context, then halts through `khalt()`.
 - `bigos::kpanic_with_mm_stats(code, source)`: optional diagnostic snapshot variant that reuses read-only `print_slab_stats()` before halt without allocating memory or triggering paths that might fail again.
@@ -26,4 +26,4 @@ Migration preserves existing diagnostic output contracts for each path and only 
 
 ## Integration Scope
 
-Only kernel runtime and mm/irq paths are covered. Early boot code (`src/arch/x86/boot/*`) is not integrated into this facility and keeps its existing failure/halt behavior. The idle `hlt` loop at the end of `kernel()` is a normal non-fatal halt path and is not affected.
+Only kernel runtime and mm/irq paths are covered. Early boot code (`kernel/arch/x86/boot/*`) is not integrated into this facility and keeps its existing failure/halt behavior. The idle `hlt` loop at the end of `kernel()` is a normal non-fatal halt path and is not affected.

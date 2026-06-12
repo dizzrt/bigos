@@ -11,7 +11,7 @@
 - [x] 2.2 实现 preflight 检查，覆盖 `python3`、`xmake`、`bochs`、`x86_64-elf-gcc`、`x86_64-elf-g++`、`x86_64-elf-ld` 和 `x86_64-elf-as`。
 - [x] 2.3 实现阶段化命令执行与错误报告，确保 kernel build、boot build、image build、Bochs launch 的失败能明确定位。
 - [x] 2.4 编排 `xmake` 构建内核 ELF，并在构建失败时停止，不使用 stale kernel 产物继续启动。
-- [x] 2.5 编排 `make -C src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot` 构建 boot 产物，并验证产物存在和尺寸约束。
+- [x] 2.5 编排 `make -C kernel/arch/x86/boot build-mbr build-dbr build-exdbr build-boot` 构建 boot 产物，并验证产物存在和尺寸约束。
 
 ## 3. User-space Raw Image Builder
 
@@ -46,7 +46,7 @@
 
 ## 7. Validation
 
-- [x] 7.1 运行 `make -C src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot`，记录 boot 构建和尺寸检查结果。
+- [x] 7.1 运行 `make -C kernel/arch/x86/boot build-mbr build-dbr build-exdbr build-boot`，记录 boot 构建和尺寸检查结果。
 - [x] 7.2 运行 `xmake`，记录内核构建结果；若存在历史编译阻塞，明确标注为非本变更新增并说明启动脚本会在该阶段失败。
 - [x] 7.3 运行 raw image builder 的离线 layout validation，验证 MBR、exFAT boot region、backup region、`/boot/boot.bin` 和 `kernel` 均可解析。
 - [x] 7.4 在 Bochs 可用时运行一行命令 smoke test；如 Bochs 不可用，记录缺失依赖和剩余 bootability 风险。
@@ -56,8 +56,8 @@
 
 ## Validation Notes
 
-- `make -C src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot`：通过；生成 `mbr.bin` 512 bytes、`dbr.bin` 512 bytes、`exdbr.bin` 890 bytes、`boot.bin` 8712 bytes；保留既有 assembler `movsd` warning。
-- `xmake`：失败于既有 `src/kernel/irq/isr.cc` 编译错误（`irq_handler`、`MAX_IRQ_NUM`、`isr_list` 未解析）；本变更未修改该文件，启动脚本会在 `kernel build` 阶段停止且不会继续使用 stale kernel。
+- `make -C kernel/arch/x86/boot build-mbr build-dbr build-exdbr build-boot`：通过；生成 `mbr.bin` 512 bytes、`dbr.bin` 512 bytes、`exdbr.bin` 890 bytes、`boot.bin` 8712 bytes；保留既有 assembler `movsd` warning。
+- `xmake`：失败于既有 `kernel/core/irq/isr.cc` 编译错误（`irq_handler`、`MAX_IRQ_NUM`、`isr_list` 未解析）；本变更未修改该文件，启动脚本会在 `kernel build` 阶段停止且不会继续使用 stale kernel。
 - `python3 tools/boot_debug.py run --no-launch`：按预期失败于 `kernel build` 阶段，验证阶段化错误报告和停止行为。
 - raw image 离线 layout validation：通过；使用新 builder、当前 boot 产物和 dummy kernel 生成 `build/test/layout-validation.raw`，随后 `python3 tools/boot_debug.py validate-image --image build/test/layout-validation.raw` 通过，覆盖 MBR、exFAT main/backup boot region、`/boot/boot.bin` 和根目录 `kernel` 解析。
 - Bochs：`/opt/homebrew/bin/bochs` 可用；`make boot-debug` 已成功启动 Bochs 3.0，完成配置解析、CPU model 初始化、磁盘几何校验、设备初始化并进入 BIOS 阶段；本次 smoke test 由开发者主动停止，非配置错误退出。

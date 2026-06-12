@@ -13,7 +13,7 @@ flat blob。
 
 首个用户程序采用内嵌 flat blob，而不是 ELF64 或文件系统加载：
 
-- flat blob 由 `src/kernel/proc/proc.cc` 中的 `FIRST_USER_CODE` 字节序列提供，编入内核镜像。
+- flat blob 由 `kernel/core/proc/proc.cc` 中的 `FIRST_USER_CODE` 字节序列提供，编入内核镜像。
 - 镜像不依赖内核 FS、块设备、hosted OS 文件 IO 或 bootloader-only exFAT helper。
 - blob 只执行 bounded `SYS_WRITE(fd=1, buf, len)`，随后执行 `SYS_EXIT(0)`。
 - loader 仍显式映射 code、data/BSS 和 stack，便于验证权限边界；data/BSS 页当前为清零页。
@@ -84,7 +84,7 @@ Process-local file descriptor 与 VFS 壳层是内核管理的 lifecycle 状态�
 
 ## ring3 进入
 
-x86_64 运行期 user mode 支持由 `src/kernel/proc/user_mode.cc` / `user_mode.s` 提供：
+x86_64 运行期 user mode 支持由 `kernel/core/proc/user_mode.cc` / `user_mode.s` 提供：
 
 - 新 GDT 保持 kernel code/data/stack selector `0x08/0x10/0x18` 不移动。
 - 新增 user data selector `0x23`、user code selector `0x2b` 和 TSS selector `0x30`。

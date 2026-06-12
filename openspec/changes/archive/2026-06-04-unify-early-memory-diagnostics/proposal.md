@@ -16,11 +16,11 @@ freestanding-safe panic/诊断底座。
     稳定错误码（枚举）、来源标识和可选上下文，然后关中断并安全 `hlt`。
   - 统一的致命诊断输出同时写 COM1 串口与 VGA，复用既有 `serial_puts`/`kprintf`。
 - 将现有分散的致命失败路径迁移到统一设施，**不改变**它们当前“安全停机”的行为语义：
-  - `src/mm/buddy.cc`：`halt_memory_handoff_failed()`、`halt_early_metadata_exhausted()`。
-  - `src/mm/slab.cc` 与 `src/mm/kmem.cc`：`BIGOS_SLAB_DEBUG` guard 的 halt 分支。
-  - `src/mm/self_test.cc`：`fail(stage)` 失败路径（保留既有
+  - `kernel/mm/buddy.cc`：`halt_memory_handoff_failed()`、`halt_early_metadata_exhausted()`。
+  - `kernel/mm/slab.cc` 与 `kernel/mm/kmem.cc`：`BIGOS_SLAB_DEBUG` guard 的 halt 分支。
+  - `kernel/mm/self_test.cc`：`fail(stage)` 失败路径（保留既有
     `BIGOS_MM_SELF_TEST_FAILED stage=` 兼容输出）。
-  - `src/kernel/irq/interrupt.cc`：异常/`#PF` 的 `halt_cpu()` 收敛为统一关中断 +
+  - `kernel/core/irq/interrupt.cc`：异常/`#PF` 的 `halt_cpu()` 收敛为统一关中断 +
     panic 停机原语（保留既有 `BIGOS_EXCEPTION` / `BIGOS_PAGE_FAULT` 诊断输出）。
 - 统一致命错误 marker 前缀，使所有“致命停机”路径都带 `BIGOS_` 前缀，可被
   `boot_debug.py --expect-serial-marker` 识别。
@@ -42,10 +42,10 @@ freestanding-safe panic/诊断底座。
 
 ## Impact
 
-- 受影响子系统：内核入口/运行时诊断（`src/kernel`）、内存管理失败路径（`src/mm`：
-  buddy/slab/kmem/self_test）、中断与异常分发停机路径（`src/kernel/irq`）。
+- 受影响子系统：内核入口/运行时诊断（`kernel/core`）、内存管理失败路径（`kernel/mm`：
+  buddy/slab/kmem/self_test）、中断与异常分发停机路径（`kernel/core/irq`）。
 - 受影响代码：新增统一诊断头文件（如 `include/bigos/panic.h`）与实现（如
-  `src/kernel/bigos/panic.cc`）；改写上述文件中的裸 `while(true){hlt}` 与零散
+  `kernel/core/bigos/panic.cc`）；改写上述文件中的裸 `while(true){hlt}` 与零散
   `kprintf` 致命输出。
 - API：新增 `bigos::kpanic(...)` 及错误码枚举；不移除现有公共内存/中断 API。
 - 输出契约：新增 `BIGOS_PANIC` marker；保留 `BIGOS_EXCEPTION`、`BIGOS_PAGE_FAULT`、

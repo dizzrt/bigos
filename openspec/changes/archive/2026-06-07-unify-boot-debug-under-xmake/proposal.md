@@ -1,6 +1,6 @@
 ## Why
 
-当前本地 boot 调试入口分散在 `Makefile`、`src/arch/x86/boot/Makefile`、`xmake.lua` 和 `tools/boot_debug.py` 之间，开发者需要混用 `make`、`xmake` 和 Python helper 才能完成构建、镜像生成和 Bochs 启动。随着 `user_program_smoke`、`syscall_smoke`、`timer_smoke` 等 xmake 开关增加，现有 `boot_debug.py` 的固定重配置会清掉未显式支持的 smoke 配置，导致组合调试不可预测。
+当前本地 boot 调试入口分散在 `Makefile`、`kernel/arch/x86/boot/Makefile`、`xmake.lua` 和 `tools/boot_debug.py` 之间，开发者需要混用 `make`、`xmake` 和 Python helper 才能完成构建、镜像生成和 Bochs 启动。随着 `user_program_smoke`、`syscall_smoke`、`timer_smoke` 等 xmake 开关增加，现有 `boot_debug.py` 的固定重配置会清掉未显式支持的 smoke 配置，导致组合调试不可预测。
 
 本 change 将本地 Legacy BIOS/MBR/exFAT/Bochs 调试闭环统一到 xmake，使 `xmake f ...` 保存测试开关，`xmake run bochs-sdl2` 按当前配置构建并启动 Bochs SDL2 调试，同时提供 `xmake run bochs` 作为非 SDL2 后备入口。
 
@@ -29,7 +29,7 @@
 
 - 影响构建系统：`xmake.lua`、可能的 xmake 自定义 rule/target/action、boot-stage binary 输出路径和依赖关系。
 - 影响调试工具：`tools/boot_debug.py` 的 kernel 构建配置逻辑、Bochs SDL2 extra 配置入口、`--no-launch`、serial-marker smoke 复用方式和旧 smoke 快捷参数移除。
-- 影响删除项：根 `Makefile`、`src/arch/x86/boot/Makefile`，以及任何文档或测试中对这些入口的稳定性断言。
+- 影响删除项：根 `Makefile`、`kernel/arch/x86/boot/Makefile`，以及任何文档或测试中对这些入口的稳定性断言。
 - 影响文档：`AGENTS.md`、`docs/en/arch/*`、`docs/zh/arch/*` 中的 `make boot-debug`、`uv run python tools/boot_debug.py run ...` 推荐路径和 UEFI/Legacy 调试矩阵描述。
 - 影响测试：`tests/test_boot_debug.py` 和源码级测试中对 `boot_debug.py` 固定 `xmake f` 参数、boot Makefile、Makefile 入口的断言。
 - 工具链假设：继续使用 `xmake`、`x86_64-elf-gcc`/`x86_64-elf-g++`/`x86_64-elf-ld`/`x86_64-elf-as`、Python 标准库和 Bochs；Python 验证通过 `uv run ...` 执行。

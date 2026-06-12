@@ -4,6 +4,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
@@ -42,8 +54,8 @@ def test_errno_single_source_adds_new_codes() -> None:
 
 def test_block_device_exposes_write_entry_point() -> None:
     header = read_source('include/drivers/block/block_device.h')
-    source = read_source('src/drivers/block/block_device.cc')
-    ata = read_source('src/drivers/block/ata_pio.cc')
+    source = read_source('kernel/drivers/block/block_device.cc')
+    ata = read_source('kernel/drivers/block/ata_pio.cc')
 
     assert 'WriteSectorsFn write_impl' in header
     assert 'BlockStatus write_sectors(' in header
@@ -58,7 +70,7 @@ def test_block_device_exposes_write_entry_point() -> None:
 
 def test_buffer_cache_write_back_and_eviction_contract() -> None:
     header = read_source('include/bigos/fs/bcache.h')
-    source = read_source('src/kernel/fs/bcache.cc')
+    source = read_source('kernel/core/fs/bcache.cc')
 
     assert 'struct BufferBlock' in header
     assert 'BufferBlock *get(' in header
@@ -75,7 +87,7 @@ def test_buffer_cache_write_back_and_eviction_contract() -> None:
 
 def test_writable_fs_uses_cache_and_may_access_enforcement() -> None:
     header = read_source('include/bigos/fs/bigfs.h')
-    source = read_source('src/kernel/fs/bigfs.cc')
+    source = read_source('kernel/core/fs/bigfs.cc')
 
     assert 'MOUNT_PREFIX = "/rw"' in header
     # All metadata/data goes through the block buffer cache.
@@ -91,7 +103,7 @@ def test_writable_fs_uses_cache_and_may_access_enforcement() -> None:
 
 def test_vfs_file_operations_gain_write_and_lseek() -> None:
     header = read_source('include/bigos/fs/vfs.h')
-    source = read_source('src/kernel/fs/vfs.cc')
+    source = read_source('kernel/core/fs/vfs.cc')
 
     assert 'WriteOp write;' in header
     assert 'LseekOp lseek;' in header
@@ -105,7 +117,7 @@ def test_vfs_file_operations_gain_write_and_lseek() -> None:
 
 
 def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
-    source = read_source('src/kernel/syscall/syscall.cc')
+    source = read_source('kernel/core/syscall/syscall.cc')
 
     for branch in (
         'case SYS_LSEEK:',
@@ -125,8 +137,8 @@ def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
 
 
 def test_pipe_eof_epipe_and_dup_share_offset() -> None:
-    pipe = read_source('src/kernel/ipc/pipe.cc')
-    proc = read_source('src/kernel/proc/proc.cc')
+    pipe = read_source('kernel/core/ipc/pipe.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     # Writers gone + empty buffer -> EOF (read returns 0 success).
     assert 'pipe->count == 0' in pipe
@@ -144,7 +156,7 @@ def test_pipe_eof_epipe_and_dup_share_offset() -> None:
 
 def test_smoke_switches_default_off_and_emit_markers() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     assert 'option("writable_fs_smoke")' in xmake
     assert 'option("pipe_smoke")' in xmake

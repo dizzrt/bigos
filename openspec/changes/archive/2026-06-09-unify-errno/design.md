@@ -16,7 +16,7 @@ BigOS 当前错误码按子系统各自定义，且数值重复：
 - freestanding 环境，无 libc、无用户态 `errno` 全局变量；错误码必须是编译期整型常量。
 - 返回寄存器中的负值数值是既有 ABI 的一部分，本次收敛**不得改变任何数值**。
 - 项目命名约定：内核 API 在 `bigos` 命名空间下；公共头文件保持最小。
-- `src/kernel/sched/`、`src/drivers/block/` 另有独立的错误表达（`WAIT_TIMEOUT=-110`、
+- `kernel/core/sched/`、`kernel/drivers/block/` 另有独立的错误表达（`WAIT_TIMEOUT=-110`、
   `BlockStatus` 枚举），它们语义独立，不属于本次 POSIX errno 收敛范围。
 
 ## Goals / Non-Goals

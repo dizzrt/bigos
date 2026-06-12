@@ -31,21 +31,21 @@ context: |
     `uv run python <script>`, `uv run ruff check`, and `uv run pyright`.
 
   Major directories:
-  - src/arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, and
+  - kernel/arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, and
     ELF loader.
-  - src/kernel: kernel entry plus subsystem subdirectories: irq, timer, terminal,
+  - kernel/core: kernel entry plus subsystem subdirectories: irq, timer, terminal,
     sched, syscall, proc, fs, ipc, signal, time, bigos, and string functions.
-  - src/kernel/proc: process model, growable fd table, VMA/heap metadata,
+  - kernel/core/proc: process model, growable fd table, VMA/heap metadata,
     demand-zero/COW handling, `fork`, signals integration, ring3 entry, `execve`,
     PID-1 init launch, safe teardown/reaping, and bounded ELF64 loader.
-  - src/kernel/fs: exFAT read path, RAM-backed `bigfs` mounted at `/rw`, VFS
+  - kernel/core/fs: exFAT read path, RAM-backed `bigfs` mounted at `/rw`, VFS
     open/read/write/close/lseek/fsync, page/buffer cache, and bounded file IO.
-  - src/mm: buddy physical page allocator with an early metadata arena,
+  - kernel/mm: buddy physical page allocator with an early metadata arena,
     slab/kmalloc allocator, kernel virtual memory, kernel direct map, public
     memory API, and switchable memory runtime self-test.
-  - src/drivers: VGA text-mode driver, i8259 PIC driver, PIT timer driver, and
+  - kernel/drivers: VGA text-mode driver, i8259 PIC driver, PIT timer driver, and
     ATA PIO block driver.
-  - src/runtime: startup objects such as crt0, crti, and crtn.
+  - kernel/runtime: startup objects such as crt0, crti, and crtn.
   - user: freestanding user crt0/libc, PID-1 init, `/bin/sh`, small `/bin/*`
     programs, and the default-off userland smoke.
   - tools: developer helper scripts such as boot_debug.py.
@@ -156,8 +156,8 @@ rules:
     - Break work by subsystem and keep each task independently reviewable.
     - Match validation tasks to the change impact area, including build, static
       checks, emulator smoke test, or targeted low-level test where practical.
-    - For runtime changes under src/kernel, src/mm, src/drivers, cpp, include,
-      src/arch, or src/runtime, include the narrowest useful validation for the affected code path
+    - For runtime changes under kernel/core, kernel/mm, kernel/drivers, cpp, include,
+      kernel/arch, or kernel/runtime, include the narrowest useful validation for the affected code path
       or explicitly record why the validation cannot run.
     - Call out manual setup needed for x86_64-elf-gcc, xmake, Bochs, or disk
       image paths.

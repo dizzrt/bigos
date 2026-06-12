@@ -4,12 +4,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_vfs_shell_defines_read_only_root_file_and_error_contracts() -> None:
     header = read_source('include/bigos/fs/vfs.h')
-    source = read_source('src/kernel/fs/vfs.cc')
+    source = read_source('kernel/core/fs/vfs.cc')
 
     assert 'namespace vfs' in header
     assert 'struct Vnode' in header
@@ -23,7 +35,7 @@ def test_vfs_shell_defines_read_only_root_file_and_error_contracts() -> None:
 
 
 def test_vfs_init_mounts_exfat_without_publishing_partial_root() -> None:
-    source = read_source('src/kernel/fs/vfs.cc')
+    source = read_source('kernel/core/fs/vfs.cc')
 
     init_index = source.index('Status init() noexcept')
     publish_index = source.index('g_initialized = true;', init_index)
@@ -37,7 +49,7 @@ def test_vfs_init_mounts_exfat_without_publishing_partial_root() -> None:
 
 
 def test_vfs_open_rejects_unsupported_paths_and_write_flags() -> None:
-    source = read_source('src/kernel/fs/vfs.cc')
+    source = read_source('kernel/core/fs/vfs.cc')
 
     # Writable opens are now routed to the bigfs backend; the read-only exFAT
     # backend rejects write/create flags with EROFS.
@@ -51,7 +63,7 @@ def test_vfs_open_rejects_unsupported_paths_and_write_flags() -> None:
 
 
 def test_vfs_read_clamps_eof_and_advances_offset_only_on_success() -> None:
-    source = read_source('src/kernel/fs/vfs.cc')
+    source = read_source('kernel/core/fs/vfs.cc')
 
     eof_index = source.index('__file->offset >= state->metadata.data_length')
     read_index = source.index('bigos::fs::read_file', eof_index)
@@ -65,7 +77,7 @@ def test_vfs_read_clamps_eof_and_advances_offset_only_on_success() -> None:
 
 def test_process_fd_table_lifecycle_and_helpers_are_growable() -> None:
     header = read_source('include/bigos/proc.h')
-    source = read_source('src/kernel/proc/proc.cc')
+    source = read_source('kernel/core/proc/proc.cc')
 
     # The former fixed 16-fd inline array is replaced by a growable heap array
     # bounded by a configurable soft limit; lowest-free allocation and EMFILE
@@ -84,7 +96,7 @@ def test_process_fd_table_lifecycle_and_helpers_are_growable() -> None:
 
 
 def test_exec_and_reap_apply_fd_close_rules_from_safe_context() -> None:
-    source = read_source('src/kernel/proc/proc.cc')
+    source = read_source('kernel/core/proc/proc.cc')
 
     exec_index = source.index('exec_current_from_elf_image')
     close_exec_index = source.index('close_on_exec_fds(process);', exec_index)
@@ -100,10 +112,10 @@ def test_exec_and_reap_apply_fd_close_rules_from_safe_context() -> None:
 
 
 def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
     header = read_source('include/bigos/syscall.h')
-    proc = read_source('src/kernel/proc/proc.cc')
-    vmem = read_source('src/mm/vmem.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     assert 'SYS_OPEN = 5' in header
     assert 'SYS_READ = 6' in header
@@ -124,9 +136,11 @@ def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
 
 
 def test_existing_smokes_use_vfs_open_read_close_path() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
-    fs_smoke = kernel[kernel.index('void fs_smoke() noexcept') : kernel.index('#endif', kernel.index('void fs_smoke() noexcept'))]
+    fs_smoke = kernel[
+        kernel.index('void fs_smoke() noexcept') : kernel.index('#endif', kernel.index('void fs_smoke() noexcept'))
+    ]
     user_elf = kernel[kernel.index('void user_elf_smoke_entry') : kernel.index('BIGOS_USER_ELF_LOAD_PASSED')]
 
     assert 'bigos::vfs::init()' in fs_smoke

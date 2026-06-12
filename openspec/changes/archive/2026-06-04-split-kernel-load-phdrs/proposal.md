@@ -23,7 +23,7 @@
 ## Impact
 
 - 影响子系统：x86 kernel 链接脚本、Legacy BIOS ELF64 kernel 加载路径、构建/启动验证文档。
-- 主要代码：`link.lds`、`src/arch/x86/boot/boot.cc`（仅复核或必要时修复多 `PT_LOAD` 加载）、相关架构文档。
+- 主要代码：`link.lds`、`kernel/arch/x86/boot/boot.cc`（仅复核或必要时修复多 `PT_LOAD` 加载）、相关架构文档。
 - 架构假设：目标仍为 x86_64 ELF64 higher-half kernel，虚拟基址保持 `0xffffffff80000000`，现有 bootloader 按 `PT_LOAD` program header 加载 kernel。
 - 内存布局假设：拆分 program header 不改变 section 的相对顺序、入口地址、运行时符号和早期内存初始化依赖的 kernel image 范围。
 - 工具链假设：使用 `x86_64-elf-ld` 生成 ELF64；验证通过 `readelf`/`objdump` 等 cross binutils 检查 program header 权限。

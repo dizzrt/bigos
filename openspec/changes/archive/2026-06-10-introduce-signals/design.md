@@ -2,9 +2,9 @@
 
 BigOS 当前没有任何信号机制：内核无法向进程投递异步通知，进程之间也不能终止彼此或自愿处理终止请求。已有的相关地基包括——
 
-- 阶段 16.5 已在 `Process` 中加入 uid/gid/euid/egid，并实现了纯判定原语 `bigos::cred::may_signal(actor, target)`（见 [cred.cc](src/kernel/proc/cred.cc#L6-L16)），但目前没有任何强制点调用它。
+- 阶段 16.5 已在 `Process` 中加入 uid/gid/euid/egid，并实现了纯判定原语 `bigos::cred::may_signal(actor, target)`（见 [cred.cc](kernel/core/proc/cred.cc#L6-L16)），但目前没有任何强制点调用它。
 - 进程生命周期已有 `exit`/`fault_current_and_exit`/zombie-to-reaper 的完整 teardown 路径，以及 `exit_code`/`fault_reason` 字段；fork/COW（阶段 16）与可增长进程/fd 表（阶段 15.5）已就位。
-- IRQ dispatch（[interrupt.cc](src/kernel/irq/interrupt.cc#L132-L166)）在外部 IRQ handler 返回并发送 EOI 后，调用 `bigos::sched::maybe_preempt_on_irq_return(__frame)`；该路径已通过 `(__frame->cs & 0x3) == 0x3` 区分用户态/内核态被中断帧（见 page_fault_handler）。这正是 POSIX 信号「在返回用户态边界投递」的天然挂载点。
+- IRQ dispatch（[interrupt.cc](kernel/core/irq/interrupt.cc#L132-L166)）在外部 IRQ handler 返回并发送 EOI 后，调用 `bigos::sched::maybe_preempt_on_irq_return(__frame)`；该路径已通过 `(__frame->cs & 0x3) == 0x3` 区分用户态/内核态被中断帧（见 page_fault_handler）。这正是 POSIX 信号「在返回用户态边界投递」的天然挂载点。
 - syscall 走 `int 0x80`，号位固定、寄存器 ABI 冻结、向量 0x80 的 IDT gate 为 DPL=3 trap gate，syscall 路径不发 i8259 EOI。新增号只能在末尾追加。
 
 约束：freestanding、单核、同步、无 libc；本阶段不提供用户态信号 trampoline，smoke 用户程序需自行 `int 0x80` 触发 `SYS_SIGRETURN`。信号帧构造与用户上下文改写是架构耦合的，需为「架构抽象」轨道预留隔离面。

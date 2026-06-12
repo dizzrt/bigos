@@ -30,7 +30,7 @@ BigOS 已具备 direct map、用户地址空间派生和首个 ring3 用户程�
 
 ## Impact
 
-- 影响子系统：`src/mm` 页表 map/unmap、kernel vmem/free_pages、direct-map 辅助访问；`src/kernel/proc` 首个用户进程资源生命周期；`src/kernel/syscall` 的 `SYS_EXIT` 边界；用户态 `#PF` fault 终止路径。
+- 影响子系统：`kernel/mm` 页表 map/unmap、kernel vmem/free_pages、direct-map 辅助访问；`kernel/core/proc` 首个用户进程资源生命周期；`kernel/core/syscall` 的 `SYS_EXIT` 边界；用户态 `#PF` fault 终止路径。
 - API/数据结构：新增或扩展地址空间生命周期 helper、页表页 ownership 元数据、用户映射记录和 process teardown 状态；保持公开内存分配 API 的页数/order 语义不变。
 - 架构假设：x86_64 四级页表、单核、当前 CPU TLB invalidation 足够；无 SMP shootdown；syscall vector 仍为 `int 0x80`，exception/IRQ/syscall EOI 语义不变。
 - 内存布局假设：boot 固定地址、higher-half kernel base、`KVMEM_BASE`、direct-map window、recursive self-mapping 地址和 BootInfo handoff ABI 不移动；direct map 可用于访问可回收页表页内容。

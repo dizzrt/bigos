@@ -1,6 +1,6 @@
 ## 1. 现状复核与边界确认
 
-- [x] 1.1 复核 `src/arch/x86/boot/exdbr_exfat.s`、`src/arch/x86/boot/boot.cc`、`tools/boot_debug.py` 和 `tools/install.py` 中的现有 exFAT/ATA 读取逻辑，记录可借鉴字段、端口序列和不能复用的 boot-stage 假设。
+- [x] 1.1 复核 `kernel/arch/x86/boot/exdbr_exfat.s`、`kernel/arch/x86/boot/boot.cc`、`tools/boot_debug.py` 和 `tools/install.py` 中的现有 exFAT/ATA 读取逻辑，记录可借鉴字段、端口序列和不能复用的 boot-stage 假设。
 - [x] 1.2 确认首版磁盘布局假设：Legacy BIOS raw image、MBR exFAT 分区、ATA primary master、512-byte sector、Bochs 可观测 COM1 serial。
 - [x] 1.3 确认首版 exFAT 支持范围：只读、MBR exFAT 分区自动发现、路径查找、普通文件读取、`NoFatChain` 连续文件读取和 FAT-chain 文件完整 bounded 跟随。
 
@@ -13,7 +13,7 @@
 
 ## 3. ATA PIO 后端
 
-- [x] 3.1 在 `src/drivers` 下新增 ATA PIO 只读后端，使用现有 port I/O primitive 实现 status polling、命令发送和数据端口读取。
+- [x] 3.1 在 `kernel/drivers` 下新增 ATA PIO 只读后端，使用现有 port I/O primitive 实现 status polling、命令发送和数据端口读取。
 - [x] 3.2 实现 bounded timeout 与错误状态返回，避免设备未就绪、DRQ 不到达或错误位被置位时无限等待。
 - [x] 3.3 支持 Bochs raw image 所需的 LBA 读取模式和 512-byte sector，记录 primary-master 限制和不支持 AHCI/NVMe/DMA 的原因。
 - [x] 3.4 添加后端内部边界检查，确保读取数量不会写出 caller buffer，短读或设备错误不会被静默视为成功。

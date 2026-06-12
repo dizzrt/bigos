@@ -21,8 +21,8 @@
 
 ## Impact
 
-- 受影响子系统：`src/kernel/irq`（`page_fault_handler` 分发）、`src/kernel/proc`（缺页处理、`brk`、匿名映射、VMA 物化记账与进程 kill）。
-- 受影响代码：[interrupt.cc](src/kernel/irq/interrupt.cc#L42-L61) 的 `page_fault_handler`、[proc.cc](src/kernel/proc/proc.cc#L1280-L1368) 的 `map_anonymous_current` / `brk_current` / `try_handle_current_stack_fault`、[proc.h](include/bigos/proc.h) 的相关声明。
+- 受影响子系统：`kernel/core/irq`（`page_fault_handler` 分发）、`kernel/core/proc`（缺页处理、`brk`、匿名映射、VMA 物化记账与进程 kill）。
+- 受影响代码：[interrupt.cc](kernel/core/irq/interrupt.cc#L42-L61) 的 `page_fault_handler`、[proc.cc](kernel/core/proc/proc.cc#L1280-L1368) 的 `map_anonymous_current` / `brk_current` / `try_handle_current_stack_fault`、[proc.h](include/bigos/proc.h) 的相关声明。
 - 构建/验证：`xmake.lua` 新增 `demand_paging_smoke` 开关；QEMU headless serial-marker smoke 与源码契约/行为断言测试。
 - 假设：x86_64 单核、同步、`int 0x80`、`InterruptFrame` ABI 不变；CR2 取缺页地址、`error_code` 位含义（present/write/user/reserved/instruction-fetch）不变；用户低半区 VMA 布局与既有页属性常量不变；Bochs/QEMU 经 `tools/boot_debug.py` 验证。
 - 非目标：file-backed mmap、共享映射、swap、page cache、COW、fork、demand-zero 之外的填充策略、多页预取/超页、内核态惰性映射、用户态 libc。这些留给后续阶段（16/16.5/18/19）。

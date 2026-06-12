@@ -27,9 +27,9 @@ BigOS 已完成早期诊断统一和 kernel direct map，阶段 0 的基线巩�
 
 ## Impact
 
-- 影响 boot/kernel 子系统：`src/kernel/kernel.cc` 或 IRQ 初始化聚合点需要在启用 IRQ 前完成 timer 初始化。
-- 影响 IRQ 子系统：`include/irq/interrupt.h`、`src/kernel/irq/interrupt.cc`、`src/kernel/irq/isr.cc` 或等价注册路径需要加入 timer vector/handler。
-- 影响 driver 子系统：新增或接入 PIT driver，例如 `src/drivers/timer/pit.cc` 与对应 public/internal header。
+- 影响 boot/kernel 子系统：`kernel/core/kernel.cc` 或 IRQ 初始化聚合点需要在启用 IRQ 前完成 timer 初始化。
+- 影响 IRQ 子系统：`include/irq/interrupt.h`、`kernel/core/irq/interrupt.cc`、`kernel/core/irq/isr.cc` 或等价注册路径需要加入 timer vector/handler。
+- 影响 driver 子系统：新增或接入 PIT driver，例如 `kernel/drivers/timer/pit.cc` 与对应 public/internal header。
 - 影响构建配置：新增默认关闭的 validation 开关，例如 `timer_smoke` -> `BIGOS_TIMER_SMOKE`。
 - 影响测试与工具：新增源码级测试覆盖 timer 注册先于 unmask、memory self-test 仍在 IRQ 前、timer handler 不直接 EOI、不依赖 scheduler/heap；Bochs 可用时用 serial marker 做 bounded smoke。
 - 架构假设：仅覆盖 x86_64 legacy BIOS + i8259 PIC + PIT 8253/8254 + Bochs 路径；不引入 APIC/IOAPIC/HPET/UEFI 专属 timer 模型。

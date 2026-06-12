@@ -2,7 +2,7 @@
 
 BigOS 当前已经具备运行第一个 ring3 用户程序的最小闭环：`Process`、派生用户页表 root、TSS/RSP0、`iretq` 进入、`SYS_WRITE`/`SYS_EXIT`、用户 fault 标记和 safe reaper 边界均已建立。阶段 7 又新增了内核态只读 block device 与 exFAT mount/path lookup/bounded read 能力，因此阶段 8 可以把用户程序来源从 flat embedded image 推进到磁盘上的 ELF64 文件。
 
-本设计覆盖 `src/kernel/proc`、用户地址空间 map/teardown、`src/kernel/syscall` 的现有用户闭环、只读 FS 调用路径、xmake smoke 配置与测试镜像资产。设计不移动 boot fixed addresses、higher-half base、direct map、`KVMEM_BASE`、self-mapping 地址、syscall vector 或既有 BootInfo ABI。
+本设计覆盖 `kernel/core/proc`、用户地址空间 map/teardown、`kernel/core/syscall` 的现有用户闭环、只读 FS 调用路径、xmake smoke 配置与测试镜像资产。设计不移动 boot fixed addresses、higher-half base、direct map、`KVMEM_BASE`、self-mapping 地址、syscall vector 或既有 BootInfo ABI。
 
 ## Goals / Non-Goals
 
@@ -26,7 +26,7 @@ BigOS 当前已经具备运行第一个 ring3 用户程序的最小闭环：`Pro
 
 ### Decision: 使用独立 `user_elf_smoke` 开关
 
-ELF 文件加载路径使用新的默认关闭开关，例如 `xmake f --user_elf_smoke=y`。该开关可以复用或显式包含 `src/kernel/proc/**`，但不改变普通 boot，也不让阶段 6 的 flat embedded smoke 依赖 block/FS。
+ELF 文件加载路径使用新的默认关闭开关，例如 `xmake f --user_elf_smoke=y`。该开关可以复用或显式包含 `kernel/core/proc/**`，但不改变普通 boot，也不让阶段 6 的 flat embedded smoke 依赖 block/FS。
 
 替代方案是直接替换 `user_program_smoke`。该方案会把原本无需磁盘 FS 的 ring3 回归路径变成 FS 相关路径，降低故障定位能力，因此不采用。
 

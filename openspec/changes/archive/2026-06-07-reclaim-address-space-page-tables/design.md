@@ -2,7 +2,7 @@
 
 阶段 5 已建立显式页属性、root-targeted user mapping、用户页表根派生和 CR3 activation helper；阶段 6 已在默认关闭的 `user_program_smoke` 下创建最小 `Process`，映射 flat embedded user image、用户数据页和用户栈，并通过 TSS/RSP0 + `iretq` 进入 ring3，最后用 `SYS_WRITE`/`SYS_EXIT` 闭环。当前退出路径只记录 terminated/fault 状态，不承诺回收用户地址空间、用户物理页、动态页表页或 process kernel stack。
 
-本 change 跨越 `src/mm` 和 `src/kernel/proc`：一侧需要让页表 map/unmap 能识别哪些页表页是运行时动态创建且可回收，另一侧需要在进程不再运行、且不处于当前用户 CR3/当前内核栈的路径上执行 teardown。设计必须保持单核 freestanding C++17、无 SMP、无 hosted libc、无异常/RTTI，并且不移动 boot 固定地址、higher-half base、`KVMEM_BASE`、direct map、recursive self-mapping 或 BootInfo handoff ABI。
+本 change 跨越 `kernel/mm` 和 `kernel/core/proc`：一侧需要让页表 map/unmap 能识别哪些页表页是运行时动态创建且可回收，另一侧需要在进程不再运行、且不处于当前用户 CR3/当前内核栈的路径上执行 teardown。设计必须保持单核 freestanding C++17、无 SMP、无 hosted libc、无异常/RTTI，并且不移动 boot 固定地址、higher-half base、`KVMEM_BASE`、direct map、recursive self-mapping 或 BootInfo handoff ABI。
 
 ## Goals / Non-Goals
 

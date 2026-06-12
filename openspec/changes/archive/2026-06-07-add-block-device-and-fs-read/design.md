@@ -2,8 +2,8 @@
 
 当前 BigOS 的 exFAT 读取能力存在于 Legacy BIOS 启动链路：
 
-- `src/arch/x86/boot/exdbr_exfat.s` 在 real/protected mode 阶段查找 `/boot/boot.bin`。
-- `src/arch/x86/boot/boot.cc` 使用 ATA PIO 读取连续文件 `kernel` 并加载 ELF64 内核。
+- `kernel/arch/x86/boot/exdbr_exfat.s` 在 real/protected mode 阶段查找 `/boot/boot.bin`。
+- `kernel/arch/x86/boot/boot.cc` 使用 ATA PIO 读取连续文件 `kernel` 并加载 ELF64 内核。
 - 这些路径依赖固定低地址缓冲区、固定目录层级、固定磁盘后端和启动期 ABI，不适合作为内核 runtime API 直接复用。
 
 阶段 7 的目标是在 kernel 初始化后提供只读块设备与基础 FS 能力。该能力运行在单核、非 IRQ 上下文，依赖已有 direct map、kernel vmem、buddy/slab、COM1 marker 和 xmake/Bochs smoke 机制。它不改变 MBR/DBR/extended DBR/BootInfo handoff，也不改变现有 first user program smoke。

@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 已有进程级 VMA 集合与一条专用的栈缺页恢复路径 `try_handle_current_stack_fault`：它仅处理向下增长的 `Stack` VMA，在 `materialized_start` 之上、`start` 之下的页上分配零页并映射。其余用户内存（匿名映射、`brk` 堆、ELF 数据/BSS）在创建 VMA 时即 eager 逐页物化。`page_fault_handler`（[interrupt.cc](src/kernel/irq/interrupt.cc#L42-L61)）在 `BIGOS_USER_PROCESS` 下，对用户态缺页先尝试栈恢复，失败即 `fault_current_and_exit(-14)`；其余路径打印 `BIGOS_PAGE_FAULT` 诊断并 `halt_cpu()`。
+BigOS 已有进程级 VMA 集合与一条专用的栈缺页恢复路径 `try_handle_current_stack_fault`：它仅处理向下增长的 `Stack` VMA，在 `materialized_start` 之上、`start` 之下的页上分配零页并映射。其余用户内存（匿名映射、`brk` 堆、ELF 数据/BSS）在创建 VMA 时即 eager 逐页物化。`page_fault_handler`（[interrupt.cc](kernel/core/irq/interrupt.cc#L42-L61)）在 `BIGOS_USER_PROCESS` 下，对用户态缺页先尝试栈恢复，失败即 `fault_current_and_exit(-14)`；其余路径打印 `BIGOS_PAGE_FAULT` 诊断并 `halt_cpu()`。
 
 约束：freestanding、单核、同步；`#PF` 异常路径不发 EOI、不可重入阻塞（`NonblockingContextGuard`）；CR2/error_code 位语义固定；用户低半区布局、页属性常量、CR3 切换不变。本设计是路线图阶段 15，必须独立完成并独立验证，作为 fork/COW/mmap 的前置。
 

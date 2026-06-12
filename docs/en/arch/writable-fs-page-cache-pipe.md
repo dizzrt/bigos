@@ -11,7 +11,7 @@ layout, DPL settings, page-table self-mapping, or CR3 conventions changes.
 
 ## Block Buffer Cache
 
-`bigos::bcache` (`include/bigos/fs/bcache.h`, `src/kernel/fs/bcache.cc`) caches
+`bigos::bcache` (`include/bigos/fs/bcache.h`, `kernel/core/fs/bcache.cc`) caches
 fixed-size blocks keyed by `(BlockDevice*, block_no)`. The block size is one
 sector (512 bytes) and the capacity is a bounded compile-time constant
 (`CACHE_BLOCKS`). Backing pages are allocated once via `alloc_kernel_pages` with
@@ -43,7 +43,7 @@ timing. A read-only device returns `Unsupported`, mapped to `-EROFS` upstream.
 
 ## Writable Filesystem (`bigfs`)
 
-`bigos::bigfs` (`include/bigos/fs/bigfs.h`, `src/kernel/fs/bigfs.cc`) is a
+`bigos::bigfs` (`include/bigos/fs/bigfs.h`, `kernel/core/fs/bigfs.cc`) is a
 minimal writable filesystem mounted at `/rw`, coexisting with the read-only
 exFAT mount. Its default backing medium is a RAM-backed `BlockDevice` (decision
 9), so the whole write path runs end to end without touching the on-disk image.
@@ -86,7 +86,7 @@ per new fd; `dup2` closes an already-open target first), and `write`/`lseek`/
 
 ## Pipes
 
-`bigos::ipc` (`include/bigos/ipc/pipe.h`, `src/kernel/ipc/pipe.cc`) provides a
+`bigos::ipc` (`include/bigos/ipc/pipe.h`, `kernel/core/ipc/pipe.cc`) provides a
 bounded ring-buffer pipe with a connected read-end and write-end `File`. Reads
 block on an empty buffer while writers remain open and are woken on write; writes
 block on a full buffer while readers remain open and are woken on read. Blocking

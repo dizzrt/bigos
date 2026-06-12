@@ -1,6 +1,6 @@
 # 用户地址空间页表准备
 
-本阶段把 `src/mm/vmem.cc` 中“仅服务内核范围”的页表代码抽象成显式的 map/unmap
+本阶段把 `kernel/mm/vmem.cc` 中“仅服务内核范围”的页表代码抽象成显式的 map/unmap
 primitive，并定义 user/kernel 页属性策略与用户地址空间页表根的最小派生。默认 helper 仍不隐式切换
 CR3；默认关闭的首个用户程序运行路径会显式激活派生根并进入 ring3。
 
@@ -49,7 +49,7 @@ IRQ 交错，不得从 IRQ handler 调用，也不在 IRQ handler 中触发动�
 
 ## EFER.NXE 状态与 NX 降级
 
-当前 long-mode 进入路径 `src/arch/x86/boot/boot.s` 在 `IA32_EFER`（MSR `0xc0000080`）只置
+当前 long-mode 进入路径 `kernel/arch/x86/boot/boot.s` 在 `IA32_EFER`（MSR `0xc0000080`）只置
 `LME`（bit 8），**未使能 NXE（bit 11）**。因此 NX bit 当前主要作为“属性编码正确”验证，不能
 依赖运行时强制不可执行；首个用户程序仍会把数据/BSS/stack 映射为 `USER_DATA`，但 runtime NX 强制
 留待后续 enable NXE change。

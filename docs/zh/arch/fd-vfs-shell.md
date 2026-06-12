@@ -7,7 +7,7 @@ BigOS 阶段 13 引入最小的只读 fd/VFS 边界。后续阶段保持这条 e
 - `include/bigos/fs/vfs.h` 定义公开壳层：`Vnode`、`File`、
   `FileOperations`、只读 open flags、确定性 status codes，以及
   `init`/`open_absolute`/`read`/`release`。
-- `src/kernel/fs/vfs.cc` 持有单 root mount。`vfs::init()` 初始化 ATA PIO
+- `kernel/core/fs/vfs.cc` 持有单 root mount。`vfs::init()` 初始化 ATA PIO
   primary-master block device，发现现有 MBR exFAT 分区，只读挂载，并且只在挂载成功后发布 root。
 - exFAT backend 是 `find_exfat_partition`、`mount_exfat`、`lookup` 和
   `read_file` 的 adapter；不重写 parser，也不改变 on-disk 支持范围。

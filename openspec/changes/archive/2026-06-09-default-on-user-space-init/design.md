@@ -1,8 +1,8 @@
 ## Context
 
-当前 normal boot 在 [kernel.cc](src/kernel/kernel.cc#L287-L351) 中的尾部顺序为：
+当前 normal boot 在 [kernel.cc](kernel/core/kernel.cc#L287-L351) 中的尾部顺序为：
 `init_mem` -> `init_tty` -> `initIRQ` -> `enableIRQ` -> `proc::init()` -> `sched::start()`。
-唯一进入 ring3 的代码是 `user_elf_smoke_entry`（[kernel.cc](src/kernel/kernel.cc#L225-L285)）
+唯一进入 ring3 的代码是 `user_elf_smoke_entry`（[kernel.cc](kernel/core/kernel.cc#L225-L285)）
 与 `proc::user_program_smoke_entry`，二者都被 `#ifdef BIGOS_USER_ELF_SMOKE` /
 `BIGOS_USER_PROGRAM_SMOKE` 包裹，默认不编译，也不打包 `/boot/user/init.elf`。
 
@@ -45,7 +45,7 @@ kernel.cc 内的等价非 `#ifdef` 函数）。理由：此时 mm/IRQ/timer/TTY/
 ### 决策 2：复用 `create_elf_user_process` + `run_user_process`，不抽象新接口
 `launch_init` 内部沿用 `vfs::init` -> `open_absolute(USER_ELF_SMOKE_PATH)` ->
 读入 bounded 缓冲 -> `create_elf_user_process` -> `run_user_process`，与
-[user_elf_smoke_entry](src/kernel/kernel.cc#L233-L283) 一致。
+[user_elf_smoke_entry](kernel/core/kernel.cc#L233-L283) 一致。
 - 备选：把 smoke entry 直接改名复用。权衡：smoke entry 发的是 `BIGOS_USER_ELF_*`
   marker 且需保留给 smoke 开关；因此新增 `launch_init` 并发 `BIGOS_INIT_*`，两者共享底层调用。
 

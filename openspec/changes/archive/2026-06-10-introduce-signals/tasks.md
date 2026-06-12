@@ -1,6 +1,6 @@
 ## 1. 信号核心子系统
 
-- [x] 1.1 新增 `include/bigos/signal.h` 与 `src/kernel/signal/`：定义固定信号编号集合（非实时、≤64）、`SigDisposition`（默认/忽略/handler 入口地址）与每信号默认动作表（Terminate/Ignore），约定 `SIGKILL` 不可捕获/不可阻塞。
+- [x] 1.1 新增 `include/bigos/signal.h` 与 `kernel/core/signal/`：定义固定信号编号集合（非实时、≤64）、`SigDisposition`（默认/忽略/handler 入口地址）与每信号默认动作表（Terminate/Ignore），约定 `SIGKILL` 不可捕获/不可阻塞。
 - [x] 1.2 实现每进程信号状态操作纯逻辑：pending 位图置位/清除/取最低位、阻塞掩码应用（`pending & ~mask`）、处置查询；全部 O(1)、无分配、无阻塞。
 - [x] 1.3 实现 `signal::kill(target, signo)` 投递：合法时置位目标 pending（`SIGKILL` 等不可阻塞信号忽略目标 mask），非法信号号返回 `-EINVAL`；不在此函数内做权限判定（由 syscall 层接线 `cred::may_signal`）。
 - [x] 1.4 接口与上下文安全审查：投递/查询路径无 `kmalloc`/`alloc_kernel_pages`/`free`、不阻塞、不 bulk 输出；信号集合宽度与位图类型一致。
@@ -10,13 +10,13 @@
 - [x] 2.1 实现 `signal::deliver_pending_to_user(InterruptFrame*, Process*)`：选最低位未阻塞 pending 信号，按处置分派——默认 Terminate（或 `SIGKILL`）走 `fault_current_and_exit`/exit 并把信号号编码进退出/fault 状态；Ignore 清位丢弃；handler 走信号帧构造。
 - [x] 2.2 实现用户 handler 信号帧构造：用 VMA-backed 用户范围校验确认用户栈可写、对齐、不越界，在用户栈保存被中断用户上下文与信号号，改写 `frame->rip=handler`、第一参数寄存器=signo、`frame->rsp=新帧`，并在 handler 期间把该信号加入阻塞掩码、清除其 pending 位；校验失败确定性终止进程（不写非法用户地址、不分配、不阻塞）。
 - [x] 2.3 实现 `signal::sigreturn(InterruptFrame*)`：从用户栈信号帧恢复用户可见寄存器与受约束的 rip/rsp/rflags 及旧掩码；强制段寄存器为用户段、rflags 保持 IF 且不提升特权敏感位、rip/rsp 限定用户低半区；不信任用户栈上的特权字段。
-- [x] 2.4 在 [interrupt.cc](src/kernel/irq/interrupt.cc) 外部 IRQ 分支、`maybe_preempt_on_irq_return` 之后、iretq 之前接入投递点：仅当 `(frame->cs & 0x3) == 0x3`、当前进程存在且有未阻塞 pending 信号时调用 `deliver_pending_to_user`；内核态被中断帧 MUST NOT 投递。
+- [x] 2.4 在 [interrupt.cc](kernel/core/irq/interrupt.cc) 外部 IRQ 分支、`maybe_preempt_on_irq_return` 之后、iretq 之前接入投递点：仅当 `(frame->cs & 0x3) == 0x3`、当前进程存在且有未阻塞 pending 信号时调用 `deliver_pending_to_user`；内核态被中断帧 MUST NOT 投递。
 - [x] 2.5 中断/ABI 与提权安全审查：审查 `interrupt.s`/`interrupt.cc`/`switch.s` 的 `InterruptFrame` 布局与返回顺序，确认投递点不破坏 iretq 约定、不与 timer 抢占钩子顺序冲突、不发 i8259 EOI；sigreturn 不可被伪造帧用于返回内核特权上下文。
 
 ## 3. 信号相关 syscall
 
 - [x] 3.1 在 [syscall.h](include/bigos/syscall.h) 的 `SyscallNumber` 末尾追加 `SYS_KILL = 16`、`SYS_SIGACTION = 17`、`SYS_SIGPROCMASK = 18`、`SYS_SIGRETURN = 19`，不改动既有号位与寄存器 ABI 注释。
-- [x] 3.2 在 [syscall.cc](src/kernel/syscall/syscall.cc) 的 `dispatch` 增加分支：`SYS_KILL` 查找目标、调用 `cred::may_signal` 强制权限、按结果返回 0/`-ESRCH`/`-EPERM`/`-EINVAL`；`SYS_SIGACTION`/`SYS_SIGPROCMASK` 校验信号号与不可捕获/不可阻塞约束后更新处置/掩码并回写旧值；`SYS_SIGRETURN` 调用 `signal::sigreturn`。全部不发 EOI。
+- [x] 3.2 在 [syscall.cc](kernel/core/syscall/syscall.cc) 的 `dispatch` 增加分支：`SYS_KILL` 查找目标、调用 `cred::may_signal` 强制权限、按结果返回 0/`-ESRCH`/`-EPERM`/`-EINVAL`；`SYS_SIGACTION`/`SYS_SIGPROCMASK` 校验信号号与不可捕获/不可阻塞约束后更新处置/掩码并回写旧值；`SYS_SIGRETURN` 调用 `signal::sigreturn`。全部不发 EOI。
 - [x] 3.3 在 [errno.h](include/bigos/errno.h) 补齐缺失的错误码（如 `ESRCH`），保持单一来源、不重复定义。
 - [x] 3.4 中断/ABI 审查：确认新增分支不发送 i8259 EOI、不放宽异常/IRQ 门、不改变 rax 返回约定与向量/DPL 布局；`SYS_SIGRETURN` 改写返回上下文的路径不破坏 `InterruptFrame` 约定。
 
@@ -31,7 +31,7 @@
 
 ## 5. 权限强制点接线
 
-- [x] 5.1 在 `SYS_KILL` 分支接入 [cred.cc](src/kernel/proc/cred.cc) 的 `may_signal(actor, target)` 作为唯一强制点；确认 `may_signal` 判定逻辑（root 放行、身份匹配、非法输入拒绝）零改动。
+- [x] 5.1 在 `SYS_KILL` 分支接入 [cred.cc](kernel/core/proc/cred.cc) 的 `may_signal(actor, target)` 作为唯一强制点；确认 `may_signal` 判定逻辑（root 放行、身份匹配、非法输入拒绝）零改动。
 - [x] 5.2 审查强制点：拒绝时不修改目标 pending、返回确定性 `-EPERM`；目标不存在返回 `-ESRCH`，先于权限判定或按文档化顺序确定性处理。
 
 ## 6. 验证开关与 smoke

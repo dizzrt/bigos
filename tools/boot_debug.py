@@ -273,7 +273,7 @@ RUNTIME_SMOKE_MATRIX = (
         expected_marker='BIGOS_USER_EXIT',
         timeout_seconds=20.0,
         risk_area='smoke-only ring3 entry, syscall write path, and process teardown',
-        proc_boundary='compiles src/kernel/proc/** and is not part of a normal boot configuration',
+        proc_boundary='compiles kernel/core/proc/** and is not part of a normal boot configuration',
     ),
     RuntimeSmokeCase(
         case_id='filesystem-user-elf',
@@ -282,7 +282,7 @@ RUNTIME_SMOKE_MATRIX = (
         expected_marker='BIGOS_USER_EXIT',
         timeout_seconds=30.0,
         risk_area='read-only exFAT user ELF load plus smoke-only ring3 execution',
-        proc_boundary='compiles src/kernel/proc/** and packages /boot/user/init.elf; not a normal boot configuration',
+        proc_boundary='compiles kernel/core/proc/** and packages /boot/user/init.elf; not a normal boot configuration',
     ),
     RuntimeSmokeCase(
         case_id='default-init',
@@ -470,9 +470,7 @@ def make_layout(
     user_init_clusters = clusters_for_size(user_init_size) if user_init_size > 0 else 0
     user_init_cluster = user_dir_cluster + 1
     next_cluster = (
-        user_init_cluster + user_init_clusters
-        if user_init_clusters > 0
-        else fs_smoke_cluster + fs_smoke_clusters
+        user_init_cluster + user_init_clusters if user_init_clusters > 0 else fs_smoke_cluster + fs_smoke_clusters
     )
 
     # /bin directory (single cluster) plus one contiguous run per program.

@@ -37,7 +37,7 @@
 
 3. TTY/console 命名统一到一个主线命名空间。
 
-   新增 API 应避免继承 WIP 中 `terminal`/`pty` 混用问题。建议公开 `include/bigos/tty.h` 与 `include/bigos/console.h`，实现放在 `src/kernel/terminal/` 或现有风格一致的路径下，命名空间统一为 `bigos::terminal`。如果实现时选择 `bigos::console`/`bigos::input` 等拆分命名，也必须在文档中固定边界。
+   新增 API 应避免继承 WIP 中 `terminal`/`pty` 混用问题。建议公开 `include/bigos/tty.h` 与 `include/bigos/console.h`，实现放在 `kernel/core/terminal/` 或现有风格一致的路径下，命名空间统一为 `bigos::terminal`。如果实现时选择 `bigos::console`/`bigos::input` 等拆分命名，也必须在文档中固定边界。
 
 4. 普通 console 输出默认只写 VGA，不默认同步到 COM1。
 

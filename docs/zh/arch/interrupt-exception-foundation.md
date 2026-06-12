@@ -83,8 +83,8 @@ handler 只读取 PS/2 data port `0x60` 的一个 scancode byte，执行 bounded
 - `uv run pytest`：31 passed。
 - `xmake`：default build 通过；仍有既有 command-line whitespace warning、`$(buildir)` deprecated warning 和 RWX LOAD segment linker warning。
 - `xmake f --mm_self_test=n --page_fault_smoke=y && xmake && xmake f --mm_self_test=n --page_fault_smoke=n`：validation-only `#PF` trigger build 通过，并已恢复默认关闭配置。
-- `x86_64-elf-g++ -std=c++17 -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/kernel/irq/interrupt.cc src/kernel/irq/isr.cc src/kernel/kernel.cc src/drivers/irqchip/i8259.cc`：通过。
-- IDE diagnostics：`include/irq/interrupt.h`、`src/kernel/irq/interrupt.cc`、`src/kernel/irq/isr.cc`、`src/kernel/kernel.cc` 无诊断。
+- `x86_64-elf-g++ -std=c++17 -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/core/irq/interrupt.cc kernel/core/irq/isr.cc kernel/core/kernel.cc kernel/drivers/irqchip/i8259.cc`：通过。
+- IDE diagnostics：`include/irq/interrupt.h`、`kernel/core/irq/interrupt.cc`、`kernel/core/irq/isr.cc`、`kernel/core/kernel.cc` 无诊断。
 
 无法完成的 runtime smoke：
 

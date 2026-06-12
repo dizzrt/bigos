@@ -7,7 +7,7 @@ environment.
 ## Components
 
 - `user/crt0/crt0.s`: user entry `_start`. It consumes the initial stack produced
-  by `copy_exec_args_to_stack` in `src/kernel/proc/proc.cc`.
+  by `copy_exec_args_to_stack` in `kernel/core/proc/proc.cc`.
 - `user/libc`: minimal C runtime support, syscall wrappers, errno translation,
   string/memory helpers, `brk`-backed `malloc`/`free`, tiny stdio/printf, and
   read-only `environ`/`getenv`.

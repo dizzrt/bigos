@@ -8,7 +8,7 @@
 
 ## 2. Bootloader 兼容性复核
 
-- [x] 2.1 复核 `src/arch/x86/boot/boot.cc` 对多个 `PT_LOAD` 的遍历、目标地址校验、文件范围校验、zero-fill 和 `kernel_memory_size` 计算。
+- [x] 2.1 复核 `kernel/arch/x86/boot/boot.cc` 对多个 `PT_LOAD` 的遍历、目标地址校验、文件范围校验、zero-fill 和 `kernel_memory_size` 计算。
 - [x] 2.2 若 PHDR 拆分暴露 loader 边界问题，仅做针对性修复，保持磁盘读取、exFAT 查找、BootInfo handoff 和 paging 初始化架构不变。
 - [x] 2.3 复核 entry point 校验仍覆盖拆分后的 RX segment，并确认最终跳转仍使用 ELF `e_entry`。
 
@@ -22,7 +22,7 @@
 ## 4. 启动与辅助检查
 
 - [x] 4.1 在 Bochs/ROM/serial oracle 可用时运行有界 boot smoke，例如 `uv run python tools/boot_debug.py run --expect-serial-marker "BigOS kernel reached"`；不可用时记录具体限制和剩余 bootability 风险。
-- [x] 4.2 若修改 `src/arch/x86/boot/boot.cc`，运行贴近交叉构建的 C++17 freestanding clang/clangd 辅助静态检查；若只修改 `link.lds`，记录 C++ 辅助检查不适用或无源码变更。
+- [x] 4.2 若修改 `kernel/arch/x86/boot/boot.cc`，运行贴近交叉构建的 C++17 freestanding clang/clangd 辅助静态检查；若只修改 `link.lds`，记录 C++ 辅助检查不适用或无源码变更。
 - [x] 4.3 运行 `uv run pytest`，确认现有源码断言和工具侧 marker 检查未被破坏。
 
 ## 5. 文档与 OpenSpec 验证
@@ -53,7 +53,7 @@
 历史诊断：
 
 - 初次 ELF section 检查发现当前源码使用 `.4k_align_area` input section，而旧 `link.lds` 只显式收集 `.4k_area`；已在 `.4k_area` output section 同时收集 `.4k_area` 和 `.4k_align_area`，避免 orphan section 改变预期顺序。
-- `src/arch/x86/boot/boot.cc` 未修改；复核确认现有 loader 遍历所有 `PT_LOAD`、校验目标和文件范围、按最大 segment end 计算 `kernel_memory_size`、zero-fill `p_memsz - p_filesz`，并最终跳转到已校验的 ELF `e_entry`。
+- `kernel/arch/x86/boot/boot.cc` 未修改；复核确认现有 loader 遍历所有 `PT_LOAD`、校验目标和文件范围、按最大 segment end 计算 `kernel_memory_size`、zero-fill `p_memsz - p_filesz`，并最终跳转到已校验的 ELF `e_entry`。
 
 本次引入问题：
 

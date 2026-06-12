@@ -15,7 +15,7 @@ BigOS SHALL provide an explicit runtime smoke validation matrix that lists each 
 
 #### Scenario: User-mode smoke boundaries are visible
 - **WHEN** the matrix lists `user_program_smoke` or `user_elf_smoke`
-- **THEN** it MUST identify that these cases compile `src/kernel/proc/**` and are not part of a normal boot configuration
+- **THEN** it MUST identify that these cases compile `kernel/core/proc/**` and are not part of a normal boot configuration
 
 ### Requirement: Runtime smoke runner uses QEMU headless marker checks
 BigOS SHALL provide a validation runner as a `tools/boot_debug.py` subcommand or equivalent documented helper flow that executes matrix cases through the existing Legacy BIOS/MBR/exFAT image path and prefers QEMU headless serial-marker checks for automated validation.

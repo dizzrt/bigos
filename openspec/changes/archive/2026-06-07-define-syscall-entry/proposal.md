@@ -47,8 +47,8 @@
 
 ## Impact
 
-- 受影响子系统：中断/入口（`src/kernel/irq/` 下的 IDT 注册与 dispatch、`interrupt.s` ISR stub）、内核入口
-  `src/kernel`（新增 syscall dispatch 与诊断 syscall 实现），以及公共头（新增 syscall number/ABI 声明）。
+- 受影响子系统：中断/入口（`kernel/core/irq/` 下的 IDT 注册与 dispatch、`interrupt.s` ISR stub）、内核入口
+  `kernel/core`（新增 syscall dispatch 与诊断 syscall 实现），以及公共头（新增 syscall number/ABI 声明）。
 - 受影响假设：单核、早期关中断、无 SMP、无 ring3；保持 kernel-owned 静态 IDT 与 `InterruptFrame` dispatch ABI
   不变；syscall 入口路径在本阶段仅从内核态/同 ring 触发，不依赖用户态地址空间切换。
 - 构建：新增默认关闭的 xmake 验证开关与 `BIGOS_` marker；不改变默认 boot 行为。

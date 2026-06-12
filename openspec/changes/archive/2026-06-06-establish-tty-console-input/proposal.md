@@ -25,9 +25,9 @@
 
 ## Impact
 
-- 影响输入与 IRQ 子系统：`src/kernel/irq/isr.cc`、`include/irq/isr.h`、`include/irq/interrupt.h`，需要把 keyboard handler 从 smoke-only 逐步连接到输入队列，同时保留现有 i8259 EOI 分离规则。
-- 影响输出与 console 子系统：`src/kernel/bigos/io.cc`、`include/bigos/io.h`、`src/drivers/video/vga.cc`、`include/drivers/video/vga.h`，需要抽象 console 后端并明确哪些早期输出 API 保持为诊断直写路径。
-- 影响 kernel 初始化：`src/kernel/kernel.cc` 需要启用或新增 `init_tty()`/console 初始化，并明确其相对内存、IRQ、`sti` 和 keyboard IRQ1 unmask 的顺序。
+- 影响输入与 IRQ 子系统：`kernel/core/irq/isr.cc`、`include/irq/isr.h`、`include/irq/interrupt.h`，需要把 keyboard handler 从 smoke-only 逐步连接到输入队列，同时保留现有 i8259 EOI 分离规则。
+- 影响输出与 console 子系统：`kernel/core/bigos/io.cc`、`include/bigos/io.h`、`kernel/drivers/video/vga.cc`、`include/drivers/video/vga.h`，需要抽象 console 后端并明确哪些早期输出 API 保持为诊断直写路径。
+- 影响 kernel 初始化：`kernel/core/kernel.cc` 需要启用或新增 `init_tty()`/console 初始化，并明确其相对内存、IRQ、`sti` 和 keyboard IRQ1 unmask 的顺序。
 - 影响构建与验证：`xmake.lua` 的 `keyboard_smoke` 开关继续默认关闭；新增/更新源码级测试覆盖 scancode/keymap、ring buffer、ISR 安全边界、IRQ1 unmask 顺序和 console API。
 - 架构假设：仍为单核 x86_64、legacy BIOS + i8259 PIC + PS/2 keyboard + VGA text mode + COM1 serial；不引入 APIC/IOAPIC、SMP、scheduler、进程或用户态。
 - 内存布局假设：不移动 boot 固定地址、linker higher-half base、kernel load base、BootInfo ABI、recursive self-mapping、`KVMEM_BASE`、direct-map 区域或 allocator API 语义。

@@ -1,6 +1,6 @@
 ## 1. xmake 构建图迁移
 
-- [x] 1.1 盘点根 `Makefile`、`src/arch/x86/boot/Makefile`、`xmake.lua` 和 `tools/boot_debug.py` 的当前职责，记录需要迁移的命令、参数、输出路径和大小限制。
+- [x] 1.1 盘点根 `Makefile`、`kernel/arch/x86/boot/Makefile`、`xmake.lua` 和 `tools/boot_debug.py` 的当前职责，记录需要迁移的命令、参数、输出路径和大小限制。
 - [x] 1.2 在 xmake 配置中新增 MBR、DBR、extended DBR 和 `boot.bin` 的构建规则，保持现有 `x86_64-elf-as`、`x86_64-elf-gcc`、`x86_64-elf-ld` 参数、entry symbol、`-Ttext` 地址和 `--oformat binary` 语义。
 - [x] 1.3 确认 boot-stage artifacts 仍输出到 `build/bin/x86/boot/` 或等价文档化路径，并保留 `mbr.bin`、`dbr.bin`、`exdbr.bin`、`boot.bin` 文件名。
 - [x] 1.4 为 boot-stage artifacts 增加构建后大小检查，保持 `512`、`512`、`4096` 和 `524288` bytes 上限。
@@ -27,7 +27,7 @@
 ## 4. 移除 Makefile 入口
 
 - [x] 4.1 删除根 `Makefile` 中的 `run`、`boot-debug`、`boot-debug-gui` 和 `boot-debug-user-gui` 包装入口。
-- [x] 4.2 删除 `src/arch/x86/boot/Makefile`，确保 boot-stage artifacts 已完全由 xmake 构建。
+- [x] 4.2 删除 `kernel/arch/x86/boot/Makefile`，确保 boot-stage artifacts 已完全由 xmake 构建。
 - [x] 4.3 搜索并清理测试、文档、OpenSpec 当前规范和开发指南中的 active `make boot-debug`、`boot-debug-gui`、boot Makefile 构建引用。
 - [x] 4.4 保留历史 archive 中的语义记录时，必要处添加迁移说明，避免把历史验证结果误改为新入口。
 
@@ -57,7 +57,7 @@
 
 - `xmake`：通过；验证默认构建仍只构建 `kernel` target。
 - `xmake build boot-artifacts`：通过；生成 `mbr.bin` 512 bytes、`dbr.bin` 512 bytes、`exdbr.bin` 890 bytes、`boot.bin` 10936 bytes，均满足上限。
-- `xmake f --user_program_smoke=y --syscall_smoke=y` + `xmake build kernel`：通过；构建日志包含 `src/kernel/proc/**`，验证组合 smoke 配置被当前 xmake 配置保留并参与构建。验证结束后已将这两个本地开关恢复为默认关闭。
+- `xmake f --user_program_smoke=y --syscall_smoke=y` + `xmake build kernel`：通过；构建日志包含 `kernel/core/proc/**`，验证组合 smoke 配置被当前 xmake 配置保留并参与构建。验证结束后已将这两个本地开关恢复为默认关闭。
 - `xmake run bochs-sdl2`：到达 kernel/boot artifact 构建、raw image 生成、SDL2 bochsrc 生成和 Bochs launch 阶段；为避免交互式 emulator 后台挂起，启动后手动停止。生成配置包含 `display_library: sdl2`。
 - `xmake run bochs`：到达 kernel/boot artifact 构建、raw image 生成、非 SDL2 bochsrc 生成和 Bochs launch 阶段；为避免交互式 emulator 后台挂起，启动后手动停止。生成配置包含 raw image `ata0-master` 且不包含 `display_library: sdl2`。
 - `uv run python tools/boot_debug.py run --no-launch`：通过；默认按当前 xmake 配置构建 `kernel` 与 `boot-artifacts`，生成并校验 `build/test/os.raw`。

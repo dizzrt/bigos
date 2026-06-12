@@ -1,7 +1,7 @@
 ## 1. 现状审查与边界确认
 
-- [x] 1.1 复查 `src/kernel/kernel.cc`、`src/kernel/irq/interrupt.s`、`src/kernel/irq/interrupt.cc`、`src/kernel/irq/isr.cc`、`include/irq/interrupt.h`、`include/irq/isr.h`，确认当前 `initIRQ()`、ISR entry、handler table 和 `enableIRQ()` 接入点。
-- [x] 1.2 复查 `src/drivers/irqchip/i8259.cc` 与 `include/drivers/irqchip/i8259.h`，确认 PIC remap base、mask/unmask 和 EOI 常量与调用语义。
+- [x] 1.1 复查 `kernel/core/kernel.cc`、`kernel/core/irq/interrupt.s`、`kernel/core/irq/interrupt.cc`、`kernel/core/irq/isr.cc`、`include/irq/interrupt.h`、`include/irq/isr.h`，确认当前 `initIRQ()`、ISR entry、handler table 和 `enableIRQ()` 接入点。
+- [x] 1.2 复查 `kernel/drivers/irqchip/i8259.cc` 与 `include/drivers/irqchip/i8259.h`，确认 PIC remap base、mask/unmask 和 EOI 常量与调用语义。
 - [x] 1.3 审查 `IDT_BASE`、boot 阶段 `lidt`、低地址保留区、BootInfo handoff、boot-stage page table 和 kernel image 布局，确认 kernel runtime IDT 迁移到 kernel-owned static IDT storage 后不破坏 boot layout 假设。
 - [x] 1.4 明确本 change 不改变 boot 固定地址、linker higher-half base、kernel load base、BootInfo ABI、self-mapping 地址或 direct-map 规划，并把结论记录到实现说明或验证记录。
 
@@ -9,9 +9,9 @@
 
 - [x] 2.1 在 IRQ public/internal header 中定义 vector 常量、i8259 vector base、IRQ line 常量、page fault vector 和 keyboard IRQ/vector 映射。
 - [x] 2.2 定义 `InterruptFrame` 或等价 C++ dispatch 参数结构，覆盖 vector、error code、必要通用寄存器和可安全读取的返回上下文字段。
-- [x] 2.3 重构 `src/kernel/irq/interrupt.s`，统一无 error-code 和有 error-code vector 的栈布局，确保 C++ dispatch 能可靠读取 vector 和 error code。
+- [x] 2.3 重构 `kernel/core/irq/interrupt.s`，统一无 error-code 和有 error-code vector 的栈布局，确保 C++ dispatch 能可靠读取 vector 和 error code。
 - [x] 2.4 调整寄存器保存/恢复和 `iretq` 路径，确保允许返回的 IRQ handler 不破坏调用前寄存器状态。
-- [x] 2.5 在 `src/kernel/irq/interrupt.cc` 中建立 C++ dispatch 入口，按 CPU exception、i8259 external IRQ 和 unknown vector 分流。
+- [x] 2.5 在 `kernel/core/irq/interrupt.cc` 中建立 C++ dispatch 入口，按 CPU exception、i8259 external IRQ 和 unknown vector 分流。
 - [x] 2.6 为 kernel-owned static IDT descriptor 初始化补齐 gate 属性、selector、offset 和 reserved 字段，并在 `initIRQ()` 中显式执行 kernel-stage `lidt`。
 
 ## 3. Exception 与 `#PF` 诊断
@@ -40,7 +40,7 @@
 
 ## 6. Kernel 初始化顺序
 
-- [x] 6.1 调整 `src/kernel/kernel.cc`，保持顺序为 VGA -> `init_mem()` -> optional `mm::self_test()` -> IRQ/PIC/keyboard 初始化 -> `enableIRQ()` -> normal boot marker。
+- [x] 6.1 调整 `kernel/core/kernel.cc`，保持顺序为 VGA -> `init_mem()` -> optional `mm::self_test()` -> IRQ/PIC/keyboard 初始化 -> `enableIRQ()` -> normal boot marker。
 - [x] 6.2 确认 `BIGOS_MM_SELF_TEST` 路径仍在 IRQ disabled 环境执行，并且 PIC/keyboard 初始化不会提前发生。
 - [x] 6.3 为 `enableIRQ()` 接入点添加清晰注释或封装，说明当前只启用已注册的早期 IRQ smoke，不代表 allocator 或 kernel API 具备 IRQ-context 安全性。
 - [x] 6.4 如果启用 IRQ 后 boot smoke 不稳定，优先保留 IDT/exception 诊断改动，并回退或编译开关保护 `enableIRQ()` 默认路径。

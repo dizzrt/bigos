@@ -6,7 +6,7 @@
 - `uv run pytest`：52 passed。
 - `xmake`：默认配置构建通过。
 - `xmake f --keyboard_smoke=y && xmake && xmake f --keyboard_smoke=n`：keyboard smoke 显式配置构建通过，并已恢复 `keyboard_smoke` 关闭。
-- `x86_64-elf-g++ -std=c++17 -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/kernel/terminal/keyboard.cc src/kernel/terminal/tty.cc src/kernel/terminal/console.cc src/kernel/irq/isr.cc src/kernel/kernel.cc src/drivers/video/vga.cc`：通过。
+- `x86_64-elf-g++ -std=c++17 -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -fno-rtti -fno-exceptions -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/core/terminal/keyboard.cc kernel/core/terminal/tty.cc kernel/core/terminal/console.cc kernel/core/irq/isr.cc kernel/core/kernel.cc kernel/drivers/video/vga.cc`：通过。
 - IDE diagnostics：当前修改文件未报告诊断。
 - `openspec validate establish-tty-console-input --strict`：通过。
 

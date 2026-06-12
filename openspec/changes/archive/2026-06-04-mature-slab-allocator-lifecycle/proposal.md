@@ -23,7 +23,7 @@
 
 ## Impact
 
-- 影响子系统：`src/mm/slab.*`、`src/mm/kmem.*`、`src/mm/vmem.*`、`include/bigos/memory.h`，以及 `cpp/libsupc++/new.cc` 间接受益。
+- 影响子系统：`kernel/mm/slab.*`、`kernel/mm/kmem.*`、`kernel/mm/vmem.*`、`include/bigos/memory.h`，以及 `cpp/libsupc++/new.cc` 间接受益。
 - 架构假设：当前仍为单核、关中断早期内核路径，不设计并发分配安全；`kmalloc/new` 成功时必须返回已映射可访问内核虚拟地址。
 - 内存布局假设：继续使用 kernel heap/vmalloc-style `KVMEM_BASE`，不引入 direct map 或移动页表 self-mapping 布局。
 - Bootstrap 假设：buddy 初始化元数据由 early metadata arena 提供，当前 change 不改变 arena 来源、容量、生命周期或 BootInfo memory map ABI。

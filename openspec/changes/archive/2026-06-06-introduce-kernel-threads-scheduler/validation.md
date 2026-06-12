@@ -3,9 +3,9 @@
 ## 已通过检查
 
 - `uv run pytest tests/test_kernel_thread_scheduler_source.py tests/test_memory_interrupt_context_source.py tests/test_timer_irq_foundation_source.py tests/test_interrupt_foundation_source.py`：36 passed。覆盖 TCB/context API 标注、1 页默认线程栈、terminated 延后回收、create 失败路径 allocator 契约、context switch symbol 与 callee-saved 集合、cooperative switch 不触碰 `InterruptFrame`/`iretq` ABI、round-robin yield、idle 线程替换裸 `hlt` loop、kernel 初始化顺序、timer bounded intent 无抢占、IRQ allocator 禁止和 scheduler smoke marker wiring。
-- `xmake`（默认配置）：构建通过，新增 `src/kernel/sched/switch.s`、`src/kernel/sched/sched.cc` 已被现有 `src/kernel/**.cc` / `src/kernel/**.s` glob 自动编译链接。
+- `xmake`（默认配置）：构建通过，新增 `kernel/core/sched/switch.s`、`kernel/core/sched/sched.cc` 已被现有 `kernel/core/**.cc` / `kernel/core/**.s` glob 自动编译链接。
 - `xmake f --scheduler_smoke=y && xmake`：scheduler smoke 显式配置构建通过；随后 `xmake f -c` 恢复默认配置（smoke 默认关闭）。
-- `x86_64-elf-g++ -std=c++17 -ffreestanding -fno-rtti -fno-exceptions -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -mno-red-zone -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only src/kernel/sched/sched.cc src/kernel/kernel.cc src/kernel/irq/isr.cc`：freestanding 语法检查通过，无告警。
+- `x86_64-elf-g++ -std=c++17 -ffreestanding -fno-rtti -fno-exceptions -mno-sse -mno-sse2 -mno-mmx -mcmodel=kernel -mno-red-zone -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only kernel/core/sched/sched.cc kernel/core/kernel.cc kernel/core/irq/isr.cc`：freestanding 语法检查通过，无告警。
 - IDE diagnostics：当前修改/新增文件未报告诊断。
 - `openspec validate introduce-kernel-threads-scheduler --strict`：通过（Change is valid）。
 
@@ -22,9 +22,9 @@
 ## 当前 Change 影响
 
 - 新增 public header：`include/bigos/thread.h`、`include/bigos/sched.h`。
-- 新增调度器实现：`src/kernel/sched/sched.cc`、`src/kernel/sched/switch.s`。
-- 修改 `src/kernel/kernel.cc`：保持 memory/self-test/TTY/IRQ 初始化顺序不变，在 `irq::enableIRQ()` 后进入 `sched::start()`，裸 `hlt` loop 由 idle 线程取代。
-- 修改 `src/kernel/irq/isr.cc`：timer IRQ0 在 `on_tick()` 后调用 bounded `sched::on_timer_tick()`，不做抢占/分配。
+- 新增调度器实现：`kernel/core/sched/sched.cc`、`kernel/core/sched/switch.s`。
+- 修改 `kernel/core/kernel.cc`：保持 memory/self-test/TTY/IRQ 初始化顺序不变，在 `irq::enableIRQ()` 后进入 `sched::start()`，裸 `hlt` loop 由 idle 线程取代。
+- 修改 `kernel/core/irq/isr.cc`：timer IRQ0 在 `on_tick()` 后调用 bounded `sched::on_timer_tick()`，不做抢占/分配。
 - 修改 `xmake.lua`：新增默认关闭的 `scheduler_smoke` 开关。
 - 新增文档/测试：`docs/en/arch/kernel-thread-scheduler.md`、`tmp/roadmap.md`、`tests/test_kernel_thread_scheduler_source.py`。
 - 未改动 boot 固定地址、higher-half/load base、BootInfo ABI、direct map、`KVMEM_BASE`、IDT vector 分配或 `InterruptFrame` layout；现有 timer/interrupt 源码级测试保持通过。

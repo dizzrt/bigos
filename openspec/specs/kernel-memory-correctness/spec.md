@@ -106,7 +106,7 @@ BigOS early kernel memory API SHALL expose allocation entry points whose names i
 
 #### Scenario: 旧 alias 不再暴露
 
-- **WHEN** 开发者搜索公开头文件和 `src/mm` 实现
+- **WHEN** 开发者搜索公开头文件和 `kernel/mm` 实现
 - **THEN** 不存在 `alloc_pages()`、`alloc_physical_pages()`、`free_physical_pages()` 或未实现的 `kmem_memory_alloc_pages()` 入口供新调用点使用
 
 #### Scenario: kmalloc 调用方不需要映射 flag

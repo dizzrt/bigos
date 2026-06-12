@@ -33,7 +33,7 @@
 
 ## Impact
 
-- 受影响子系统：`src/kernel/kernel.cc` 初始化尾部、`src/kernel/timer`、`src/kernel/irq`、新增 `src/kernel/sched` 或等价调度器目录、`include/bigos` public scheduler/thread headers、`xmake.lua` 源文件注册、`tests` 源码级验证与 `docs/en/arch` 架构说明。
+- 受影响子系统：`kernel/core/kernel.cc` 初始化尾部、`kernel/core/timer`、`kernel/core/irq`、新增 `kernel/core/sched` 或等价调度器目录、`include/bigos` public scheduler/thread headers、`xmake.lua` 源文件注册、`tests` 源码级验证与 `docs/en/arch` 架构说明。
 - 架构假设：x86_64、单核、Legacy BIOS/i8259、PIT IRQ0、kernel-owned IDT、无 SMP、无用户态地址空间、无进程模型。
 - 内存假设：线程栈和 TCB 可在非中断上下文创建；调度器和 IRQ handler 遵守阶段 3 的 allocator 契约，普通 allocator 仍不从 IRQ handler 调用。
 - 工具链/模拟器假设：继续使用 `xmake`、`x86_64-elf-g++`、`uv run pytest` 和 `openspec validate`；Bochs runtime smoke 可用时观测 serial/VGA marker，不可稳定观测时必须在 validation 中记录剩余 bootability/scheduler runtime 风险。

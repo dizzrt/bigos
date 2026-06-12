@@ -13,7 +13,7 @@ embedded flat blob.
 
 The first user program uses an embedded flat blob rather than ELF64 or filesystem loading:
 
-- The flat blob is provided by the `FIRST_USER_CODE` byte sequence in `src/kernel/proc/proc.cc` and linked into the kernel image.
+- The flat blob is provided by the `FIRST_USER_CODE` byte sequence in `kernel/core/proc/proc.cc` and linked into the kernel image.
 - The image does not depend on an in-kernel FS, block devices, hosted OS file IO, or bootloader-only exFAT helpers.
 - The blob executes only a bounded `SYS_WRITE(fd=1, buf, len)` and then `SYS_EXIT(0)`.
 - The loader still maps code, data/BSS, and stack explicitly to validate permission boundaries; data/BSS pages are currently zero-filled pages.
@@ -93,7 +93,7 @@ constructed by the initial user stack.
 
 ## Ring3 Entry
 
-x86_64 runtime user-mode support is provided by `src/kernel/proc/user_mode.cc` / `user_mode.s`:
+x86_64 runtime user-mode support is provided by `kernel/core/proc/user_mode.cc` / `user_mode.s`:
 
 - The new GDT keeps kernel code/data/stack selectors `0x08/0x10/0x18` unchanged.
 - It adds user data selector `0x23`, user code selector `0x2b`, and TSS selector `0x30`.

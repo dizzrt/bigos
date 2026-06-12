@@ -4,7 +4,7 @@
 
 ## 页表 ownership
 
-`src/mm/vmem.cc` 维护一个静态 `PageTableMetadata` 表，记录：
+`kernel/mm/vmem.cc` 维护一个静态 `PageTableMetadata` 表，记录：
 
 - owner 类别：kernel vmem 动态映射或派生用户地址空间。
 - 页表级别：PML4、PDPT、PD 或 PT。

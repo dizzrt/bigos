@@ -84,7 +84,7 @@ handoff address、字段 offset 常量和 C-compatible packed struct，不依赖
 备选方案：
 
 - 继续保留魔法地址，仅补文档。该方案侵入性更低，但无法防止未来 producer/consumer 意外不匹配。
-- 只在 `boot.cc` 或 `src/mm/buddy.cc` 附近定义结构。该方案局部简单，但 assembly、boot C++
+- 只在 `boot.cc` 或 `kernel/mm/buddy.cc` 附近定义结构。该方案局部简单，但 assembly、boot C++
   和 kernel C++ 很容易复制出不一致的 offset。
 
 ### 保留固定早期地址布局并补充文档
@@ -177,7 +177,7 @@ BIOS 和 ATA 读循环都应在明确失败条件下停止：
 
 ## 风险 / 权衡
 
-- [风险] 引入 `BootInfo` 时 producer 和 consumer 布局不一致会破坏 `src/mm/buddy.cc` -> [缓解] 在 kernel consumer 迁移并验证前保留现有魔法地址兼容写入。
+- [风险] 引入 `BootInfo` 时 producer 和 consumer 布局不一致会破坏 `kernel/mm/buddy.cc` -> [缓解] 在 kernel consumer 迁移并验证前保留现有魔法地址兼容写入。
 - [风险] 写入 exFAT 中的 `boot.bin` 时，如果误解 FAT 分配，可能损坏镜像 -> [缓解] 初期只支持连续预分配目标空间，校验容量，并 fail closed。
 - [风险] ELF 多段加载可能因畸形 segment 覆盖页表或 bootloader 内存 -> [缓解] 读入前校验目标范围不与文档化保留区域冲突。
 - [风险] 超时常量对某些模拟器或磁盘过低 -> [缓解] 使用保守重试次数，并将常量命名以便调参。

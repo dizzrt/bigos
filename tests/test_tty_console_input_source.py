@@ -4,19 +4,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def keyboard_handler_body() -> str:
-    isr = read_source('src/kernel/irq/isr.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
     start = isr.index('implement_isr(keyboard)')
     end = isr.index('void init_isr_timer()')
     return isr[start:end]
 
 
 def test_keyboard_irq1_handoff_preserves_dispatch_eoi_boundary() -> None:
-    isr = read_source('src/kernel/irq/isr.cc')
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
     unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);')
@@ -54,8 +66,8 @@ def test_keyboard_isr_body_stays_irq_context_safe() -> None:
 
 
 def test_tty_and_keyboard_are_ready_before_irq_enable() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
-    isr = read_source('src/kernel/irq/isr.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
 
     init_tty_index = kernel.index('bigos::terminal::init_tty();')
     init_irq_index = kernel.index('bigos::irq::initIRQ();')
@@ -68,7 +80,7 @@ def test_tty_and_keyboard_are_ready_before_irq_enable() -> None:
 
 
 def test_scancode_decoder_covers_minimal_set1_mapping_and_modifiers() -> None:
-    keyboard = read_source('src/kernel/terminal/keyboard.cc')
+    keyboard = read_source('kernel/core/terminal/keyboard.cc')
 
     expected_mappings = (
         "key(0x01, '\\x1b')",
@@ -94,7 +106,7 @@ def test_scancode_decoder_covers_minimal_set1_mapping_and_modifiers() -> None:
 
 def test_tty_ring_buffer_is_fixed_capacity_fifo_and_drops_new_input() -> None:
     tty_h = read_source('include/bigos/tty.h')
-    tty = read_source('src/kernel/terminal/tty.cc')
+    tty = read_source('kernel/core/terminal/tty.cc')
 
     assert 'TTY_INPUT_CAPACITY = 128' in tty_h
     assert 'char buffer[TTY_INPUT_CAPACITY];' in tty
@@ -113,7 +125,7 @@ def test_tty_ring_buffer_is_fixed_capacity_fifo_and_drops_new_input() -> None:
 
 def test_tty_blocking_consumer_is_additive_and_uses_wait_queue() -> None:
     tty_h = read_source('include/bigos/tty.h')
-    tty = read_source('src/kernel/terminal/tty.cc')
+    tty = read_source('kernel/core/terminal/tty.cc')
 
     assert 'bool read_char(char *out) noexcept;' in tty_h
     assert 'size_t drain(char *out, size_t capacity) noexcept;' in tty_h
@@ -126,9 +138,9 @@ def test_tty_blocking_consumer_is_additive_and_uses_wait_queue() -> None:
 
 def test_console_api_wraps_vga_without_serial_mirroring() -> None:
     console_h = read_source('include/bigos/console.h')
-    console = read_source('src/kernel/terminal/console.cc')
-    vga = read_source('src/drivers/video/vga.cc')
-    io = read_source('src/kernel/bigos/io.cc')
+    console = read_source('kernel/core/terminal/console.cc')
+    vga = read_source('kernel/drivers/video/vga.cc')
+    io = read_source('kernel/core/bigos/io.cc')
 
     assert 'void console_put(char ch) noexcept;' in console_h
     assert 'void console_write(const char *s) noexcept;' in console_h

@@ -1,7 +1,7 @@
 ## 1. 页属性与 map/unmap primitive
 
 - [x] 1.1 在 `include/bigos/memory.h` 或等价 `bigos::mm` 头中声明显式页属性类型（present/writable/user/no-execute/global bit）与 map/unmap primitive 接口，标注 non-interrupt-context 使用约束。
-- [x] 1.2 在 `src/mm/vmem.cc`（或新增 `src/mm/` 辅助文件）实现 primitive：复用现有 self-mapping 遍历、缺级页表分配与 `InterruptGuard` 写入边界，按属性入参设置 PTE bit。
+- [x] 1.2 在 `kernel/mm/vmem.cc`（或新增 `kernel/mm/` 辅助文件）实现 primitive：复用现有 self-mapping 遍历、缺级页表分配与 `InterruptGuard` 写入边界，按属性入参设置 PTE bit。
 - [x] 1.3 unmap primitive 清除 PTE 并对该虚拟地址执行 `invlpg` TLB 失效，保持与现有 `rollback_kernel_range()` 一致的失效语义。
 - [x] 1.4 失败路径（缺级页表分配失败）保持现有 rollback 行为，不破坏 buddy/slab 阶段契约，不引入 IRQ handler 中的动态分配。
 

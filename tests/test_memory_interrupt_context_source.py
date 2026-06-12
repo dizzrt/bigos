@@ -4,6 +4,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
@@ -28,9 +40,9 @@ def test_public_allocator_contracts_are_documented() -> None:
 
 def test_read_only_memory_diagnostics_have_context_contracts() -> None:
     memory = read_source('include/bigos/memory.h')
-    buddy_h = read_source('src/mm/buddy.h')
-    vmem_h = read_source('src/mm/vmem.h')
-    slab_h = read_source('src/mm/slab.h')
+    buddy_h = read_source('kernel/mm/buddy.h')
+    vmem_h = read_source('kernel/mm/vmem.h')
+    slab_h = read_source('kernel/mm/slab.h')
 
     assert 'Context-agnostic after init: total number of physical pages is stable.' in buddy_h
     assert 'IRQ-disabled-only snapshot' in buddy_h
@@ -58,9 +70,9 @@ def test_interrupt_guard_preserves_if_state_and_documents_scope() -> None:
 
 
 def test_allocator_metadata_paths_use_interrupt_guard() -> None:
-    buddy = read_source('src/mm/buddy.cc')
-    slab = read_source('src/mm/slab.cc')
-    vmem = read_source('src/mm/vmem.cc')
+    buddy = read_source('kernel/mm/buddy.cc')
+    slab = read_source('kernel/mm/slab.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     for source in (buddy, slab, vmem):
         assert '#include <irq/interrupt.h>' in source
@@ -93,15 +105,15 @@ def test_allocator_metadata_paths_use_interrupt_guard() -> None:
 
 
 def test_guarded_regions_do_not_introduce_blocking_tokens() -> None:
-    for relative in ('src/mm/buddy.cc', 'src/mm/slab.cc', 'src/mm/vmem.cc'):
+    for relative in ('kernel/mm/buddy.cc', 'kernel/mm/slab.cc', 'kernel/mm/vmem.cc'):
         source = read_source(relative)
         for token in ('mdelay', 'filesystem', 'scheduler', 'user-mode'):
             assert token not in source
 
 
 def test_irq_handlers_avoid_ordinary_allocator_apis() -> None:
-    isr = read_source('src/kernel/irq/isr.cc')
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     timer_body = isr[isr.index('implement_isr(timer)') : isr.index('implement_isr(keyboard)')]
     keyboard_body = isr[isr.index('implement_isr(keyboard)') : isr.index('void init_isr_timer()')]
@@ -129,8 +141,8 @@ def test_irq_handlers_avoid_ordinary_allocator_apis() -> None:
 
 
 def test_mm_self_test_stays_before_irq_enable_and_layout_aliases_are_unchanged() -> None:
-    kernel = read_source('src/kernel/kernel.cc')
-    vmem = read_source('src/mm/vmem.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
     memory = read_source('include/bigos/memory.h')
 
     init_mem_index = kernel.index('bigos::init_mem(boot_info);')

@@ -26,9 +26,9 @@ BigOS 目前已有 IDT stub、默认 ISR、i8259 PIC 驱动和 `initIRQ()` 接�
 
 ## Impact
 
-- 影响 boot/kernel 子系统：`src/kernel/kernel.cc` 的初始化顺序和 IRQ enable 时机。
-- 影响 IRQ 子系统：`src/kernel/irq/interrupt.s`、`src/kernel/irq/interrupt.cc`、`src/kernel/irq/isr.cc`、`include/irq/interrupt.h`、`include/irq/isr.h`。
-- 影响 driver 子系统：`src/drivers/irqchip/i8259.cc`、`include/drivers/irqchip/i8259.h`，以及新增或接入 keyboard IRQ 相关代码。
+- 影响 boot/kernel 子系统：`kernel/core/kernel.cc` 的初始化顺序和 IRQ enable 时机。
+- 影响 IRQ 子系统：`kernel/core/irq/interrupt.s`、`kernel/core/irq/interrupt.cc`、`kernel/core/irq/isr.cc`、`include/irq/interrupt.h`、`include/irq/isr.h`。
+- 影响 driver 子系统：`kernel/drivers/irqchip/i8259.cc`、`include/drivers/irqchip/i8259.h`，以及新增或接入 keyboard IRQ 相关代码。
 - 可能新增测试或源码级检查：`tests/` 下针对 IDT/ISR/PIC/keyboard/#PF 行为的静态验证，必要时扩展 boot debug smoke marker。
 - 架构假设：仅覆盖 x86_64 legacy BIOS + i8259 PIC + Bochs 路径；不引入 APIC/IOAPIC 或 UEFI 专属中断模型。
 - 内存布局假设：不移动 linker higher-half base、kernel load base、BootInfo handoff ABI、page table self-mapping 地址或 roadmap 中尚未定义的 direct map 区域。

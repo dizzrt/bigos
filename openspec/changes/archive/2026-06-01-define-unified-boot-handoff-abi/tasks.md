@@ -62,7 +62,7 @@
 ### 已通过检查
 
 - `xmake`：kernel、runtime、mm 相关改动构建通过；输出仍包含历史 `command-line` 宏空白 warning、`build/kernel` RWX LOAD segment warning 和 `$(buildir)` deprecation warning。
-- `make -C src/arch/x86/boot build-mbr build-dbr build-exdbr build-boot`：Legacy BIOS boot artifacts 构建通过；`mbr.s`/`dbr_exfat.s` 仍有历史 `movsd`/`movsl` assembler warning。
+- `make -C kernel/arch/x86/boot build-mbr build-dbr build-exdbr build-boot`：Legacy BIOS boot artifacts 构建通过；`mbr.s`/`dbr_exfat.s` 仍有历史 `movsd`/`movsl` assembler warning。
 - `python3 tools/boot_debug.py run --no-launch`：kernel build、boot build、raw image build 和 image validation 通过，生成 `build/test/os.raw` 与 `build/test/bochsrc.bxrc`。
 - `clang++ --target=x86_64-elf -std=c++17 -ffreestanding -fno-rtti -fno-exceptions -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -nostdinc++ -Iinclude -Icpp/include -Icpp/libsupc++/include -fsyntax-only ...`：修改过的 C++ source/header 语法检查通过。
 - IDE diagnostics / clangd：修改过的 C++ 文件当前无诊断。

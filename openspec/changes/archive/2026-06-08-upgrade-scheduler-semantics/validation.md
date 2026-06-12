@@ -17,7 +17,7 @@
 
 - `uv run ruff check`：失败在既有测试文件格式问题，涉及 `tests/test_address_space_lifecycle_source.py`、`tests/test_bilingual_docs_layout.py`、`tests/test_first_user_program_source.py`、`tests/test_memory_correctness_source.py`；本 change 未修改这些文件。
 - `uv run ruff format --check`：失败在既有测试文件格式问题，涉及 `tests/test_address_space_lifecycle_source.py`、`tests/test_first_user_program_source.py`、`tests/test_memory_correctness_source.py`、`tests/test_memory_interrupt_context_source.py`；本 change 未修改这些文件。
-- `uv run pytest`：145 项中 142 通过；修复本 change 相关的 scheduler/timer source-check 后，剩余失败为 `tests/test_user_address_space_vmem_source.py::test_derivation_does_not_switch_cr3_and_runtime_activation_is_explicit`，断言 `src/kernel/proc/proc.cc` 中存在特定 `activate_address_space_root` 调用字符串；该失败与 scheduler/timer/IRQ-return preemption 改动无关。
+- `uv run pytest`：145 项中 142 通过；修复本 change 相关的 scheduler/timer source-check 后，剩余失败为 `tests/test_user_address_space_vmem_source.py::test_derivation_does_not_switch_cr3_and_runtime_activation_is_explicit`，断言 `kernel/core/proc/proc.cc` 中存在特定 `activate_address_space_root` 调用字符串；该失败与 scheduler/timer/IRQ-return preemption 改动无关。
 
 ## Runtime Artifacts
 

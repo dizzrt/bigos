@@ -27,7 +27,7 @@ BigOS 已具备进程生命周期、bounded ELF64 `exec`、fd/VFS 壳层和安�
 
 ## Impact
 
-- 影响子系统：`src/mm` 用户地址空间和页表映射路径、`src/kernel/proc` 进程生命周期与 exec、`src/kernel/syscall` syscall ABI/dispatch、`include/bigos` 公共内核接口，以及相关 source-level tests 与 smoke 配置。
+- 影响子系统：`kernel/mm` 用户地址空间和页表映射路径、`kernel/core/proc` 进程生命周期与 exec、`kernel/core/syscall` syscall ABI/dispatch、`include/bigos` 公共内核接口，以及相关 source-level tests 与 smoke 配置。
 - 架构假设：x86_64 单核 long mode，当前 `#PF` handler 仍以诊断/受控终止为默认行为；仅在明确的 stack-growth 场景允许用户缺页恢复。
 - 内存布局假设：保留 higher-half kernel、direct map、`KVMEM_BASE`、recursive self-mapping 和用户低半区边界；本 change 不移动 linker 地址、boot handoff 地址或页表自映射地址。
 - 模拟器和工具链假设：构建以 `xmake` 和 `x86_64-elf-gcc/g++` 为主；运行时验证优先 QEMU headless 串口 marker，必要时用 Bochs 或 QEMU+Bochs 交叉验证；Python 辅助检查通过 `uv run ...` 执行。

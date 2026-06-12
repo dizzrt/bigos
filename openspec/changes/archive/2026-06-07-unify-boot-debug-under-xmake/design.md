@@ -4,7 +4,7 @@ BigOS 当前以 `xmake` 作为主构建系统，但本地启动调试链路仍�
 
 - 根 `Makefile` 提供 `boot-debug`、`boot-debug-gui` 和 `boot-debug-user-gui` 包装。
 - `tools/boot_debug.py` 负责编译 kernel、调用 boot 子目录 Makefile、生成 raw image、生成 Bochs 配置并启动 Bochs。
-- `src/arch/x86/boot/Makefile` 负责编译 `mbr.bin`、`dbr.bin`、`exdbr.bin` 和 `boot.bin`。
+- `kernel/arch/x86/boot/Makefile` 负责编译 `mbr.bin`、`dbr.bin`、`exdbr.bin` 和 `boot.bin`。
 - `xmake.lua` 已经定义 kernel target 和所有 smoke 开关，但 `xmake run kernel` 只直接启动 Bochs，不走 deterministic raw image 生成流程。
 
 这导致两个实际问题：
@@ -96,7 +96,7 @@ build/bin/x86/boot/boot.bin
 
 替代方案：
 
-- 保留 boot 子目录 Makefile，仅从 xmake 调用 `make -C src/arch/x86/boot ...`：虽然可快速接入 `xmake run`，但没有真正移除 Makefile 工具链。
+- 保留 boot 子目录 Makefile，仅从 xmake 调用 `make -C kernel/arch/x86/boot ...`：虽然可快速接入 `xmake run`，但没有真正移除 Makefile 工具链。
 - 改写为 Python 构建 boot artifacts：会把编译职责从 xmake 转移到 helper，不符合统一主构建系统的目标。
 
 ### Decision: boot_debug.py 降级为镜像和 emulator helper
@@ -152,7 +152,7 @@ qemu-ovmf
 1. 在 `xmake.lua` 中增加 boot-stage artifact 构建目标或规则，保持现有输出路径和二进制大小限制。
 2. 增加 `bochs-sdl2` 和 `bochs` runnable target，串起 kernel build、boot artifact build、raw image generation、generated bochsrc 和 Bochs launch。
 3. 调整 `tools/boot_debug.py`，将 kernel build/config 逻辑拆分或移除，删除 smoke 快捷参数，并支持“消费已构建 artifacts”的 xmake 调用方式。
-4. 删除根 `Makefile` 和 `src/arch/x86/boot/Makefile`，同步清理文档和测试引用。
+4. 删除根 `Makefile` 和 `kernel/arch/x86/boot/Makefile`，同步清理文档和测试引用。
 5. 运行 `xmake`、`xmake f --user_program_smoke=y --syscall_smoke=y`、`xmake run bochs-sdl2`、`xmake run bochs` 或 Python helper no-launch 等价路径，记录 Bochs 环境不可用时的剩余风险。
 
 Rollback 策略：如果 xmake boot-stage 构建迁移失败，可暂时保留 boot 子目录 Makefile 并让 xmake target 调用旧 Makefile 作为中间态，但最终归档前必须移除该中间态或在 tasks 中明确未完成。

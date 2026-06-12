@@ -1,7 +1,7 @@
 ## 1. 现状审查与边界确认
 
-- [x] 1.1 复查 `src/kernel/kernel.cc`、`src/kernel/irq/interrupt.cc`、`src/kernel/irq/isr.cc`、`include/irq/interrupt.h`，确认 `initIRQ()`、external IRQ dispatch、EOI 和 `enableIRQ()` 的当前顺序。
-- [x] 1.2 复查 `src/drivers/irqchip/i8259.cc` 与 `include/drivers/irqchip/i8259.h`，确认 IRQ0/IRQ1 mask、unmask、EOI 语义。
+- [x] 1.1 复查 `kernel/core/kernel.cc`、`kernel/core/irq/interrupt.cc`、`kernel/core/irq/isr.cc`、`include/irq/interrupt.h`，确认 `initIRQ()`、external IRQ dispatch、EOI 和 `enableIRQ()` 的当前顺序。
+- [x] 1.2 复查 `kernel/drivers/irqchip/i8259.cc` 与 `include/drivers/irqchip/i8259.h`，确认 IRQ0/IRQ1 mask、unmask、EOI 语义。
 - [x] 1.3 确认当前没有 PIT/timer driver、timer smoke 开关或 tick API，避免复用 `tmp/` 归档原型而未审查。
 - [x] 1.4 明确本 change 不改变 boot 固定地址、linker higher-half base、kernel load base、BootInfo ABI、recursive self-mapping、`KVMEM_BASE` 或 direct-map 布局。
 

@@ -2,8 +2,8 @@
 
 ## 1. 内核侧：SYS_EXECVE（append-only 暴露既有 exec 入口）
 - [x] 1.1 在 [syscall.h](include/bigos/syscall.h) 的 `SyscallNumber` 末尾追加 `SYS_EXECVE`（取下一个号位 27），并注释其 ABI（rdi=path、rsi=argv、rdx=envp，成功不返回、失败返回负 errno）；不改动既有号位。
-- [x] 1.2 在 [syscall.cc](src/kernel/syscall/syscall.cc) 新增 `SYS_EXECVE` dispatch 分支：进入同步块 IO/分配前检查调度阻塞守卫；经 VMA-backed 校验把用户 `path`（≤ `SYS_PATH_MAX_LEN`）与 `argv`/`envp`（受 `EXEC_MAX_ARGC`/`EXEC_MAX_ENVC`/`EXEC_MAX_STRING_BYTES` 约束）拷入内核 `ExecArgs`。
-- [x] 1.3 在 [proc.cc](src/kernel/proc/proc.cc) 暴露/接线一条 `execve` 路径：经 VFS `open_absolute` + bounded read 读 ELF 到内核缓冲，调用既有 `exec_current_from_elf_image`；失败映射确定性负 errno（`-ENOENT`/`-EACCES`/`-ENOEXEC`/`-E2BIG`/`-EFAULT`/`-ENOMEM`），成功不返回。
+- [x] 1.2 在 [syscall.cc](kernel/core/syscall/syscall.cc) 新增 `SYS_EXECVE` dispatch 分支：进入同步块 IO/分配前检查调度阻塞守卫；经 VMA-backed 校验把用户 `path`（≤ `SYS_PATH_MAX_LEN`）与 `argv`/`envp`（受 `EXEC_MAX_ARGC`/`EXEC_MAX_ENVC`/`EXEC_MAX_STRING_BYTES` 约束）拷入内核 `ExecArgs`。
+- [x] 1.3 在 [proc.cc](kernel/core/proc/proc.cc) 暴露/接线一条 `execve` 路径：经 VFS `open_absolute` + bounded read 读 ELF 到内核缓冲，调用既有 `exec_current_from_elf_image`；失败映射确定性负 errno（`-ENOENT`/`-EACCES`/`-ENOEXEC`/`-E2BIG`/`-EFAULT`/`-ENOMEM`），成功不返回。
 - [x] 1.4 复查：`SYS_EXECVE` MUST NOT 改动既有 syscall 号位、寄存器约定、`VECTOR_SYSCALL`/DPL、「syscall 不发 EOI」；失败时保持当前进程镜像可继续（先完成可失败的拷入/读盘，再调用 exec 入口）。
 - [x] 1.5 同步更新 `docs/en/arch/syscall-entry.md` 与镜像 `docs/zh/arch/syscall-entry.md`，记录新增 `SYS_EXECVE` 号与 ABI（保持中英文技术事实一致）。
 
@@ -35,8 +35,8 @@
 
 ## 6. 默认 boot 进入并维持 shell（user-space-init）
 - [x] 6.1 把默认 `/boot/user/init.elf` 改为链接 crt0/libc 的常驻 C init：`fork`+`execve("/bin/sh")` 启动 shell，父 init 进入 `while(1) wait(...)` 循环收割退出子进程（含被过继到 PID-1 的孤儿）；`/bin/sh` 退出时重新 `fork`+`execve` 拉起，init 自身不退出；init 自身 `fork`/`execve`/`wait` 失败确定性报错并经现有 reaper/`BIGOS_INIT_*` 边界处理。
-- [x] 6.2 在 [proc.cc](src/kernel/proc/proc.cc) 退出路径（`exit_current`/`fault_current_and_exit` 标记 zombie/reap 之前）补齐最小孤儿过继接线：遍历退出进程的 `first_child_pid` 兄弟链，把每个子进程 `parent_pid` 改为 `g_init_process->pid` 并挂入 init 的 `first_child_pid` 链；对其中已是 Zombie 的子进程向 init 投递 `SIGCHLD` 并 `wake_all(&g_process_wait_queue)`。复用现有 `parent_pid`/`first_child_pid`/`next_sibling_pid` 字段与 sibling 链维护方式，纯指针改写、无分配/IO/锁；`g_init_process == nullptr` 时跳过、回退现有自我回收兜底；不改 `wait_current` 既有遍历语义、不改 init 自身退出的 `BIGOS_INIT_EXIT`/idle/panic 边界。
-- [x] 6.3 复查 [proc.cc](src/kernel/proc/proc.cc) `launch_init`：内核加载路径与 `BIGOS_INIT_ENTER` marker 行为不变；确认 `/bin/sh` 在默认构建被打包。
+- [x] 6.2 在 [proc.cc](kernel/core/proc/proc.cc) 退出路径（`exit_current`/`fault_current_and_exit` 标记 zombie/reap 之前）补齐最小孤儿过继接线：遍历退出进程的 `first_child_pid` 兄弟链，把每个子进程 `parent_pid` 改为 `g_init_process->pid` 并挂入 init 的 `first_child_pid` 链；对其中已是 Zombie 的子进程向 init 投递 `SIGCHLD` 并 `wake_all(&g_process_wait_queue)`。复用现有 `parent_pid`/`first_child_pid`/`next_sibling_pid` 字段与 sibling 链维护方式，纯指针改写、无分配/IO/锁；`g_init_process == nullptr` 时跳过、回退现有自我回收兜底；不改 `wait_current` 既有遍历语义、不改 init 自身退出的 `BIGOS_INIT_EXIT`/idle/panic 边界。
+- [x] 6.3 复查 [proc.cc](kernel/core/proc/proc.cc) `launch_init`：内核加载路径与 `BIGOS_INIT_ENTER` marker 行为不变；确认 `/bin/sh` 在默认构建被打包。
 - [x] 6.4 保留 `user_program_smoke`/`user_elf_smoke` 开关与其 `BIGOS_USER_ENTER`/`BIGOS_USER_EXIT` marker 不变。
 
 ## 7. 验证开关 userland_smoke（runtime-smoke-validation）
@@ -50,7 +50,7 @@
 - [x] 8.4 涉及 execve/初始栈布局/ELF 装载边界时，在可用环境下补 Bochs 或 QEMU+Bochs 交叉验证 ring3 进入与取参正确性；若环境不可用，明确记录跳过与残留风险。
 
 ## 9. C++ 辅助静态检查（仅内核 C++ 改动部分）
-- [x] 9.1 对本 change 触及的内核 C++ 源/头（[syscall.cc](src/kernel/syscall/syscall.cc)、[proc.cc](src/kernel/proc/proc.cc)、[syscall.h](include/bigos/syscall.h)）跑 clang/clangd 辅助检查，配置尽量贴近 GCC 交叉环境（freestanding C++17、x86_64 target、项目 include、无 hosted/异常/RTTI）。
+- [x] 9.1 对本 change 触及的内核 C++ 源/头（[syscall.cc](kernel/core/syscall/syscall.cc)、[proc.cc](kernel/core/proc/proc.cc)、[syscall.h](include/bigos/syscall.h)）跑 clang/clangd 辅助检查，配置尽量贴近 GCC 交叉环境（freestanding C++17、x86_64 target、项目 include、无 hosted/异常/RTTI）。
 - [x] 9.2 修复本 change 引入的 clang/clangd 错误并确认/修复新增有效告警；验证记录区分历史诊断、本 change 诊断、工具链/freestanding 误报。若工具不可用记录差距与残留风险。
 - [x] 9.3 注：用户态 C 程序（crt0/libc/sh）按用户 freestanding C 配置审查；clang/clangd 仅作辅助信号，不替代 `x86_64-elf-gcc` 交叉构建。
 

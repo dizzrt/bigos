@@ -5,12 +5,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
 def test_static_slab_size_classes_match_names() -> None:
-    kmem = read_source('src/mm/kmem.cc')
-    memdef = read_source('src/mm/memdef.h')
+    kmem = read_source('kernel/mm/kmem.cc')
+    memdef = read_source('kernel/mm/memdef.h')
 
     assert '#define CACHE_MAX_OBJ_SIZE 0x800ul' in memdef
 
@@ -21,8 +33,8 @@ def test_static_slab_size_classes_match_names() -> None:
 
 
 def test_buddy_bootstrap_metadata_uses_internal_arena() -> None:
-    buddy = read_source('src/mm/buddy.cc')
-    header = read_source('src/mm/buddy.h')
+    buddy = read_source('kernel/mm/buddy.cc')
+    header = read_source('kernel/mm/buddy.h')
 
     assert 'class EarlyMetadataArena' in buddy
     assert 'alignas(EARLY_METADATA_ALIGNMENT) static uint8_t gEarlyMetadataArenaStorage' in buddy
@@ -37,7 +49,7 @@ def test_buddy_bootstrap_metadata_uses_internal_arena() -> None:
 
 
 def test_buddy_runtime_split_stays_allocator_backed() -> None:
-    buddy = read_source('src/mm/buddy.cc')
+    buddy = read_source('kernel/mm/buddy.cc')
 
     split_start = buddy.index('ktl::intrusive_list_node<PageBlock *> *Zone::alloc')
     split_end = buddy.index('split_done:')
@@ -50,7 +62,7 @@ def test_buddy_runtime_split_stays_allocator_backed() -> None:
 
 
 def test_vmem_uses_9_bit_page_table_indexes() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     assert '#define INDEX_MASK 0x1fful' in vmem
     assert '#define get_pt_index(ADDR)   (((ADDR) >> INDEX_PT_OFFSET) & INDEX_MASK)' in vmem
@@ -58,7 +70,7 @@ def test_vmem_uses_9_bit_page_table_indexes() -> None:
 
 
 def test_kvmem_region_is_not_described_as_direct_map() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     assert '#define KVMEM_BASE       0xffff880000000000ul' in vmem
     assert '#define KVMEM_LEN        0x10000000000ul' in vmem
@@ -69,7 +81,7 @@ def test_kvmem_region_is_not_described_as_direct_map() -> None:
 
 def test_direct_map_window_is_independent_and_non_overlapping() -> None:
     memory = read_source('include/bigos/memory.h')
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
     docs = read_source('docs/en/arch/x86-boot-layout.md')
 
     assert 'constexpr uintptr_t KDIRECT_BASE = 0xffff900000000000ul;' in memory
@@ -88,28 +100,28 @@ def test_direct_map_window_is_independent_and_non_overlapping() -> None:
 
 def test_direct_map_helpers_are_checked_and_do_not_claim_kvmem_or_mmio() -> None:
     memory = read_source('include/bigos/memory.h')
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     assert 'bool is_direct_mapped_phys(uint64_t __phys, uint64_t __len = 1) noexcept;' in memory
     assert 'void *phys_to_direct(uint64_t __phys) noexcept' in memory
     assert 'uint64_t direct_to_phys(const void *__addr) noexcept' in memory
     assert 'constexpr uint64_t INVALID_PHYS_ADDR = ~0ull;' in memory
-    assert 'return nullptr;' in vmem[vmem.index('void *phys_to_direct'):vmem.index('uint64_t direct_to_phys')]
+    assert 'return nullptr;' in vmem[vmem.index('void *phys_to_direct') : vmem.index('uint64_t direct_to_phys')]
     assert 'return INVALID_PHYS_ADDR;' in vmem
     assert 'direct_map_memory_type_is_ram' in vmem
     assert '__type == BIGOS_BOOT_MEMORY_TYPE_USABLE' in vmem
     assert 'BIGOS_BOOT_MEMORY_TYPE_ACPI_RECLAIM' in vmem
     assert 'BIGOS_BOOT_MEMORY_TYPE_ACPI_NVS' in vmem
     assert 'BIGOS_BOOT_MEMORY_TYPE_BAD_MEMORY' in vmem
-    assert 'phys_to_direct(bigos::mm::KDIRECT_LEN) != nullptr' in read_source('src/mm/self_test.cc')
-    assert 'direct_to_phys((const void *)0xffff880000000000ul)' in read_source('src/mm/self_test.cc')
+    assert 'phys_to_direct(bigos::mm::KDIRECT_LEN) != nullptr' in read_source('kernel/mm/self_test.cc')
+    assert 'direct_to_phys((const void *)0xffff880000000000ul)' in read_source('kernel/mm/self_test.cc')
 
 
 def test_page_count_and_physical_order_apis_are_separate() -> None:
     memory = read_source('include/bigos/memory.h')
-    buddy = read_source('src/mm/buddy.h')
-    slab = read_source('src/mm/slab.cc')
-    vmem = read_source('src/mm/vmem.cc')
+    buddy = read_source('kernel/mm/buddy.h')
+    slab = read_source('kernel/mm/slab.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     assert 'alloc_kernel_pages(uint32_t __pages' in memory
     assert 'alloc_physical_order(uint32_t __order' in buddy
@@ -118,8 +130,8 @@ def test_page_count_and_physical_order_apis_are_separate() -> None:
 
 
 def test_vmem_map_unmap_lifecycle_is_explicit() -> None:
-    vmem = read_source('src/mm/vmem.cc')
-    header = read_source('src/mm/vmem.h')
+    vmem = read_source('kernel/mm/vmem.cc')
+    header = read_source('kernel/mm/vmem.h')
 
     assert 'bool VMem::map_kernel_range(MemoryBlock *__mblk) noexcept' in vmem
     assert 'void VMem::unmap_kernel_range(MemoryBlock *__mblk) noexcept' in vmem
@@ -131,7 +143,7 @@ def test_vmem_map_unmap_lifecycle_is_explicit() -> None:
 
 
 def test_free_pages_unmaps_before_releasing_physical_backing() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     unmap_index = vmem.index('unmap_kernel_range(mblk);')
     release_index = vmem.index('release_physical_area(mblk);')
@@ -144,7 +156,7 @@ def test_free_pages_unmaps_before_releasing_physical_backing() -> None:
 
 
 def test_vmem_pre_paging_failure_rolls_back_mapping_and_backing() -> None:
-    vmem = read_source('src/mm/vmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
 
     assert 'struct PagingDescriptorChange' in vmem
     assert 'clear_new_paging_descriptors(new_descriptors, new_descriptor_count);' in vmem
@@ -158,13 +170,15 @@ def test_vmem_pre_paging_failure_rolls_back_mapping_and_backing() -> None:
 
 
 def test_direct_map_initialization_uses_bootinfo_ram_and_panics_on_partial_failure() -> None:
-    vmem = read_source('src/mm/vmem.cc')
-    kmem = read_source('src/mm/kmem.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
+    kmem = read_source('kernel/mm/kmem.cc')
 
     assert 'void init_direct_map(const BootInfoHeader *__boot_info)' in vmem
     assert 'BootHandoff handoff = bigos_boot_resolve_handoff(__boot_info);' in vmem
     assert 'bigos_boot_info_v2_find_section(__header, BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP)' in vmem
-    assert 'init_direct_map_from_region(regions[i].physical_base, regions[i].length, regions[i].normalized_type);' in vmem
+    assert (
+        'init_direct_map_from_region(regions[i].physical_base, regions[i].length, regions[i].normalized_type);' in vmem
+    )
     assert 'map_direct_page(bigos::mm::KDIRECT_BASE + phys, phys)' in vmem
     assert 'map_direct_large_page(bigos::mm::KDIRECT_BASE + phys, phys)' in vmem
     assert 'PAGING_DESCRIPTOR_LARGE_PAGE' in vmem
@@ -183,10 +197,10 @@ def test_direct_map_initialization_uses_bootinfo_ram_and_panics_on_partial_failu
 def test_legacy_memory_api_aliases_are_not_exposed() -> None:
     for relative in (
         'include/bigos/memory.h',
-        'src/mm/buddy.h',
-        'src/mm/buddy.cc',
-        'src/mm/kmem.h',
-        'src/mm/vmem.cc',
+        'kernel/mm/buddy.h',
+        'kernel/mm/buddy.cc',
+        'kernel/mm/kmem.h',
+        'kernel/mm/vmem.cc',
     ):
         source = read_source(relative)
         assert re.search(r'(?<!_)alloc_pages\(', source) is None
@@ -196,7 +210,7 @@ def test_legacy_memory_api_aliases_are_not_exposed() -> None:
 
 
 def test_kmalloc_callers_do_not_need_pre_paging_flag() -> None:
-    kmem = read_source('src/mm/kmem.cc')
+    kmem = read_source('kernel/mm/kmem.cc')
     new = read_source('cpp/libsupc++/new.cc')
     allocator = read_source('cpp/include/ktl/allocator.h')
 
@@ -210,7 +224,7 @@ def test_kmalloc_callers_do_not_need_pre_paging_flag() -> None:
 
 
 def test_buddy_split_metadata_failure_restores_original_block() -> None:
-    buddy = read_source('src/mm/buddy.cc')
+    buddy = read_source('kernel/mm/buddy.cc')
 
     assert 'uint64_t original_base = pblk->base;' in buddy
     assert 'uint64_t original_len = pblk->len;' in buddy
@@ -227,15 +241,15 @@ def test_buddy_split_metadata_failure_restores_original_block() -> None:
 
 
 def test_no_debug_allocator_scanners_added() -> None:
-    for relative in ('src/mm/buddy.cc', 'src/mm/vmem.cc', 'src/mm/buddy.h', 'src/mm/vmem.h'):
+    for relative in ('kernel/mm/buddy.cc', 'kernel/mm/vmem.cc', 'kernel/mm/buddy.h', 'kernel/mm/vmem.h'):
         source = read_source(relative)
         assert 'debug_check_buddy' not in source
         assert 'debug_check_vmem' not in source
 
 
 def test_fixed_memory_layout_constants_are_unchanged() -> None:
-    buddy = read_source('src/mm/buddy.cc')
-    vmem = read_source('src/mm/vmem.cc')
+    buddy = read_source('kernel/mm/buddy.cc')
+    vmem = read_source('kernel/mm/vmem.cc')
     link_script = read_source('link.lds')
 
     assert '#define KERNEL_BASE  0x1000000ul' in buddy
@@ -246,7 +260,7 @@ def test_fixed_memory_layout_constants_are_unchanged() -> None:
 
 def test_memory_self_test_is_switchable_and_not_default() -> None:
     xmake = read_source('xmake.lua')
-    kernel = read_source('src/kernel/kernel.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     assert 'option("mm_self_test")' in xmake
     assert 'option("slab_debug")' in xmake
@@ -262,7 +276,7 @@ def test_memory_self_test_is_switchable_and_not_default() -> None:
 
 
 def test_memory_self_test_avoids_later_subsystem_dependencies() -> None:
-    self_test = read_source('src/mm/self_test.cc')
+    self_test = read_source('kernel/mm/self_test.cc')
 
     forbidden_tokens = (
         'initIRQ',
@@ -287,13 +301,13 @@ def test_memory_self_test_avoids_later_subsystem_dependencies() -> None:
     assert 'direct_to_phys(direct) != phys' in self_test
     assert 'CACHE_MAX_OBJ_SIZE + 257' in self_test
     assert 'run_slab_reclaim_smoke();' in self_test
-    assert 'kernel_vmem_free_pages()' in read_source('src/mm/vmem.h')
+    assert 'kernel_vmem_free_pages()' in read_source('kernel/mm/vmem.h')
 
 
 def test_large_allocation_header_and_free_dispatch_are_explicit() -> None:
-    slab_h = read_source('src/mm/slab.h')
-    slab = read_source('src/mm/slab.cc')
-    kmem = read_source('src/mm/kmem.cc')
+    slab_h = read_source('kernel/mm/slab.h')
+    slab = read_source('kernel/mm/slab.cc')
+    kmem = read_source('kernel/mm/kmem.cc')
 
     assert 'SLAB_LARGE_ALLOC_MAGIC' in slab_h
     assert 'enum class AllocationKind' in slab_h
@@ -309,8 +323,8 @@ def test_large_allocation_header_and_free_dispatch_are_explicit() -> None:
 
 
 def test_empty_dynamic_slab_reclaim_preserves_permanent_slabs() -> None:
-    slab_h = read_source('src/mm/slab.h')
-    slab = read_source('src/mm/slab.cc')
+    slab_h = read_source('kernel/mm/slab.h')
+    slab = read_source('kernel/mm/slab.cc')
 
     assert 'bool should_reclaim_empty_slab(Slab *__slab) const noexcept' in slab_h
     assert '(__slab->flags_ & SLAB_PERMANENT)' in slab
@@ -324,8 +338,8 @@ def test_empty_dynamic_slab_reclaim_preserves_permanent_slabs() -> None:
 
 def test_slab_stats_and_debug_guard_are_source_visible() -> None:
     memory = read_source('include/bigos/memory.h')
-    slab_h = read_source('src/mm/slab.h')
-    slab = read_source('src/mm/slab.cc')
+    slab_h = read_source('kernel/mm/slab.h')
+    slab = read_source('kernel/mm/slab.cc')
 
     assert 'struct SlabCacheStats' in slab_h
     assert 'struct SlabAllocatorStats' in slab_h
@@ -340,8 +354,8 @@ def test_slab_stats_and_debug_guard_are_source_visible() -> None:
 
 
 def test_perfect_fit_dynamic_cache_creation_is_disabled() -> None:
-    memdef = read_source('src/mm/memdef.h')
-    slab = read_source('src/mm/slab.cc')
+    memdef = read_source('kernel/mm/memdef.h')
+    slab = read_source('kernel/mm/slab.cc')
 
     assert '#define GFM_PERFECT_FIT _GFM_PERFECT_FIT' in memdef
     assert 'Reserved for future kmem_cache_create-like work' in memdef

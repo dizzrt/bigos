@@ -21,7 +21,7 @@
 
 ## Impact
 
-- 受影响子系统：`include/bigos/memory.h`、`src/mm/buddy.h`、`src/mm/buddy.cc`、`src/mm/kmem.h`、`src/mm/vmem.cc`、`src/mm/slab.cc`，以及可能直接包含这些头文件的内核/KTL 调用方。
+- 受影响子系统：`include/bigos/memory.h`、`kernel/mm/buddy.h`、`kernel/mm/buddy.cc`、`kernel/mm/kmem.h`、`kernel/mm/vmem.cc`、`kernel/mm/slab.cc`，以及可能直接包含这些头文件的内核/KTL 调用方。
 - API 影响：`alloc_pages()` 与 `alloc_physical_pages()` 作为旧语义入口会被移除、隐藏或迁移到兼容期外；调用方需要使用 `alloc_kernel_pages()` 和 `alloc_physical_order()`。
 - 架构假设：x86_64 long mode、4 KiB 页、现有 `KVMEM_BASE` 内核虚拟分配区、现有 self-mapping 地址公式和 boot-stage PML4 固定物理地址保持不变。
 - 内存布局假设：不移动低 2 MiB 保留区、kernel 物理加载基址 `0x1000000`、higher-half kernel base `0xffffffff80000000` 或 `0x2000` PML4。

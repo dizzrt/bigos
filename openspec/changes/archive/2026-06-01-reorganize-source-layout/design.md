@@ -15,11 +15,11 @@ BigOS 当前把多个实现子系统直接放在仓库根目录，包括 `arch/x
 
 **Goals:**
 
-- 将实现源码统一收敛到 `src/` 下，使仓库根目录更像项目入口而不是源码集合。
+- 将实现源码统一收敛到 `kernel/` 下，使仓库根目录更像项目入口而不是源码集合。
 - 保留顶层 `cpp/` 作为独立 freestanding C++ 支撑库目录，继续承载 KTL、C++ ABI stub、`new`/`delete` 和专属 include root。
 - 保持 `include/` 作为顶层内核公共头文件目录，继续承载公共内核 API、freestanding C header subset 和跨子系统接口。
 - 将 boot 磁盘安装辅助脚本迁移到顶层 `tools/`，使工具脚本与 boot runtime 源码解耦。
-- 保持 `docs/`、`tests/`、`openspec/`、`.github/`、`xmake.lua`、`toolchains.lua`、`link.lds` 等非实现资产在顶层。
+- 保持 `docs/`、`tests/`、`openspec/`、`.github/`、`xmake.lua`、`xmake/toolchains.lua`、`link.lds` 等非实现资产在顶层。
 - 更新构建、IDE、文档和辅助配置中的路径引用，使开发者可以从新布局完成构建、静态检查和 boot smoke test。
 - 将高风险目录迁移拆分为可 review 的阶段，尤其是 boot、startup object 和 linker 相关路径。
 
@@ -33,13 +33,13 @@ BigOS 当前把多个实现子系统直接放在仓库根目录，包括 `arch/x
 
 ## Decisions
 
-### Decision: 使用 `src/` 收敛内核实现源码，并保留顶层 `cpp/` 独立性
+### Decision: 使用 `kernel/` 收敛内核实现源码，并保留顶层 `cpp/` 独立性
 
 目标布局：
 
 ```text
 .
-|-- src/
+|-- kernel/
 |   |-- arch/
 |   |   `-- x86/
 |   |       `-- boot/
@@ -61,7 +61,7 @@ BigOS 当前把多个实现子系统直接放在仓库根目录，包括 `arch/x
 |-- tests/
 |-- openspec/
 |-- xmake.lua
-|-- toolchains.lua
+|-- xmake/toolchains.lua
 `-- link.lds
 ```
 
@@ -70,23 +70,23 @@ BigOS 当前把多个实现子系统直接放在仓库根目录，包括 `arch/x
 - 实现源码和项目资产分离，根目录职责更清楚。
 - 顶层 `include/` 继续作为内核公共接口入口，使用者不需要理解具体实现在哪个子目录。
 - 顶层 `cpp/` 独立表达“C++ 支撑库”边界，避免 KTL、`bits`、`ext` 和 libsupc++ 头文件与内核公共 API 混在同一个 include root 中。
-- `src/runtime` 比 `src/lib/src` 更明确，表达 crt startup object 的用途，避免 `lib/src` 双重泛化。
+- `kernel/runtime` 比 `kernel/lib/src` 更明确，表达 crt startup object 的用途，避免 `lib/src` 双重泛化。
 
 替代方案：
 
 - 保持现状：移动成本最低，但根目录复杂度会继续增长。
-- 将所有内容放进 `src/`，包括 `include/`、`docs/`、`tests/`：目录看似统一，但会把公共接口、文档和测试误归类为实现源码。
+- 将所有内容放进 `kernel/`，包括 `include/`、`docs/`、`tests/`：目录看似统一，但会把公共接口、文档和测试误归类为实现源码。
 - 将 `cpp/include/ktl`、`cpp/include/bits`、`cpp/include/ext` 合并进顶层 `include/`：include root 更少，但会弱化 C++ support library 和 kernel public API 的边界。
 
 ### Decision: 迁移分阶段执行，而不是一次性移动全部目录
 
 迁移顺序：
 
-1. 创建 `src/` 目标结构和路径约定文档。
+1. 创建 `kernel/` 目标结构和路径约定文档。
 2. 迁移较低风险的 `kernel`、`drivers`、`mm` 实现，并更新 `xmake.lua`、`.clangd` 和文档。
 3. 保留顶层 `cpp/`，梳理 `cpp/include`、`cpp/ktl`、`cpp/libsupc++` 的职责边界，并更新构建、IDE 和文档中的 C++ 支撑库说明。
-4. 单独迁移 `arch/x86/boot` 到 `src/arch/x86/boot`，并将 `arch/x86/boot/install.py` 迁移到 `tools/` 后验证 boot 局部构建、disk install helper 路径和 README 中的 boot flow。
-5. 迁移 `lib/src` 到 `src/runtime`，确认 startup object 构建输出、link order 和 `link.lds` 段收集语义不变。
+4. 单独迁移 `arch/x86/boot` 到 `kernel/arch/x86/boot`，并将 `arch/x86/boot/install.py` 迁移到 `tools/` 后验证 boot 局部构建、disk install helper 路径和 README 中的 boot flow。
+5. 迁移 `lib/src` 到 `kernel/runtime`，确认 startup object 构建输出、link order 和 `link.lds` 段收集语义不变。
 
 理由：
 
@@ -105,19 +105,19 @@ BigOS 当前把多个实现子系统直接放在仓库根目录，包括 `arch/x
 理由：
 
 - `cpp/include/ktl`、`cpp/include/bits`、`cpp/include/ext` 和 `cpp/libsupc++/include` 实际承担 C++ 支撑库自己的公共/半公共头文件职责，保留在 `cpp/` 下能表达其库边界。
-- 让 driver 公共头使用 `include/drivers`，与实现源码目录 `src/drivers` 保持命名一致；mm 私有头继续保留在 `src/mm`。
+- 让 driver 公共头使用 `include/drivers`，与实现源码目录 `kernel/drivers` 保持命名一致；mm 私有头继续保留在 `kernel/mm`。
 - 顶层 `include/` 专注内核公共 API 和 freestanding C header subset，`cpp/include` 专注 KTL/C++ support API，职责更清晰。
 - 这次不重命名 KTL API、namespace 或 C++ 支撑库 include directive。
 
 替代方案：
 
-- 将所有 include 改为 `src/...` 或相对路径：会暴露实现路径，不利于公共 API 稳定。
+- 将所有 include 改为 `kernel/...` 或相对路径：会暴露实现路径，不利于公共 API 稳定。
 - 将 `cpp/include` 合并进顶层 `include/`：include root 更少，但会把 C++ support API 混入 kernel public API。
 - 将 driver、mm 的所有实现私有头也移动到顶层 `include/`：可以减少 include path，但会扩大公共接口面，不适合与本次组织重构混合。
 
 ### Decision: 构建输出和链接脚本语义保持不变
 
-`xmake.lua` 可以改为从 `src/kernel`、`src/mm`、`src/drivers`、`src/arch`、`src/runtime` 和保留的顶层 `cpp` 收集源码，但最终输出仍为 `build/kernel`，linker script 仍为顶层 `link.lds`，startup objects 的 link order 必须保持与当前一致。
+`xmake.lua` 可以改为从 `kernel/core`、`kernel/mm`、`kernel/drivers`、`kernel/arch`、`kernel/runtime` 和保留的顶层 `cpp` 收集源码，但最终输出仍为 `build/kernel`，linker script 仍为顶层 `link.lds`，startup objects 的 link order 必须保持与当前一致。
 
 地址和 ABI 约束：
 
@@ -128,7 +128,7 @@ BigOS 当前把多个实现子系统直接放在仓库根目录，包括 `arch/x
 
 ### Decision: boot 安装辅助脚本迁移到 `tools/`，Python 验证必须覆盖
 
-`arch/x86/boot/install.py` 属于 boot disk image helper，但它是开发/安装工具，不会进入 boot runtime 或 kernel image。本次将其迁移到顶层 `tools/`，并通过参数、路径常量或文档明确它与 `src/arch/x86/boot`、disk image 和 Bochs 配置的关系。
+`arch/x86/boot/install.py` 属于 boot disk image helper，但它是开发/安装工具，不会进入 boot runtime 或 kernel image。本次将其迁移到顶层 `tools/`，并通过参数、路径常量或文档明确它与 `kernel/arch/x86/boot`、disk image 和 Bochs 配置的关系。
 
 理由：
 
@@ -138,8 +138,8 @@ BigOS 当前把多个实现子系统直接放在仓库根目录，包括 `arch/x
 
 替代方案：
 
-- 随 boot 目录迁移到 `src/arch/x86/boot/install.py`：上下文集中，但会把开发工具混入 boot runtime 源码树。
-- 暂时保留在旧路径：迁移量最小，但与“实现源码进入 `src/`，工具进入 `tools/`”的目标不一致。
+- 随 boot 目录迁移到 `kernel/arch/x86/boot/install.py`：上下文集中，但会把开发工具混入 boot runtime 源码树。
+- 暂时保留在旧路径：迁移量最小，但与“实现源码进入 `kernel/`，工具进入 `tools/`”的目标不一致。
 
 ### Decision: 批量更新归档 OpenSpec change 中的路径引用
 
@@ -168,10 +168,10 @@ BigOS 当前把多个实现子系统直接放在仓库根目录，包括 `arch/x
 ## Migration Plan
 
 1. 准备阶段：确认当前 `openspec status`、`xmake.lua`、`.clangd`、README 和项目指南中的旧路径引用。
-2. 低风险源码阶段：迁移 `kernel`、`drivers`、`mm` 到 `src/`，更新构建和 include search path，运行构建/静态检查。
+2. 低风险源码阶段：迁移 `kernel`、`drivers`、`mm` 到 `kernel/`，更新构建和 include search path，运行构建/静态检查。
 3. C++ 支撑阶段：保留顶层 `cpp/`、`cpp/include`、`cpp/ktl` 和 `cpp/libsupc++`，更新文档和构建说明以明确其独立 C++ support library 边界，运行 C++ 辅助检查。
-4. boot/tools 阶段：迁移 `arch/x86/boot` 到 `src/arch/x86/boot`，迁移 `install.py` 到 `tools/`，更新 boot 局部构建、Python helper 配置和文档路径。
-5. runtime 阶段：迁移 `lib/src` 到 `src/runtime`，确认 startup object 生成位置、link order 和 linker script 行为。
+4. boot/tools 阶段：迁移 `arch/x86/boot` 到 `kernel/arch/x86/boot`，迁移 `install.py` 到 `tools/`，更新 boot 局部构建、Python helper 配置和文档路径。
+5. runtime 阶段：迁移 `lib/src` 到 `kernel/runtime`，确认 startup object 生成位置、link order 和 linker script 行为。
 6. 文档阶段：更新 README、AGENTS、OpenSpec project context、路径说明、归档 OpenSpec change 路径引用和验证记录。
 7. 验证阶段：运行 `xmake`，在工具链可用时运行 targeted compile/static checks；在 Bochs 和本机配置可用时运行 boot smoke test。
 

@@ -32,7 +32,7 @@ BigOS 当前 I/O 栈是单向只读的，可写语义全缺：
 
 ### 决策 1：buffer cache 以（设备, 块号）为键，块大小对齐扇区，落盘只在可阻塞上下文
 
-新增 `bigos::fs::bcache`（落在 `src/kernel/fs/bcache`，与块/FS 同层，避免 mm 依赖 FS）。缓存条目 `BufferBlock { BlockDevice* dev; uint64_t block_no; uint8_t* data; bool dirty; bool valid; uint32_t ref_count; /* LRU 链接 */ }`，块大小取 `DEFAULT_SECTOR_SIZE`（512）的固定倍数（design 固定为 1 扇区/块起步，便于与现有读路径对齐），缓存数据页用 `alloc_kernel_pages`。接口：`get(dev, block_no) -> BufferBlock*`（命中返回，未命中分配并经 `block::read_sectors` 装入）、`put(block)`（释放引用）、`mark_dirty(block)`、`sync(block)` / `sync_all()`（把脏块经新写扇区路径回写）。
+新增 `bigos::fs::bcache`（落在 `kernel/core/fs/bcache`，与块/FS 同层，避免 mm 依赖 FS）。缓存条目 `BufferBlock { BlockDevice* dev; uint64_t block_no; uint8_t* data; bool dirty; bool valid; uint32_t ref_count; /* LRU 链接 */ }`，块大小取 `DEFAULT_SECTOR_SIZE`（512）的固定倍数（design 固定为 1 扇区/块起步，便于与现有读路径对齐），缓存数据页用 `alloc_kernel_pages`。接口：`get(dev, block_no) -> BufferBlock*`（命中返回，未命中分配并经 `block::read_sectors` 装入）、`put(block)`（释放引用）、`mark_dirty(block)`、`sync(block)` / `sync_all()`（把脏块经新写扇区路径回写）。
 
 - 理由：块缓存是可写 FS 与「写后立即读回一致」的地基；以（设备, 块号）为键是最小且标准的设计。读优先命中缓存可让 FS 元数据/数据访问统一走一条路径。
 - 容量与淘汰：固定上限 N 块（编译期常量，有界）。淘汰优先选 `ref_count==0` 的干净块；若需淘汰脏块，先 `sync` 回写再复用（回写在可阻塞上下文进行）。无可淘汰块时 `get` 返回 `nullptr` -> 上层确定性 `-ENOMEM`/`-ENOSPC`，绝不阻塞死等、绝不在 IRQ 上下文落盘。

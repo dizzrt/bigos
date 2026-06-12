@@ -6,9 +6,9 @@ BigOS SHALL build x86 Legacy BIOS boot-stage artifacts through the primary xmake
 
 #### Scenario: Developer inspects boot build ownership
 
-- **WHEN** a developer checks how `src/arch/x86/boot` artifacts are produced
+- **WHEN** a developer checks how `kernel/arch/x86/boot` artifacts are produced
 - **THEN** the build rules for MBR, DBR, extended DBR, and `boot.bin` MUST be discoverable from the primary xmake build configuration or xmake-included build files
-- **AND** the boot artifact build MUST NOT require `src/arch/x86/boot/Makefile`
+- **AND** the boot artifact build MUST NOT require `kernel/arch/x86/boot/Makefile`
 
 #### Scenario: Boot artifact outputs remain compatible
 
@@ -19,5 +19,5 @@ BigOS SHALL build x86 Legacy BIOS boot-stage artifacts through the primary xmake
 #### Scenario: Source tree no longer exposes Makefile debug wrappers
 
 - **WHEN** a developer lists project-level build and debug entry files after the migration
-- **THEN** the repository MUST NOT present root `Makefile` or `src/arch/x86/boot/Makefile` as active build/debug entry points
+- **THEN** the repository MUST NOT present root `Makefile` or `kernel/arch/x86/boot/Makefile` as active build/debug entry points
 - **AND** active documentation MUST point developers to xmake commands instead

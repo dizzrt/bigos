@@ -23,8 +23,8 @@
 
 ## Impact
 
-- 受影响子系统：`src/kernel/proc`（进程表、PID 分配、Process 对象分配/回收、fd 表）。
-- 受影响代码：[proc.h](include/bigos/proc.h)（`MAX_PROCESSES` / `MAX_FDS` / `Process` / `FdEntry` 结构与相关声明）、[proc.cc](src/kernel/proc/proc.cc)（`g_process_table`、`alloc_pid`/`publish_process`/`unpublish_process`/`lookup_process`、`static Process` 单例创建点、`install_fd_current`/`read_fd_current`/`close_fd_current`/`close_all_fds`/`close_on_exec_fds`/`reap_pending_processes`）。
+- 受影响子系统：`kernel/core/proc`（进程表、PID 分配、Process 对象分配/回收、fd 表）。
+- 受影响代码：[proc.h](include/bigos/proc.h)（`MAX_PROCESSES` / `MAX_FDS` / `Process` / `FdEntry` 结构与相关声明）、[proc.cc](kernel/core/proc/proc.cc)（`g_process_table`、`alloc_pid`/`publish_process`/`unpublish_process`/`lookup_process`、`static Process` 单例创建点、`install_fd_current`/`read_fd_current`/`close_fd_current`/`close_all_fds`/`close_on_exec_fds`/`reap_pending_processes`）。
 - 构建/验证：`xmake.lua` 新增 `growable_tables_smoke` 开关；QEMU headless serial-marker smoke 与源码契约/行为断言测试。
 - 假设：x86_64 单核、同步、`int 0x80`、`InterruptFrame` ABI 不变；`kmalloc`/`free` 在进程创建/回收上下文（非 IRQ 上下文）可用；KTL 容器或等价手写结构在 freestanding 下可用；Bochs/QEMU 经 `tools/boot_debug.py` 验证。
 - 非目标：`fork`、COW、页引用计数、SMP/锁、per-CPU 进程状态、`MAX_VMAS` / `EXEC_MAX_ARGC` / `EXEC_MAX_ENVC` 等其余编译期上限的移除（按真实需求在后续阶段跟进）、信号、可写文件系统、用户态 libc。

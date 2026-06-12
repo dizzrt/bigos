@@ -6,7 +6,7 @@
 - CPU 异常（vector 0x00–0x1f），由 `irq_dispatch` 路由到 exception handler（`#PF` 诊断-only）。
 - i8259 外部 IRQ（vector 0x20–0x2f），EOI 仅对外部 IRQ 发送。
 
-关键现状（来自 `src/kernel/irq/`）：
+关键现状（来自 `kernel/core/irq/`）：
 
 - IDT 为 kernel-owned 静态表，`__detail::initIDT()` 把全部 256 个 vector 都装成
   `PRESENT_RING0_INTERRUPT_GATE = 0x8e00`（present、type=interrupt gate、**DPL=0**），selector 为

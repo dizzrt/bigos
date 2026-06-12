@@ -4,6 +4,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_source(relative: str) -> str:
+    if relative == 'xmake.lua':
+        parts = [
+            ROOT / 'xmake.lua',
+            ROOT / 'xmake/options.lua',
+            ROOT / 'xmake/common.lua',
+            ROOT / 'xmake/boot_artifacts.lua',
+            ROOT / 'xmake/user_package.lua',
+            ROOT / 'xmake/runtime.lua',
+            ROOT / 'xmake/kernel.lua',
+            ROOT / 'xmake/run_targets.lua',
+        ]
+        return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
     return (ROOT / relative).read_text(encoding='utf-8')
 
 
@@ -39,7 +51,7 @@ def test_errno_has_eperm_and_esrch_single_source() -> None:
     assert 'EPERM = 1' in errno_h
     assert 'ESRCH = 3' in errno_h
     # No duplicate definitions in subsystem sources.
-    for rel in ('src/kernel/signal/signal.cc', 'src/kernel/syscall/syscall.cc'):
+    for rel in ('kernel/core/signal/signal.cc', 'kernel/core/syscall/syscall.cc'):
         src = read_source(rel)
         assert 'EPERM =' not in src
         assert 'ESRCH =' not in src
@@ -57,7 +69,7 @@ def test_process_carries_signal_state_fields() -> None:
 
 
 def test_sigkill_uncatchable_and_unblockable() -> None:
-    sig = read_source('src/kernel/signal/signal.cc')
+    sig = read_source('kernel/core/signal/signal.cc')
 
     # set_disposition rejects a non-default disposition for an uncatchable signal.
     set_disp = sig[sig.index('int64_t set_disposition(') : sig.index('int64_t set_mask(')]
@@ -75,7 +87,7 @@ def test_sigkill_uncatchable_and_unblockable() -> None:
 
 
 def test_kill_sets_pending_without_permission_or_allocation() -> None:
-    sig = read_source('src/kernel/signal/signal.cc')
+    sig = read_source('kernel/core/signal/signal.cc')
 
     kill_body = sig[sig.index('int64_t kill(') : sig.index('bool has_deliverable_signal(')]
     assert '__target->sig_pending |= signo_bit(__signo);' in kill_body
@@ -87,7 +99,7 @@ def test_kill_sets_pending_without_permission_or_allocation() -> None:
 
 
 def test_kill_syscall_enforces_may_signal_and_errno_ordering() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     kill_body = syscall[syscall.index('static int64_t sys_kill(') : syscall.index('static int64_t sys_sigaction(')]
     # ESRCH for absent target precedes the permission decision; EPERM on denial.
@@ -100,7 +112,7 @@ def test_kill_syscall_enforces_may_signal_and_errno_ordering() -> None:
 
 
 def test_irq_return_delivery_point_is_user_frame_only() -> None:
-    interrupt = read_source('src/kernel/irq/interrupt.cc')
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     # Delivery happens after maybe_preempt_on_irq_return, gated on a user frame.
     preempt_index = interrupt.index('maybe_preempt_on_irq_return(__frame);')
@@ -112,7 +124,7 @@ def test_irq_return_delivery_point_is_user_frame_only() -> None:
 
 
 def test_sigreturn_forces_user_constraints() -> None:
-    sig = read_source('src/kernel/signal/signal.cc')
+    sig = read_source('kernel/core/signal/signal.cc')
 
     sigreturn = sig[sig.index('void sigreturn(') :]
     # Magic check, user-low-half rip/rsp constraint, forced user segments and IF.
@@ -124,7 +136,7 @@ def test_sigreturn_forces_user_constraints() -> None:
 
 
 def test_sigreturn_dispatch_does_not_overwrite_restored_rax() -> None:
-    syscall = read_source('src/kernel/syscall/syscall.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     dispatch = syscall[syscall.index('void dispatch(') :]
     # SYS_SIGRETURN returns before the shared __frame->rax write-back.
@@ -137,7 +149,7 @@ def test_sigreturn_dispatch_does_not_overwrite_restored_rax() -> None:
 
 
 def test_lifecycle_initializes_inherits_and_resets_signal_state() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     # Both non-fork creation paths initialize signal state.
     assert proc.count('bigos::signal::init_state(__process);') == 2
@@ -152,7 +164,7 @@ def test_lifecycle_initializes_inherits_and_resets_signal_state() -> None:
 
 
 def test_child_exit_sets_parent_sigchld() -> None:
-    proc = read_source('src/kernel/proc/proc.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     zombie_body = proc[
         proc.index('void mark_zombie_or_reap_pending(') : proc.index('bool clone_process_kernel_stack_mapping(')
@@ -163,8 +175,8 @@ def test_child_exit_sets_parent_sigchld() -> None:
 def test_signal_smoke_switch_and_marker_present() -> None:
     xmake = read_source('xmake.lua')
     proc_h = read_source('include/bigos/proc.h')
-    proc = read_source('src/kernel/proc/proc.cc')
-    kernel = read_source('src/kernel/kernel.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    kernel = read_source('kernel/core/kernel.cc')
 
     option_index = xmake.index('option("signal_smoke")')
     default_index = xmake.index('set_default(false)', option_index)
@@ -173,7 +185,7 @@ def test_signal_smoke_switch_and_marker_present() -> None:
 
     # Existing smoke matrix preserved.
     assert 'option("time_identity_smoke")' in xmake
-    assert 'src/kernel/signal/**.cc' in xmake
+    assert 'kernel/core/signal/**.cc' in xmake
 
     assert '#ifdef BIGOS_SIGNAL_SMOKE' in proc_h
     assert 'void signal_smoke_entry(void *) noexcept;' in proc_h

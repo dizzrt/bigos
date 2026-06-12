@@ -20,7 +20,7 @@
 
 ## Current-Change Diagnostics
 
-- Added `include/bigos/fs/vfs.h` and `src/kernel/fs/vfs.cc` for the minimal read-only VFS shell and exFAT backend adapter.
+- Added `include/bigos/fs/vfs.h` and `kernel/core/fs/vfs.cc` for the minimal read-only VFS shell and exFAT backend adapter.
 - Added bounded process fd table ownership, fd install/read/close helpers, `exec` close-on-exec handling, and safe reaper close-all.
 - Added `SYS_OPEN`, `SYS_READ`, and `SYS_CLOSE` under the existing `int 0x80` ABI.
 - Added writable user-range validation for `SYS_READ` copy-out so VFS file offsets do not advance before an invalid destination is rejected.

@@ -26,8 +26,8 @@
 
 ## Impact
 
-- 影响子系统：`src/mm` 下的 VMem、buddy physical allocator、slab grow backing 路径和公开 `alloc_kernel_pages()` / `free_pages()` 行为。
-- 影响代码：`src/mm/vmem.cc`、`src/mm/vmem.h`、`src/mm/buddy.cc`、`src/mm/buddy.h`、`src/mm/memdef.h`、`include/bigos/memory.h`、相关源码级测试。
+- 影响子系统：`kernel/mm` 下的 VMem、buddy physical allocator、slab grow backing 路径和公开 `alloc_kernel_pages()` / `free_pages()` 行为。
+- 影响代码：`kernel/mm/vmem.cc`、`kernel/mm/vmem.h`、`kernel/mm/buddy.cc`、`kernel/mm/buddy.h`、`kernel/mm/memdef.h`、`include/bigos/memory.h`、相关源码级测试。
 - API 影响：不恢复旧 `alloc_pages()` / `alloc_physical_pages()` alias；可新增内部 helper 表达 map/unmap 和 TLB flush，但不扩大普通调用方可见的 `_GFM_PRE_PAGING` 语义。
 - API 命名：不把 `free_pages()` 重命名为 `free_kernel_pages()`；未来若需要命名统一，应放入独立 kernel memory API polish。
 - 架构假设：x86_64 四级页表、现有 recursive self-mapping 地址、`0x2000` boot-stage PML4、`0xffff880000000000` kernel virtual allocation base、`0xffffffff80000000` higher-half kernel base 均保持不变。

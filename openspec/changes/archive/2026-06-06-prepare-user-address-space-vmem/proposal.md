@@ -5,7 +5,7 @@
 当前“仅服务内核 higher-half / KVMEM / direct map”的隐式约定，抽象成一个显式的、可复用的
 map/unmap primitive，并明确 user / writable / NX 等页属性的 bit 策略。
 
-当前 `src/mm/vmem.cc` 的页表代码只为内核范围服务：`map_kernel_range()` / `unmap_kernel_range()`
+当前 `kernel/mm/vmem.cc` 的页表代码只为内核范围服务：`map_kernel_range()` / `unmap_kernel_range()`
 固定使用 `DEFAULT_ATTR_PTE = 0x3`（present + writable，supervisor），没有 user bit、没有 NX bit，
 也没有“面向某个具体地址空间”的概念。在没有显式属性策略和地址空间抽象之前，无法安全地为用户态
 建立独立映射。本 change 只做这一层准备工作，不实现 syscall 入口、不加载用户程序。
@@ -47,8 +47,8 @@ map/unmap primitive，并明确 user / writable / NX 等页属性的 bit 策略�
 
 ## Impact
 
-- 受影响子系统：内存管理（`src/mm/vmem.cc` 的页表 map/unmap 路径）与公共内存头
-  `include/bigos/memory.h`（新增 primitive 声明），可能新增 `src/mm/` 下的页属性/地址空间辅助文件。
+- 受影响子系统：内存管理（`kernel/mm/vmem.cc` 的页表 map/unmap 路径）与公共内存头
+  `include/bigos/memory.h`（新增 primitive 声明），可能新增 `kernel/mm/` 下的页属性/地址空间辅助文件。
 - 受影响假设：单核、早期关中断、无 SMP；保持 kernel-owned 静态 IDT 与中断契约不变；
   保持现有 `alloc_kernel_pages` / `free_pages` / direct map / self-mapping 地址语义不变。
 - 构建：新增默认关闭的 xmake 验证开关与 marker；不改变默认 boot 行为。

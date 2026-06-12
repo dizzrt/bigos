@@ -2,7 +2,7 @@
 
 BigOS 的内存管理已经完成基础 correctness 修复、页数/order API 拆分和 VMem map/unmap 生命周期整理。当前剩余风险在于验证信号仍偏静态：源码级测试和构建能发现部分回归，但不能证明 emulator 中 `init_mem()` 之后 `kmalloc/free`、kernel virtual pages 和 physical order 分配在真实页表环境下可用。
 
-本设计聚焦 `src/mm` 与 `src/kernel/kernel.cc` 之间的早期启动验证链路。目标是在不引入 scheduler、IRQ enable、SMP 或新 allocator 策略的前提下，为内存管理建立可重复 runtime smoke。
+本设计聚焦 `kernel/mm` 与 `kernel/core/kernel.cc` 之间的早期启动验证链路。目标是在不引入 scheduler、IRQ enable、SMP 或新 allocator 策略的前提下，为内存管理建立可重复 runtime smoke。
 
 ## Goals / Non-Goals
 
@@ -44,19 +44,19 @@ BigOS 的内存管理已经完成基础 correctness 修复、页数/order API �
 
 ### Decision: 统计验证以可恢复分配为主
 
-self-test 应记录 `g_nr_free_pages()` 和 VMem free counter 的前后变化，确保测试释放后恢复。VMem free counter 采用最小内部只读 accessor 暴露给 `src/mm` 内的 self-test：该 accessor 只返回计数值，不提供修改能力，优先放在 `bigos::mm::__detail`、私有头或 test-only 编译路径中，不进入通用 public API。
+self-test 应记录 `g_nr_free_pages()` 和 VMem free counter 的前后变化，确保测试释放后恢复。VMem free counter 采用最小内部只读 accessor 暴露给 `kernel/mm` 内的 self-test：该 accessor 只返回计数值，不提供修改能力，优先放在 `bigos::mm::__detail`、私有头或 test-only 编译路径中，不进入通用 public API。
 
 替代方案是只检查分配返回非空。该方案不足以发现泄漏、未释放 backing 或统计漂移。
 
 ### Decision: self-test 保持集中实现，不直接耦合 VMem 私有静态状态
 
-内存 self-test 应作为 `src/mm` 内的集中测试入口维护，避免为了读取 VMem free counter 把测试逻辑拆入 `vmem.cc` 或直接触碰其私有静态变量。集中实现便于串联 slab、kernel virtual pages 和 physical order 的前后统计检查，也能让启动接入点只依赖单一 self-test 入口。
+内存 self-test 应作为 `kernel/mm` 内的集中测试入口维护，避免为了读取 VMem free counter 把测试逻辑拆入 `vmem.cc` 或直接触碰其私有静态变量。集中实现便于串联 slab、kernel virtual pages 和 physical order 的前后统计检查，也能让启动接入点只依赖单一 self-test 入口。
 
 替代方案是把 VMem 相关检查放在 `vmem.cc` 内直接访问计数器。该方案短期更少接口，但会让 self-test 分散到 allocator 实现文件中，增加后续调整测试顺序、失败 marker 和阶段诊断的维护成本。
 
 ## Risks / Trade-offs
 
-- Runtime self-test 本身可能引入 boot 依赖 -> 使用编译期开关，并保持测试代码只依赖 `src/mm` 基础 API。
+- Runtime self-test 本身可能引入 boot 依赖 -> 使用编译期开关，并保持测试代码只依赖 `kernel/mm` 基础 API。
 - Bochs oracle 可能受本机 ROM、串口配置或本地交互限制影响 -> 同时保留 `boot_debug.py --no-launch`、构建和源码级测试，并在验证记录中明确缺口。
 - 统计 getter 可能扩大内部 API 面 -> 优先放在 `bigos::mm::__detail` 或 test-only 编译路径，避免长期 public API 污染。
 - 测试分配模式覆盖有限 -> 先覆盖最小关键路径，后续 slab lifecycle change 再扩大压力测试。

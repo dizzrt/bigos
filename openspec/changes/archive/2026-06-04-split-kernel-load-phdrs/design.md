@@ -60,7 +60,7 @@ PHDRS {
 
 ### D4: Bootloader 只做兼容性复核，必要时小修
 
-实现时先用 `readelf -l build/kernel` 确认拆分后的 `PT_LOAD` 数量、权限、offset、vaddr、filesz、memsz。再复核 `src/arch/x86/boot/boot.cc` 是否仍满足：
+实现时先用 `readelf -l build/kernel` 确认拆分后的 `PT_LOAD` 数量、权限、offset、vaddr、filesz、memsz。再复核 `kernel/arch/x86/boot/boot.cc` 是否仍满足：
 
 - 遍历每个 `PT_LOAD`，不假设只有一个 load segment。
 - 校验 `p_filesz <= p_memsz`。
@@ -110,7 +110,7 @@ PHDRS {
 1. 修改 `link.lds` 的 `PHDRS` 和 section 到 PHDR 的映射。
 2. 使用 `xmake -r` 生成 kernel，并确认 RWX LOAD warning 消失。
 3. 使用 cross `readelf` 检查 `PT_LOAD` 数量、权限、entry、vaddr 和 filesz/memsz。
-4. 复核或必要时修复 `src/arch/x86/boot/boot.cc` 的多段加载边界。
+4. 复核或必要时修复 `kernel/arch/x86/boot/boot.cc` 的多段加载边界。
 5. 运行可用的 Bochs serial marker smoke；不可用时记录原因。
 6. 更新架构文档，说明 kernel ELF segment 权限布局和非目标。
 

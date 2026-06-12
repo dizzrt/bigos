@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前启动链路由多个手工步骤组成：`xmake` 生成内核 ELF，`src/arch/x86/boot/Makefile` 生成 MBR/DBR/exDBR/`boot.bin`，`tools/install.py` 将 boot 产物写入已有虚拟磁盘，最后通过 Bochs 启动。这个流程要求开发者预先准备 `test/bochsrc.bxrc` 和符合现有 bootloader 假设的 exFAT 镜像，导致启动调试依赖本机状态和手工操作。
+BigOS 当前启动链路由多个手工步骤组成：`xmake` 生成内核 ELF，`kernel/arch/x86/boot/Makefile` 生成 MBR/DBR/exDBR/`boot.bin`，`tools/install.py` 将 boot 产物写入已有虚拟磁盘，最后通过 Bochs 启动。这个流程要求开发者预先准备 `test/bochsrc.bxrc` 和符合现有 bootloader 假设的 exFAT 镜像，导致启动调试依赖本机状态和手工操作。
 
 本变更只解决第一阶段本地调试入口：通过一行命令完成构建、生成固定 raw disk image、写入 MBR/exFAT/`/boot/boot.bin`/`/kernel`，并启动 Bochs。它不改变 bootloader、内核 ELF、链接脚本或内核初始化逻辑。
 
