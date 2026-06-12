@@ -157,19 +157,94 @@ runtime behavior checks, and environment-dependent checks.
 
 分层组织验证，让后续工作能区分源码检查、构建检查、运行时行为检查和依赖本地环境的检查。
 
-## Stage 20+ Entry / Stage 20+ 入口
+### Stage 20: Interactive Console Usability / 阶段 20：交互式控制台可用性
 
-Add future roadmap items here. Keep each item concise and describe only the
-direction, intended boundary change, and dependency on the current baseline.
+- Make the default bounded userland shell usable from the runtime text console,
+  including visible prompts, typed input echo, and command output, while
+  preserving bounded serial/log validation.
+- 让默认有界用户态 shell 可从运行时文本控制台使用，包括可见 prompt、输入回显和命令输出，
+  同时保留有界串口/日志验证。
+- Boundary change: default console I/O becomes a user-visible interactive path.
+  Preserved boundaries: no full POSIX terminal, job control, termios, SMP, or new
+  boot/architecture runtime parity.
+- 边界变化：默认 console I/O 成为用户可见的交互路径。保持边界：不引入完整 POSIX
+  terminal、作业控制、termios、SMP，或新的 boot/architecture 运行时等价能力。
 
-在此追加未来路线图事项。每项保持简洁，只描述方向、预期边界变化，以及它与当前基线的关系。
+### Stage 21: Minimal C Program Baseline / 阶段 21：最小 C 程序运行基线
 
-### Stage 20: TBD / 阶段 20：待定
+- Turn simple statically linked C user programs into a first-class compatibility
+  target by stabilizing the process entry model, argument/environment handoff,
+  syscall wrappers, error reporting, basic output, and small packaged utilities.
+- 将简单静态链接 C 用户程序提升为一等兼容目标，稳定进程入口模型、参数/环境传递、
+  syscall wrapper、错误报告、基础输出和小型打包工具。
+- Boundary change: simple C programs become a planned user-visible baseline.
+  Preserved boundaries: no dynamic linking, shared libraries, hosted runtime, or
+  complete POSIX libc.
+- 边界变化：简单 C 程序成为规划中的用户可见基线。保持边界：不引入动态链接、共享库、
+  hosted runtime 或完整 POSIX libc。
 
-- Candidate themes: stronger behavior-oriented validation, architecture
-  decoupling, broader userland ergonomics, or future boot-backend groundwork.
-- 候选主题：更强的行为导向验证、架构解耦、更完整的用户态易用性，或未来 boot-backend
-  前置工作。
-- Requirement before starting: state which current boundaries are intentionally
-  changed versus preserved.
-- 启动前要求：说明哪些当前边界会被有意改变、哪些保持不变。
+### Stage 22: Minimal C Library Subset / 阶段 22：最小 C 标准库子集
+
+- Grow the freestanding userland support into a documented minimal C library
+  subset aligned with actual kernel syscall behavior and the needs of simple C
+  programs.
+- 将 freestanding 用户态支持推进为有文档边界的最小 C 标准库子集，并与实际内核 syscall
+  行为和简单 C 程序需求保持一致。
+- Boundary change: libc compatibility becomes a staged project goal. Preserved
+  boundaries: no locale, threads, complete hosted stdio, dynamic loader, or broad
+  standards conformance claim.
+- 边界变化：libc 兼容性成为阶段性项目目标。保持边界：不引入 locale、线程、完整 hosted
+  stdio、动态加载器，或广泛标准兼容声明。
+
+### Stage 23: POSIX-Like Process And I/O Subset / 阶段 23：POSIX-like 进程与 I/O 子集
+
+- Stabilize the bounded UNIX-like behavior around process lifecycle, image
+  replacement, waiting, fd inheritance, pipes, duplication, redirection, signals,
+  time, identity, and shell command execution.
+- 稳定围绕进程生命周期、镜像替换、等待、fd 继承、pipe、duplication、重定向、signals、
+  time、identity 和 shell 命令执行的有界 UNIX-like 行为。
+- Boundary change: the POSIX-compatible goal is refined into an explicit bounded
+  process/I/O subset. Preserved boundaries: no sessions, terminal process groups,
+  job control, complete permissions model, or complete POSIX process model.
+- 边界变化：将 POSIX-compatible 目标细化为明确的有界进程/I/O 子集。保持边界：不引入
+  session、terminal process group、作业控制、完整权限模型或完整 POSIX 进程模型。
+
+### Stage 24: Bounded Runtime Filesystem Usability / 阶段 24：有界运行时文件系统可用性
+
+- Improve bounded writable runtime storage so simple C programs can reliably use
+  documented file creation, read, write, seek, sync, directory, and removal
+  behavior within explicit limits.
+- 改进有界可写运行时存储，让简单 C 程序能在明确限制内可靠使用有文档描述的文件创建、
+  读取、写入、seek、sync、目录和删除行为。
+- Boundary change: runtime file behavior becomes part of the minimal usable
+  system goal. Preserved boundaries: no persistent full writable filesystem,
+  broad file-backed mapping, async I/O, or broad storage/device support.
+- 边界变化：运行时文件行为成为最小可用系统目标的一部分。保持边界：不引入持久完整可写
+  文件系统、广泛 file-backed mapping、async I/O 或广泛存储/设备支持。
+
+### Stage 25: x86_64/Core Decoupling Discipline / 阶段 25：x86_64 与内核核心解耦纪律
+
+- Separate existing x86_64 backend mechanisms from kernel core concepts at real
+  consumption points, preparing for future multi-architecture work without adding
+  a speculative second runnable backend.
+- 在真实消费点将现有 x86_64 backend 机制与内核核心概念解耦，为未来多架构工作做准备，
+  但不引入缺少实际消费场景的第二可运行 backend。
+- Boundary change: architecture abstraction becomes an active maintenance
+  discipline. Preserved boundaries: the runnable backend remains x86_64 with the
+  existing legacy boot/storage path.
+- 边界变化：架构抽象成为主动维护纪律。保持边界：当前可运行 backend 仍是 x86_64 与现有
+  legacy boot/storage 路径。
+
+### Stage 26: Behavior-Oriented Validation / 阶段 26：行为导向验证
+
+- Promote runtime-observable behavior checks for the interactive shell, simple C
+  programs, process/fd semantics, filesystem operations, and userland
+  compatibility so later refactoring and backend work have regression protection.
+- 推进面向运行时可观察行为的检查，覆盖交互式 shell、简单 C 程序、进程/fd 语义、文件系统
+  操作和用户态兼容性，为后续重构与 backend 工作提供回归保护。
+- Boundary change: behavior assertions become the preferred validation direction
+  for the minimal usable system. Preserved boundaries: environment-dependent
+  emulator and hardware checks remain layered rather than mandatory for every
+  change.
+- 边界变化：行为断言成为最小可用系统的优先验证方向。保持边界：依赖环境的模拟器和硬件
+  检查保持分层，而不是每次变更都强制要求。
