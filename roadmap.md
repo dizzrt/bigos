@@ -2,439 +2,171 @@
 
 Language: English | 简体中文
 
-This roadmap summarizes the completed baseline and sets the recommended
-direction toward a general-purpose, POSIX-compatible, multi-architecture kernel.
-It is a planning document, not a replacement for `docs/`, `openspec/specs/`, or
-archived OpenSpec changes.
+This roadmap is the planning entry point for BigOS after the current bounded
+userland baseline. It summarizes completed capabilities at a high level and
+leaves clear space for future work. It does not replace detailed architecture,
+implementation, validation, or change-tracking documents.
 
-本文档压缩整理已完成基线，并给出面向「通用、兼容 POSIX、支持多架构的内核」目标的
-后续阶段建议。它是规划文档，不替代 `docs/`、`openspec/specs/` 或已归档的
-OpenSpec change。
+本文档是 BigOS 在当前有界用户态基线之后的规划入口。它只在高层概述已完成能力，
+并为后续工作留出清晰入口。它不替代详细架构、实现、验证或变更追踪文档。
 
-Project goals (decided): a general-purpose POSIX-compatible kernel that will grow
-an architecture-abstraction layer to support multiple ISAs. The current code is
-x86_64-only; multi-arch support is a planned future direction, not a current
-capability.
+Project goal: grow BigOS from the current x86_64 research kernel into a
+more general-purpose, POSIX-compatible, multi-architecture kernel. The current
+runnable implementation remains x86_64-only and tied to the existing legacy
+boot/storage path.
 
-项目目标（已确定）：一个通用、兼容 POSIX 的内核，并将逐步完善架构抽象层以支持多种
-ISA。当前代码仅支持 x86_64；多架构支持是规划中的后续方向，而非现有能力。
+项目目标：将 BigOS 从当前 x86_64 研究内核逐步推进为更通用、兼容 POSIX、支持多架构
+的内核。当前可运行实现仍是 x86_64-only，并绑定在现有 legacy boot/storage 路径上。
 
-## Completed Baseline / 已完成基线
+## Current Implementation Summary / 当前实现概述
 
-BigOS has completed early bring-up: a smoke-tested single-core kernel with a
-minimal, mostly synchronous user-mode path.
+BigOS currently provides a smoke-tested, single-core, mostly synchronous kernel
+with a bounded userland. At a high level, the implemented baseline includes:
 
-BigOS 已完成早期 bring-up：一个带 smoke 验证、以同步为主的单核内核与最小用户态
-路径。
+BigOS 当前提供一个经过 smoke 验证、单核、以同步为主、具备有界用户态的内核。从高层看，
+当前已实现基线包括：
 
-- Boot: Legacy BIOS/MBR/exFAT boot sectors load `/boot/boot.bin`, then the
-  higher-half ELF64 `kernel`.
-- 引导：Legacy BIOS/MBR/exFAT 引导扇区加载 `/boot/boot.bin`，再加载高半区
-  ELF64 `kernel`。
-- Runtime core: VGA/COM1 output, kernel-owned IDT, exception/IRQ/syscall
-  dispatch, i8259 PIC, PIT IRQ0 tick, keyboard IRQ1 to TTY/console, a single-core
-  scheduler with time-slice/preemption-disable semantics, explicit blocking
-  primitives, and `int 0x80` dispatch.
-- 运行时核心：VGA/COM1 输出、内核自有 IDT、exception/IRQ/syscall 分发、i8259、
-  PIT IRQ0 tick、键盘 IRQ1 到 TTY/console、带时间片与 preemption-disable 的单核
-  调度器、显式阻塞原语、`int 0x80` 分发。
-- Blocking model: thread wait states, wait queues, wake-one/wake-all, timeout
-  waits, blocking-context guards, timer-backed sleep.
-- 阻塞模型：线程等待状态、wait queue、wake-one/wake-all、timeout wait、阻塞
-  上下文保护、timer-backed sleep。
-- Memory: buddy, slab/kmalloc, kernel virtual memory, direct map, user
-  address-space derivation/teardown, owned empty PT/PD/PDPT reclamation, VMA
-  tracking, `brk`, restricted anonymous mappings, fault-driven stack growth, and
-  VMA-backed user range validation.
-- 内存：buddy、slab/kmalloc、内核虚拟内存、direct map、用户地址空间派生/teardown、
-  空 PT/PD/PDPT 回收、VMA 跟踪、`brk`、受限匿名映射、按 fault 的用户栈增长、基于
-  VMA 的用户地址范围验证。
-- Storage/FS: synchronous ATA PIO, MBR exFAT discovery, read-only exFAT boot
-  assets, writable `/rw` files, bounded file IO, pipes, dup/dup2, and fd-backed
-  `open`/`read`/`write`/`close`.
-- 存储/文件系统：同步 ATA PIO、MBR exFAT 发现、只读 exFAT boot assets、可写
-  `/rw` 文件、bounded file IO、pipe、dup/dup2，以及 fd-backed
-  `open`/`read`/`write`/`close`。
-- User mode: process lifecycle, `fork`/COW, signals, wait/exit/reap, orphan
-  adoption to PID-1, bounded ELF64 `exec` / `SYS_EXECVE`, default-on resident C
-  init, minimal user crt0/libc, `/bin/sh`, packaged `/bin/*`, and default-off
-  userland runtime smoke.
-- 用户态：进程生命周期、`fork`/COW、信号、wait/exit/reap、孤儿过继到 PID-1、
-  bounded ELF64 `exec` / `SYS_EXECVE`、默认开启的常驻 C init、最小用户态
-  crt0/libc、`/bin/sh`、打包的 `/bin/*`，以及默认关闭的用户态运行时 smoke。
-- Build/Validation: `xmake` is the primary build; smoke options via
-  `xmake f ...=y`; QEMU/Bochs via `xmake run` and `tools/boot_debug.py`; the
-  stage 9 runtime smoke matrix is productized with QEMU headless serial-marker
-  checks, per-case timeouts, structured artifacts, and explicit skip reasons.
-- 构建/验证：`xmake` 为主构建；smoke 选项用 `xmake f ...=y`；QEMU/Bochs 经
-  `xmake run` 与 `tools/boot_debug.py`；阶段 9 runtime smoke 矩阵已产品化（headless
-  串口 marker、按 case timeout、结构化 artifact、明确跳过原因）。
+- A working x86_64 boot and kernel runtime foundation with text/serial output,
+  interrupt/exception/syscall dispatch, basic timers, keyboard input, and a
+  single-core scheduler.
+- 可工作的 x86_64 启动与内核运行基础，包括文本/串口输出、中断/异常/syscall 分发、
+  基础计时、键盘输入和单核调度。
+- Kernel memory management covering physical allocation, slab-style allocation,
+  kernel virtual memory, direct mapping, user address-space management, and
+  bounded user fault handling.
+- 内核内存管理，包括物理页分配、slab 风格分配、内核虚拟内存、direct map、用户地址
+  空间管理和有界用户 fault 处理。
+- A bounded process and syscall layer with process lifecycle management,
+  file-descriptor based I/O, anonymous demand paging, `fork`/COW, signals,
+  time/identity primitives, and image replacement.
+- 有界进程与 syscall 层，包括进程生命周期管理、基于文件描述符的 I/O、匿名 demand
+  paging、`fork`/COW、signals、time/identity 原语和进程镜像替换。
+- A minimal storage and filesystem layer with synchronous block I/O, read-only
+  boot assets, a bounded writable runtime area, page/buffer cache, pipes, and fd
+  duplication.
+- 最小存储与文件系统层，包括同步块 I/O、只读启动资产、有界可写运行时区域、
+  page/buffer cache、pipe 和 fd duplication。
+- A minimal freestanding userland with resident init behavior, a small shell,
+  basic libc-style support, and small packaged user programs.
+- 最小 freestanding 用户态，包括常驻 init 行为、小型 shell、基础 libc 风格支持和小型
+  用户程序。
 
 ## Current Boundary / 当前边界
 
-BigOS is a controlled research kernel, not yet a general-purpose OS. It is
-single-core and mostly synchronous, with a bounded default userland and a
-minimal shell. It still lacks SMP, a complete POSIX process model, dynamic
-linking, a full libc, job control, broad `mmap`, relative paths/cwd, async IO,
-and broad storage/device support.
+BigOS is a controlled research kernel, not a complete general-purpose OS. Keep
+future planning and documentation within these boundaries until a specific stage
+changes them:
 
-BigOS 是受控研究内核，尚非通用 OS。它是单核、以同步为主，具备有界默认用户态和
-最小 shell。它仍缺少 SMP、完整 POSIX 进程模型、动态链接、完整 libc、作业控制、
-广泛 `mmap`、相对路径/cwd、async IO，以及广泛存储/设备支持。
+BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改变前，后续规划和文档都应保持
+以下边界：
 
-```text
-Normal boot today / 当前 normal boot
-  BIOS -> higher-half kernel -> mm/runtime init -> IRQ/timer/TTY
-       -> scheduler + blocking/sleep -> int 0x80
-       -> proc::init() -> launch_init() -> /boot/user/init.elf (PID-1)
-       -> fork + execve /bin/sh -> interactive bounded shell
+- Current runnable backend: x86_64 with the existing Legacy BIOS style boot
+  flow; UEFI and additional architectures are not yet runtime-parity backends.
+- 当前可运行 backend：x86_64 与现有 Legacy BIOS 风格启动流程；UEFI 和其他架构尚不具备
+  运行时等价能力。
+- Execution model: single-core, mostly synchronous, bounded userland, no SMP.
+- 执行模型：单核、以同步为主、有界用户态、无 SMP。
+- Userland: minimal static user programs, no dynamic linking/shared libraries,
+  no job control, no terminal process groups, no complete POSIX libc.
+- 用户态：最小静态用户程序，无动态链接/共享库、无作业控制、无终端进程组、
+  无完整 POSIX libc。
+- Memory/file model: bounded anonymous demand paging/COW and bounded writable
+  runtime storage, but no broad file-backed `mmap`, no persistent full writable
+  filesystem, no async I/O, and no broad storage/device support.
+- 内存/文件模型：bounded anonymous demand paging/COW 与有界可写运行时存储，但无广泛
+  file-backed `mmap`、无持久完整可写文件系统、无 async I/O、无广泛存储/设备支持。
+- Boot/backends: additional boot, storage, device, and ISA backends are planning
+  or parallel-track items, not current runtime parity.
+- 启动/backend：额外 boot、storage、device 和 ISA backend 是规划或并行轨道事项，
+  不具备当前运行时等价能力。
 
-Remaining general / POSIX layer / 尚缺的通用 / POSIX 层
-  full libc + dynamic linking -> broad mmap/file-backed paging
-       -> cwd/relative paths -> terminal job control -> SMP/async IO
-  (parallel: arch abstraction · behavior-assertion testing)
-```
+The roadmap should stay at this boundary level. Detailed boot order, concrete
+entry points, validation markers, build commands, and change-tracking history
+belong in dedicated documentation and source-adjacent notes.
 
-## Recommended Stages / 推荐阶段
-
-The completed work above already decided two things kept below: introduce demand
-paging only after fault recovery / allocation-failure / process-kill semantics
-are designed, and plan COW together with `fork`. Detailed history lives in the
-archived OpenSpec changes under `openspec/changes/archive/`.
-
-上述已完成工作已确立两条后续仍沿用的判断：在设计好 fault recovery、分配失败与
-进程 kill 语义后再引入 demand paging；将 COW 与 `fork` 一起规划。详细历史见
-`openspec/changes/archive/` 下已归档的 OpenSpec change。
-
-### Stage 14.1: Unify errno / 阶段 14.1：统一 errno
-
-Status: completed (archived as `2026-06-09-unify-errno`). Independent; done before any other stage.
-
-状态：已完成（已归档为 `2026-06-09-unify-errno`）。独立，已先于其他所有阶段完成。
-
-Goal: converge the per-subsystem error codes into a single source of truth.
-
-目标：把各子系统的错误码收敛到单一来源。
-
-- Error codes are currently defined per-subsystem with duplicate values
-  (`SYS_EBADF` vs `FD_EBADF`, `SYS_EWOULDBLOCK` vs `WAIT_EWOULDBLOCK`, etc.).
-  Collapse them into one `bigos/errno.h`.
-- 错误码目前按子系统各自定义且值重复（`SYS_EBADF` 与 `FD_EBADF`、
-  `SYS_EWOULDBLOCK` 与 `WAIT_EWOULDBLOCK` 等）。收敛到单一 `bigos/errno.h`。
-- Pure mechanical convergence, zero semantic risk; cheap now while only ~10
-  values exist, a nightmare once POSIX spreads dozens of codes.
-- 纯机械收敛、零语义风险；趁现在仅约 10 个值时做成本极低，POSIX 铺开几十个码后
-  再做则是噩梦。
-
-### Stage 14.5: Default-On User-Space Init / 阶段 14.5：默认进入用户态 init
-
-Status: completed (archived as `2026-06-09-default-on-user-space-init`). Prerequisite and runway for all POSIX work below.
-
-状态：已完成（已归档为 `2026-06-09-default-on-user-space-init`）。是下方所有 POSIX 工作的前置起跑线。
-
-Goal: make normal boot enter ring3 by default, so process/exec/VFS/ELF
-capabilities become a continuously exercised default path instead of smoke-only.
-
-目标：让 normal boot 默认进入 ring3，使进程/exec/VFS/ELF 能力成为默认路径上被
-持续验证的行为，而不是仅 smoke。
-
-- Add a default-on `launch_init()` between `proc::init()` and `sched::start()`:
-  reuse `vfs::init` -> read `/boot/user/init.elf` -> `create_elf_user_process`
-  -> `run_user_process`.
-- 在 `proc::init()` 与 `sched::start()` 之间新增默认开启的 `launch_init()`：复用
-  现有 VFS/ELF 路径，从 `#ifdef` 中解放出来。
-- Keep `user_program_smoke` / `user_elf_smoke` as extra validation switches; do
-  not delete the existing matrix.
-- 保留 `user_program_smoke` / `user_elf_smoke` 作为额外验证开关，不删除已有矩阵。
-- Define deterministic degradation: missing/invalid `init.elf` -> panic with a
-  `BIGOS_INIT_*` marker (PID-1 semantics). Define kernel behavior when init exits
-  or is reaped.
-- 定义确定性降级：init 缺失或非法 -> 带 `BIGOS_INIT_*` marker 的 panic（PID 1
-  语义雏形）；定义 init 退出/被 reap 后内核的行为约定。
-- Validation: assert `BIGOS_INIT_ENTER`/`BIGOS_INIT_EXIT` in the default build
-  with no smoke flags; add to the stage 9 matrix as a default case; source
-  contract asserts `launch_init` has no `#ifdef` guard.
-- 验证：在不加任何 smoke 开关的默认构建中断言 init marker，纳入阶段 9 矩阵默认
-  case，源码契约断言 `launch_init` 无 `#ifdef` 守卫。
-- Test upgrade (enabled here): now that normal boot runs a real user program,
-  start shifting validation from source-contract string asserts toward behavior
-  assertions (serial markers + user-binary output). This kicks off the
-  Behavior-Assertion Testing track below; treat it as ongoing, not a one-shot.
-- 测试升级（在此启用）：normal boot 已能运行真实用户程序，开始把验证从源码字符串
-  断言转向行为断言（serial marker + 用户态二进制输出）。这启动了下方「行为断言测试」
-  轨道；视为持续推进，而非一次性。
-
-### Stage 15: Demand Paging & Page-Fault Policy / 阶段 15：按需分页与缺页策略
-
-Status: completed (archived as `2026-06-09-introduce-demand-paging`; QEMU headless
-`BIGOS_DEMAND_PAGING_PASSED`, source-contract pytest). First POSIX foundation;
-prerequisite for fork/COW/mmap.
-
-状态：已完成（已归档为 `2026-06-09-introduce-demand-paging`；QEMU headless
-`BIGOS_DEMAND_PAGING_PASSED`、源码契约 pytest）。第一块 POSIX 地基，是
-fork/COW/mmap 的前置。
-
-Goal: generalize the existing stack-only `try_handle_current_stack_fault` into a
-unified `try_handle_user_page_fault` page-fault handler.
-
-目标：把原栈专用的 `try_handle_current_stack_fault` 泛化为统一的
-`try_handle_user_page_fault` 缺页处理。
-
-- Lazy anonymous-page materialization (heap/anon/downward stack), allocation-failure
-  -> deterministic process kill, permission/out-of-range faults -> kill,
-  kernel-mode faults still panic.
-- 匿名页（堆/匿名/向下栈）惰性物化、分配失败 -> 确定性进程 kill、权限违例/越界
-  -> kill、内核态 fault 仍 panic。
-- Done standalone and validated independently before fork/COW via the default-off
-  `demand_paging_smoke` switch.
-- 经默认关闭的 `demand_paging_smoke` 开关单独完成并独立验证，再进入 fork/COW。
-
-### Stage 15.5: Growable Process/Fd Tables / 阶段 15.5：进程与 fd 表可增长
-
-Status: completed (archived as `2026-06-09-grow-process-fd-tables`). Hard prerequisite for Stage 16.
-
-状态：已完成（已归档为 `2026-06-09-grow-process-fd-tables`）。是阶段 16 的硬前置。
-
-Goal: remove the static-slot ceiling before `fork` can hit it.
-
-目标：在 `fork` 撞上静态槽位上限之前移除它。
-
-- Evolve the static process and fd tables (`MAX_PROCESSES=16`, `MAX_FDS=16`) into
-  growable/recyclable structures with proper PID allocation/reclamation.
-- 把静态进程表与 fd 表（`MAX_PROCESSES=16`、`MAX_FDS=16`）改为可增长/可回收结构，
-  并配套 PID 的分配与回收。
-- `MAX_VMAS`, `EXEC_MAX_ARGC`, and other compile-time ceilings can follow later,
-  driven by real need rather than upfront.
-- `MAX_VMAS`、`EXEC_MAX_ARGC` 等其他编译期上限可稍后按真实需求跟进，不必提前做。
-
-### Stage 16: `fork` + Copy-On-Write / 阶段 16：`fork` 与写时复制
-
-Status: completed (archived as `2026-06-10-introduce-fork-cow`). Depends on Stage 15 and Stage 15.5.
-
-状态：已完成（已归档为 `2026-06-10-introduce-fork-cow`）。依赖阶段 15 与阶段 15.5。
-
-Goal: real process duplication, enabling `fork`+`exec` and a future shell.
-
-目标：真正的进程复制，使 `fork`+`exec` 与未来 shell 成为可能。
-
-- COW address-space copy, page refcounts, and write-time split.
-- COW 地址空间复制、页引用计数、写时分裂。
-- Assumes growable process/fd tables from Stage 15.5 are already in place.
-- 假定阶段 15.5 的可增长进程/fd 表已就位。
-
-### Stage 16.5: Time & Identity / 阶段 16.5：时间与身份
-
-Status: completed (archived as `2026-06-10-add-time-and-identity`). Prerequisite for Stages 17 and 18.
-
-状态：已完成（已归档为 `2026-06-10-add-time-and-identity`）。是阶段 17 与 18 的前置。
-
-Goal: add the wall-clock and identity primitives that signals and writable FS
-both depend on.
-
-目标：补齐信号与可写文件系统都依赖的墙钟与身份原语。
-
-- Add a wall-clock/RTC source alongside the existing monotonic tick.
-- 在现有 monotonic tick 之外，新增墙钟/RTC 来源。
-- Introduce uid/gid and a basic permission model (who may signal whom; file
-  owner/mode for Stage 18).
-- 引入 uid/gid 与基础权限模型（谁能 kill 谁；阶段 18 的文件 owner/mode）。
-- Keep it minimal and driven by the two consumers below; no broad POSIX user/
-  group database yet.
-- 保持最小并由下方两个消费者驱动；暂不做完整的 POSIX 用户/组数据库。
-
-### Stage 17: Signals / 阶段 17：信号子系统
-
-Status: completed (archived as `2026-06-10-introduce-signals`). Depends on Stage 16 and Stage 16.5.
-
-状态：已完成（已归档为 `2026-06-10-introduce-signals`）。依赖阶段 16 与阶段 16.5。
-
-Goal: a minimal POSIX signal model.
-
-目标：最小 POSIX 信号模型。
-
-- Per-process signal queue, default actions, `kill`/`sigaction`/masks, and
-  delivery on IRQ-return (reuse the existing reschedule-on-IRQ-return hook).
-- 进程信号队列、默认动作、`kill`/`sigaction`/掩码、IRQ-return 时投递（复用现有
-  reschedule-on-IRQ-return 钩子）。
-- Consumes the wall-clock and uid/gid primitives from Stage 16.5 (who may signal
-  whom).
-- 消费阶段 16.5 的墙钟与 uid/gid 原语（谁能 kill 谁）。
-- Arch note: signal frame setup and IRQ-return delivery are arch-coupled; route
-  them through the arch trap-frame interface (see Architecture Abstraction) rather
-  than hard-coding x86 mechanisms, so the model stays portable.
-- 架构注意：信号帧构造与 IRQ-return 投递是架构耦合的；应通过 arch trap-frame 接口
-  （见「架构抽象」）走，而非硬编码 x86 机制，以保持模型可移植。
-
-### Stage 18: Writable FS + Page Cache + Pipe / 阶段 18：可写文件系统 + 页缓存 + 管道
-
-Status: completed (archived as `2026-06-11-introduce-writable-fs-page-cache-pipe`). Depends on Stage 15 and Stage 16.5.
-
-状态：已完成（已归档为 `2026-06-11-introduce-writable-fs-page-cache-pipe`）。依赖阶段 15 与阶段 16.5。
-
-Goal: general-purpose I/O semantics.
-
-目标：通用 I/O 语义。
-
-- Page/buffer cache first, then exFAT write or a simpler FS (e.g. ext2);
-  `pipe`/`dup` to unlock shell pipelines.
-- 先 page/buffer cache，再做 exFAT 写或更简单的 FS（如 ext2）；`pipe`/`dup` 解锁
-  shell 管道。
-- Builds on the uid/gid + permission model (owner/mode) from Stage 16.5; do not
-  bolt permissions on afterward.
-- 建立在阶段 16.5 的 uid/gid 与权限模型（owner/mode）之上；不要事后再补权限。
-
-### Stage 19: Userland Runtime / libc / Shell / 阶段 19：用户态运行时 / libc / shell
-
-Status: completed (archived as `2026-06-11-introduce-userland-runtime`). Consumes Stages 15-18.
-
-状态：已完成（已归档为 `2026-06-11-introduce-userland-runtime`）。消费阶段 15-18。
-
-Goal: the smallest usable userland.
-
-目标：最小可用用户态。
-
-- Minimal crt0, syscall wrappers, errno mirror tests, `/bin/sh`, user test
-  binaries, and default-off `userland_smoke`.
-- 最小 crt0、syscall wrapper、errno 镜像测试、`/bin/sh`、用户态测试二进制，以及
-  默认关闭的 `userland_smoke`。
-- Default boot enters resident PID-1 init, which starts `/bin/sh`; this is
-  bounded userland, not a full POSIX distribution.
-- 默认启动进入常驻 PID-1 init，并启动 `/bin/sh`；这是有界用户态，不是完整 POSIX
-  发行环境。
+路线图应保持在上述边界层级。具体启动顺序、入口点、验证 marker、构建命令和变更追踪
+历史应放在专门文档与贴近源码的说明中。
 
 ## Continuous Concerns / 持续性关注
 
-Cross-cutting items with no single completion point. The bounded debts that did
-have a clear time point have been promoted into the staged sequence above
-(Stage 14.1 errno, Stage 15.5 growable tables, Stage 16.5 time & identity). The
-two below stay here because they advance continuously rather than finishing once.
+Cross-cutting items with no single completion point.
 
-无单一完成点的横切事项。原本有明确时间点的有界债务已提升为上方的阶段（14.1
-errno、15.5 可增长表、16.5 时间与身份）。下面两项留在此处，因为它们持续推进、
-不会一次完成。
+无单一完成点的横切事项。
 
 ### Behavior-Assertion Testing / 行为断言测试
 
-- Current source-contract tests assert raw C++ source strings (e.g.
-  `test_user_elf_program_loader_source.py`), which break on any equivalent
-  refactor and cannot validate fork/COW/page-cache behavior. Kicked off by Stage
-  14.5, progressively shift validation toward behavior assertions (serial markers
-  + user-binary output) as a stage-9 matrix evolution, growing with each new
-  POSIX stage.
-- 现有 source-contract 测试断言原始 C++ 源码字符串（如
-  `test_user_elf_program_loader_source.py`），重构即误报，且无法验证
-  fork/COW/page cache 行为。由阶段 14.5 启动，逐步把验证转向行为断言（serial
-  marker + 用户态二进制输出），作为阶段 9 矩阵的演进，随每个新 POSIX 阶段一起成长。
+- Continue replacing source-string contract tests with behavior assertions from
+  runtime-observable behavior. The current userland baseline makes this more
+  valuable because kernel, process, filesystem, and user program behavior can be
+  checked together.
+- 继续用运行时可观察行为替换源码字符串契约测试。当前用户态基线让这件事更有价值，
+  因为内核、进程、文件系统和用户程序行为可以被组合验证。
 
 ### Architecture Decoupling Discipline / 架构解耦纪律
 
-- The kernel is deeply x86_64-bound (IDT, `int 0x80`, `InterruptFrame`, i8259,
-  PIT, ATA PIO). Multi-arch is now a decided goal, so every new stage must consume
-  the arch interface (see the Architecture Abstraction track) rather than calling
-  x86 mechanisms directly, keeping coupling from leaking further into POSIX code.
-- 内核与 x86_64 深度绑定（IDT、`int 0x80`、`InterruptFrame`、i8259、PIT、ATA
-  PIO）。多架构已是确定目标，故每个新阶段都必须消费 arch 接口（见「架构抽象」
-  轨道），而非直接调用 x86 机制，避免耦合进一步渗入 POSIX 代码。
+- The kernel remains deeply tied to its current x86_64 backend. New roadmap work
+  should avoid spreading backend-specific mechanisms further into process,
+  filesystem, and userland-facing code.
+- 内核仍与当前 x86_64 backend 深度绑定。新的路线图工作应避免把 backend-specific
+  机制继续扩散到进程、文件系统和面向用户态的代码中。
+
+### Documentation Discipline / 文档纪律
+
+- Keep detailed architecture, implementation, validation, and change-tracking
+  material outside the roadmap. The roadmap should describe project-level
+  capabilities, gaps, planning direction, and staged priorities only.
+- 将详细架构、实现、验证和变更追踪材料放在 roadmap 之外。roadmap 只描述项目级能力、
+  缺口、规划方向和阶段性优先级。
+- Track detailed change rationale, assumptions, non-goals, and validation notes
+  outside this roadmap.
+- 详细变更理由、假设、non-goals 和验证记录应在路线图之外追踪。
 
 ## Parallel Tracks / 并行轨道
 
 ### Architecture Abstraction / 架构抽象层
 
-Goal: grow a thin `arch/` interface so the kernel core stops calling x86_64
-mechanisms directly, making future ISAs (e.g. aarch64, riscv64) tractable. This
-is a long-running track that should advance incrementally alongside the staged
-work, not a single big-bang port.
+Goal: gradually separate kernel core concepts from backend-specific mechanisms,
+without adding speculative second-backend complexity too early.
 
-目标：逐步建立一层薄的 `arch/` 接口，让内核核心不再直接调用 x86_64 机制，使未来的
-ISA（如 aarch64、riscv64）成为可行目标。这是一条长期轨道，应与分阶段工作并行、
-增量推进，而非一次性大改。
-
-- Define an arch interface for the coupled mechanisms first: CPU/trap frame,
-  interrupt controller, timer, context switch, syscall entry, MMU/page-table ops,
-  and per-CPU access. Keep x86_64 as the only backend initially.
-- 先为耦合机制定义 arch 接口：CPU/trap frame、中断控制器、timer、context switch、
-  syscall 入口、MMU/页表操作、per-CPU 访问。初期仅保留 x86_64 一个后端。
-- Move x86_64 code under `arch/x86_64/` behind that interface incrementally; do
-  not add a second backend until the interface is stable and a real arch consumer
-  (a staged feature) exercises it.
-- 增量地把 x86_64 代码移到 `arch/x86_64/` 并置于该接口之后；在接口稳定且有真实的
-  arch 消费者（某个阶段功能）验证它之前，不引入第二个后端。
-- Sequencing: prefer the trap/interrupt/MMU interfaces before Stage 17 (signals)
-  and before SMP, since both deepen arch coupling if left implicit. The syscall
-  interface should be abstracted before Stage 19 userland wrappers are frozen, so
-  the user/kernel ABI is not hard-wired to `int 0x80`.
-- 排序：在阶段 17（信号）与 SMP 之前，优先完成 trap/interrupt/MMU 接口，因为两者
-  若保持隐式会加深架构耦合。syscall 接口应在阶段 19 用户态 wrapper 冻结前抽象出来，
-  避免用户/内核 ABI 被硬绑定到 `int 0x80`。
-- Non-goals for now: a second working backend, bi-endian support, or a generic
-  device tree. Keep the abstraction driven by real needs, not speculation.
-- 当前非目标：第二个可用后端、双端序支持、通用 device tree。让抽象由真实需求驱动，
-  而非臆测。
+目标：逐步把内核核心概念与 backend-specific 机制解耦，但不要过早引入缺少实际消费场景的
+第二 backend 复杂度。
 
 ### SMP / 对称多处理
 
-Keep out of the main line until locking, per-CPU state, and TLB shootdown are
-explicitly designed first. SMP and the arch abstraction reinforce each other:
-per-CPU state and TLB shootdown are inherently arch-specific, so design them
-through the arch interface rather than ad hoc x86 code.
+Keep out of the main line until locking, per-CPU state, TLB shootdown, scheduling
+policy, and arch interactions are explicitly designed.
 
-在显式设计好锁、per-CPU 状态与 TLB shootdown 之前，不纳入主线。SMP 与架构抽象互为
-支撑：per-CPU 状态与 TLB shootdown 本质上是架构相关的，应通过 arch 接口设计，而非
-临时的 x86 代码。
+在锁、per-CPU 状态、TLB shootdown、调度策略和架构交互明确设计前，不纳入主线。
 
 ### UEFI And Boot Backends / UEFI 与引导后端
 
-- Keep UEFI separate from runtime scheduling/process/VM changes.
-- 将 UEFI 与 runtime 调度/进程/VM 变更分离。
-- Implement `BOOTX64.EFI`, ESP image generation, QEMU/OVMF smoke, GOP handoff,
-  and firmware-table sections only after the unified BootInfo contract is stable;
-  preserve the Legacy BIOS path until UEFI reaches parity.
-- 在统一 BootInfo 契约稳定后再实现 `BOOTX64.EFI`、ESP 镜像、QEMU/OVMF smoke、
-  GOP handoff 与 firmware table section；在 UEFI 达到等价前保留 Legacy BIOS 路径。
+Keep future boot backend work separate from runtime scheduling, process, and VM
+changes. Preserve the current runnable backend until any new backend reaches
+runtime parity.
+
+将未来 boot backend 工作与 runtime 调度、进程和 VM 变更分离。在新 backend 达到运行时
+等价前，保留当前可运行 backend。
 
 ### CI And Tooling / CI 与工具链
 
-- Layer validation: source-contract tests, image-generation tests, GCC
-  cross-toolchain builds, QEMU headless marker smokes, and optional Bochs
-  cross-checks. Keep `uv run pytest` for Python; record explicit skip reasons
-  when a tool is unavailable.
-- 分层验证：源码契约测试、镜像生成测试、GCC 交叉构建、QEMU headless marker
-  smoke、可选 Bochs 交叉检查；Python 用 `uv run pytest`；工具不可用时显式记录
-  跳过原因。
+Layer validation so future work can distinguish source checks, build checks,
+runtime behavior checks, and environment-dependent checks.
 
-### Documentation And OpenSpec / 文档与 OpenSpec
+分层组织验证，让后续工作能区分源码检查、构建检查、运行时行为检查和依赖本地环境的检查。
 
-- Keep `docs/en` canonical and mirror in `docs/zh` with matching relative paths.
-- `docs/en` 为 canonical，`docs/zh` 按匹配相对路径同步。
-- One OpenSpec change per major stage; do not combine scheduler/process/VFS/VM/
-  UEFI in a single change. Record architecture, memory-layout, and toolchain
-  assumptions, explicit non-goals, and validation notes per change.
-- 每个主要阶段创建独立 OpenSpec change，不混合 scheduler/process/VFS/VM/UEFI；
-  每个 change 记录架构/内存布局/工具链假设、明确 non-goals 与验证记录。
+## Stage 20+ Entry / Stage 20+ 入口
 
-## Near-Term Recommendation / 近期建议
+Add future roadmap items here. Keep each item concise and describe only the
+direction, intended boundary change, and dependency on the current baseline.
 
-The full main-line order, with bounded debts now numbered into the sequence.
+在此追加未来路线图事项。每项保持简洁，只描述方向、预期边界变化，以及它与当前基线的关系。
 
-完整主线顺序，有界债务已编号并入序列。
+### Stage 20: TBD / 阶段 20：待定
 
-1. Stage 14.1 (`unify errno`): independent, do this first.
-   - 阶段 14.1（统一 errno）：独立，先做。
-2. Stage 14.5 (`default-on user-space init`): make normal boot actually run a
-   user process; this also kicks off the behavior-assertion testing track.
-   - 阶段 14.5（默认进入用户态 init）：让 normal boot 真正运行用户进程；同时启动
-     行为断言测试轨道。
-3. Then proceed Stage 15 -> 15.5 -> 16 -> 16.5 -> 17 -> 18 -> 19 in order: demand
-   paging is the safest first foundation, growable tables (15.5) precede fork
-   (16), time & identity (16.5) precede signals (17) and writable FS (18), and
-   userland (19) builds on all of it.
-   - 然后按阶段 15 -> 15.5 -> 16 -> 16.5 -> 17 -> 18 -> 19 顺序推进：demand paging
-     是最安全的第一块地基，可增长表（15.5）先于 fork（16），时间与身份（16.5）
-     先于信号（17）与可写 FS（18），用户态（19）建立在全部之上。
-4. Advance the Architecture Abstraction track in parallel: land the trap/
-   interrupt/MMU interfaces before Stage 17 and SMP, and the syscall interface
-   before Stage 19 freezes userland wrappers, keeping x86_64 the only backend
-   until a real consumer justifies a second one.
-   - 并行推进「架构抽象」轨道：在阶段 17 与 SMP 之前落地 trap/interrupt/MMU 接口，
-     在阶段 19 冻结用户态 wrapper 之前落地 syscall 接口；在有真实消费者证明必要前，
-     x86_64 保持为唯一后端。
+- Candidate themes: stronger behavior-oriented validation, architecture
+  decoupling, broader userland ergonomics, or future boot-backend groundwork.
+- 候选主题：更强的行为导向验证、架构解耦、更完整的用户态易用性，或未来 boot-backend
+  前置工作。
+- Requirement before starting: state which current boundaries are intentionally
+  changed versus preserved.
+- 启动前要求：说明哪些当前边界会被有意改变、哪些保持不变。

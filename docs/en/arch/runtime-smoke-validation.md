@@ -25,17 +25,22 @@ The runner explicitly configures each case through `xmake f`, builds through the
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO plus VFS open/read/release over the read-only exFAT backend. |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | Runs the embedded flat image as a lifecycle-core process; smoke entry remains default-off. |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | Packages `/boot/user/init.elf` and runs it through reusable ELF exec preparation; smoke entry remains default-off. |
-| `default-init` | _(none)_ | `BIGOS_INIT_EXIT` | 30s | Default build with no smoke switch; normal boot packages `/boot/user/init.elf` and enters ring3 via `launch_init`. |
+| `demand-paging` | `--demand_paging_smoke=y` | `BIGOS_DEMAND_PAGING_PASSED` | 30s | VMA-backed lazy anonymous materialization and deterministic fault handling. |
+| `fork-cow` | `--fork_cow_smoke=y` | `BIGOS_FORK_COW_PASSED` | 30s | Bounded `fork` plus anonymous COW split semantics. |
+| `time-identity` | `--time_identity_smoke=y` | `BIGOS_TIME_IDENTITY_PASSED` | 20s | Wall-clock and pid/ppid/uid/gid syscall path. |
+| `signals` | `--signal_smoke=y` | `BIGOS_SIGNAL_PASSED` | 30s | Minimal signal queue, masks, handlers, and delivery path. |
+| `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`, page/buffer cache, write/readback, fsync, and permissions. |
+| `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup endpoint accounting, blocking wakeup, EOF, and `EPIPE`. |
+| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, errno, fork/exec/wait, pipe, redirection, and malloc. |
+| `default-init` | _(none)_ | `BIGOS_USER_EXEC` | 40s | Default build with no smoke switch; normal boot packages PID-1 init, `/bin/sh`, and bounded `/bin/*`. |
 
 Each case enables only the listed smoke switch and explicitly disables the other smoke switches before building. Outside the runner, all runtime smoke options remain default-off unless a developer explicitly configures them with `xmake f ...=y`.
 
-The `default-init` case is the first behavior-assertion case driven by no smoke
-switch: it builds the default configuration (every smoke option set to `=n`) and
-asserts the kernel `BIGOS_INIT_ENTER` and `BIGOS_INIT_EXIT` serial markers rather
-than a C++ source string. Missing those markers is a failure and is not
-reinterpreted as a pass. The init binary's own stdout assertion is deferred to a
-later stage once user space has a stable write-out path; this case starts the
-behavior-assertion track that progressively replaces source string contracts.
+The `default-init` case is the behavior-assertion case driven by no smoke switch:
+it builds the default configuration (every smoke option set to `=n`) and asserts
+that normal boot reaches resident PID-1 init and `/bin/sh`, using
+`BIGOS_USER_EXEC` as the QEMU headless marker. Missing that marker is a failure
+and is not reinterpreted as a pass.
 
 The `blocking-primitives` case emits intermediate markers `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, and `BIGOS_BLOCKING_TIMEOUT_EXPIRED` before the final pass marker. It uses a synthetic TTY producer, so automated QEMU headless validation does not require manual keyboard input; optional manual keyboard validation should be recorded separately when performed.
 
@@ -47,13 +52,12 @@ checks cover PID uniqueness, bounded table failure, parent/child linkage,
 zombie-to-reap, wait wakeups, exec rollback, bounded `argv`/`envp`, active-root
 teardown rejection, and current-stack release deferral.
 
-The fd/VFS shell is validated by source-level checks plus the existing
-`filesystem-read` and `filesystem-user-elf` runtime cases. The `filesystem-read`
-case covers VFS root initialization, `open`/`read`/`release`, EOF clamp, and the
-existing `/boot/fs_smoke.txt` COM1 marker. Source-level checks cover bad fd,
-double close, fd table capacity, invalid user buffer handling, exec inheritance,
-close-on-exec, and exit/reap close-all. fd/VFS syscalls use the DPL=3 `int 0x80`
-trap gate and must pass `sched::can_block()` before synchronous storage I/O.
+The fd/VFS shell is validated by source-level checks plus `filesystem-read`,
+`filesystem-user-elf`, `writable-fs`, `pipe`, and `userland-runtime` runtime
+cases. The read-only exFAT path remains the boot/image source of truth, while
+`/rw` and pipe semantics are bounded runtime capabilities. fd/VFS syscalls use
+the DPL=3 `int 0x80` trap gate and must pass `sched::can_block()` before
+synchronous storage I/O or blocking pipe operations.
 
 ## Manual Single-Case Flow
 

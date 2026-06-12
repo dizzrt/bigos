@@ -1,6 +1,6 @@
 # 文件描述符与 VFS 壳层
 
-BigOS 阶段 13 在可写文件系统、page cache、广泛 `mmap` 或用户态 libc 之前，引入最小的只读 fd/VFS 边界。阶段 14 在该边界之上加入 bounded VMA metadata、`brk`、restricted anonymous mapping 和 VMA-backed syscall-buffer validation。
+BigOS 阶段 13 引入最小的只读 fd/VFS 边界。后续阶段保持这条 exFAT 读路径不变，并在其上加入 bounded VMA metadata、`brk`、restricted anonymous mapping、demand paging、可写 `/rw`、page/buffer cache、pipe/dup 和最小用户态运行时。
 
 ## VFS 边界
 
@@ -39,4 +39,5 @@ BigOS 阶段 13 在可写文件系统、page cache、广泛 `mmap` 或用户态 
 
 ## 非目标
 
-- fd/VFS 壳层不引入 regular file write syscall、目录变更、权限、cwd、相对路径解析、`dup`、`pipe`、`select`、`lseek`、`stat`、page cache、async I/O、广泛或 file-backed `mmap`、demand paging、COW、用户态 libc、SMP 或 UEFI backend。`brk` 与 restricted anonymous mapping 由后续 bounded VMA/user-memory API 覆盖。
+- 本阶段不引入 regular file write syscall、目录变更、权限、cwd、相对路径解析、`dup`、`pipe`、`select`、`lseek`、`stat`、page cache、demand paging、COW、用户态 libc、SMP 或 UEFI backend；其中一部分已由后续 bounded 能力覆盖，另一部分仍是非目标。
+- 当前项目非目标仍包括 async I/O、广泛或 file-backed `mmap`、完整 POSIX 文件系统/进程语义、动态链接、SMP 和可运行 UEFI backend。

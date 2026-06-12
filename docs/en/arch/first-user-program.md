@@ -45,9 +45,9 @@ Init markers are distinct from the smoke `BIGOS_USER_*` markers:
   prototype and a new normal-boot failure mode.
 - When init exits normally via `SYS_EXIT`, the kernel emits `BIGOS_INIT_EXIT`
   (after the shared `BIGOS_USER_EXIT`) and falls through to the existing
-  deferred reaper and idle scheduling, rather than panicking. Reclamation reuses
-  the existing zombie/reaper teardown without leaking the address space or
-  breaking scheduler invariants. PID-1 restart/adoption is not implemented.
+  deferred reaper and idle scheduling, rather than panicking. Stage 19 replaces
+  the one-shot init payload with a resident PID-1 that starts and restarts
+  `/bin/sh`, while orphan adoption remains bounded to the current process model.
 
 ## Process Lifecycle
 
@@ -86,10 +86,10 @@ before publication, and uses deterministic exec-failure status if the old image
 cannot be resumed after commit.
 
 The initial ELF user stack uses a minimal libc-like shape: `argc`, `argv[]`,
-`envp[]`, and bounded strings. It intentionally omits auxv, TLS, dynamic linker
-state, and user-space libc startup. Process-local file descriptors and the
-read-only VFS shell are kernel-managed lifecycle state, not objects constructed
-by the initial user stack.
+`envp[]`, and bounded strings consumed by the repository's freestanding crt0. It
+intentionally omits auxv, TLS, and dynamic linker state. Process-local file
+descriptors and the VFS shell are kernel-managed lifecycle state, not objects
+constructed by the initial user stack.
 
 ## Ring3 Entry
 
@@ -106,6 +106,9 @@ x86_64 runtime user-mode support is provided by `src/kernel/proc/user_mode.cc` /
 - `SYS_WRITE` validates the user buffer range, present/user bits, and maximum length, then emits `BIGOS_USER_WRITE_SYSCALL`; invalid user buffers fault the process and use the same safe reaper boundary.
 - `SYS_EXIT` marks the current process terminated/reap-pending, records the exit code, restores the kernel root, and enters the scheduler's deferred-reclamation exit path.
 - `SYS_WAIT` exposes the minimal wait ABI and uses the same `sched::can_block()` guard as other blocking-capable syscall paths. Ordinary user process syscalls can block when the scheduler context and IF state allow it; unsupported contexts return deterministic wait errors.
-- User-mode `#PF` is identified from the saved `CS` CPL, emits `BIGOS_USER_PAGE_FAULT`, marks the process faulted/reap-pending, and does not implement demand paging.
+- User-mode `#PF` is identified from the saved `CS` CPL. Supported VMA-backed
+  demand-zero and COW faults are handled by the bounded user fault path; invalid
+  or unsupported faults emit `BIGOS_USER_PAGE_FAULT`, mark the process
+  faulted/reap-pending, and use the safe reaper boundary.
 - Kernel-mode `#PF` keeps the existing diagnostic-only `BIGOS_PAGE_FAULT` semantics.
 - The idle-loop reaper releases the user address space and kernel stack once the active stack/root checks pass, then emits `BIGOS_USER_RECLAIMED`.

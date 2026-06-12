@@ -24,17 +24,22 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
   - `src/kernel/sched`: single-core scheduler, wait queues, timeout sleep,
     guarded IRQ-return preemption, and context-switch assembly.
   - `src/kernel/syscall`: `int 0x80` dispatcher and ABI.
-  - `src/kernel/proc`: minimal process model, fd table, VMA/heap metadata,
-    ring3 user-mode entry, safe teardown/reaping, and bounded ELF64
-    user-program loading. Flat first-user-program and filesystem-backed user
-    ELF entries remain default-off smoke consumers.
-  - `src/kernel/fs`: read-only VFS shell over exFAT, path lookup, fd-backed
-    open/read/close, and bounded file reads.
+  - `src/kernel/proc`: bounded process model, growable fd table, VMA/heap
+    metadata, demand-zero/COW handling, `fork`, signals, identity/time state,
+    ring3 user-mode entry, `execve`, resident PID-1 init launch, safe
+    teardown/reaping, and bounded ELF64 user-program loading. Flat
+    first-user-program, filesystem-backed user ELF, and userland runtime entries
+    remain default-off smoke consumers.
+  - `src/kernel/fs`: VFS shell over exFAT and RAM-backed `/rw`, path lookup,
+    fd-backed open/read/write/close/lseek/fsync, writable `bigfs`, block buffer
+    cache, and bounded file reads/writes.
   - `src/kernel/bigos`: low-level IO, panic, and utility helpers.
 - `src/mm`: buddy allocator, slab allocator, `kmalloc/free`, virtual memory, and
   the kernel direct map, including owned empty page-table reclamation.
 - `src/drivers`: VGA text mode, i8259 PIC, PIT timer, and ATA PIO block drivers.
 - `src/runtime`: startup assembly source objects.
+- `user`: freestanding user crt0/libc, PID-1 init, `/bin/sh`, small user
+  binaries, and default-off userland smoke source.
 - `tools`: developer helper scripts such as the boot disk install tool.
 - `cpp`: kernel C++ support library, KTL containers, `new/delete`, ABI stubs.
 - `include`: public kernel headers (`bigos/`, `drivers/`, `irq/`) and a small
@@ -104,14 +109,22 @@ xmake f --syscall_smoke=y      # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASS
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
 xmake f --fs_smoke=y           # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
 xmake f --user_elf_smoke=y     # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
+xmake f --demand_paging_smoke=y # BIGOS_DEMAND_PAGING_SMOKE -> BIGOS_DEMAND_PAGING_PASSED/FAILED
+xmake f --fork_cow_smoke=y     # BIGOS_FORK_COW_SMOKE -> BIGOS_FORK_COW_PASSED/FAILED
+xmake f --time_identity_smoke=y # BIGOS_TIME_IDENTITY_SMOKE -> BIGOS_TIME_IDENTITY_PASSED/FAILED
+xmake f --signal_smoke=y       # BIGOS_SIGNAL_SMOKE -> BIGOS_SIGNAL_PASSED/FAILED
+xmake f --writable_fs_smoke=y  # BIGOS_WRITABLE_FS_SMOKE -> BIGOS_WRITABLE_FS_PASSED/FAILED
+xmake f --pipe_smoke=y         # BIGOS_PIPE_SMOKE -> BIGOS_PIPE_PASSED/FAILED
+xmake f --userland_smoke=y     # BIGOS_USERLAND_SMOKE -> BIGOS_USERLAND_PASSED/FAILED
 ```
 
-`--user_program_smoke` and `--user_elf_smoke` enter default-off bounded ring3
-user-program paths; neither is part of a normal boot. `src/kernel/proc/**` is a
-normal kernel subsystem, while the smoke switches control flat/user-ELF entry
-threads and the optional user ELF artifact. `--user_elf_smoke` builds
-`build/bin/user/init.elf`, packages it as `/boot/user/init.elf`, reads it through
-the kernel VFS/exFAT path, and loads a bounded ELF64 `ET_EXEC` image.
+Normal boot packages `/boot/user/init.elf`, `/bin/sh`, and bounded `/bin/*`
+programs, enters resident PID-1 init, and starts `/bin/sh`; QEMU headless default
+validation observes `BIGOS_USER_EXEC`. `--user_program_smoke`,
+`--user_elf_smoke`, and `--userland_smoke` select default-off user-program
+validation paths in place of the normal init payload. `src/kernel/proc/**`,
+`src/kernel/fs/**`, and `user/**` are normal Stage 19 baseline subsystems; smoke
+switches only select extra validation entry points or marker programs.
 
 For bounded emulator smoke against memory markers:
 
@@ -202,9 +215,11 @@ Notes:
 - Process, fd/VFS, and user-memory boundaries: `include/bigos/proc.h`,
   `include/bigos/syscall.h`, `include/bigos/fs/vfs.h`, `src/kernel/fs/vfs.cc`,
   and `src/kernel/proc/proc.cc`. Keep process lifecycle, fd table, `brk`,
-  restricted anonymous mapping, and VMA-backed user-buffer validation bounded;
-  do not imply POSIX `fork`, writable files, page cache, broad `mmap`, demand
-  paging, COW, or user-space libc.
+  restricted anonymous mapping, demand paging, bounded `fork`/COW, signals,
+  time/identity, writable `/rw`, pipes/dup, userland runtime, and VMA-backed
+  user-buffer validation bounded; do not imply a complete POSIX process model,
+  broad file-backed `mmap`, dynamic linking, job control, full libc, persistent
+  writable filesystems, async I/O, SMP, or broad storage/device support.
 - Driver port IO and hardware state: `src/drivers/video/vga.cc`,
   `src/drivers/irqchip/i8259.cc`, `src/drivers/timer/pit.cc`,
   `src/kernel/bigos/io.cc` (VGA and COM1 serial).
@@ -222,17 +237,21 @@ Notes:
 - A single-core round-robin kernel-thread scheduler with cooperative switching,
   wait queues, timeout sleep, preemption-disable depth, and guarded IRQ-return
   timer preemption is implemented. The `int 0x80` syscall entry supports the
-  minimal diagnostic/user ABI plus bounded process `wait`, read-only fd/VFS
-  `open`/`read`/`close`, `brk`, and restricted anonymous mapping.
-- The process lifecycle core, safe user-process teardown/reaping, process-local
-  fd table, VMA-backed user-buffer validation, read-only VFS/exFAT path, flat
-  first-user-program smoke, and filesystem-backed ELF64 user-program smoke are
+  diagnostic/user ABI plus bounded process, fd/VFS, pipe/dup, time/identity,
+  signal, `brk`, restricted anonymous mapping, and `execve` calls used by the
+  minimal userland.
+- The process lifecycle core, growable process/fd tables, safe user-process
+  teardown/reaping, demand-zero materialization, bounded `fork`/COW, signal
+  delivery, VMA-backed user-buffer validation, exFAT plus RAM-backed writable
+  `/rw` VFS path, page/buffer cache, default-on PID-1 init, minimal user
+  crt0/libc, `/bin/sh`, packaged `/bin/*`, flat first-user-program smoke,
+  filesystem-backed ELF64 user-program smoke, and `userland_smoke` are
   implemented with explicit bounded/default-off smoke boundaries where
   applicable.
-- Not yet implemented: SMP, a full POSIX multi-process model, `fork`, COW,
-  general demand paging, broad `mmap` including file-backed mappings,
-  user-space libc, writable filesystems, page cache, broad storage/device
-  drivers, a UEFI backend, and release-grade CI automation.
+- Not yet implemented: SMP, a complete POSIX process/job-control model, broad
+  file-backed `mmap`, dynamic linking/shared libraries, a complete POSIX libc,
+  persistent full writable filesystems, async I/O, broad storage/device drivers,
+  a runnable UEFI backend, and release-grade CI automation.
 - Some code paths are scaffolding or TODOs. Inspect call sites before assuming a
   subsystem is wired into the normal boot path; smoke entry threads and runtime
   validation markers remain gated by build switches even when their shared
@@ -249,9 +268,15 @@ Notes:
   while preserving OpenSpec-required structural keywords when needed for tooling.
 - For reviews, focus on correctness, undefined behavior, bootability, memory
   safety, interrupt safety, and initialization order.
-- For documentation sync, keep Stage 9-14 bounded capabilities aligned with
+- For documentation sync, keep Stage 9-19 bounded capabilities aligned with
   `roadmap.md`, current source, and archived OpenSpec specs without describing
   BigOS as a complete POSIX or general-purpose OS.
+- Keep `roadmap.md` at project-planning level only: describe implemented
+  capabilities, missing capabilities, medium/long-term planning, and staged
+  development priorities. Do not add concrete entry points, file paths, commands,
+  validation markers, source-level implementation details, or archive/version
+  indexes to the roadmap; keep those details in dedicated docs, OpenSpec
+  artifacts, source-adjacent notes, or validation records.
 - When editing `docs/en` or `docs/zh`, update the corresponding language mirror
   in the same change and keep the directory structures isomorphic.
 - Do not revert unrelated local changes.

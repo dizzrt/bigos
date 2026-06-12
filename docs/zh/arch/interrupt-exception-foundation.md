@@ -45,7 +45,7 @@ kernel runtime IDT 使用 kernel-owned static storage，由 `irq::initIRQ()` 构
 
 所有 generated ISR entry 都进入统一 assembly common path。无 error-code vector 会压入 synthetic zero error code；有 error-code vector 保留 CPU push 的原始 error code。assembly path 保存通用寄存器，向 C++ `irq_dispatch(InterruptFrame*)` 传递统一 frame，并在允许返回的 IRQ 路径对称恢复寄存器后执行 `iretq`。
 
-当前 `InterruptFrame` 中的 `rsp` 是 ring-0 interrupt entry 可计算的 interrupted stack pointer；BigOS 尚未实现用户态 privilege transition，因此不声明完整用户态 `SS:RSP` 语义。
+foundation 阶段的 `InterruptFrame.rsp` 是 ring-0 interrupt entry 可计算的 interrupted stack pointer；后续用户态工作已加入 bounded ring3 transition 和 syscall frame 消费者，但本文档仍不定义完整的 architecture-neutral trap-frame ABI。
 
 ## Dispatch 策略
 

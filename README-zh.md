@@ -86,6 +86,7 @@ TTY 输入路径、具备 bounded timer semantics 的内核线程调度器、`in
 .
 |-- cpp               内核 C++ 支持库、KTL、libsupc++ 子集
 |-- include           公共内核头文件和小型 libc 风格头文件子集
+|-- user              freestanding 用户 crt0/libc、init、shell、bin 与 smoke
 |-- src               boot、kernel、drivers、mm、runtime 等实现源码
 |   |-- arch/x86/boot x86 引导代码、MBR/DBR 和 ELF 加载器
 |   |-- drivers       VGA、i8259 PIC、PIT timer、ATA PIO 等硬件驱动
@@ -174,6 +175,12 @@ xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSE
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
 xmake f --fs_smoke=y          # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
 xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
+xmake f --demand_paging_smoke=y # BIGOS_DEMAND_PAGING_SMOKE -> BIGOS_DEMAND_PAGING_PASSED/FAILED
+xmake f --fork_cow_smoke=y    # BIGOS_FORK_COW_SMOKE -> BIGOS_FORK_COW_PASSED/FAILED
+xmake f --time_identity_smoke=y # BIGOS_TIME_IDENTITY_SMOKE -> BIGOS_TIME_IDENTITY_PASSED/FAILED
+xmake f --signal_smoke=y      # BIGOS_SIGNAL_SMOKE -> BIGOS_SIGNAL_PASSED/FAILED
+xmake f --writable_fs_smoke=y # BIGOS_WRITABLE_FS_SMOKE -> BIGOS_WRITABLE_FS_PASSED/FAILED
+xmake f --pipe_smoke=y        # BIGOS_PIPE_SMOKE -> BIGOS_PIPE_PASSED/FAILED
 xmake f --userland_smoke=y    # BIGOS_USERLAND_SMOKE -> BIGOS_USERLAND_PASSED/FAILED
 ```
 
@@ -435,26 +442,27 @@ timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
 - `src/kernel/syscall/syscall.cc` / `include/bigos/syscall.h`：`int 0x80`
   dispatcher 和最小寄存器 ABI（number 在 `rax`，参数在 `rdi/rsi/rdx/r10/r8/r9`，
   返回值在 `rax`）。实现 `SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE`、
-  `SYS_EXIT`、`SYS_WAIT`、只读 fd/VFS `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`、
-  `SYS_BRK` 和 restricted `SYS_MAP_ANON`；未知 number 返回 `SYS_ENOSYS`。
+  `SYS_EXIT`、`SYS_WAIT`、fd/VFS `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`、`SYS_BRK`、
+  restricted `SYS_MAP_ANON`、`SYS_FORK`、时间/身份、signal、`lseek`、pipe/dup、
+  fsync/mkdir/unlink 和 `SYS_EXECVE`；未知 number 返回 `SYS_ENOSYS`。
   `syscall_smoke` 开关从 ring0 验证诊断 dispatch。
 
 ### 进程与用户态
 
-生命周期核心作为普通内核子系统编译。`user_program_smoke` 和 `user_elf_smoke`
-只控制默认关闭的 smoke entry thread 和 user ELF artifact。
+生命周期核心作为普通内核子系统编译。普通启动进入常驻 PID-1 init 和 `/bin/sh`；
+`user_program_smoke`、`user_elf_smoke` 和 `userland_smoke` 只选择默认关闭的验证 payload。
 
-- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`：最小 bounded process table、
-  PID 分配、parent/child 链接、wait status、zombie/reap-pending lifecycle、
+- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`：bounded process model、PID
+  分配、parent/child 链接、wait status、zombie/reap-pending lifecycle、
   process-local fd table、VMA/heap metadata、VMA-backed user-buffer validation、
-  `brk`、restricted anonymous mapping、用户地址空间派生、安全 teardown/reaping、
-  flat embedded 用户镜像映射，以及面向 `/boot/user/init.elf` 的 bounded ELF64
-  `ET_EXEC` prepare/exec 路径。两个 smoke 路径都验证 bounded 用户 syscall 闭环
-  （`BIGOS_USER_ENTER` / `BIGOS_USER_EXIT`）。
+  `brk`、restricted anonymous mapping、demand-zero 物化、bounded `fork`/COW、
+  signal 状态、用户地址空间派生、安全 teardown/reaping、flat embedded 用户镜像映射，
+  以及面向 `/boot/user/init.elf`、`execve`、PID-1 init 和默认关闭用户态 smoke 的
+  bounded ELF64 `ET_EXEC` prepare/exec 路径。
 - `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
   `include/bigos/user_mode.h`：GDT/TSS/RSP0 设置和 `iretq` ring3 entry。
-- 尚未实现 demand paging、COW、`fork`、file-backed `mmap` 和用户态 libc；`#PF`
-  handler 对用户态页错误记录受控 marker，仅处理受限 stack-growth hook，并把进程清理交给 safe reaper。
+- Demand paging 与 COW 仅针对当前 bounded anonymous 用户映射实现；广泛
+  file-backed `mmap`、动态链接、作业控制和完整 POSIX libc 仍不在范围内。
 
 ### 显示与 IO
 
@@ -479,9 +487,9 @@ VGA 文本模式和 COM1 串口是当前输出后端。
 - 保持代码 freestanding-safe。不要依赖托管 libc、异常、RTTI、OS 服务，
   或尚未初始化的动态分配路径。
 - 将引导地址、链接地址、页表布局、中断向量和磁盘偏移视为关键设计约束。
-- 描述 fd/VFS、process lifecycle 和 VMA/user-memory 时保持 bounded 边界：只读文件、
-  同步 I/O、restricted anonymous mapping、无 page cache、无广泛 POSIX 进程模型、
-  无 general demand paging。
+- 描述 fd/VFS、process lifecycle 和 VMA/user-memory 时保持 bounded 边界：同步 I/O、
+  RAM-backed 可写 `/rw`、restricted anonymous/file mapping、bounded demand paging/COW、
+  无广泛 POSIX 进程模型、无动态链接、无作业控制、无广泛 file-backed `mmap`。
 - 优先使用小而显式的硬件相关代码。
 - 仔细验证初始化顺序；许多子系统依赖内存、分页或描述符表先就绪。
 - 修改 Bochs 或磁盘镜像设置时，请记录本地路径假设。

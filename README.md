@@ -103,6 +103,7 @@ Not implemented or still skeletal:
 .
 |-- cpp               kernel C++ support library, KTL, libsupc++ subset
 |-- include           public kernel headers and small libc-style header subset
+|-- user              freestanding user crt0/libc, init, shell, bins, and smoke
 |-- src               implementation sources for boot, kernel, drivers, mm, runtime
 |   |-- arch/x86/boot x86 boot code, MBR/DBR, and ELF loader
 |   |-- drivers       hardware drivers such as VGA, i8259 PIC, PIT, and ATA PIO
@@ -194,6 +195,12 @@ xmake f --syscall_smoke=y     # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSE
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
 xmake f --fs_smoke=y          # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
 xmake f --user_elf_smoke=y    # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
+xmake f --demand_paging_smoke=y # BIGOS_DEMAND_PAGING_SMOKE -> BIGOS_DEMAND_PAGING_PASSED/FAILED
+xmake f --fork_cow_smoke=y    # BIGOS_FORK_COW_SMOKE -> BIGOS_FORK_COW_PASSED/FAILED
+xmake f --time_identity_smoke=y # BIGOS_TIME_IDENTITY_SMOKE -> BIGOS_TIME_IDENTITY_PASSED/FAILED
+xmake f --signal_smoke=y      # BIGOS_SIGNAL_SMOKE -> BIGOS_SIGNAL_PASSED/FAILED
+xmake f --writable_fs_smoke=y # BIGOS_WRITABLE_FS_SMOKE -> BIGOS_WRITABLE_FS_PASSED/FAILED
+xmake f --pipe_smoke=y        # BIGOS_PIPE_SMOKE -> BIGOS_PIPE_PASSED/FAILED
 xmake f --userland_smoke=y    # BIGOS_USERLAND_SMOKE -> BIGOS_USERLAND_PASSED/FAILED
 ```
 
@@ -476,31 +483,31 @@ wait queues, timeout sleep, and guarded IRQ-return timer preemption.
 - `src/kernel/syscall/syscall.cc` / `include/bigos/syscall.h`: the `int 0x80`
   dispatcher and minimal register ABI (number in `rax`, args in
   `rdi/rsi/rdx/r10/r8/r9`, return in `rax`). Implements `SYS_DEBUG_WRITE`,
-  `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, `SYS_WAIT`, read-only fd/VFS
-  `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`, `SYS_BRK`, and restricted
-  `SYS_MAP_ANON`; unknown numbers return `SYS_ENOSYS`. The `syscall_smoke`
-  switch exercises diagnostic dispatch from ring0.
+  `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, `SYS_WAIT`, fd/VFS
+  `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`, `SYS_BRK`, restricted `SYS_MAP_ANON`,
+  `SYS_FORK`, time/identity, signal, `lseek`, pipe/dup, fsync/mkdir/unlink, and
+  `SYS_EXECVE`; unknown numbers return `SYS_ENOSYS`. The `syscall_smoke` switch
+  exercises diagnostic dispatch from ring0.
 
 ### Process And User Mode
 
-The lifecycle core is compiled as a normal kernel subsystem. The
-`user_program_smoke` and `user_elf_smoke` switches only control default-off smoke
-entry threads and the user ELF artifact.
+The lifecycle core is compiled as a normal kernel subsystem. Normal boot enters
+resident PID-1 init and `/bin/sh`; `user_program_smoke`, `user_elf_smoke`, and
+`userland_smoke` only select default-off validation payloads.
 
-- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a minimal bounded process
-  table, PID allocation, parent/child linkage, wait status, zombie/reap-pending
+- `src/kernel/proc/proc.cc` / `include/bigos/proc.h`: a bounded process model,
+  PID allocation, parent/child linkage, wait status, zombie/reap-pending
   lifecycle, process-local fd table, VMA/heap metadata, VMA-backed user-buffer
-  validation, `brk`, restricted anonymous mapping, user address-space
-  derivation, safe teardown/reaping, mapping of a flat embedded user image, and
-  a bounded ELF64 `ET_EXEC` prepare/exec path for `/boot/user/init.elf`. Both
-  smoke paths exercise bounded user syscall loops (`BIGOS_USER_ENTER` /
-  `BIGOS_USER_EXIT`).
+  validation, `brk`, restricted anonymous mapping, demand-zero materialization,
+  bounded `fork`/COW, signal state, user address-space derivation, safe
+  teardown/reaping, mapping of a flat embedded user image, and bounded ELF64
+  `ET_EXEC` prepare/exec paths for `/boot/user/init.elf`, `execve`, PID-1 init,
+  and default-off user smokes.
 - `src/kernel/proc/user_mode.cc` / `src/kernel/proc/user_mode.s` /
   `include/bigos/user_mode.h`: GDT/TSS/RSP0 setup and the `iretq` ring3 entry.
-- Demand paging, COW, `fork`, file-backed `mmap`, and user-space libc are not
-  implemented; the `#PF` handler records a controlled marker for user faults,
-  handles only bounded stack-growth hooks where supported, and hands process
-  cleanup to the safe reaper.
+- Demand paging and COW are implemented only for the current bounded anonymous
+  user mappings; broad file-backed `mmap`, dynamic linking, job control, and a
+  complete POSIX libc remain out of scope.
 
 ### Display And IO
 
@@ -527,8 +534,9 @@ The project provides a small amount of freestanding C++ infrastructure.
 - Treat boot addresses, linker addresses, page-table layout, interrupt vectors,
   and disk offsets as design-critical.
 - Keep fd/VFS, process lifecycle, and VMA/user-memory descriptions bounded:
-  read-only files, synchronous I/O, restricted anonymous mappings, no page cache,
-  no broad POSIX process model, and no general demand paging.
+  synchronous I/O, RAM-backed writable `/rw`, restricted anonymous/file mapping,
+  bounded demand paging/COW, no broad POSIX process model, no dynamic linking,
+  no job control, and no broad file-backed `mmap`.
 - Prefer small, explicit hardware-facing code.
 - Validate initialization order carefully; many subsystems depend on memory,
   paging, or descriptor tables being available first.

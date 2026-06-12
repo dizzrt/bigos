@@ -19,7 +19,7 @@ Core primitives:
 - `bool map_page(uint64_t vaddr, uint64_t phys, PageAttr attr)`: creates one 4 KiB mapping, reusing recursive self-mapping traversal and missing-level page-table allocation. It rolls back newly created intermediate levels and returns `false` on missing-level allocation failure. For user mappings, intermediate entries inherit the user bit so the leaf is reachable; NX is encoded only in the leaf PTE.
 - `void unmap_page(uint64_t vaddr)`: clears the PTE and executes `invlpg` for that address, matching the invalidation semantics of `rollback_kernel_range()`.
 - `bool map_page_in_root(uint64_t root, uint64_t vaddr, uint64_t phys, PageAttr attr)`: edits the low-half page tables of the specified derived root through the direct map without writing CR3, allowing the user-program loader to populate code/data/BSS/stack while the kernel address space remains active.
-- `bool user_range_mapped(uint64_t root, uint64_t vaddr, uint64_t len)`: verifies that a bounded user range is below the canonical user half and that every page has present/user PTEs. It does not implement demand paging.
+- `bool user_range_mapped(uint64_t root, uint64_t vaddr, uint64_t len)`: verifies that a bounded user range is below the canonical user half and that every page has present/user PTEs. This stage does not implement demand paging; later process/VMA code adds bounded demand-zero and COW fault handling.
 
 These primitives are non-interrupt-context-only. They use `InterruptGuard` while writing entries to mask same-CPU maskable IRQ interleaving, must not be called from IRQ handlers, and must not trigger dynamic allocation inside IRQ handlers.
 
@@ -57,7 +57,7 @@ The current long-mode entry path in `src/arch/x86/boot/boot.s` sets only `LME` (
 - The loader first builds low-half mappings with `derive_user_address_space_root()` and `map_page_in_root()`.
 - Before entering ring3, it records the current kernel root, sets TSS/RSP0, then writes CR3 to activate the user root.
 - `SYS_EXIT` or a controlled user fault records process state and restores the kernel root without immediately freeing the current stack/process object.
-- Ordinary derivation helpers do not write CR3, enter ring3, or trigger demand paging.
+- Ordinary derivation helpers do not write CR3, enter ring3, or trigger later-stage demand paging.
 
 ## Validation
 

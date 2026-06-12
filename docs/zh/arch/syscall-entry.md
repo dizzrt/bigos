@@ -66,13 +66,13 @@ syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU excep
 
 ## 验证：默认关闭构建开关 + 确定性 marker
 
-默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）继续从 ring0 验证 `SYS_DEBUG_WRITE`、`SYS_GET_TICK` 和未知 number。新增默认关闭的 `user_program_smoke` 会创建首个用户进程，从 CPL3 调用 `SYS_WRITE` / `SYS_EXIT`，输出 `BIGOS_USER_*` marker。默认 boot 不创建用户进程。
+默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）继续从 ring0 验证 `SYS_DEBUG_WRITE`、`SYS_GET_TICK` 和未知 number。额外默认关闭的 smoke 覆盖 flat 首个用户程序、filesystem-backed user ELF、demand paging、fork/COW、time/identity、signals、writable FS、pipes 和 userland runtime。普通启动现在会打包 `/boot/user/init.elf`，进入常驻 PID-1 init，并启动 `/bin/sh`；默认 headless 验证观察 `BIGOS_USER_EXEC`。
 
 ## 本阶段非目标
 
 - 不切换到 `syscall`/`sysret` MSR 快速路径。
-- 不实现 fork、signal、用户线程、POSIX-wide syscall 语义、可写文件或 fd duplication。
-- 不实现 demand paging / COW，`#PF` 保持诊断-only。
+- 不把当前 bounded syscall 集解释为完整 POSIX-wide syscall 语义、用户线程、作业控制、动态链接或完整 libc。
+- 不把 demand paging/COW 扩展到当前 bounded anonymous mapping 之外，也不引入广泛 file-backed `mmap`。
 - 不对 syscall 以外的 IDT gate 放宽 DPL；不从 syscall path 发送 i8259 EOI。
 
 ## 横切工程化项

@@ -87,13 +87,13 @@ The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU
 
 ## Validation: Default-Off Build Switches And Deterministic Markers
 
-The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. The additional default-off `user_program_smoke` creates the first user process, calls `SYS_WRITE` / `SYS_EXIT` from CPL3, and emits `BIGOS_USER_*` markers. Default boot does not create a user process.
+The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. Additional default-off smokes cover the flat first user program, filesystem-backed user ELF, demand paging, fork/COW, time/identity, signals, writable FS, pipes, and userland runtime. Normal boot now packages `/boot/user/init.elf`, enters resident PID-1 init, and starts `/bin/sh`; default headless validation observes `BIGOS_USER_EXEC`.
 
 ## Non-Goals For This Stage
 
 - Do not switch to the `syscall`/`sysret` MSR fast path.
-- Do not implement fork, signals, user threads, POSIX-wide syscall semantics, writable files, or fd duplication.
-- Do not implement demand paging / COW. `#PF` remains diagnostic-only.
+- Do not reinterpret the bounded syscall set as complete POSIX-wide syscall semantics, user threads, job control, dynamic linking, or a full libc.
+- Do not broaden demand paging/COW beyond the current bounded anonymous mappings or add broad file-backed `mmap`.
 - Do not relax DPL for IDT gates other than syscall; do not send i8259 EOI from the syscall path.
 
 ## Cross-Cutting Engineering Items

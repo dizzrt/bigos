@@ -25,11 +25,18 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO 加只读 exFAT backend 上的 VFS open/read/release 路径。 |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | 以 lifecycle-core 进程运行 embedded flat image；smoke entry 仍默认关闭。 |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | 打包 `/boot/user/init.elf` 并通过可复用 ELF exec prepare 路径运行；smoke entry 仍默认关闭。 |
-| `default-init` | _(无)_ | `BIGOS_INIT_EXIT` | 30s | 不加任何 smoke 开关的默认构建；normal boot 打包 `/boot/user/init.elf` 并通过 `launch_init` 进入 ring3。 |
+| `demand-paging` | `--demand_paging_smoke=y` | `BIGOS_DEMAND_PAGING_PASSED` | 30s | VMA-backed lazy anonymous 物化和确定性 fault 处理。 |
+| `fork-cow` | `--fork_cow_smoke=y` | `BIGOS_FORK_COW_PASSED` | 30s | Bounded `fork` 与 anonymous COW split 语义。 |
+| `time-identity` | `--time_identity_smoke=y` | `BIGOS_TIME_IDENTITY_PASSED` | 20s | 墙钟和 pid/ppid/uid/gid syscall 路径。 |
+| `signals` | `--signal_smoke=y` | `BIGOS_SIGNAL_PASSED` | 30s | 最小 signal queue、mask、handler 和投递路径。 |
+| `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`、page/buffer cache、写后读回、fsync 和权限。 |
+| `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
+| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、errno、fork/exec/wait、pipe、重定向和 malloc。 |
+| `default-init` | _(无)_ | `BIGOS_USER_EXEC` | 40s | 不加任何 smoke 开关的默认构建；normal boot 打包 PID-1 init、`/bin/sh` 和 bounded `/bin/*`。 |
 
 每个 case 只启用表中列出的 smoke 开关，并在构建前显式关闭其他 smoke 开关。runner 之外，所有 runtime smoke 选项仍保持默认关闭，除非开发者通过 `xmake f ...=y` 显式配置。
 
-`default-init` 是首个不依赖任何 smoke 开关的行为断言 case：它以默认配置（所有 smoke 选项设为 `=n`）构建，并以内核 `BIGOS_INIT_ENTER` 与 `BIGOS_INIT_EXIT` 串口 marker 作为通过判据，而非断言 C++ 源码字符串。缺失这些 marker 即判定为失败，不会被重新解读为通过。init 二进制自身的 stdout 输出断言留待后续阶段（待用户态有稳定写出路径后）引入；该 case 启动逐步替代源码字符串契约的「行为断言测试」轨道。
+`default-init` 是不依赖任何 smoke 开关的行为断言 case：它以默认配置（所有 smoke 选项设为 `=n`）构建，并断言 normal boot 到达常驻 PID-1 init 和 `/bin/sh`，以 `BIGOS_USER_EXEC` 作为 QEMU headless marker。缺失该 marker 即判定为失败，不会被重新解读为通过。
 
 `blocking-primitives` case 在最终 pass marker 前还会输出 `BIGOS_BLOCKING_WAIT_BLOCKED`、`BIGOS_BLOCKING_WAKE_SENT`、`BIGOS_BLOCKING_WAIT_RESUMED`、`BIGOS_BLOCKING_TIMEOUT_BLOCKED` 与 `BIGOS_BLOCKING_TIMEOUT_EXPIRED` 中间 marker。它使用 synthetic TTY producer，因此 QEMU headless 自动验证不依赖手工键盘输入；若执行可选手工键盘验证，需要单独记录。
 
@@ -40,12 +47,10 @@ entry thread 与 marker 行为；source-level checks 覆盖 PID 唯一性、有�
 parent/child 链接、zombie-to-reap、wait wakeup、exec rollback、bounded `argv`/`envp`、
 active-root teardown rejection 和 current-stack release deferral。
 
-fd/VFS 壳层通过 source-level checks 加现有 `filesystem-read` 与 `filesystem-user-elf`
-runtime case 验证。`filesystem-read` case 覆盖 VFS root 初始化、`open`/`read`/`release`、
-EOF clamp 和既有 `/boot/fs_smoke.txt` COM1 marker。Source-level checks 覆盖 bad fd、
-double close、fd table capacity、invalid user buffer、exec inheritance、close-on-exec
-以及 exit/reap close-all。fd/VFS syscall 使用 DPL=3 `int 0x80` trap gate，并且必须在同步
-storage I/O 前通过 `sched::can_block()`。
+fd/VFS 壳层通过 source-level checks 加 `filesystem-read`、`filesystem-user-elf`、
+`writable-fs`、`pipe` 和 `userland-runtime` runtime case 验证。只读 exFAT 路径仍是
+boot/image 的 source of truth，而 `/rw` 与 pipe 语义是 bounded runtime 能力。fd/VFS
+syscall 使用 DPL=3 `int 0x80` trap gate，并且必须在同步 storage I/O 或阻塞 pipe 操作前通过 `sched::can_block()`。
 
 ## 手工单 Case 流程
 

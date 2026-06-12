@@ -43,9 +43,8 @@ init marker 与 smoke `BIGOS_USER_*` marker 区分开：
   （`BIGOS_PANIC ... source=launch_init`）。这是有意的 PID-1 语义雏形，也是一个
   新的 normal-boot 失败模式。
 - init 通过 `SYS_EXIT` 正常退出时，内核在共享的 `BIGOS_USER_EXIT` 之后发出
-  `BIGOS_INIT_EXIT`，并落入现有延后 reaper 与 idle 调度，而非 panic。回收复用现有
-  zombie/reaper teardown，不泄漏地址空间、不破坏调度器不变量。本阶段不实现 PID-1
-  重启/收养。
+  `BIGOS_INIT_EXIT`，并落入现有延后 reaper 与 idle 调度，而非 panic。Stage 19 将
+  one-shot init payload 替换为常驻 PID-1，由它启动并重启 `/bin/sh`；孤儿收养仍限定在当前进程模型内。
 
 ## 进程生命周期
 
@@ -79,9 +78,9 @@ program header、W+X segment、重叠 segment、入口点不在 executable segme
 commit 前准备新 image，发布前失败会 rollback；若 commit 后旧 image 已无法恢复，则通过
 确定性的 exec failure status 终止当前进程。
 
-ELF 初始用户栈使用最小 libc-like 形状：`argc`、`argv[]`、`envp[]` 和 bounded 字符串。
-它刻意省略 auxv、TLS、dynamic linker 状态和 user-space libc startup。Process-local
-file descriptor 与只读 VFS 壳层是内核管理的 lifecycle 状态，不由初始用户栈构造。
+ELF 初始用户栈使用最小 libc-like 形状：`argc`、`argv[]`、`envp[]` 和 bounded 字符串，
+由仓库内的 freestanding crt0 消费。它刻意省略 auxv、TLS 和 dynamic linker 状态。
+Process-local file descriptor 与 VFS 壳层是内核管理的 lifecycle 状态，不由初始用户栈构造。
 
 ## ring3 进入
 
@@ -98,6 +97,8 @@ x86_64 运行期 user mode 支持由 `src/kernel/proc/user_mode.cc` / `user_mode
 - `SYS_WRITE` 验证用户 buffer 范围、present/user bit 和最大长度，然后输出 `BIGOS_USER_WRITE_SYSCALL`；非法用户 buffer 会 fault 当前进程，并使用同一个 safe reaper 边界。
 - `SYS_EXIT` 标记当前进程 terminated/reap-pending、记录 exit code、恢复 kernel root，并进入 scheduler 延后回收退出路径。
 - `SYS_WAIT` 暴露最小 wait ABI，并与其它可阻塞 syscall 路径使用同一个 `sched::can_block()` guard。普通用户进程 syscall 在 scheduler context 和 IF 状态允许时可以阻塞；不支持的上下文返回确定性 wait 错误。
-- 用户态 `#PF` 通过 saved `CS` 的 CPL 识别，输出 `BIGOS_USER_PAGE_FAULT`，标记进程 faulted/reap-pending，并不做 demand paging。
+- 用户态 `#PF` 通过 saved `CS` 的 CPL 识别。受支持的 VMA-backed demand-zero 与 COW
+  fault 由 bounded 用户 fault 路径处理；非法或不支持的 fault 输出
+  `BIGOS_USER_PAGE_FAULT`，标记进程 faulted/reap-pending，并使用 safe reaper 边界。
 - 内核态 `#PF` 保持既有 `BIGOS_PAGE_FAULT` 诊断-only 语义。
 - idle-loop reaper 在 active stack/root 检查通过后释放用户地址空间和 kernel stack，然后输出 `BIGOS_USER_RECLAIMED`。

@@ -195,7 +195,7 @@ Candidate follow-up changes:
 Future UEFI debug entries must use separate names and separate artifacts, for example:
 
 - `xmake run qemu-ovmf`
-- `python3 tools/uefi_boot_debug.py run`
+- `uv run python tools/uefi_boot_debug.py run`
 
 Future UEFI artifact isolation policy:
 

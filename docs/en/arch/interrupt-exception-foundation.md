@@ -45,7 +45,7 @@ This change does not alter these layouts or ABIs:
 
 All generated ISR entries enter one assembly common path. Vectors without a CPU error code push a synthetic zero error-code slot; vectors with a CPU error code preserve the original CPU-pushed value. The assembly path saves general-purpose registers, passes a unified frame to C++ `irq_dispatch(InterruptFrame*)`, restores registers symmetrically on IRQ paths that may return, and finishes with `iretq`.
 
-The current `InterruptFrame.rsp` is the interrupted stack pointer computed for ring-0 interrupt entry. BigOS has not yet implemented a general user privilege transition in this foundation, so it does not declare full user `SS:RSP` semantics here.
+The foundation-stage `InterruptFrame.rsp` was the interrupted stack pointer computed for ring-0 interrupt entry. Later user-mode work adds the bounded ring3 transition and syscall frame consumers; this foundation document still does not define a complete architecture-neutral trap-frame ABI.
 
 ## Dispatch Policy
 

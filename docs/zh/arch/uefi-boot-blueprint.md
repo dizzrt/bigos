@@ -207,7 +207,7 @@ UEFI `GetMemoryMap` 初步映射方向：
 未来 UEFI 调试入口必须使用独立命名和独立产物，例如：
 
 - `xmake run qemu-ovmf`
-- `python3 tools/uefi_boot_debug.py run`
+- `uv run python tools/uefi_boot_debug.py run`
 
 未来 UEFI 产物隔离策略：
 

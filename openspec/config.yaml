@@ -5,27 +5,27 @@ context: |
 
   Domain:
   - The repository is a toy/research OS kernel, not an application service.
+  - The current runnable backend is x86_64 Legacy BIOS/MBR/exFAT. UEFI,
+    multi-architecture backends, and SMP remain future or parallel tracks.
   - The kernel boots from an x86 disk image, enters long mode, loads an ELF64
     kernel named "kernel", and jumps to the higher-half kernel address
     0xffffffff80000000.
-  - The current implementation covers bootstrapping, VGA text and COM1 serial
-    output, a kernel-owned IDT with exception/IRQ/syscall dispatch, i8259 PIC
-    support, a PIT timer IRQ0 with a monotonic tick, keyboard scan-code decode
-    feeding a TTY/console input path, a fairly complete early kernel memory
-    management stack (buddy, slab/kmalloc, kernel virtual memory, direct map,
-    owned empty page-table reclamation), a single-core scheduler with wait
-    queues, timeout sleep, preemption-disable guards, and bounded IRQ-return
-    timer preemption, an `int 0x80` syscall entry with a minimal ABI, process
-    lifecycle core, read-only fd/VFS services, default-off ring3 user-program
-    smokes, a read-only ATA PIO block/exFAT path, a bounded filesystem-backed
-    ELF64 user-program loader, and bounded VMA-backed user-memory validation.
+  - The current Stage 19 baseline covers bootstrapping, VGA text and COM1 serial
+    output, a kernel-owned IDT with exception/IRQ/syscall dispatch, i8259 PIC,
+    PIT IRQ0 tick, keyboard TTY/console input, buddy/slab/kmalloc/virtual memory,
+    direct map, owned empty page-table reclamation, a single-core scheduler,
+    `int 0x80` syscall dispatch, process lifecycle, demand paging, bounded
+    `fork`/COW, signals, time/identity, fd/VFS, pipe/dup, RAM-backed writable
+    `/rw`, page/buffer cache, `execve`, default PID-1 init, minimal user
+    crt0/libc, `/bin/sh`, packaged `/bin/*`, and default-off runtime smokes.
 
   Tech stack:
   - C++17 and C17 in freestanding mode.
-  - x86/x86_64 assembly for boot, interrupt stubs, and runtime startup objects.
+  - x86/x86_64 assembly for boot, interrupt stubs, context switching, and runtime
+    startup objects.
   - xmake is the primary build system.
   - x86_64-elf-gcc is the expected cross toolchain.
-  - Bochs is used for local emulation.
+  - QEMU and Bochs are supported for the current Legacy BIOS path.
   - Python scripts are auxiliary build/install helpers, not the core runtime.
   - Python-related commands should run through uv, for example `uv run pytest`,
     `uv run python <script>`, `uv run ruff check`, and `uv run pyright`.
@@ -33,98 +33,83 @@ context: |
   Major directories:
   - src/arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, and
     ELF loader.
-  - src/kernel: kernel entry plus subsystem subdirectories: irq (IDT, exception
-    and IRQ dispatch, ISR stubs), timer (monotonic tick), terminal (console,
-    keyboard decode, TTY input), sched (single-core scheduler, wait queues,
-    timeout sleep, preemption guards, and context-switch assembly), syscall
-    (`int 0x80` dispatch), proc (process model, fd table, VMA/heap metadata,
-    ring3 user-mode entry, safe teardown/reaping, and bounded ELF64 loader), fs
-    (read-only VFS shell over exFAT, path lookup, fd-backed open/read/close, and
-    bounded reads), bigos (low-level IO, panic, utils), and string functions.
+  - src/kernel: kernel entry plus subsystem subdirectories: irq, timer, terminal,
+    sched, syscall, proc, fs, ipc, signal, time, bigos, and string functions.
+  - src/kernel/proc: process model, growable fd table, VMA/heap metadata,
+    demand-zero/COW handling, `fork`, signals integration, ring3 entry, `execve`,
+    PID-1 init launch, safe teardown/reaping, and bounded ELF64 loader.
+  - src/kernel/fs: exFAT read path, RAM-backed `bigfs` mounted at `/rw`, VFS
+    open/read/write/close/lseek/fsync, page/buffer cache, and bounded file IO.
   - src/mm: buddy physical page allocator with an early metadata arena,
-    slab/kmalloc allocator (reclaim, large allocations, debug guards, stats),
-    kernel virtual memory area/page-table mapping, kernel direct map, public
-    memory API, and a switchable memory runtime self-test.
+    slab/kmalloc allocator, kernel virtual memory, kernel direct map, public
+    memory API, and switchable memory runtime self-test.
   - src/drivers: VGA text-mode driver, i8259 PIC driver, PIT timer driver, and
     ATA PIO block driver.
   - src/runtime: startup objects such as crt0, crti, and crtn.
-  - tools: developer helper scripts such as the boot disk-image install helper and
-    boot_debug.py (raw image build, Bochs config generation, serial-marker smoke).
+  - user: freestanding user crt0/libc, PID-1 init, `/bin/sh`, small `/bin/*`
+    programs, and the default-off userland smoke.
+  - tools: developer helper scripts such as boot_debug.py.
   - cpp: small kernel C++ support library, KTL containers, new/delete, and minimal
     libsupc++/ABI support.
-  - include: public kernel headers (bigos/{memory,sched,thread,syscall,proc,
-    user_mode,timer,tty,console,keyboard,panic}.h, drivers/timer/pit.h, irq) and a
-    small libc-style header subset.
+  - include: public kernel headers and a small libc-style header subset.
+  - docs: bilingual project documentation with docs/en canonical and docs/zh as
+    the Simplified Chinese mirror.
   - tests: validation tests and local test assets.
 
   Current maturity:
   - The project has iterated from an early boot/kernel skeleton to a single-core
-    freestanding kernel with a minimal user-mode loop.
+    bounded userland baseline.
   - Boot, VGA/serial output, kernel-owned IDT and exception/IRQ/syscall dispatch,
-    PIC, PIT timer IRQ0 with a monotonic tick, keyboard decode plus TTY/console
-    input, buddy allocation, slab allocation, kernel virtual memory, owned empty
-    page-table reclamation, and the kernel direct map are implemented and
-    covered by switchable runtime smokes plus source-level tests.
-  - A single-core round-robin kernel-thread scheduler with cooperative switching,
-    wait queues, timeout sleep, preemption-disable depth, and guarded IRQ-return
-    timer preemption is implemented. The `int 0x80` syscall entry supports the
-    minimal diagnostic/user ABI plus bounded process wait, read-only fd/VFS
-    open/read/close, brk, and restricted anonymous mapping.
-  - The process lifecycle core, safe user-process teardown/reaping,
-    process-local fd table, VMA-backed user-buffer validation, read-only
-    ATA PIO/exFAT VFS path, default-off flat first-user-program smoke, and
-    default-off filesystem-backed ELF64 user-program smoke are implemented with
-    explicit bounded/default-off smoke boundaries where applicable.
-  - Not yet implemented: SMP, a full POSIX multi-process model, fork, COW,
-    general demand paging, broad mmap including file-backed mappings,
-    user-space libc, writable filesystems, page cache, broad storage/device
-    drivers, a UEFI backend, and release-grade CI automation.
-  - Several helper scripts and some paths are placeholders or gated by build
-    switches; validate code paths before assuming they are wired into normal
-    boot. Smoke entry threads and runtime validation markers remain gated even
-    when their shared subsystems compile normally.
+    PIC, PIT timer IRQ0, keyboard decode plus TTY/console input, buddy allocation,
+    slab allocation, kernel virtual memory, owned empty page-table reclamation,
+    and the kernel direct map are implemented and covered by switchable smokes or
+    source-level checks.
+  - A single-core round-robin scheduler with cooperative switching, wait queues,
+    timeout sleep, preemption-disable depth, and guarded IRQ-return timer
+    preemption is implemented.
+  - The `int 0x80` syscall entry supports the bounded diagnostic/user ABI plus
+    process wait/exit, fd/VFS open/read/write/close/lseek/fsync, pipe/dup, brk,
+    restricted anonymous mapping, `fork`, time/identity, signals, mkdir/unlink,
+    and `execve`.
+  - Normal boot packages `/boot/user/init.elf`, `/bin/sh`, and bounded `/bin/*`,
+    enters resident PID-1 init, and starts `/bin/sh`. Default-off smokes cover
+    flat user program, filesystem-backed user ELF, demand paging, fork/COW,
+    time/identity, signals, writable FS, pipe, and userland runtime markers.
+  - Not yet implemented: SMP, a complete POSIX process/job-control model, broad
+    file-backed `mmap`, dynamic linking/shared libraries, a complete POSIX libc,
+    persistent full writable filesystems, async I/O, broad storage/device
+    drivers, a runnable UEFI backend, and release-grade CI automation.
+  - Some paths are scaffolding or TODOs. Inspect call sites before assuming a
+    subsystem is wired into normal boot; optional smoke entry threads and runtime
+    validation markers remain gated even when shared subsystems compile normally.
 
   Conventions:
   - Prefer small, explicit low-level code over abstractions that hide hardware
     details.
-  - Keep code freestanding-safe. Do not assume a hosted C/C++ runtime, libc,
-    exceptions, RTTI, dynamic initialization beyond what the project explicitly
-    supports, or OS services.
+  - Keep kernel code freestanding-safe. Do not assume hosted libc, exceptions,
+    RTTI, OS services, or dynamic initialization beyond what the project
+    explicitly supports; `user/**` may use only the bounded freestanding libc
+    implemented in this repository.
   - Preserve the current namespace style: bigos for kernel APIs, bigos::mm for
     memory management, bigos::irq for interrupts, driver::* for drivers, and ktl
     for kernel container utilities.
   - Use the explicit memory allocation API: alloc_kernel_pages(nr_pages, flags)
-    for kernel virtual pages (page-count semantics) and the internal
-    alloc_physical_order(order, flags) for buddy (order semantics). Do not
-    reintroduce removed mixed-semantics aliases such as alloc_pages(),
-    alloc_physical_pages(), or free_physical_pages(). Keep buddy bootstrap on the
-    early metadata arena rather than dynamic slab growth.
-  - Preserve the interrupt foundation: kernel-owned static IDT loaded before
-    enabling IRQs, the stable InterruptFrame dispatch ABI, separation of CPU
-    exceptions (0x00-0x1f) from remapped i8259 IRQs (0x20-0x2f) and the software
-    syscall vector (0x80), and EOI only for external IRQs (never for exceptions
-    or syscalls). The #PF handler is diagnostic-only and must not attempt
-    recovery. The syscall IDT gate is raised to DPL=3 so CPL3 can issue
-    `int 0x80`, while exception and external IRQ gates remain ring0-only.
+    for kernel virtual pages and the internal alloc_physical_order(order, flags)
+    for buddy. Do not reintroduce removed mixed-semantics aliases.
+  - Preserve the interrupt foundation: kernel-owned static IDT, stable
+    InterruptFrame dispatch ABI, separation of CPU exceptions, remapped i8259
+    IRQs, and the software syscall vector 0x80. The syscall path must never send
+    an i8259 EOI. User `#PF` recovery is bounded to the implemented VMA-backed
+    demand-zero/COW paths; unsupported kernel faults remain diagnostic/panic
+    paths.
   - Validation/diagnostic features are gated by xmake switches (all default-off)
     and emit fixed COM1/VGA markers:
-    mm_self_test (BIGOS_MM_SELF_TEST -> BIGOS_MM_SELF_TEST_PASSED/FAILED),
-    slab_debug (BIGOS_SLAB_DEBUG, implied by mm_self_test),
-    page_fault_smoke (BIGOS_PAGE_FAULT_SMOKE -> BIGOS_PAGE_FAULT),
-    timer_smoke (BIGOS_TIMER_SMOKE -> BIGOS_TIMER_IRQ),
-    keyboard_smoke (BIGOS_KEYBOARD_SMOKE, enables IRQ1 line),
-    scheduler_smoke (BIGOS_SCHEDULER_SMOKE -> BIGOS_SCHED_THREAD_A/B),
-    scheduler_semantics_smoke (BIGOS_SCHEDULER_SEMANTICS_SMOKE ->
-    BIGOS_SCHED_SEMANTICS_PASSED),
-    blocking_smoke (BIGOS_BLOCKING_SMOKE -> BIGOS_BLOCKING_SMOKE_PASSED),
-    user_vmem_smoke (BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_PASSED/FAILED),
-    syscall_smoke (BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED),
-    user_program_smoke (BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT and is
-    not part of a normal boot),
-    fs_smoke (BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED),
-    user_elf_smoke (BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT, builds
-    build/bin/user/init.elf, and packages it as /boot/user/init.elf).
-    The unified panic path emits BIGOS_PANIC code=<code> source=<source>.
+    mm_self_test, slab_debug, page_fault_smoke, timer_smoke, keyboard_smoke,
+    scheduler_smoke, scheduler_semantics_smoke, blocking_smoke, user_vmem_smoke,
+    syscall_smoke, user_program_smoke, fs_smoke, user_elf_smoke,
+    demand_paging_smoke, fork_cow_smoke, time_identity_smoke, signal_smoke,
+    writable_fs_smoke, pipe_smoke, and userland_smoke. The unified panic path
+    emits BIGOS_PANIC code=<code> source=<source>.
   - Treat hardware constants, linker addresses, boot protocol addresses, and page
     table self-mapping addresses as design-critical. Explain changes to them.
   - Keep public headers minimal and include only what is needed.
@@ -134,10 +119,14 @@ context: |
     must use repository-relative paths and must not imply changes to boot
     addresses, linker addresses, IDT/syscall vectors, page-table layout, disk
     layout, CR3 switching, or kernel ABI.
+  - Treat roadmap.md as a project-planning document only. It may describe
+    implemented capabilities, missing capabilities, medium/long-term planning,
+    and staged development priorities, but must not contain concrete entry
+    points, file paths, commands, validation markers, source-level implementation
+    details, or archive/version indexes.
   - OpenSpec change artifacts should use Chinese descriptions by default,
-    including proposal, design, specs, tasks, validation notes, and
-    documentation tasks. Preserve OpenSpec-required structural keywords when
-    needed for tooling.
+    including proposal, design, specs, tasks, validation notes, and documentation
+    tasks. Preserve OpenSpec-required structural keywords when needed for tooling.
 
 rules:
   proposal:

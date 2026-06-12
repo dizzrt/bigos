@@ -29,7 +29,8 @@ CR3；默认关闭的首个用户程序运行路径会显式激活派生根并�
   通过 direct map 修改指定派生根的低半区页表，供用户程序 loader 在内核地址空间仍处于活动状态时
   填充 code/data/BSS/stack。
 - `bool user_range_mapped(uint64_t root, uint64_t vaddr, uint64_t len)`：验证 bounded 用户范围低于
-  canonical user half，且每页 PTE present/user；它不实现 demand paging。
+  canonical user half，且每页 PTE present/user；本阶段不实现 demand paging，后续
+  process/VMA 代码补充 bounded demand-zero 与 COW fault 处理。
 
 两者均为 non-interrupt-context-only，写入条目时使用 `InterruptGuard` 屏蔽同 CPU maskable
 IRQ 交错，不得从 IRQ handler 调用，也不在 IRQ handler 中触发动态分配。
@@ -77,7 +78,7 @@ IRQ 交错，不得从 IRQ handler 调用，也不在 IRQ handler 中触发动�
 - loader 先通过 `derive_user_address_space_root()` 和 `map_page_in_root()` 构建低半区映射。
 - 进入 ring3 前记录当前 kernel root、设置 TSS/RSP0，然后写 CR3 激活用户 root。
 - `SYS_EXIT` 或受控用户 fault 会记录进程状态，并在不立即释放当前栈/进程对象的前提下恢复 kernel root。
-- 普通派生 helper 不写 CR3、不进入 ring3、不触发 demand paging。
+- 普通派生 helper 不写 CR3、不进入 ring3、不触发后续阶段的 demand paging。
 
 ## 验证
 
