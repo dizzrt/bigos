@@ -15,9 +15,12 @@ environment.
   `fork` + `execve`, waits for children, and restarts the shell when it exits.
 - `user/sh/sh.c`: bounded interactive shell with builtins, PATH lookup,
   `fork` + `execve` + `wait`, one-stage pipes, and basic `<` / `>` redirection.
-- `user/bin/*`: small packaged user binaries such as `/bin/echo`.
+- `user/bin/*`: small packaged user binaries such as `/bin/echo` and `/bin/cat`.
+- `user/smoke/bin/*`: validation-only C probes that are built and packaged under
+  `/bin/smoke/*` only when the default-off `userland_smoke` path is selected.
 - `user/smoke/userland_smoke.c`: default-off deterministic validation program
-  for crt0, libc wrappers, errno, fork/exec/wait, pipe, redirection, and malloc.
+  for crt0, libc wrappers, errno, stdout/stderr, smoke C-program execution,
+  fork/exec/wait, pipe, redirection, and malloc.
 
 ## crt0 Stack Contract
 
@@ -86,6 +89,28 @@ This does not implement job control, background processes, globbing, variable
 expansion, shell scripts, sub-shells, terminal process groups, termios, a full
 FILE API, dynamic linking, or a complete POSIX libc.
 
+## Simple C Program Baseline
+
+The simple C program baseline treats simple static C programs as a user-visible compatibility
+baseline, still within the existing freestanding runtime boundary:
+
+- Entry: `_start` calls `main(argc, argv, envp)` using the existing user stack
+  layout, and `main`'s return value is passed to `SYS_EXIT`.
+- Wrappers: libc syscall wrappers translate negative kernel returns into
+  positive `errno` values and return `-1` or the documented failure sentinel.
+- Output: programs use fd-based `write`, `putchar`, `puts`, or the tiny `printf`;
+  stdout is fd `1` and deterministic errors can be written to fd `2`.
+- Environment: `envp`, `environ`, and `getenv` are read-only. If no environment
+  is supplied, programs must report that empty boundary deterministically.
+- Smoke-only probes: `/bin/smoke/args`, `/bin/smoke/env`, `/bin/smoke/out`,
+  `/bin/smoke/errno`, and `/bin/smoke/exit` cover argument handoff, environment
+  reporting, stdout/stderr, wrapper failure plus `errno`, and requested exit
+  status when `userland_smoke` is enabled.
+
+This baseline does not add kernel syscalls, change the `int 0x80` register ABI,
+change boot or disk layout, introduce dynamic linking, or claim hosted libc or
+full POSIX shell behavior.
+
 ## Build and Packaging
 
 `xmake.lua` builds user C programs with the cross toolchain as static
@@ -94,11 +119,14 @@ freestanding ELF64 `ET_EXEC` images using `user/crt0`, `user/libc`, and
 
 - `/boot/user/init.elf` for the default resident C init or the selected smoke.
 - `/bin/sh` for the interactive shell.
-- `/bin/echo` and other bounded test binaries.
+- `/bin/echo` and `/bin/cat` for normal packaged user commands.
+- `/bin/smoke/*` probes only for the explicit `userland_smoke` validation image.
 
 The image layout remains the existing Legacy BIOS / MBR / exFAT path; stage 19
-adds files under `/boot/user` and `/bin` but does not introduce UEFI, AHCI, NVMe,
-virtio, or a new filesystem backend.
+and later userland stages add files under `/boot/user` and `/bin` but do not
+introduce UEFI, AHCI, NVMe, virtio, or a new filesystem backend. Every user
+program remains a static freestanding ELF64 `ET_EXEC` image bounded by the shared
+64 KiB user-ELF limit.
 
 ## Validation
 
@@ -111,10 +139,15 @@ xmake f --userland_smoke=y
 uv run python tools/boot_debug.py run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
 ```
 
-`BIGOS_USERLAND_PASSED` validates the non-interactive runtime path. Stage 20 also
-keeps the default-init headless marker assertion (`BIGOS_USER_EXEC`) while adding
-optional manual or emulator-input checks for prompt visibility, input echo,
-backspace feedback, and command output on the text console. When local display,
-ROM, keyboard input, or injection support is unavailable, record the interactive
-portion as skipped or blocked with the substitute source/build/headless checks
-and remaining console-usability risk.
+`BIGOS_USERLAND_PASSED` validates the non-interactive runtime path. The simple C program baseline adds
+behavior assertions for the smoke-only C probes: the smoke observes their
+stdout/stderr, verifies argument and environment reporting, verifies `errno`
+translation through a failing wrapper, observes the requested exit-code probe,
+and runs probes through `/bin/sh` to confirm the shell continues after a non-zero
+external program. Interactive console usability also keeps the default-init headless marker
+assertion (`BIGOS_USER_EXEC`) while adding optional manual or emulator-input
+checks for prompt visibility, input echo, backspace feedback, and command output
+on the text console. When local display, ROM, keyboard input, or injection
+support is unavailable, record the interactive portion as skipped or blocked
+with the substitute source/build/headless checks and remaining console-usability
+risk.

@@ -224,11 +224,11 @@ BigOS SHALL 新增一个默认关闭的构建开关 `userland_smoke`（定义 `B
 - **THEN** MUST 发射 `BIGOS_USERLAND_FAILED`（可附带失败原因）
 - **AND** MUST NOT 静默通过或发射 `BIGOS_USERLAND_PASSED`
 
-### Requirement: Stage 20 validation preserves headless behavior assertions
+### Requirement: interactive console usability validation preserves headless behavior assertions
 BigOS SHALL validate interactive console usability without making graphical display, manual keyboard input, or emulator scancode injection mandatory for every automated smoke run.
 
 #### Scenario: Headless default boot remains observable
-- **WHEN** Stage 20 changes are validated through the preferred QEMU headless serial/log path
+- **WHEN** interactive console usability changes are validated through the preferred QEMU headless serial/log path
 - **THEN** validation MUST continue to assert the default userland/init behavior through existing deterministic serial/log observations
 - **AND** missing expected observations MUST be recorded as failure rather than reinterpreted as success
 
@@ -242,10 +242,45 @@ BigOS SHALL validate interactive console usability without making graphical disp
 - **THEN** validation MUST mark the interactive portion as skipped or blocked rather than passed
 - **AND** validation MUST record substitute source/build/headless checks and the remaining console-usability risk
 
-### Requirement: Stage 20 validation does not widen runtime boundaries
-BigOS SHALL keep Stage 20 validation within the current bounded userland and x86_64 Legacy BIOS runtime boundary.
+### Requirement: interactive console usability validation does not widen runtime boundaries
+BigOS SHALL keep interactive console usability validation within the current bounded userland and x86_64 Legacy BIOS runtime boundary.
 
 #### Scenario: Existing runtime contracts are preserved
 - **WHEN** interactive console validation is added or executed
 - **THEN** it MUST NOT require UEFI, OVMF, ESP/FAT images, virtio, AHCI/SATA, NVMe, SMP, dynamic linking, full POSIX terminal support, job control, or a complete POSIX libc
 - **AND** it MUST NOT change boot layout, kernel link addresses, IDT vectors, syscall vector `0x80`, CR3 switching rules, disk layout, or existing smoke marker semantics
+
+### Requirement: 简单 C 程序行为断言覆盖 简单 C 程序基线
+
+BigOS runtime validation SHALL provide behavior-oriented checks for the simple C program baseline. These checks MUST validate runtime-observable behavior such as argument handoff, environment handoff, stdout/stderr output, `errno` translation, process exit status, and shell execution of packaged C programs.
+
+#### Scenario: 参数和环境行为可验证
+
+- **WHEN** simple C program baseline runtime validation runs the simple C program baseline
+- **THEN** validation MUST observe that a packaged C program receives expected `argc`/`argv`
+- **AND** validation MUST observe that environment handoff is present or deterministically reported as absent within the documented boundary
+
+#### Scenario: wrapper 和错误报告行为可验证
+
+- **WHEN** simple C program baseline runtime validation exercises a failing libc wrapper path
+- **THEN** validation MUST observe the documented failure return and `errno` behavior through program output, exit status, or another runtime-visible result
+
+#### Scenario: shell 执行小型 C 程序可验证
+
+- **WHEN** simple C program baseline runtime validation invokes packaged C programs through `/bin/sh` or an equivalent deterministic shell path
+- **THEN** validation MUST observe program stdout/stderr and exit behavior
+- **AND** validation MUST confirm the shell continues after the external program exits
+
+### Requirement: 简单 C 程序基线验证保持分层和默认关闭
+
+BigOS SHALL keep simple C program baseline validation layered with existing source, build, runtime, and environment-dependent checks. Emulator-dependent validation MUST remain optional or default-off unless the surrounding test mode explicitly enables it.
+
+#### Scenario: 默认构建不强制运行 emulator smoke
+
+- **WHEN** a normal default build is requested
+- **THEN** simple C program baseline emulator smoke MUST NOT be mandatory for the build to complete
+
+#### Scenario: 环境缺失时记录残留风险
+
+- **WHEN** QEMU、Bochs、交叉工具链、显示或串口日志环境不可用
+- **THEN** validation notes MUST record the skipped check, substitute checks, and residual risk instead of claiming runtime validation passed

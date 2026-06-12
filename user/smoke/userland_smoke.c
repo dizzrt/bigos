@@ -10,11 +10,15 @@
  *   - libc syscall wrapper + errno translation (open of a missing file -> -1,
  *     errno == ENOENT),
  *   - minimal malloc/free,
- *   - shell-style fork + execve + wait of an external command,
+ *   - shell-style fork + execve + wait of external simple C programs,
  *   - single-stage pipe between two children,
  *   - file redirection through the writable /rw mount (open + dup2 + read back).
+ *   - non-interactive /bin/sh execution of /bin/smoke probes, including
+ *     stdout/stderr, errno reporting, and shell continuation after non-zero exit.
  */
 #include "libc.h"
+
+#define CAPTURE_MAX 512
 
 static void emit(const char *s) {
     write(1, s, strlen(s));
@@ -25,6 +29,100 @@ static void fail(const char *why) {
     emit(why);
     emit("\n");
     exit(1);
+}
+
+static int contains(const char *haystack, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0)
+        return 1;
+    for (const char *p = haystack; *p != 0; p++) {
+        if (strncmp(p, needle, nlen) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void write_all_or_exit(int fd, const char *s) {
+    size_t len = strlen(s);
+    while (len > 0) {
+        ssize_t n = write(fd, s, len);
+        if (n <= 0)
+            exit(125);
+        s += n;
+        len -= (size_t)n;
+    }
+}
+
+static int dup_non_stdio(int fd) {
+    int temps[3] = {-1, -1, -1};
+    for (int i = 0; i < 4; i++) {
+        int moved = dup(fd);
+        if (moved < 0)
+            break;
+        if (moved >= 3) {
+            for (int j = 0; j < 3; j++)
+                if (temps[j] >= 0)
+                    close(temps[j]);
+            return moved;
+        }
+        if (i < 3)
+            temps[i] = moved;
+        else
+            close(moved);
+    }
+    for (int j = 0; j < 3; j++)
+        if (temps[j] >= 0)
+            close(temps[j]);
+    return -1;
+}
+
+static int move_pipe_fds_from_stdio(int fds[2]) {
+    int moved[2] = {fds[0], fds[1]};
+    for (int i = 0; i < 2; i++) {
+        if (fds[i] < 3) {
+            moved[i] = dup_non_stdio(fds[i]);
+            if (moved[i] < 0) {
+                for (int j = 0; j < i; j++)
+                    if (moved[j] != fds[j])
+                        close(moved[j]);
+                return -1;
+            }
+        }
+    }
+    for (int i = 0; i < 2; i++) {
+        if (moved[i] != fds[i]) {
+            close(fds[i]);
+            fds[i] = moved[i];
+        }
+    }
+    return 0;
+}
+
+static void run_program(const char *path, char **child_argv, char **envp) {
+    pid_t pid = fork();
+    if (pid < 0)
+        fail("program-fork");
+    if (pid == 0) {
+        execve(path, child_argv, envp);
+        exit(127);
+    }
+
+    if (wait(pid) != pid)
+        fail("program-wait");
+}
+
+static void require_file_contains(const char *path, const char *expect) {
+    int fd = open(path, O_RDONLY, 0);
+    if (fd < 0)
+        fail("record-open");
+    char buf[CAPTURE_MAX];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        fail("record-read");
+    buf[n] = 0;
+    if (!contains(buf, expect))
+        fail("record-content");
 }
 
 /* crt0 contract: argc >= 1 and argv[0] non-NULL. */
@@ -126,6 +224,61 @@ static void test_redirect(void) {
         fail("redir-content");
 }
 
+static void test_smoke_programs(char **envp) {
+    char *args_argv[] = {(char *)"/bin/smoke/args", (char *)"alpha", (char *)"beta", NULL};
+    run_program("/bin/smoke/args", args_argv, envp);
+    require_file_contains("/rw/smoke_args.txt", "smoke_args argc=3 argv[2]=beta");
+
+    char *env_argv[] = {(char *)"/bin/smoke/env", NULL};
+    run_program("/bin/smoke/env", env_argv, envp);
+    require_file_contains("/rw/smoke_env.txt", "smoke_env boundary=");
+
+    char *out_argv[] = {(char *)"/bin/smoke/out", NULL};
+    run_program("/bin/smoke/out", out_argv, envp);
+    require_file_contains("/rw/smoke_out.txt", "smoke_out stdout stderr");
+
+    char *errno_argv[] = {(char *)"/bin/smoke/errno", NULL};
+    run_program("/bin/smoke/errno", errno_argv, envp);
+    require_file_contains("/rw/smoke_errno.txt", "smoke_errno open=-1 errno=2");
+
+    char *exit_argv[] = {(char *)"/bin/smoke/exit", (char *)"7", NULL};
+    run_program("/bin/smoke/exit", exit_argv, envp);
+    require_file_contains("/rw/smoke_exit.txt", "smoke_exit requested=7");
+}
+
+static void test_smoke_shell(char **envp) {
+    int input[2];
+    if (pipe(input) < 0)
+        fail("shell-pipe");
+    if (move_pipe_fds_from_stdio(input) < 0)
+        fail("shell-pipe-fds");
+    unlink("/rw/smoke_args.txt");
+
+    pid_t pid = fork();
+    if (pid < 0)
+        fail("shell-fork");
+    if (pid == 0) {
+        close(input[1]);
+        dup2(input[0], 0);
+        close(input[0]);
+        char *argv[] = {(char *)"/bin/sh", NULL};
+        execve("/bin/sh", argv, envp);
+        exit(127);
+    }
+
+    close(input[0]);
+    write_all_or_exit(input[1], "/bin/smoke/exit 7\n");
+    write_all_or_exit(input[1], "/bin/smoke/args alpha beta\n");
+    write_all_or_exit(input[1], "echo shell-alive\n");
+    write_all_or_exit(input[1], "exit 0\n");
+    close(input[1]);
+
+    if (wait(pid) != pid)
+        fail("shell-wait");
+    require_file_contains("/rw/smoke_exit.txt", "smoke_exit requested=7");
+    require_file_contains("/rw/smoke_args.txt", "smoke_args argc=3 argv[2]=beta");
+}
+
 int main(int argc, char **argv, char **envp) {
     test_crt0(argc, argv);
     test_errno();
@@ -133,6 +286,8 @@ int main(int argc, char **argv, char **envp) {
     test_fork_exec(envp);
     test_pipe();
     test_redirect();
+    test_smoke_programs(envp);
+    test_smoke_shell(envp);
     emit("BIGOS_USERLAND_PASSED\n");
     /* Idle: as PID-1 this must not exit; reap any further children. */
     for (;;) {

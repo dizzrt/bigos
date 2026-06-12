@@ -16,6 +16,7 @@ on_build(function()
     local user_bindir = path.join("$(builddir)", "bin", "user")
     local user_tempdir = path.join("$(builddir)", "temp", "user")
     local user_bin_subdir = path.join(user_bindir, "bin")
+    local user_smoke_bin_subdir = path.join(user_bin_subdir, "smoke")
     os.mkdir(user_bindir)
     os.mkdir(user_tempdir)
     os.mkdir(user_bin_subdir)
@@ -62,13 +63,32 @@ on_build(function()
         end
     end
 
-    -- Always build the test binaries packaged under /bin.
-    build_user_program(path.join(projectdir, "user", "sh", "sh.c"),
-        path.join(user_bin_subdir, "sh"))
-    build_user_program(path.join(projectdir, "user", "bin", "echo.c"),
-        path.join(user_bin_subdir, "echo"))
-    build_user_program(path.join(projectdir, "user", "bin", "cat.c"),
-        path.join(user_bin_subdir, "cat"))
+    -- Always build only the regular bounded /bin programs.
+    local user_bin_programs = {
+        { "sh", path.join(projectdir, "user", "sh", "sh.c") },
+        { "echo", path.join(projectdir, "user", "bin", "echo.c") },
+        { "cat", path.join(projectdir, "user", "bin", "cat.c") },
+    }
+    for _, program in ipairs(user_bin_programs) do
+        build_user_program(program[2], path.join(user_bin_subdir, program[1]))
+    end
+
+    -- Build /bin/smoke probes only for the default-off userland smoke image.
+    if has_config("userland_smoke") then
+        os.mkdir(user_smoke_bin_subdir)
+        local smoke_bin_programs = {
+            { "args", path.join(projectdir, "user", "smoke", "bin", "args.c") },
+            { "env", path.join(projectdir, "user", "smoke", "bin", "env.c") },
+            { "out", path.join(projectdir, "user", "smoke", "bin", "out.c") },
+            { "errno", path.join(projectdir, "user", "smoke", "bin", "errno.c") },
+            { "exit", path.join(projectdir, "user", "smoke", "bin", "exit.c") },
+        }
+        for _, program in ipairs(smoke_bin_programs) do
+            build_user_program(program[2], path.join(user_smoke_bin_subdir, program[1]))
+        end
+    else
+        os.rm(user_smoke_bin_subdir)
+    end
 
     -- Select the PID-1 init image:
     --   userland_smoke           -> userland validation program,

@@ -34,6 +34,6 @@
 
 ## 6. Documentation And Review
 
-- [x] 6.1 更新必要的 docs/en 与 docs/zh 镜像文档，描述 Stage 20 的交互控制台边界、non-goals 和验证方式；保持 roadmap 只在项目规划层级。
+- [x] 6.1 更新必要的 docs/en 与 docs/zh 镜像文档，描述 交互控制台可用性的交互控制台边界、non-goals 和验证方式；保持 roadmap 只在项目规划层级。
 - [x] 6.2 审查所有文档和注释，确认没有声称完整 POSIX terminal、termios、job control、SMP、UEFI parity、完整 libc 或持久完整可写文件系统。
 - [x] 6.3 汇总验证记录，区分已通过检查、无法运行检查、历史诊断、当前 change 引入并已修复的问题，以及仍然存在的 console-usability 风险。

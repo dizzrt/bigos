@@ -32,7 +32,7 @@ Stage 19 之后，BigOS normal boot 已经能打包并启动 resident PID-1 init
 
 2. 输入回显由非中断消费路径负责，而不是由 keyboard ISR 直接写 VGA/serial。
 
-   Rationale: 现有 TTY spec 已要求 ISR 不直接写普通输出。Stage 20 继续保持 IRQ handler 有界、allocation-free、non-blocking，只允许 enqueue 和 bounded wakeup。
+   Rationale: 现有 TTY spec 已要求 ISR 不直接写普通输出。交互控制台可用性继续保持 IRQ handler 有界、allocation-free、non-blocking，只允许 enqueue 和 bounded wakeup。
 
    Alternatives considered: 在 IRQ1 收到 printable key 时立即写 VGA。该方案降低延迟，但把 UI 输出耦合到硬件中断路径，扩大 port I/O 和显示行为的中断安全风险。
 
@@ -44,28 +44,28 @@ Stage 19 之后，BigOS normal boot 已经能打包并启动 resident PID-1 init
 
 4. 自动化验证优先保留串口/日志行为断言，人工控制台验证作为分层补充。
 
-   Rationale: headless QEMU 更适合 CI-like smoke；真实键盘和 VGA 可见性受本地 emulator/display 配置影响。Stage 20 需要证明不破坏 default boot/userland markers，同时记录交互路径的手动证据或跳过原因。
+   Rationale: headless QEMU 更适合 CI-like smoke；真实键盘和 VGA 可见性受本地 emulator/display 配置影响。交互控制台可用性需要证明不破坏 default boot/userland markers，同时记录交互路径的手动证据或跳过原因。
 
    Alternatives considered: 强制所有验证通过图形 QEMU 或 Bochs 手动输入。该方案不可移植，容易把环境缺失误判为代码失败。
 
 5. shell 交互判定采用最小 `isatty` 风格 wrapper，而不是 init 固定约定或暴露完整 fd 类型模型。
 
-   Rationale: shell 需要知道何时显示 prompt，但 Stage 20 不需要完整 POSIX `isatty`。最小 wrapper 只回答 fd 是否绑定到默认 TTY/console，既能避免 prompt 污染重定向/管道输出，也为后续 POSIX-like 用户态演进保留清晰语义。
+   Rationale: shell 需要知道何时显示 prompt，但 交互控制台可用性不需要完整 POSIX `isatty`。最小 wrapper 只回答 fd 是否绑定到默认 TTY/console，既能避免 prompt 污染重定向/管道输出，也为后续 POSIX-like 用户态演进保留清晰语义。
 
    Alternatives considered: 复用内部 fd 类型信息会把内核/VFS 细节泄露给用户态；由 init 传入固定交互约定实现更简单，但容易在后续重定向、替代 shell 或非交互启动场景中变脆弱。
 
-6. Stage 20 包含最小 backspace 行编辑，但不扩展为完整 terminal editing。
+6. 交互控制台可用性包含最小 backspace 行编辑，但不扩展为完整 terminal editing。
 
    Rationale: 只显示 backspace 效果但不修改实际输入缓冲会造成“屏幕看起来删除了字符，shell 实际仍读到旧字符”的可用性陷阱。最小行编辑仅覆盖 printable、newline 和 backspace，保持行长和缓冲边界明确。
 
-   Alternatives considered: 完全不处理 backspace 会让默认交互 shell 难以实际使用；支持方向键、历史记录、escape sequence、termios 或复杂编辑状态会越过 Stage 20 的边界。
+   Alternatives considered: 完全不处理 backspace 会让默认交互 shell 难以实际使用；支持方向键、历史记录、escape sequence、termios 或复杂编辑状态会越过 交互控制台可用性的边界。
 
 ## Risks / Trade-offs
 
 - [Risk] 文本控制台可见但串口日志不可判断交互是否完整 → Mitigation: 保留默认 init/userland marker 断言，并把人工控制台检查记录为分层验证证据。
 - [Risk] 回显路径误入 keyboard ISR，破坏 IRQ-safe 边界 → Mitigation: spec 明确要求回显来自非中断消费路径，tasks 中加入源码检查和 targeted review。
 - [Risk] shell prompt 在重定向或管道场景中污染非交互输出 → Mitigation: prompt 仅在交互式 stdin/stdout 绑定到默认 TTY/console 时显示，非交互路径保持有界命令语义。
-- [Risk] 控制字符处理不足导致输入体验不稳定 → Mitigation: Stage 20 只要求基本 printable、newline、backspace 的有界行为；复杂 terminal editing 留作后续阶段。
+- [Risk] 控制字符处理不足导致输入体验不稳定 → Mitigation: 交互控制台可用性只要求基本 printable、newline、backspace 的有界行为；复杂 terminal editing 留作后续阶段。
 - [Risk] 本地 emulator 缺少键盘/display 支持 → Mitigation: validation artifact 记录图形/人工检查跳过原因、替代 headless 检查和剩余风险。
 
 ## Migration Plan
@@ -78,4 +78,4 @@ Stage 19 之后，BigOS normal boot 已经能打包并启动 resident PID-1 init
 
 ## Open Questions
 
-- 后续是否已有或需要新增可复用的 emulator keyboard injection；Stage 20 不把它作为必需项，自动化保留 headless marker，交互体验用人工或可选 emulator 输入验证。
+- 后续是否已有或需要新增可复用的 emulator keyboard injection；交互控制台可用性不把它作为必需项，自动化保留 headless marker，交互体验用人工或可选 emulator 输入验证。

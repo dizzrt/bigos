@@ -44,11 +44,11 @@ The blocking API is valid only from ordinary running kernel-thread context where
 
 The automated blocking smoke uses a synthetic producer that calls `terminal::enqueue_input()` and therefore exercises the same TTY wakeup path without requiring manual keyboard input. Manual keyboard validation remains optional and should record emulator input capability when used.
 
-Stage 20 connects the same blocking consumer to default user stdin: when a user process reads fd `0` and no file or pipe is installed there, `SYS_READ` blocks on the TTY ring and returns one bounded byte to user space. If fd `0` is replaced by a pipe or file through `dup2()` or redirection, reads use the normal fd/VFS path instead of the default console.
+Interactive console usability connects the same blocking consumer to default user stdin: when a user process reads fd `0` and no file or pipe is installed there, `SYS_READ` blocks on the TTY ring and returns one bounded byte to user space. If fd `0` is replaced by a pipe or file through `dup2()` or redirection, reads use the normal fd/VFS path instead of the default console.
 
 ## Console Output Boundary
 
-Ordinary runtime text output uses `terminal::console_put()` and `terminal::console_write()`. The current backend writes VGA text mode. Stage 20 routes user writes to fd `1` or fd `2` through this visible console when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
+Ordinary runtime text output uses `terminal::console_put()` and `terminal::console_write()`. The current backend writes VGA text mode. Interactive console usability routes user writes to fd `1` or fd `2` through this visible console when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
 
 Basic control-character behavior:
 

@@ -71,6 +71,8 @@ USER_INIT_ELF_PATH = '/boot/user/init.elf'
 # USER_ELF_MAX_FILE_BYTES limit is enforced for both init and execve targets.
 USER_BIN_DIR = BUILD_DIR / 'bin' / 'user' / 'bin'
 USER_BIN_PROGRAMS = ('sh', 'echo', 'cat')
+USER_SMOKE_BIN_DIR = USER_BIN_DIR / 'smoke'
+USER_SMOKE_BIN_PROGRAMS = ('args', 'env', 'out', 'errno', 'exit')
 USER_BIN_MAX_BYTES = USER_INIT_ELF_MAX_BYTES
 
 BUILD_TOOLS = (
@@ -113,6 +115,9 @@ class ImageLayout:
     bin_dir_cluster: int = 0
     # Tuple of (name, first_cluster, data_length, clusters) for /bin programs.
     bin_files: tuple[tuple[str, int, int, int], ...] = ()
+    smoke_bin_dir_cluster: int = 0
+    # Tuple of (name, first_cluster, data_length, clusters) for /bin/smoke programs.
+    smoke_bin_files: tuple[tuple[str, int, int, int], ...] = ()
 
     @property
     def cluster_heap_lba(self) -> int:
@@ -142,6 +147,8 @@ class PreparedArtifacts:
     user_init_elf: Path | None = None
     # List of (name, Path) for user /bin programs, in packaging order.
     bin_programs: tuple[tuple[str, Path], ...] = ()
+    # List of (name, Path) for optional user /bin/smoke programs.
+    smoke_bin_programs: tuple[tuple[str, Path], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -302,15 +309,16 @@ RUNTIME_SMOKE_MATRIX = (
     ),
     RuntimeSmokeCase(
         case_id='userland-runtime',
-        title='Userland runtime (crt0/libc/shell)',
+        title='Userland runtime (crt0/libc/shell/simple C)',
         switches=('userland_smoke',),
         expected_marker='BIGOS_USERLAND_PASSED',
         timeout_seconds=40.0,
-        risk_area='crt0 arg passing, user libc + errno translation, fork/execve/wait, single-stage pipe, '
-        'redirection, and the minimal malloc/free',
+        risk_area='crt0 arg/env passing, user libc + errno translation, stdout/stderr, exit-code probes, '
+        'fork/execve/wait, shell execution, single-stage pipe, redirection, and the minimal malloc/free',
         proc_boundary=(
             'default-off userland_smoke build; packages the userland validation program as /boot/user/init.elf and '
-            'runs it as PID-1 with deterministic non-interactive assertions (no manual stdin)'
+            'runs it as PID-1 with deterministic non-interactive assertions over bounded /bin/smoke C programs '
+            '(no manual stdin)'
         ),
     ),
 )
@@ -437,6 +445,13 @@ def get_artifacts(kernel: Path = DEFAULT_KERNEL) -> PreparedArtifacts:
         program = USER_BIN_DIR / name
         require_file(program, 'image build', f'/bin/{name}', USER_BIN_MAX_BYTES)
         bin_programs.append((name, program))
+    smoke_bin_programs: list[tuple[str, Path]] = []
+    smoke_bin_dir = USER_BIN_DIR / 'smoke'
+    if smoke_bin_dir.exists():
+        for name in USER_SMOKE_BIN_PROGRAMS:
+            program = smoke_bin_dir / name
+            require_file(program, 'image build', f'/bin/smoke/{name}', USER_BIN_MAX_BYTES)
+            smoke_bin_programs.append((name, program))
     return PreparedArtifacts(
         kernel=kernel,
         mbr=BOOT_ARTIFACTS['mbr'][0],
@@ -445,6 +460,7 @@ def get_artifacts(kernel: Path = DEFAULT_KERNEL) -> PreparedArtifacts:
         boot=BOOT_ARTIFACTS['boot'][0],
         user_init_elf=USER_INIT_ELF,
         bin_programs=tuple(bin_programs),
+        smoke_bin_programs=tuple(smoke_bin_programs),
     )
 
 
@@ -454,6 +470,7 @@ def make_layout(
     kernel_size: int,
     user_init_size: int = 0,
     bin_sizes: Sequence[tuple[str, int]] = (),
+    smoke_bin_sizes: Sequence[tuple[str, int]] = (),
 ) -> ImageLayout:
     image_size = align_up(image_size, SECTOR_SIZE)
     total_sectors = image_size // SECTOR_SIZE
@@ -473,16 +490,26 @@ def make_layout(
         user_init_cluster + user_init_clusters if user_init_clusters > 0 else fs_smoke_cluster + fs_smoke_clusters
     )
 
-    # /bin directory (single cluster) plus one contiguous run per program.
+    # /bin directory (single cluster) plus one contiguous run per regular program.
+    # Optional smoke probes live in a nested /bin/smoke directory only when built.
     bin_dir_cluster = 0
     bin_files: list[tuple[str, int, int, int]] = []
-    if bin_sizes:
+    smoke_bin_dir_cluster = 0
+    smoke_bin_files: list[tuple[str, int, int, int]] = []
+    if bin_sizes or smoke_bin_sizes:
         bin_dir_cluster = next_cluster
         next_cluster += 1
         for name, size in bin_sizes:
             clusters = clusters_for_size(size)
             bin_files.append((name, next_cluster, size, clusters))
             next_cluster += clusters
+        if smoke_bin_sizes:
+            smoke_bin_dir_cluster = next_cluster
+            next_cluster += 1
+            for name, size in smoke_bin_sizes:
+                clusters = clusters_for_size(size)
+                smoke_bin_files.append((name, next_cluster, size, clusters))
+                next_cluster += clusters
 
     last_cluster = next_cluster - 1
     cluster_count = (partition_sectors - CLUSTER_HEAP_OFFSET) // SECTORS_PER_CLUSTER
@@ -507,6 +534,8 @@ def make_layout(
         user_init_cluster=user_init_cluster,
         bin_dir_cluster=bin_dir_cluster,
         bin_files=tuple(bin_files),
+        smoke_bin_dir_cluster=smoke_bin_dir_cluster,
+        smoke_bin_files=tuple(smoke_bin_files),
     )
 
 
@@ -645,6 +674,10 @@ def make_allocation_bitmap(layout: ImageLayout) -> bytes:
         used_clusters.append(layout.bin_dir_cluster)
         for _name, first_cluster, _size, clusters in layout.bin_files:
             used_clusters.extend(range(first_cluster, first_cluster + clusters))
+    if layout.smoke_bin_dir_cluster != 0:
+        used_clusters.append(layout.smoke_bin_dir_cluster)
+        for _name, first_cluster, _size, clusters in layout.smoke_bin_files:
+            used_clusters.extend(range(first_cluster, first_cluster + clusters))
     for cluster in used_clusters:
         index = cluster - 2
         bitmap[index // 8] |= 1 << (index % 8)
@@ -677,8 +710,10 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
     user_init = read_file(artifacts.user_init_elf) if artifacts.user_init_elf is not None else b''
     bin_data = [(name, read_file(program)) for name, program in artifacts.bin_programs]
     bin_sizes = [(name, len(data)) for name, data in bin_data]
+    smoke_bin_data = [(name, read_file(program)) for name, program in artifacts.smoke_bin_programs]
+    smoke_bin_sizes = [(name, len(data)) for name, data in smoke_bin_data]
 
-    layout = make_layout(image_size, len(boot), len(kernel), len(user_init), bin_sizes)
+    layout = make_layout(image_size, len(boot), len(kernel), len(user_init), bin_sizes, smoke_bin_sizes)
     image_path.parent.mkdir(parents=True, exist_ok=True)
 
     with image_path.open('wb') as image:
@@ -724,12 +759,25 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
                 ExfatFile(name, first_cluster, size, is_directory=False)
                 for (name, first_cluster, size, _clusters) in layout.bin_files
             ]
+            if layout.smoke_bin_dir_cluster != 0:
+                bin_entries.append(ExfatFile('smoke', layout.smoke_bin_dir_cluster, CLUSTER_SIZE, is_directory=True))
             write_cluster(image, layout, layout.bin_dir_cluster, make_directory(bin_entries))
             size_by_name = {name: len(data) for name, data in bin_data}
             data_by_name = dict(bin_data)
             for name, first_cluster, _size, _clusters in layout.bin_files:
                 assert size_by_name[name] == len(data_by_name[name])
                 write_at(image, layout.cluster_lba(first_cluster) * SECTOR_SIZE, data_by_name[name])
+        if layout.smoke_bin_dir_cluster != 0:
+            smoke_entries = [
+                ExfatFile(name, first_cluster, size, is_directory=False)
+                for (name, first_cluster, size, _clusters) in layout.smoke_bin_files
+            ]
+            write_cluster(image, layout, layout.smoke_bin_dir_cluster, make_directory(smoke_entries))
+            smoke_size_by_name = {name: len(data) for name, data in smoke_bin_data}
+            smoke_data_by_name = dict(smoke_bin_data)
+            for name, first_cluster, _size, _clusters in layout.smoke_bin_files:
+                assert smoke_size_by_name[name] == len(smoke_data_by_name[name])
+                write_at(image, layout.cluster_lba(first_cluster) * SECTOR_SIZE, smoke_data_by_name[name])
 
     return layout
 

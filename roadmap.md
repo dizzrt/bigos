@@ -173,15 +173,16 @@ runtime behavior checks, and environment-dependent checks.
 
 ### Stage 21: Minimal C Program Baseline / 阶段 21：最小 C 程序运行基线
 
-- Turn simple statically linked C user programs into a first-class compatibility
-  target by stabilizing the process entry model, argument/environment handoff,
-  syscall wrappers, error reporting, basic output, and small packaged utilities.
-- 将简单静态链接 C 用户程序提升为一等兼容目标，稳定进程入口模型、参数/环境传递、
-  syscall wrapper、错误报告、基础输出和小型打包工具。
-- Boundary change: simple C programs become a planned user-visible baseline.
-  Preserved boundaries: no dynamic linking, shared libraries, hosted runtime, or
-  complete POSIX libc.
-- 边界变化：简单 C 程序成为规划中的用户可见基线。保持边界：不引入动态链接、共享库、
+- Status: complete. Simple statically linked C user programs are now a
+  first-class compatibility target with a stable process entry model,
+  argument/environment handoff, syscall wrappers, error reporting, basic output,
+  and small packaged utilities.
+- 状态：已完成。简单静态链接 C 用户程序现在是一等兼容目标，具备稳定的进程入口模型、
+  参数/环境传递、syscall wrapper、错误报告、基础输出和小型打包工具。
+- Boundary status: simple C programs are now a user-visible baseline. Preserved
+  boundaries: no dynamic linking, shared libraries, hosted runtime, or complete
+  POSIX libc.
+- 边界状态：简单 C 程序现在是用户可见基线。保持边界：不引入动态链接、共享库、
   hosted runtime 或完整 POSIX libc。
 
 ### Stage 22: Minimal C Library Subset / 阶段 22：最小 C 标准库子集

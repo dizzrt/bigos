@@ -14,9 +14,10 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
   等待子进程，并在 shell 退出后重新拉起。
 - `user/sh/sh.c`：有界交互 shell，支持内建命令、PATH 查找、
   `fork` + `execve` + `wait`、单级管道，以及基本 `<` / `>` 重定向。
-- `user/bin/*`：打包进镜像的小型用户程序，例如 `/bin/echo`。
+- `user/bin/*`：打包进镜像的小型用户程序，例如 `/bin/echo` 和 `/bin/cat`。
+- `user/smoke/bin/*`：仅用于验证的 C 探针，只在默认关闭的 `userland_smoke` 路径被选择时构建并打包到 `/bin/smoke/*`。
 - `user/smoke/userland_smoke.c`：默认关闭的确定性验证程序，覆盖 crt0、libc
-  wrapper、errno、fork/exec/wait、pipe、重定向和 malloc。
+  wrapper、errno、stdout/stderr、smoke C 程序执行、fork/exec/wait、pipe、重定向和 malloc。
 
 ## crt0 栈契约
 
@@ -76,6 +77,25 @@ Shell 有意保持很小：
 本阶段不实现作业控制、后台进程、glob、变量展开、shell 脚本、子 shell、终端进程组、
 termios、完整 FILE API、动态链接或完整 POSIX libc。
 
+## 简单 C 程序基线
+
+简单 C 程序基线将简单静态 C 程序作为用户可见兼容基线，但仍保持在现有 freestanding
+runtime 边界内：
+
+- 入口：`_start` 使用现有用户栈布局调用 `main(argc, argv, envp)`，并将
+  `main` 返回值传给 `SYS_EXIT`。
+- Wrapper：libc syscall wrapper 将内核负返回值翻译为正的 `errno`，并返回
+  `-1` 或接口文档化的失败哨兵。
+- 输出：程序使用 fd-based `write`、`putchar`、`puts` 或极简 `printf`；stdout
+  是 fd `1`，确定性错误可以写到 fd `2`。
+- 环境：`envp`、`environ` 和 `getenv` 只读。若没有提供环境变量，程序必须确定性报告空边界。
+- Smoke-only 探针：`/bin/smoke/args`、`/bin/smoke/env`、`/bin/smoke/out`、
+  `/bin/smoke/errno` 和 `/bin/smoke/exit` 在启用 `userland_smoke` 时分别覆盖参数传递、
+  环境报告、stdout/stderr、wrapper 失败加 `errno`，以及请求的退出状态。
+
+该基线不新增 kernel syscall、不修改 `int 0x80` 寄存器 ABI、不改变 boot 或磁盘布局、
+不引入动态链接，也不声称提供 hosted libc 或完整 POSIX shell 行为。
+
 ## 构建与打包
 
 `xmake.lua` 使用交叉工具链，把用户 C 程序与 `user/crt0`、`user/libc`、
@@ -83,10 +103,12 @@ termios、完整 FILE API、动态链接或完整 POSIX libc。
 
 - `/boot/user/init.elf`：默认常驻 C init 或选中的 smoke 程序。
 - `/bin/sh`：交互 shell。
-- `/bin/echo` 和其他有界测试二进制。
+- `/bin/echo` 和 `/bin/cat`：正常打包用户命令。
+- `/bin/smoke/*` 探针：仅用于显式 `userland_smoke` 验证镜像。
 
-镜像布局仍沿用现有 Legacy BIOS / MBR / exFAT 路径；阶段 19 只在
+镜像布局仍沿用现有 Legacy BIOS / MBR / exFAT 路径；阶段 19 及后续用户态阶段只在
 `/boot/user` 与 `/bin` 下新增文件，不引入 UEFI、AHCI、NVMe、virtio 或新的文件系统后端。
+每个用户程序都保持为静态 freestanding ELF64 `ET_EXEC`，并受共享 64 KiB user-ELF 上限约束。
 
 ## 验证
 
@@ -98,8 +120,10 @@ xmake f --userland_smoke=y
 uv run python tools/boot_debug.py run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
 ```
 
-`BIGOS_USERLAND_PASSED` 验证非交互运行时路径。Stage 20 还保留 default-init
-headless marker 断言（`BIGOS_USER_EXEC`），并增加可选的手工或 emulator-input 检查，
-用于观察文本 console 上的 prompt、输入回显、backspace feedback 和命令输出。若本地
-display、ROM、keyboard input 或 injection 能力不可用，需要将交互部分记录为 skipped
+`BIGOS_USERLAND_PASSED` 验证非交互运行时路径。简单 C 程序基线增加面向 smoke-only C 探针的行为断言：
+smoke 会观察它们的 stdout/stderr，验证参数和环境报告，验证失败 wrapper 的 `errno` 翻译，
+观察请求的退出码探针，并通过 `/bin/sh` 运行探针以确认 shell 在外部程序非零退出后继续运行。
+交互控制台可用性还保留 default-init headless marker 断言（`BIGOS_USER_EXEC`），并增加可选的手工或
+emulator-input 检查，用于观察文本 console 上的 prompt、输入回显、backspace feedback 和命令输出。
+若本地 display、ROM、keyboard input 或 injection 能力不可用，需要将交互部分记录为 skipped
 或 blocked，并写明替代 source/build/headless 检查和剩余 console-usability 风险。

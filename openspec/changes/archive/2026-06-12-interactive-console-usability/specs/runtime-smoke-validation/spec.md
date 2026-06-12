@@ -1,10 +1,10 @@
 ## ADDED Requirements
 
-### Requirement: Stage 20 validation preserves headless behavior assertions
+### Requirement: interactive console usability validation preserves headless behavior assertions
 BigOS SHALL validate interactive console usability without making graphical display, manual keyboard input, or emulator scancode injection mandatory for every automated smoke run.
 
 #### Scenario: Headless default boot remains observable
-- **WHEN** Stage 20 changes are validated through the preferred QEMU headless serial/log path
+- **WHEN** interactive console usability changes are validated through the preferred QEMU headless serial/log path
 - **THEN** validation MUST continue to assert the default userland/init behavior through existing deterministic serial/log observations
 - **AND** missing expected observations MUST be recorded as failure rather than reinterpreted as success
 
@@ -18,8 +18,8 @@ BigOS SHALL validate interactive console usability without making graphical disp
 - **THEN** validation MUST mark the interactive portion as skipped or blocked rather than passed
 - **AND** validation MUST record substitute source/build/headless checks and the remaining console-usability risk
 
-### Requirement: Stage 20 validation does not widen runtime boundaries
-BigOS SHALL keep Stage 20 validation within the current bounded userland and x86_64 Legacy BIOS runtime boundary.
+### Requirement: interactive console usability validation does not widen runtime boundaries
+BigOS SHALL keep interactive console usability validation within the current bounded userland and x86_64 Legacy BIOS runtime boundary.
 
 #### Scenario: Existing runtime contracts are preserved
 - **WHEN** interactive console validation is added or executed

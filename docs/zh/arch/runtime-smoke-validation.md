@@ -31,14 +31,14 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `signals` | `--signal_smoke=y` | `BIGOS_SIGNAL_PASSED` | 30s | 最小 signal queue、mask、handler 和投递路径。 |
 | `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`、page/buffer cache、写后读回、fsync 和权限。 |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
-| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、errno、fork/exec/wait、pipe、重定向和 malloc。 |
+| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和 malloc。 |
 | `default-init` | _(无)_ | `BIGOS_USER_EXEC` | 40s | 不加任何 smoke 开关的默认构建；normal boot 打包 PID-1 init、`/bin/sh` 和 bounded `/bin/*`。 |
 
 每个 case 只启用表中列出的 smoke 开关，并在构建前显式关闭其他 smoke 开关。runner 之外，所有 runtime smoke 选项仍保持默认关闭，除非开发者通过 `xmake f ...=y` 显式配置。
 
 `default-init` 是不依赖任何 smoke 开关的行为断言 case：它以默认配置（所有 smoke 选项设为 `=n`）构建，并断言 normal boot 到达常驻 PID-1 init 和 `/bin/sh`，以 `BIGOS_USER_EXEC` 作为 QEMU headless marker。缺失该 marker 即判定为失败，不会被重新解读为通过。
 
-Stage 20 的交互 console 验证叠加在该 case 之上。自动化 QEMU headless run 继续使用
+交互控制台可用性验证叠加在该 case 之上。自动化 QEMU headless run 继续使用
 serial/log marker 断言，不要求图形 display、手工键盘输入或 emulator scancode
 injection。若 graphical QEMU、Bochs、手工键盘输入或 input injection 可用，validation
 notes 应记录 backend、display/input method、输入命令、观察到的 prompt/echo/output
@@ -58,6 +58,15 @@ fd/VFS 壳层通过 source-level checks 加 `filesystem-read`、`filesystem-user
 `writable-fs`、`pipe` 和 `userland-runtime` runtime case 验证。只读 exFAT 路径仍是
 boot/image 的 source of truth，而 `/rw` 与 pipe 语义是 bounded runtime 能力。fd/VFS
 syscall 使用 DPL=3 `int 0x80` trap gate，并且必须在同步 storage I/O 或阻塞 pipe 操作前通过 `sched::can_block()`。
+
+简单 C 程序验证分层接入默认关闭的 `userland-runtime` case。启用
+`userland_smoke` 时，构建会通过与 `/bin/sh`、`/bin/echo`、`/bin/cat` 相同的
+`crt0 + libc + -nostdlib -static` ELF64 路径，打包有界 `/bin/smoke/args`、
+`/bin/smoke/env`、`/bin/smoke/out`、`/bin/smoke/errno` 和 `/bin/smoke/exit` 程序。
+这些探针不会打包进普通镜像。smoke 会观察程序 stdout/stderr，检查参数与环境报告，
+检查失败 wrapper 的 `errno` 翻译，观察请求的退出码探针，并向 `/bin/sh` 输入确定性命令脚本，
+确认 shell 在外部程序非零退出后继续运行。该验证不新增 kernel syscall、不修改 `int 0x80` ABI、
+不改变 boot/disk 布局，也不会让 emulator-dependent smoke 成为默认构建的强制依赖。
 
 ## 手工单 Case 流程
 

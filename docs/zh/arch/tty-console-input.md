@@ -44,11 +44,11 @@ blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-threa
 
 自动化 blocking smoke 使用 synthetic producer 调用 `terminal::enqueue_input()`，因此不依赖手工键盘输入也能覆盖同一 TTY wakeup 路径。手工键盘验证仍是可选项，使用时需要记录 emulator input capability。
 
-Stage 20 将同一个 blocking consumer 接到默认用户态 stdin：当用户进程读取 fd `0` 且该描述符没有安装文件或 pipe 时，`SYS_READ` 会在 TTY ring 上阻塞，并向用户态返回一个有界 byte。如果 fd `0` 通过 `dup2()` 或重定向替换为 pipe/file，读取会走普通 fd/VFS 路径，而不是默认 console。
+交互控制台可用性将同一个 blocking consumer 接到默认用户态 stdin：当用户进程读取 fd `0` 且该描述符没有安装文件或 pipe 时，`SYS_READ` 会在 TTY ring 上阻塞，并向用户态返回一个有界 byte。如果 fd `0` 通过 `dup2()` 或重定向替换为 pipe/file，读取会走普通 fd/VFS 路径，而不是默认 console。
 
 ## Console 输出边界
 
-普通运行期文本输出使用 `terminal::console_put()` 和 `terminal::console_write()`，当前 backend 写 VGA text mode。Stage 20 在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到这个可见 console；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
+普通运行期文本输出使用 `terminal::console_put()` 和 `terminal::console_write()`，当前 backend 写 VGA text mode。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到这个可见 console；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
 
 基础控制字符行为：
 
