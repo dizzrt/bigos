@@ -129,10 +129,32 @@ def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
     assert 'bigos::proc::read_fd_current' in syscall
     assert 'bigos::proc::copy_to_current_user_buffer' in syscall
     assert 'bigos::proc::close_fd_current' in syscall
+    assert 'sys_stat(__frame->rdi, __frame->rsi)' in syscall
+    assert 'sys_fstat(__frame->rdi, __frame->rsi)' in syscall
+    assert 'sizeof(bigos::Metadata)' in syscall
     assert 'validate_user_io_buffer' in proc
     assert 'user_range_writable(process->address_space_root, __addr, __len)' in proc
     assert 'copy_to_user_root' in vmem
     assert '(*pte & page_attr::WRITABLE) == 0' in vmem
+
+
+def test_bounded_metadata_contract_is_vfs_backed() -> None:
+    header = read_source('include/bigos/metadata.h')
+    vfs_h = read_source('include/bigos/fs/vfs.h')
+    vfs = read_source('kernel/core/fs/vfs.cc')
+
+    assert 'struct Metadata' in header
+    assert 'BIGOS_METADATA_TYPE_REGULAR = 1' in header
+    assert 'BIGOS_METADATA_TYPE_DIRECTORY = 2' in header
+    assert 'uint64_t object_id;' in header
+    assert 'uint64_t reserved[4];' in header
+    assert 'Status stat_absolute(const char *__path, bigos::Metadata *__out)' in vfs_h
+    assert 'Status stat(File *__file, bigos::Metadata *__out)' in vfs_h
+    assert 'fill_metadata_defaults(__out)' in vfs
+    assert '__out->object_id = 0;' in vfs
+    assert 'bigos::fs::lookup(&g_mount, __path, &metadata)' in vfs
+    assert 'bigos::bigfs::stat(__inode' in vfs
+    assert 'return Status::Unsupported;' in vfs
 
 
 def test_existing_smokes_use_vfs_open_read_close_path() -> None:
@@ -171,7 +193,7 @@ def test_shell_line_editor_is_bounded_and_non_irq_userland_echo() -> None:
     assert 'write_all(1, "\\b");' in shell
     assert 'write_all(1, "\\n");' in shell
     assert 'should_echo_input(ch)' in shell
-    assert 'while (n > 0 && ch != \'\\n\')' in shell
+    assert "while (n > 0 && ch != '\\n')" in shell
     assert 'return -1;' in shell
 
 

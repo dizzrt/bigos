@@ -46,6 +46,10 @@ and the minimal userland runtime.
 - `SYS_READ = 6`: `rdi=fd`, `rsi=user_buffer`, `rdx=len`, copies through a
   bounded kernel buffer and returns the byte count or a negative error.
 - `SYS_CLOSE = 7`: `rdi=fd`, removes the descriptor and drops the file reference.
+- `SYS_STAT = 29`: `rdi=path`, `rsi=struct stat*`, returns a bounded BigOS
+  metadata snapshot for an absolute path.
+- `SYS_FSTAT = 30`: `rdi=fd`, `rsi=struct stat*`, returns metadata for the open
+  file object without advancing its offset.
 - fd/VFS syscalls check `sched::can_block()` before initializing VFS, allocating
   file objects, or entering synchronous exFAT/ATA PIO reads.
 - The `int 0x80` vector and register ABI are unchanged. The syscall gate is a
@@ -56,19 +60,32 @@ and the minimal userland runtime.
 ## Validation
 
 - Source-level checks cover VFS root publication, open rejection, fd capacity,
-  bad fd and double-close behavior, EOF clamp, offset advancement, exec
-  close-on-exec handling, and safe reaper close-all.
+  bad fd and double-close behavior, EOF clamp, offset advancement, metadata
+  snapshots, exec close-on-exec handling, and safe reaper close-all.
 - The existing `fs_smoke` case now validates `/boot/fs_smoke.txt` through
   VFS open/read/release and emits the existing
   `BIGOS_FS_EXFAT_READ_PASSED` marker.
 - `user_elf_smoke` reads `/boot/user/init.elf` through VFS before handing the
   bounded image to the existing ELF process loader.
 
+## Bounded Metadata
+
+- BigOS exposes a small metadata structure through `stat`/`fstat` wrappers and a
+  packaged `/bin/stat` observer. It contains object type, size, mode, uid, gid, a
+  bounded link-count default, a user-visible object id that is zero in this ABI
+  version, and reserved zero fields.
+- exFAT metadata is read-only and reports documented defaults for owner and
+  mode. `/rw` metadata reflects successful runtime create, write, truncate,
+  mkdir, unlink, and permission metadata changes while remaining RAM-backed and
+  non-persistent across reboot.
+- This is a BigOS bounded metadata subset, not complete POSIX `struct stat`,
+  device-node, symlink, ACL, xattr, complete timestamp, stable inode, or
+  persistent object identity semantics.
+
 ## Non-Goals
 
-- This stage did not introduce writable files, directory mutation, permissions,
-  cwd, relative path resolution, `dup`, `pipe`, `select`, `lseek`, `stat`, page
-  cache, demand paging, COW, user-space libc, SMP, or a UEFI backend; those are
+- This baseline still does not introduce cwd, relative path resolution, `select`,
+  complete POSIX `stat`, demand paging, COW, SMP, or a UEFI backend; those are
   either later bounded capabilities or still non-goals.
 - Current project non-goals remain async I/O, broad or file-backed `mmap`, full
   POSIX filesystem/process semantics, dynamic linking, SMP, and a runnable UEFI

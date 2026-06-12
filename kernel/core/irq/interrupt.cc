@@ -154,23 +154,25 @@ namespace irq {
         }
 
         if (__detail::is_i8259_external_irq(__frame->vector)) {
-            __detail::NonblockingContextGuard nonblocking_guard;
             const uint8_t irq_line = __detail::vector_to_i8259_irq(__frame->vector);
-            if (driver::irqchip::i8259::is_spurious_irq(irq_line)) {
-                driver::irqchip::i8259::acknowledge_spurious_irq(irq_line);
-                return;
+            {
+                __detail::NonblockingContextGuard nonblocking_guard;
+                if (driver::irqchip::i8259::is_spurious_irq(irq_line)) {
+                    driver::irqchip::i8259::acknowledge_spurious_irq(irq_line);
+                    return;
+                }
+
+                IRQHandler handler = __detail::isr_list[__frame->vector];
+                if (handler == nullptr)
+                    handler = &__detail::default_external_irq_handler;
+
+                // External IRQs (including timer vector 0x20) send exactly one EOI
+                // here, after the registered handler returns. Only after that EOI may
+                // the scheduler-owned IRQ-return bridge switch to another runnable
+                // kernel thread; exceptions and syscalls never enter this bridge.
+                handler(__frame);
+                driver::irqchip::i8259::send_eoi(irq_line);
             }
-
-            IRQHandler handler = __detail::isr_list[__frame->vector];
-            if (handler == nullptr)
-                handler = &__detail::default_external_irq_handler;
-
-            // External IRQs (including timer vector 0x20) send exactly one EOI
-            // here, after the registered handler returns. Only after that EOI may
-            // the scheduler-owned IRQ-return bridge switch to another runnable
-            // kernel thread; exceptions and syscalls never enter this bridge.
-            handler(__frame);
-            driver::irqchip::i8259::send_eoi(irq_line);
             bigos::sched::maybe_preempt_on_irq_return(__frame);
 #ifdef BIGOS_USER_PROCESS
             // Single signal-delivery point (decision 2/9): only when returning to

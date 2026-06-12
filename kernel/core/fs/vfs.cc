@@ -135,6 +135,45 @@ namespace {
 
     const bigos::vfs::FileOperations EXFAT_FILE_OPS = {&exfat_read, &exfat_close, nullptr, nullptr, nullptr};
 
+    void fill_metadata_defaults(bigos::Metadata *__out) noexcept {
+        if (__out == nullptr)
+            return;
+        *__out = {};
+        __out->nlink = 1;
+        __out->object_id = 0;
+    }
+
+    void fill_exfat_metadata(const bigos::fs::FileMetadata *__metadata, bigos::Metadata *__out) noexcept {
+        fill_metadata_defaults(__out);
+        if (__metadata == nullptr || __out == nullptr)
+            return;
+        __out->type =
+            __metadata->is_directory ? bigos::BIGOS_METADATA_TYPE_DIRECTORY : bigos::BIGOS_METADATA_TYPE_REGULAR;
+        __out->mode = __metadata->is_directory ? (bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444);
+        __out->uid = bigos::cred::ROOT_UID;
+        __out->gid = 0;
+        __out->size = __metadata->data_length;
+    }
+
+    bigos::vfs::Status fill_bigfs_metadata(uint32_t __inode, bigos::Metadata *__out) noexcept {
+        fill_metadata_defaults(__out);
+        if (__out == nullptr)
+            return bigos::vfs::Status::InvalidArgument;
+        uint32_t mode = 0;
+        uint32_t uid = 0;
+        uint32_t gid = 0;
+        uint64_t size = 0;
+        bool is_dir = false;
+        if (!bigos::bigfs::stat(__inode, &mode, &uid, &gid, &size, &is_dir))
+            return bigos::vfs::Status::NotFound;
+        __out->type = is_dir ? bigos::BIGOS_METADATA_TYPE_DIRECTORY : bigos::BIGOS_METADATA_TYPE_REGULAR;
+        __out->mode = (mode & 07777) | (is_dir ? bigos::BIGOS_MODE_IFDIR : bigos::BIGOS_MODE_IFREG);
+        __out->uid = uid;
+        __out->gid = gid;
+        __out->size = size;
+        return bigos::vfs::Status::Success;
+    }
+
     bigos::vfs::Status bigfs_to_vfs(bigos::bigfs::Status __status) noexcept {
         switch (__status) {
             case bigos::bigfs::Status::Success:
@@ -517,6 +556,69 @@ namespace vfs {
         if (__file->ops->readdir == nullptr)
             return Status::NotDirectory;
         return __file->ops->readdir(__file, __entries, __max_entries, __entries_read);
+    }
+
+    Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept {
+        fill_metadata_defaults(__out);
+        if (__out == nullptr)
+            return Status::InvalidArgument;
+        if (!g_initialized)
+            return Status::NotInitialized;
+        if (__path == nullptr || __path[0] != '/')
+            return Status::InvalidArgument;
+
+        if (bigos::bigfs::owns_path(__path)) {
+            uint32_t inode = 0;
+            uint64_t size = 0;
+            bool is_dir = false;
+            const bigos::bigfs::Status open_status =
+                bigos::bigfs::open(__path, OPEN_RDONLY, 0, bigos::cred::ROOT_UID, 0, &inode, &size, &is_dir);
+            if (open_status != bigos::bigfs::Status::Success)
+                return bigfs_to_vfs(open_status);
+            const Status status = fill_bigfs_metadata(inode, __out);
+            bigos::bigfs::close_inode(inode);
+            return status;
+        }
+
+        if (!path_supported(__path))
+            return Status::InvalidArgument;
+        bigos::fs::FileMetadata metadata = {};
+        const bigos::fs::FsStatus status = bigos::fs::lookup(&g_mount, __path, &metadata);
+        if (status != bigos::fs::FsStatus::Success)
+            return fs_to_vfs(status);
+        fill_exfat_metadata(&metadata, __out);
+        return Status::Success;
+    }
+
+    Status stat(File *__file, bigos::Metadata *__out) noexcept {
+        fill_metadata_defaults(__out);
+        if (__out == nullptr)
+            return Status::InvalidArgument;
+        if (__file == nullptr || __file->ops == nullptr)
+            return Status::BadFileDescriptor;
+        if (__file->vnode == nullptr)
+            return Status::Unsupported;
+
+        if (__file->ops == &EXFAT_FILE_OPS) {
+            ExfatFileState *state = (ExfatFileState *)__file->private_data;
+            if (state == nullptr)
+                return Status::BadFileDescriptor;
+            fill_exfat_metadata(&state->metadata, __out);
+            return Status::Success;
+        }
+        if (__file->ops == &BIGFS_FILE_OPS) {
+            BigfsFileState *state = (BigfsFileState *)__file->private_data;
+            if (state == nullptr)
+                return Status::BadFileDescriptor;
+            return fill_bigfs_metadata(state->inode, __out);
+        }
+
+        __out->type = __file->vnode->is_directory ? BIGOS_METADATA_TYPE_DIRECTORY : BIGOS_METADATA_TYPE_REGULAR;
+        __out->mode = __file->vnode->is_directory ? (BIGOS_MODE_IFDIR | 0555) : (BIGOS_MODE_IFREG | 0444);
+        __out->uid = bigos::cred::ROOT_UID;
+        __out->gid = 0;
+        __out->size = __file->vnode->size;
+        return Status::Success;
     }
 
     Status mkdir(const char *__path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept {

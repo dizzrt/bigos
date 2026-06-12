@@ -1,6 +1,7 @@
 #ifndef _BIGOS_FS_VFS_H
 #define _BIGOS_FS_VFS_H
 
+#include <bigos/metadata.h>
 #include <bigos/types.h>
 
 NAMESPACE_BIGOS_BEG
@@ -101,6 +102,8 @@ namespace vfs {
     Status lseek(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
     Status fsync(File *__file) noexcept;
     Status readdir(File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
+    Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept;
+    Status stat(File *__file, bigos::Metadata *__out) noexcept;
     // Directory mutation on the writable backend. owner/identity are the caller's.
     Status mkdir(const char *__path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__path, uint32_t __uid, uint32_t __gid) noexcept;

@@ -68,6 +68,7 @@ on_build(function()
         { "sh", path.join(projectdir, "user", "sh", "sh.c") },
         { "echo", path.join(projectdir, "user", "bin", "echo.c") },
         { "cat", path.join(projectdir, "user", "bin", "cat.c") },
+        { "stat", path.join(projectdir, "user", "bin", "stat.c") },
     }
     for _, program in ipairs(user_bin_programs) do
         build_user_program(program[2], path.join(user_bin_subdir, program[1]))

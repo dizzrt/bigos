@@ -37,5 +37,7 @@
 #define SYS_UNLINK      26
 #define SYS_EXECVE      27
 #define SYS_READDIR     28
+#define SYS_STAT        29
+#define SYS_FSTAT       30
 
 #endif /* _BIGOS_USER_SYS_H */

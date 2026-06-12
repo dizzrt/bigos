@@ -125,8 +125,17 @@ static void run_program(const char *path, char **child_argv, char **envp) {
 
 static void require_file_contains(const char *path, const char *expect) {
     int fd = open(path, O_RDONLY, 0);
-    if (fd < 0)
+    if (fd < 0) {
+        if (errno == ENOENT)
+            fail("record-open-enoent");
+        if (errno == EWOULDBLOCK)
+            fail("record-open-wouldblock");
+        if (errno == EACCES)
+            fail("record-open-acces");
+        if (errno == EMFILE)
+            fail("record-open-emfile");
         fail("record-open");
+    }
     char buf[CAPTURE_MAX];
     ssize_t n = read(fd, buf, sizeof(buf) - 1);
     close(fd);
@@ -135,6 +144,19 @@ static void require_file_contains(const char *path, const char *expect) {
     buf[n] = 0;
     if (!contains(buf, expect))
         fail("record-content");
+}
+
+static int file_contains(const char *path, const char *expect) {
+    int fd = open(path, O_RDONLY, 0);
+    if (fd < 0)
+        return 0;
+    char buf[CAPTURE_MAX];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+    buf[n] = 0;
+    return contains(buf, expect);
 }
 
 /* crt0 contract: argc >= 1 and argv[0] non-NULL. */
@@ -263,6 +285,12 @@ static void test_runtime_filesystem(void) {
     unlink("/rw/runtime_unlink.txt");
     if (mkdir("/rw/runtime_dir", 0755) < 0 && errno != EEXIST)
         fail("runtime-mkdir");
+    struct stat st;
+    if (stat("/rw/runtime_dir", &st) != 0 || st.type != BIGOS_METADATA_TYPE_DIRECTORY || !S_ISDIR(st.st_mode))
+        fail("runtime-stat-dir");
+    if (stat("/boot/user/init.elf", &st) != 0 || st.type != BIGOS_METADATA_TYPE_REGULAR || st.st_size == 0 ||
+        st.st_object_id != 0)
+        fail("runtime-stat-exfat");
 
     int fd = open("/rw/runtime_file.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (fd < 0)
@@ -270,6 +298,11 @@ static void test_runtime_filesystem(void) {
     const char *payload = "runtime-fs";
     if (write(fd, payload, strlen(payload)) != (ssize_t)strlen(payload))
         fail("runtime-write");
+    if (fstat(fd, &st) != 0 || st.type != BIGOS_METADATA_TYPE_REGULAR || st.st_size != strlen(payload) ||
+        st.st_uid != 0 || st.st_gid != 0 || st.st_object_id != 0)
+        fail("runtime-fstat-file");
+    if (lseek(fd, 0, SEEK_CUR) != (off_t)strlen(payload))
+        fail("runtime-fstat-offset");
     if (fsync(fd) != 0)
         fail("runtime-fsync");
     if (lseek(fd, 0, SEEK_SET) != 0)
@@ -282,10 +315,14 @@ static void test_runtime_filesystem(void) {
     buf[n] = 0;
     if (strcmp(buf, payload) != 0)
         fail("runtime-content");
+    if (stat("/rw/runtime_file.txt", &st) != 0 || st.st_size != strlen(payload) || !S_ISREG(st.st_mode))
+        fail("runtime-stat-file");
 
     int dirfd = open("/rw", O_RDONLY, 0);
     if (dirfd < 0)
         fail("runtime-dir-open");
+    if (fstat(dirfd, &st) != 0 || st.type != BIGOS_METADATA_TYPE_DIRECTORY)
+        fail("runtime-fstat-dir");
     struct bigos_dirent entries[BIGOS_DIRENT_MAX_BATCH];
     ssize_t count = bigos_readdir(dirfd, entries, BIGOS_DIRENT_MAX_BATCH);
     close(dirfd);
@@ -305,6 +342,10 @@ static void test_runtime_filesystem(void) {
         fail("runtime-unlink");
     if (open("/rw/runtime_unlink.txt", O_RDONLY, 0) != -1 || errno != ENOENT)
         fail("runtime-unlink-lookup");
+    if (stat("/rw/runtime_unlink.txt", &st) != -1 || errno != ENOENT)
+        fail("runtime-unlink-stat");
+    if (fstat(fd, &st) != 0 || st.st_size != 4)
+        fail("runtime-unlink-fstat");
     if (lseek(fd, 0, SEEK_SET) != 0)
         fail("runtime-unlink-seek");
     n = read(fd, buf, sizeof(buf) - 1);
@@ -319,6 +360,12 @@ static void test_runtime_filesystem(void) {
     fd = open("/boot/user/init.elf", O_WRONLY, 0);
     if (fd != -1 || errno != EROFS)
         fail("runtime-rofs");
+    errno = 0;
+    if (stat("relative", &st) != -1 || errno != EINVAL)
+        fail("runtime-stat-relative");
+    errno = 0;
+    if (fstat(250, &st) != -1 || errno != EBADF)
+        fail("runtime-fstat-badfd");
 }
 
 static void test_time_identity(void) {
@@ -423,6 +470,8 @@ static void test_smoke_shell(char **envp) {
     write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\n");
     write_all_or_exit(input[1], "echo redir-ok > /rw/smoke_shell_redir.txt\n");
     write_all_or_exit(input[1], "/bin/cat < /rw/smoke_shell_redir.txt\n");
+    write_all_or_exit(input[1], "/bin/stat /rw/smoke_shell_redir.txt\n");
+    write_all_or_exit(input[1], "/bin/stat relative\n");
     write_all_or_exit(input[1], "| /bin/cat\n");
     write_all_or_exit(input[1], "echo shell-alive\n");
     write_all_or_exit(input[1], "exit 0\n");
@@ -435,6 +484,10 @@ static void test_smoke_shell(char **envp) {
     require_file_contains("/rw/smoke_shell_redir.txt", "redir-ok");
     require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok");
     require_file_contains("/rw/smoke_shell_io.txt", "redir-ok");
+    if (!file_contains("/rw/smoke_shell_io.txt", "type=file size=9"))
+        fail("shell-stat-file");
+    if (!file_contains("/rw/smoke_shell_io.txt", "stat: relative: errno=22"))
+        fail("shell-stat-error");
     require_file_contains("/rw/smoke_shell_io.txt", "sh: syntax error near |");
     require_file_contains("/rw/smoke_shell_io.txt", "shell-alive");
 }

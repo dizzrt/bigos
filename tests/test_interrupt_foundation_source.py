@@ -52,6 +52,21 @@ def test_i8259_spurious_irq7_is_checked_before_default_handler() -> None:
     assert spurious_index < handler_index < eoi_index
 
 
+def test_irq_return_preemption_runs_after_nonblocking_guard_scope() -> None:
+    interrupt = read_source('kernel/core/irq/interrupt.cc')
+
+    external_start = interrupt.index('if (__detail::is_i8259_external_irq(__frame->vector))')
+    syscall_start = interrupt.index('if (__detail::is_syscall_vector(__frame->vector))')
+    external_body = interrupt[external_start:syscall_start]
+
+    guard_index = external_body.index('__detail::NonblockingContextGuard nonblocking_guard;')
+    eoi_index = external_body.index('driver::irqchip::i8259::send_eoi(irq_line);')
+    guard_close_index = external_body.index('}\n            bigos::sched::maybe_preempt_on_irq_return(__frame);')
+    preempt_index = external_body.index('bigos::sched::maybe_preempt_on_irq_return(__frame);')
+
+    assert guard_index < eoi_index < guard_close_index < preempt_index
+
+
 def test_keyboard_irq_handler_is_registered_before_unmask() -> None:
     isr = read_source('kernel/core/irq/isr.cc')
     xmake = read_source('xmake.lua')

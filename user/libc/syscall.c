@@ -138,6 +138,14 @@ int unlink(const char *path) {
     return (int)errno_translate(syscall1(SYS_UNLINK, (long)path));
 }
 
+int stat(const char *path, struct stat *st) {
+    return (int)errno_translate(syscall2(SYS_STAT, (long)path, (long)st));
+}
+
+int fstat(int fd, struct stat *st) {
+    return (int)errno_translate(syscall2(SYS_FSTAT, (long)fd, (long)st));
+}
+
 ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries) {
     return (ssize_t)errno_translate(syscall3(SYS_READDIR, (long)fd, (long)entries, (long)max_entries));
 }

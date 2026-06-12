@@ -311,6 +311,44 @@ namespace sys {
             return (int64_t)entries_read;
         }
 
+        static int64_t sys_stat(uint64_t __path, uint64_t __out) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            if (!bigos::proc::validate_user_io_buffer(__out, sizeof(bigos::Metadata)))
+                return -bigos::EFAULT;
+
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+
+            bigos::Metadata metadata = {};
+            const bigos::vfs::Status status = bigos::vfs::stat_absolute(path, &metadata);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            if (!bigos::proc::copy_to_current_user_buffer(__out, &metadata, sizeof(metadata)))
+                return -bigos::EFAULT;
+            return 0;
+        }
+
+        static int64_t sys_fstat(uint64_t __fd, uint64_t __out) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            if (!bigos::proc::validate_user_io_buffer(__out, sizeof(bigos::Metadata)))
+                return -bigos::EFAULT;
+            bigos::Metadata metadata = {};
+            const bigos::vfs::Status status = bigos::proc::stat_fd_current((uint32_t)__fd, &metadata);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            if (!bigos::proc::copy_to_current_user_buffer(__out, &metadata, sizeof(metadata)))
+                return -bigos::EFAULT;
+            return 0;
+        }
+
         static int64_t sys_brk(uint64_t __new_break) noexcept {
             return bigos::proc::brk_current(__new_break);
         }
@@ -569,6 +607,12 @@ namespace sys {
                 break;
             case SYS_READDIR:
                 result = __detail::sys_readdir(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_STAT:
+                result = __detail::sys_stat(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_FSTAT:
+                result = __detail::sys_fstat(__frame->rdi, __frame->rsi);
                 break;
             case SYS_BRK:
                 result = __detail::sys_brk(__frame->rdi);

@@ -33,6 +33,8 @@ def test_syscall_numbers_appended_after_sigreturn() -> None:
     assert 'SYS_UNLINK = 26' in header
     assert 'SYS_EXECVE = 27' in header
     assert 'SYS_READDIR = 28' in header
+    assert 'SYS_STAT = 29' in header
+    assert 'SYS_FSTAT = 30' in header
     # Frozen ABI anchors must not move.
     assert 'SYS_OPEN = 5' in header
     assert 'SYS_WRITE = 2' in header
@@ -131,6 +133,8 @@ def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
         'case SYS_MKDIR:',
         'case SYS_UNLINK:',
         'case SYS_READDIR:',
+        'case SYS_STAT:',
+        'case SYS_FSTAT:',
     ):
         assert branch in source
     # Allocation / blocking syscalls check the scheduler blocking guard.
@@ -156,7 +160,11 @@ def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:
     assert 'bigos::vfs::DIRENT_TYPE_DIRECTORY' in bigfs
     assert 'Status readdir(File *__file' in vfs
     assert 'readdir_fd_current' in proc
+    assert 'stat_fd_current' in proc
+    assert 'bigos::vfs::stat(entry->file, __out)' in proc
     assert 'bigos_readdir(dirfd, entries, BIGOS_DIRENT_MAX_BATCH)' in smoke
+    assert 'fstat(fd, &st)' in smoke
+    assert 'stat("/rw/runtime_unlink.txt", &st) != -1 || errno != ENOENT' in smoke
     assert 'open("/rw/runtime_unlink.txt", O_RDONLY, 0) != -1 || errno != ENOENT' in smoke
     assert 'open("/boot/user/init.elf", O_WRONLY, 0)' in smoke
 

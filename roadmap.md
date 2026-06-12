@@ -43,10 +43,10 @@ BigOS 当前提供一个经过 smoke 验证、单核、以同步为主、具备�
 - 有界进程与 syscall 层，包括进程生命周期管理、基于文件描述符的 I/O、匿名 demand
   paging、`fork`/COW、signals、time/identity 原语和进程镜像替换。
 - A minimal storage and filesystem layer with synchronous block I/O, read-only
-  boot assets, a bounded writable runtime area, page/buffer cache, pipes, and fd
-  duplication.
+  boot assets, a bounded writable runtime area, page/buffer cache, pipes, fd
+  duplication, and bounded file/directory metadata queries.
 - 最小存储与文件系统层，包括同步块 I/O、只读启动资产、有界可写运行时区域、
-  page/buffer cache、pipe 和 fd duplication。
+  page/buffer cache、pipe、fd duplication 和有界文件/目录元数据查询。
 - A minimal freestanding userland with resident init behavior, an interactive
   text-console shell, basic libc-style support, and small packaged user programs.
 - 最小 freestanding 用户态，包括常驻 init 行为、交互式文本控制台 shell、基础 libc
@@ -161,12 +161,12 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 26 are complete and now form a compressed minimal usable system
+Stages 20 through 27 are complete and now form a compressed minimal usable system
 baseline. Keep the detailed implementation and validation history in dedicated
 architecture docs and OpenSpec records; this roadmap tracks only project-level
 capabilities and boundaries.
 
-阶段 20 到阶段 26 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
+阶段 20 到阶段 27 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
 专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
@@ -200,6 +200,14 @@ capabilities and boundaries.
 - 有界运行时文件系统可用性：运行时文件行为已成为简单程序最小可用系统基线的一部分。
   保持边界：不引入持久完整可写文件系统、广泛 file-backed mapping、async I/O 或广泛
   存储/设备支持。
+- Minimal metadata contract: simple programs can observe bounded file and
+  directory metadata through kernel, libc, user-tool, and behavior-validation
+  paths. Preserved boundaries: no symbolic links, device-node model, complete
+  POSIX metadata database, stable inode identity, ACLs, extended attributes, or
+  broad standards-conformance claim.
+- 最小元数据契约：简单程序可通过内核、libc、用户工具和行为验证路径观察有界文件与目录
+  元数据。保持边界：不引入符号链接、设备节点模型、完整 POSIX 元数据数据库、稳定 inode
+  身份、ACL、扩展属性或广泛标准兼容声明。
 - x86_64/core decoupling discipline: architecture abstraction is an active
   maintenance discipline at real consumption points. Preserved boundaries: the
   runnable backend remains x86_64 with the existing legacy boot/storage path.
@@ -225,17 +233,6 @@ docs, or source-adjacent notes rather than this roadmap.
 kernel-to-userland 能力环：内核契约、freestanding libc 暴露、shell 或打包用户程序消费、
 以及行为导向验证。具体 syscall 编号、源码入口、命令、marker 和验证日志应放在
 OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 roadmap 中。
-
-### Stage 27: Minimal Metadata Contract / 最小元数据契约
-
-- Add the minimal file and directory metadata contract needed by simple programs,
-  with bounded `stat`/`fstat`-style behavior exposed consistently through the
-  kernel, libc, shell/user tools, and behavior checks.
-- 补齐简单程序所需的最小文件与目录元数据契约，通过内核、libc、shell/用户工具和行为检查
-  一致暴露有界 `stat`/`fstat` 风格行为。
-- Keep the scope bounded: no symbolic links, device-node model, complete POSIX
-  metadata database, or broad standards-conformance claim.
-- 保持范围有界：不引入符号链接、设备节点模型、完整 POSIX 元数据数据库或广泛标准兼容声明。
 
 ### Stage 28: Cwd And Relative Paths / Cwd 与相对路径
 

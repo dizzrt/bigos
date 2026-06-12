@@ -67,6 +67,8 @@ namespace bigos::sys {
                                // EXEC_MAX_STRING_BYTES.
         SYS_READDIR = 28,      // (fd, struct bigos_dirent *entries, max_entries) -> entry count
                                // or negative errno; minimal bounded /rw directory enumeration.
+        SYS_STAT = 29,         // (path, struct bigos_metadata *out) -> 0 or negative errno.
+        SYS_FSTAT = 30,        // (fd, struct bigos_metadata *out) -> 0 or negative errno.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);
