@@ -1,4 +1,5 @@
 #include <string.h>
+#include <arch/x86/boot/boot_info.h>
 #include <bigos/io.h>   //TODO remove later
 #include <bigos/panic.h>
 

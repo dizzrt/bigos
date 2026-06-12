@@ -5,7 +5,8 @@
 #include <ktl/pair.h>
 #include <bigos/types.h>
 #include <bigos/attributes.h>
-#include <arch/x86/boot/boot_info.h>
+
+struct BootInfoHeader;
 
 NAMESPACE_BIGOS_BEG
 void *alloc_kernel_pages(uint32_t __pages, gfm_t __gfm) noexcept;

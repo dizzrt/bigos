@@ -3,9 +3,10 @@
 
 #include <ktl/list.h>
 #include <bigos/types.h>
-#include <arch/x86/boot/boot_info.h>
 
 #include "memdef.h"
+
+struct BootInfoHeader;
 
 // get page block size by order
 #define get_pblk_size(ORDER) (PAGE_SIZE * (1ul << (ORDER)))

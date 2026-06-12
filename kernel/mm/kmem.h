@@ -3,7 +3,8 @@
 
 #include <bigos/types.h>
 #include <bigos/attributes.h>
-#include <arch/x86/boot/boot_info.h>
+
+struct BootInfoHeader;
 
 NAMESPACE_BIGOS_BEG
 namespace mm {

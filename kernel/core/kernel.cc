@@ -9,7 +9,6 @@
 
 #include <drivers/video/vga.h>
 
-#include <arch/x86/boot/boot_info.h>
 #include <bigos/memory.h>
 #include <bigos/proc.h>
 #include <bigos/sched.h>
@@ -22,7 +21,6 @@
 #include <bigos/fs/vfs.h>
 #include <bigos/io.h>
 #include <ktl/buffer.h>
-#include <string.h>
 #ifdef BIGOS_WRITABLE_FS_SMOKE
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/bigfs.h>
@@ -32,6 +30,8 @@
 #include <bigos/ipc/pipe.h>
 #include <bigos/sched.h>
 #endif
+
+struct BootInfoHeader;
 
 extern "C" void kernel(const BootInfoHeader *boot_info);
 
@@ -70,8 +70,7 @@ namespace {
         bigos::sched::disable_preemption();
         const bigos::timer::tick_t pending_start = bigos::timer::ticks();
         while (!bigos::sched::reschedule_pending() &&
-               bigos::timer::ticks() - pending_start < SCHED_SEMANTICS_PENDING_TIMEOUT_TICKS) {
-        }
+               bigos::timer::ticks() - pending_start < SCHED_SEMANTICS_PENDING_TIMEOUT_TICKS) {}
 
         if (bigos::sched::reschedule_pending()) {
             g_sched_semantics_delayed = true;
@@ -83,8 +82,7 @@ namespace {
 
         const bigos::timer::tick_t preempt_start = bigos::timer::ticks();
         while (!g_sched_semantics_preempted &&
-               bigos::timer::ticks() - preempt_start < SCHED_SEMANTICS_PREEMPT_TIMEOUT_TICKS) {
-        }
+               bigos::timer::ticks() - preempt_start < SCHED_SEMANTICS_PREEMPT_TIMEOUT_TICKS) {}
         if (!g_sched_semantics_preempted)
             bigos::serial_puts("BIGOS_SCHED_SEMANTICS_FAILED preempt\n");
     }
@@ -273,7 +271,8 @@ namespace {
         bigos::vfs::release(file);
         if (status != bigos::vfs::Status::Success || bytes_read != file_size) {
             bigos::free(image);
-            user_elf_smoke_failed(status == bigos::vfs::Status::Success ? "short-read" : bigos::vfs::status_name(status));
+            user_elf_smoke_failed(
+                status == bigos::vfs::Status::Success ? "short-read" : bigos::vfs::status_name(status));
             return;
         }
 
@@ -319,8 +318,8 @@ namespace {
         const size_t plen = strlen(payload);
         uint32_t inode = 0;
         uint64_t size = 0;
-        bigos::bigfs::Status s = bigos::bigfs::open(
-            path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid, &inode, &size);
+        bigos::bigfs::Status s =
+            bigos::bigfs::open(path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid, &inode, &size);
         if (s != bigos::bigfs::Status::Success) {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED create\n");
             return;

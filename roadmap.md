@@ -228,15 +228,15 @@ runtime behavior checks, and environment-dependent checks.
 
 ### Stage 25: x86_64/Core Decoupling Discipline / 阶段 25：x86_64 与内核核心解耦纪律
 
-- Separate existing x86_64 backend mechanisms from kernel core concepts at real
-  consumption points, preparing for future multi-architecture work without adding
-  a speculative second runnable backend.
-- 在真实消费点将现有 x86_64 backend 机制与内核核心概念解耦，为未来多架构工作做准备，
-  但不引入缺少实际消费场景的第二可运行 backend。
-- Boundary change: architecture abstraction becomes an active maintenance
+- Status: complete. Existing x86_64 backend mechanisms have been separated from
+  kernel core concepts at real consumption points without adding a speculative
+  second runnable backend.
+- 状态：已完成。现有 x86_64 backend 机制已在真实消费点与内核核心概念解耦，且未引入缺少
+  实际消费场景的第二可运行 backend。
+- Boundary status: architecture abstraction is now an active maintenance
   discipline. Preserved boundaries: the runnable backend remains x86_64 with the
   existing legacy boot/storage path.
-- 边界变化：架构抽象成为主动维护纪律。保持边界：当前可运行 backend 仍是 x86_64 与现有
+- 边界状态：架构抽象现在是主动维护纪律。保持边界：当前可运行 backend 仍是 x86_64 与现有
   legacy boot/storage 路径。
 
 ### Stage 26: Behavior-Oriented Validation / 阶段 26：行为导向验证
