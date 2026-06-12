@@ -130,12 +130,16 @@ int fsync(int fd) {
     return (int)errno_translate(syscall1(SYS_FSYNC, (long)fd));
 }
 
-int mkdir(const char *path, int mode) {
+int mkdir(const char *path, mode_t mode) {
     return (int)errno_translate(syscall2(SYS_MKDIR, (long)path, (long)mode));
 }
 
 int unlink(const char *path) {
     return (int)errno_translate(syscall1(SYS_UNLINK, (long)path));
+}
+
+ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries) {
+    return (ssize_t)errno_translate(syscall3(SYS_READDIR, (long)fd, (long)entries, (long)max_entries));
 }
 
 void *brk_raw(void *addr) {

@@ -33,6 +33,11 @@ namespace bigfs {
     constexpr uint32_t INODE_REGULAR = 1;
     constexpr uint32_t INODE_DIRECTORY = 2;
 
+    struct DirectoryEntry {
+        uint32_t type;
+        char name[DIRENT_NAME_MAX + 1];
+    };
+
     enum class Status : int32_t {
         Success = 0,
         Invalid,
@@ -64,7 +69,8 @@ namespace bigfs {
     // bits; access checks use (__uid, __gid) as the requester identity. On
     // success returns Success and fills __out_inode/__out_size.
     Status open(const char *__abs_path, uint64_t __flags, uint32_t __mode, uint32_t __uid, uint32_t __gid,
-        uint32_t *__out_inode, uint64_t *__out_size) noexcept;
+        uint32_t *__out_inode, uint64_t *__out_size, bool *__out_is_dir) noexcept;
+    void close_inode(uint32_t __inode) noexcept;
 
     Status read(uint32_t __inode, uint64_t __offset, void *__dst, size_t __len, size_t *__out_read) noexcept;
     Status write(uint32_t __inode, uint64_t __offset, const void *__src, size_t __len, uint32_t __uid, uint32_t __gid,
@@ -72,6 +78,8 @@ namespace bigfs {
 
     Status mkdir(const char *__abs_path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__abs_path, uint32_t __uid, uint32_t __gid) noexcept;
+    Status readdir(uint32_t __inode, uint64_t __offset, DirectoryEntry *__entries, size_t __max_entries,
+        size_t *__out_entries, uint64_t *__next_offset) noexcept;
 
     // Flushes every dirty cached block for the writable device.
     Status fsync() noexcept;

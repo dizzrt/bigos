@@ -54,9 +54,11 @@ metadata and data go through the block buffer cache.
 
 Each inode carries `owner` (uid/gid) and `mode`. Supported operations: writable
 `open` (`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`), file `write`, `lseek`,
-`O_TRUNC` truncation, `mkdir`, and `unlink`. Failure semantics are deterministic
-(`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-EISDIR`/`-EINVAL`/`-EIO`/`-EACCES`/`-EROFS`) and
-never publish half-written metadata.
+`O_TRUNC` truncation, `mkdir`, minimal directory enumeration, and `unlink`.
+`unlink` removes the directory entry first; open file descriptors keep the inode
+and data blocks alive until the last reference closes. Failure semantics are
+deterministic (`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-ENOTDIR`/`-EISDIR`/`-EINVAL`/
+`-EIO`/`-EACCES`/`-EROFS`) and never publish half-written metadata.
 
 Because the medium is RAM-backed it is not persistent across reboots; this stage
 only guarantees runtime consistency (write-then-read-back, and read-back after
@@ -75,14 +77,16 @@ decision logic itself is unchanged from phase 16.5.
 
 ## VFS And fd Extensions
 
-`FileOperations` gains appended `write` and `lseek` ops and `File` gains an
-appended `writable` flag (the read-only `read`/`close` layout is preserved). A
-backend with a null `write` op is read-only (`write` returns `-EROFS`); a null
-`lseek` op uses ordinary offset arithmetic with overflow checks. `open_absolute`
-has a writable overload accepting create flags plus `O_CREAT` mode/owner. The fd
-layer adds `dup`/`dup2` (sharing the same `File` and its offset, retaining once
-per new fd; `dup2` closes an already-open target first), and `write`/`lseek`/
-`fsync` through a process-local fd.
+`FileOperations` gains appended `write`, `lseek`, and minimal `readdir` ops and
+`File` gains an appended `writable` flag (the read-only `read`/`close` layout is
+preserved). A backend with a null `write` op is read-only (`write` returns
+`-EROFS`); a null `lseek` op uses ordinary offset arithmetic with overflow
+checks. `open_absolute` has a writable overload accepting create flags plus
+`O_CREAT` mode/owner; read-only opens of `/rw` directories produce directory fds
+that can enumerate bounded name/type records. The fd layer adds `dup`/`dup2`
+(sharing the same `File` and its offset, retaining once per new fd; `dup2`
+closes an already-open target first), and `write`/`lseek`/`fsync`/minimal
+directory enumeration through a process-local fd.
 
 ## Pipes
 
@@ -102,12 +106,13 @@ reclaiming the pipe when both ends are gone.
 
 New numbers are appended after `SYS_SIGRETURN = 19`: `SYS_LSEEK = 20`,
 `SYS_PIPE = 21`, `SYS_DUP = 22`, `SYS_DUP2 = 23`, `SYS_FSYNC = 24`,
-`SYS_MKDIR = 25`, `SYS_UNLINK = 26`. `SYS_OPEN = 5` is extended to accept
-writable/create flags and an `O_CREAT` mode; `SYS_WRITE = 2` is extended to write
-file and pipe fds while preserving the console fast path. The register ABI,
-existing numbers, vector layout, and the "syscall sends no EOI" rule are
-unchanged. Write/pipe/FS syscalls check the scheduler blocking guard before
-allocating or entering synchronous block I/O or blocking.
+`SYS_MKDIR = 25`, `SYS_UNLINK = 26`, `SYS_EXECVE = 27`, and `SYS_READDIR = 28`.
+`SYS_OPEN = 5` is extended to accept writable/create flags and an `O_CREAT`
+mode; `SYS_WRITE = 2` is extended to write file and pipe fds while preserving
+the console fast path. The register ABI, existing numbers, vector layout, and
+the "syscall sends no EOI" rule are unchanged. Write/pipe/FS syscalls check the
+scheduler blocking guard before allocating or entering synchronous block I/O or
+blocking.
 
 ## Validation Smoke
 

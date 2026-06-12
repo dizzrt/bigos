@@ -31,7 +31,7 @@ The runner explicitly configures each case through `xmake f`, builds through the
 | `signals` | `--signal_smoke=y` | `BIGOS_SIGNAL_PASSED` | 30s | Minimal signal queue, masks, handlers, and delivery path. |
 | `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`, page/buffer cache, write/readback, fsync, and permissions. |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup endpoint accounting, blocking wakeup, EOF, and `EPIPE`. |
-| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, arg/env handoff, stdout/stderr, errno, simple C program baseline probes, shell execution, fork/exec/wait, pipe, redirection, and malloc. |
+| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, arg/env handoff, stdout/stderr, errno, simple C program baseline probes, shell execution, fork/exec/wait, pipe, redirection, malloc, and bounded `/rw` runtime file operations. |
 | `default-init` | _(none)_ | `BIGOS_USER_EXEC` | 40s | Default build with no smoke switch; normal boot packages PID-1 init, `/bin/sh`, and bounded `/bin/*`. |
 
 Each case enables only the listed smoke switch and explicitly disables the other smoke switches before building. Outside the runner, all runtime smoke options remain default-off unless a developer explicitly configures them with `xmake f ...=y`.
@@ -65,9 +65,11 @@ teardown rejection, and current-stack release deferral.
 The fd/VFS shell is validated by source-level checks plus `filesystem-read`,
 `filesystem-user-elf`, `writable-fs`, `pipe`, and `userland-runtime` runtime
 cases. The read-only exFAT path remains the boot/image source of truth, while
-`/rw` and pipe semantics are bounded runtime capabilities. fd/VFS syscalls use
-the DPL=3 `int 0x80` trap gate and must pass `sched::can_block()` before
-synchronous storage I/O or blocking pipe operations.
+`/rw` and pipe semantics are bounded runtime capabilities. `/rw` guarantees
+current-runtime consistency only and does not persist data across reboot or alter
+the Legacy BIOS/MBR/exFAT disk image. fd/VFS syscalls use the DPL=3 `int 0x80`
+trap gate and must pass `sched::can_block()` before synchronous storage I/O or
+blocking pipe operations.
 
 Simple C program validation is layered into the default-off
 `userland-runtime` case. When `userland_smoke` is enabled, the build packages

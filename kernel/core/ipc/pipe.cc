@@ -152,8 +152,8 @@ namespace {
         maybe_free(pipe);
     }
 
-    const bigos::vfs::FileOperations PIPE_READ_OPS = {&pipe_read, &pipe_close, nullptr, &pipe_lseek};
-    const bigos::vfs::FileOperations PIPE_WRITE_OPS = {nullptr, &pipe_close, &pipe_write, &pipe_lseek};
+    const bigos::vfs::FileOperations PIPE_READ_OPS = {&pipe_read, &pipe_close, nullptr, &pipe_lseek, nullptr};
+    const bigos::vfs::FileOperations PIPE_WRITE_OPS = {nullptr, &pipe_close, &pipe_write, &pipe_lseek, nullptr};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG

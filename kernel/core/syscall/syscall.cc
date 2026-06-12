@@ -289,6 +289,28 @@ namespace sys {
             return vfs_status_to_syscall(bigos::vfs::unlink(path, uid, gid));
         }
 
+        static int64_t sys_readdir(uint64_t __fd, uint64_t __entries, uint64_t __max_entries) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            if (__max_entries == 0 || __max_entries > SYS_DIRENT_MAX_ENTRIES)
+                return -bigos::EINVAL;
+            const uint64_t bytes = __max_entries * sizeof(bigos::vfs::DirectoryEntry);
+            if (__max_entries > UINT64_MAX / sizeof(bigos::vfs::DirectoryEntry) ||
+                !bigos::proc::validate_user_io_buffer(__entries, bytes))
+                return -bigos::EFAULT;
+            bigos::vfs::DirectoryEntry bounded[SYS_DIRENT_MAX_ENTRIES];
+            size_t entries_read = 0;
+            const bigos::vfs::Status status =
+                bigos::proc::readdir_fd_current((uint32_t)__fd, bounded, (size_t)__max_entries, &entries_read);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            if (entries_read != 0 &&
+                !bigos::proc::copy_to_current_user_buffer(
+                    __entries, bounded, entries_read * sizeof(bigos::vfs::DirectoryEntry)))
+                return -bigos::EFAULT;
+            return (int64_t)entries_read;
+        }
+
         static int64_t sys_brk(uint64_t __new_break) noexcept {
             return bigos::proc::brk_current(__new_break);
         }
@@ -544,6 +566,9 @@ namespace sys {
                 // interrupt path sends no i8259 EOI and relaxes no gate/register
                 // convention.
                 result = __detail::sys_execve(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_READDIR:
+                result = __detail::sys_readdir(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
             case SYS_BRK:
                 result = __detail::sys_brk(__frame->rdi);

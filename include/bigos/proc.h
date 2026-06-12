@@ -271,6 +271,8 @@ namespace bigos::proc {
         uint32_t __fd, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
     bigos::vfs::Status lseek_fd_current(uint32_t __fd, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
     bigos::vfs::Status fsync_fd_current(uint32_t __fd) noexcept;
+    bigos::vfs::Status readdir_fd_current(
+        uint32_t __fd, bigos::vfs::DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
     // Returns the vfs::File bound to a current-process fd, or nullptr on an
     // invalid/unused descriptor. The reference count is not changed.
     bigos::vfs::File *file_for_fd_current(uint32_t __fd) noexcept;

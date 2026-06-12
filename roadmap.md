@@ -215,15 +215,15 @@ runtime behavior checks, and environment-dependent checks.
 
 ### Stage 24: Bounded Runtime Filesystem Usability / 阶段 24：有界运行时文件系统可用性
 
-- Improve bounded writable runtime storage so simple C programs can reliably use
-  documented file creation, read, write, seek, sync, directory, and removal
-  behavior within explicit limits.
-- 改进有界可写运行时存储，让简单 C 程序能在明确限制内可靠使用有文档描述的文件创建、
-  读取、写入、seek、sync、目录和删除行为。
-- Boundary change: runtime file behavior becomes part of the minimal usable
-  system goal. Preserved boundaries: no persistent full writable filesystem,
+- Status: complete. Bounded writable runtime storage now supports documented
+  file creation, read, write, seek, sync, directory, and removal behavior for
+  simple C programs within explicit limits.
+- 状态：已完成。有界可写运行时存储现在支持简单 C 程序在明确限制内使用有文档描述的文件
+  创建、读取、写入、seek、sync、目录和删除行为。
+- Boundary status: runtime file behavior is now part of the minimal usable
+  system baseline. Preserved boundaries: no persistent full writable filesystem,
   broad file-backed mapping, async I/O, or broad storage/device support.
-- 边界变化：运行时文件行为成为最小可用系统目标的一部分。保持边界：不引入持久完整可写
+- 边界状态：运行时文件行为现在是最小可用系统基线的一部分。保持边界：不引入持久完整可写
   文件系统、广泛 file-backed mapping、async I/O 或广泛存储/设备支持。
 
 ### Stage 25: x86_64/Core Decoupling Discipline / 阶段 25：x86_64 与内核核心解耦纪律

@@ -11,6 +11,7 @@ namespace vfs {
     constexpr uint64_t OPEN_CREAT = 1ull << 6;
     constexpr uint64_t OPEN_TRUNC = 1ull << 9;
     constexpr size_t MAX_PATH_LEN = 256;
+    constexpr size_t DIRENT_NAME_MAX = 27;
 
     enum class Status : int64_t {
         Success = 0,
@@ -27,6 +28,7 @@ namespace vfs {
         ReadOnlyFs = -30,
         NoSpace = -28,
         AccessDenied = -13,
+        NotDirectory = -20,
         NotSeekable = -29,
         IsDirectory = -21,
         Exists = -17,
@@ -40,10 +42,19 @@ namespace vfs {
 
     struct Vnode;
     struct File;
+    struct DirectoryEntry {
+        uint32_t type;
+        char name[DIRENT_NAME_MAX + 1];
+    };
+
+    constexpr uint32_t DIRENT_TYPE_FILE = 1;
+    constexpr uint32_t DIRENT_TYPE_DIRECTORY = 2;
 
     using ReadOp = Status (*)(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
     using WriteOp = Status (*)(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
     using LseekOp = Status (*)(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
+    using ReaddirOp = Status (*)(
+        File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
     using CloseOp = void (*)(File *__file) noexcept;
 
     struct FileOperations {
@@ -54,6 +65,7 @@ namespace vfs {
         // (the wrapper then performs ordinary offset arithmetic).
         WriteOp write;
         LseekOp lseek;
+        ReaddirOp readdir;
     };
 
     struct Vnode {
@@ -88,6 +100,7 @@ namespace vfs {
     Status write(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
     Status lseek(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
     Status fsync(File *__file) noexcept;
+    Status readdir(File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
     // Directory mutation on the writable backend. owner/identity are the caller's.
     Status mkdir(const char *__path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__path, uint32_t __uid, uint32_t __gid) noexcept;

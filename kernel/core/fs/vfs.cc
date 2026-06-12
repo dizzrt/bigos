@@ -131,7 +131,9 @@ namespace {
         }
     }
 
-    const bigos::vfs::FileOperations EXFAT_FILE_OPS = {&exfat_read, &exfat_close, nullptr, nullptr};
+    constexpr size_t VFS_DIRENT_BATCH_MAX = 16;
+
+    const bigos::vfs::FileOperations EXFAT_FILE_OPS = {&exfat_read, &exfat_close, nullptr, nullptr, nullptr};
 
     bigos::vfs::Status bigfs_to_vfs(bigos::bigfs::Status __status) noexcept {
         switch (__status) {
@@ -146,7 +148,7 @@ namespace {
             case bigos::bigfs::Status::NoSpace:
                 return bigos::vfs::Status::NoSpace;
             case bigos::bigfs::Status::NotDirectory:
-                return bigos::vfs::Status::NotFound;
+                return bigos::vfs::Status::NotDirectory;
             case bigos::bigfs::Status::IsDirectory:
                 return bigos::vfs::Status::IsDirectory;
             case bigos::bigfs::Status::NotEmpty:
@@ -209,6 +211,8 @@ namespace {
         if (__file == nullptr)
             return;
         if (__file->private_data != nullptr) {
+            BigfsFileState *state = (BigfsFileState *)__file->private_data;
+            bigos::bigfs::close_inode(state->inode);
             bigos::free(__file->private_data);
             __file->private_data = nullptr;
         }
@@ -218,7 +222,37 @@ namespace {
         }
     }
 
-    const bigos::vfs::FileOperations BIGFS_FILE_OPS = {&bigfs_read, &bigfs_close, &bigfs_write, nullptr};
+    bigos::vfs::Status bigfs_readdir(bigos::vfs::File *__file, bigos::vfs::DirectoryEntry *__entries,
+        size_t __max_entries, size_t *__entries_read) noexcept {
+        if (__entries_read != nullptr)
+            *__entries_read = 0;
+        if (__file == nullptr || __file->private_data == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        if (__entries == nullptr || __max_entries == 0)
+            return bigos::vfs::Status::InvalidArgument;
+        if (__file->vnode == nullptr || !__file->vnode->is_directory)
+            return bigos::vfs::Status::NotDirectory;
+        BigfsFileState *state = (BigfsFileState *)__file->private_data;
+        if (__max_entries > VFS_DIRENT_BATCH_MAX)
+            return bigos::vfs::Status::InvalidArgument;
+        bigos::bigfs::DirectoryEntry local_entries[VFS_DIRENT_BATCH_MAX];
+        size_t count = 0;
+        uint64_t next_offset = __file->offset;
+        const bigos::bigfs::Status status =
+            bigos::bigfs::readdir(state->inode, __file->offset, local_entries, __max_entries, &count, &next_offset);
+        if (status != bigos::bigfs::Status::Success)
+            return bigfs_to_vfs(status);
+        for (size_t i = 0; i < count; i++) {
+            __entries[i].type = local_entries[i].type;
+            memcpy(__entries[i].name, local_entries[i].name, sizeof(__entries[i].name));
+        }
+        __file->offset = next_offset;
+        if (__entries_read != nullptr)
+            *__entries_read = count;
+        return bigos::vfs::Status::Success;
+    }
+
+    const bigos::vfs::FileOperations BIGFS_FILE_OPS = {&bigfs_read, &bigfs_close, &bigfs_write, nullptr, &bigfs_readdir};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG
@@ -253,6 +287,8 @@ namespace vfs {
                 return "no-space";
             case Status::AccessDenied:
                 return "access-denied";
+            case Status::NotDirectory:
+                return "not-directory";
             case Status::NotSeekable:
                 return "not-seekable";
             case Status::Exists:
@@ -320,21 +356,26 @@ namespace vfs {
         if (bigos::bigfs::owns_path(__path)) {
             uint32_t inode = 0;
             uint64_t size = 0;
+            bool is_dir = false;
             const bigos::bigfs::Status status =
-                bigos::bigfs::open(__path, __flags, __mode, __uid, __gid, &inode, &size);
+                bigos::bigfs::open(__path, __flags, __mode, __uid, __gid, &inode, &size, &is_dir);
             if (status != bigos::bigfs::Status::Success)
                 return bigfs_to_vfs(status);
 
             Vnode *vnode = (Vnode *)bigos::kmalloc(sizeof(Vnode));
-            if (vnode == nullptr)
+            if (vnode == nullptr) {
+                bigos::bigfs::close_inode(inode);
                 return Status::NoMemory;
+            }
             BigfsFileState *state = (BigfsFileState *)bigos::kmalloc(sizeof(BigfsFileState));
             if (state == nullptr) {
+                bigos::bigfs::close_inode(inode);
                 bigos::free(vnode);
                 return Status::NoMemory;
             }
             File *file = (File *)bigos::kmalloc(sizeof(File));
             if (file == nullptr) {
+                bigos::bigfs::close_inode(inode);
                 bigos::free(state);
                 bigos::free(vnode);
                 return Status::NoMemory;
@@ -343,7 +384,7 @@ namespace vfs {
             state->uid = __uid;
             state->gid = __gid;
             vnode->size = size;
-            vnode->is_directory = false;
+            vnode->is_directory = is_dir;
             vnode->private_data = state;
             file->ops = &BIGFS_FILE_OPS;
             file->vnode = vnode;
@@ -466,6 +507,16 @@ namespace vfs {
         if (__file->ops->write == nullptr)
             return Status::Success;
         return bigfs_to_vfs(bigos::bigfs::fsync());
+    }
+
+    Status readdir(File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept {
+        if (__entries_read != nullptr)
+            *__entries_read = 0;
+        if (__file == nullptr || __file->ops == nullptr)
+            return Status::BadFileDescriptor;
+        if (__file->ops->readdir == nullptr)
+            return Status::NotDirectory;
+        return __file->ops->readdir(__file, __entries, __max_entries, __entries_read);
     }
 
     Status mkdir(const char *__path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept {

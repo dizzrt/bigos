@@ -250,6 +250,77 @@ static void test_redirect_and_dup(void) {
         fail("redir-content");
 }
 
+static int dirents_contain(struct bigos_dirent *entries, ssize_t n, const char *name, unsigned int type) {
+    for (ssize_t i = 0; i < n; i++) {
+        if (entries[i].type == type && strcmp(entries[i].name, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void test_runtime_filesystem(void) {
+    unlink("/rw/runtime_file.txt");
+    unlink("/rw/runtime_unlink.txt");
+    if (mkdir("/rw/runtime_dir", 0755) < 0 && errno != EEXIST)
+        fail("runtime-mkdir");
+
+    int fd = open("/rw/runtime_file.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        fail("runtime-open");
+    const char *payload = "runtime-fs";
+    if (write(fd, payload, strlen(payload)) != (ssize_t)strlen(payload))
+        fail("runtime-write");
+    if (fsync(fd) != 0)
+        fail("runtime-fsync");
+    if (lseek(fd, 0, SEEK_SET) != 0)
+        fail("runtime-seek");
+    char buf[32];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n != (ssize_t)strlen(payload))
+        fail("runtime-read");
+    buf[n] = 0;
+    if (strcmp(buf, payload) != 0)
+        fail("runtime-content");
+
+    int dirfd = open("/rw", O_RDONLY, 0);
+    if (dirfd < 0)
+        fail("runtime-dir-open");
+    struct bigos_dirent entries[BIGOS_DIRENT_MAX_BATCH];
+    ssize_t count = bigos_readdir(dirfd, entries, BIGOS_DIRENT_MAX_BATCH);
+    close(dirfd);
+    if (count < 0)
+        fail("runtime-readdir");
+    if (!dirents_contain(entries, count, "runtime_file.txt", BIGOS_DIRENT_TYPE_FILE))
+        fail("runtime-readdir-file");
+    if (!dirents_contain(entries, count, "runtime_dir", BIGOS_DIRENT_TYPE_DIRECTORY))
+        fail("runtime-readdir-dir");
+
+    fd = open("/rw/runtime_unlink.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        fail("runtime-unlink-open");
+    if (write(fd, "gone", 4) != 4)
+        fail("runtime-unlink-write");
+    if (unlink("/rw/runtime_unlink.txt") != 0)
+        fail("runtime-unlink");
+    if (open("/rw/runtime_unlink.txt", O_RDONLY, 0) != -1 || errno != ENOENT)
+        fail("runtime-unlink-lookup");
+    if (lseek(fd, 0, SEEK_SET) != 0)
+        fail("runtime-unlink-seek");
+    n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n != 4)
+        fail("runtime-unlink-read");
+    buf[n] = 0;
+    if (strcmp(buf, "gone") != 0)
+        fail("runtime-unlink-content");
+
+    errno = 0;
+    fd = open("/boot/user/init.elf", O_WRONLY, 0);
+    if (fd != -1 || errno != EROFS)
+        fail("runtime-rofs");
+}
+
 static void test_time_identity(void) {
     if (getpid() <= 0)
         fail("getpid");
@@ -376,6 +447,7 @@ int main(int argc, char **argv, char **envp) {
     test_fork_exec(envp);
     test_pipe();
     test_redirect_and_dup();
+    test_runtime_filesystem();
     test_time_identity();
     test_smoke_programs(envp);
     test_smoke_shell(envp);

@@ -2169,6 +2169,19 @@ namespace bigos::proc {
         return bigos::vfs::fsync(entry->file);
     }
 
+    bigos::vfs::Status readdir_fd_current(
+        uint32_t __fd, bigos::vfs::DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept {
+        if (__entries_read != nullptr)
+            *__entries_read = 0;
+        Process *process = g_current_process;
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
+            return bigos::vfs::Status::BadFileDescriptor;
+        FdEntry *entry = &process->fd_table[__fd];
+        if (entry->file == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        return bigos::vfs::readdir(entry->file, __entries, __max_entries, __entries_read);
+    }
+
     bigos::vfs::File *file_for_fd_current(uint32_t __fd) noexcept {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)

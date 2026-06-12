@@ -65,6 +65,8 @@ namespace bigos::sys {
                                // user pointer arrays copied through VMA-backed validation
                                // and bounded by EXEC_MAX_ARGC/EXEC_MAX_ENVC/
                                // EXEC_MAX_STRING_BYTES.
+        SYS_READDIR = 28,      // (fd, struct bigos_dirent *entries, max_entries) -> entry count
+                               // or negative errno; minimal bounded /rw directory enumeration.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);
@@ -73,6 +75,7 @@ namespace bigos::sys {
     constexpr uint64_t SYS_WRITE_MAX_LEN = 128;
     constexpr uint64_t SYS_IO_MAX_LEN = 512;
     constexpr uint64_t SYS_PATH_MAX_LEN = 256;
+    constexpr uint64_t SYS_DIRENT_MAX_ENTRIES = 16;
 
     // Syscall dispatch entry. Invoked from irq_dispatch when the interrupt vector
     // is VECTOR_SYSCALL. Reads the syscall number from frame->rax, routes to the

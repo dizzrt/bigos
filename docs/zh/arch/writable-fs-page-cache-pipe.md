@@ -44,9 +44,10 @@ inode 数、仅直接块的文件（有界 `MAX_FILE_SIZE`）、定长目录项�
 
 每个 inode 携带 `owner`（uid/gid）与 `mode`。支持：可写 `open`
 （`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`）、文件 `write`、`lseek`、`O_TRUNC`
-截断、`mkdir`、`unlink`。失败语义确定性
-（`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-EISDIR`/`-EINVAL`/`-EIO`/`-EACCES`/`-EROFS`），
-失败路径绝不发布半成品元数据。
+截断、`mkdir`、最小目录枚举与 `unlink`。`unlink` 会先移除目录项；仍打开的 fd 会让
+inode 与数据块保留到最后一个引用关闭。失败语义确定性
+（`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-ENOTDIR`/`-EISDIR`/`-EINVAL`/`-EIO`/`-EACCES`/
+`-EROFS`），失败路径绝不发布半成品元数据。
 
 由于介质为 RAM-backed，重启不持久；本阶段只保证运行期一致性（写后读回，以及
 `fsync` 加缓存淘汰后再读一致）。无 journaling，崩溃一致性不在范围内，作为已知限
@@ -62,12 +63,13 @@ owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端�
 
 ## VFS 与 fd 扩展
 
-`FileOperations` 追加 `write` 与 `lseek` op，`File` 追加 `writable` 标志（保留只读
-`read`/`close` 布局）。`write` op 为空的后端即只读（`write` 返回 `-EROFS`）；
-`lseek` op 为空时使用带溢出检查的普通 offset 运算。`open_absolute` 增加可写重载，
-接受创建 flags 与 `O_CREAT` 的 mode/owner。fd 层新增 `dup`/`dup2`（共享同一 `File`
-与 offset，每个新 fd 增引用一次；`dup2` 先关闭已打开的目标），以及经进程局部 fd
-的 `write`/`lseek`/`fsync`。
+`FileOperations` 追加 `write`、`lseek` 与最小 `readdir` op，`File` 追加 `writable`
+标志（保留只读 `read`/`close` 布局）。`write` op 为空的后端即只读（`write` 返回
+`-EROFS`）；`lseek` op 为空时使用带溢出检查的普通 offset 运算。`open_absolute`
+增加可写重载，接受创建 flags 与 `O_CREAT` 的 mode/owner；以只读方式打开 `/rw`
+目录会得到可枚举有界 name/type 记录的目录 fd。fd 层新增 `dup`/`dup2`（共享同一
+`File` 与 offset，每个新 fd 增引用一次；`dup2` 先关闭已打开的目标），以及经进程
+局部 fd 的 `write`/`lseek`/`fsync`/最小目录枚举。
 
 ## 管道
 
@@ -83,10 +85,10 @@ owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端�
 
 新号紧随 `SYS_SIGRETURN = 19` 追加：`SYS_LSEEK = 20`、`SYS_PIPE = 21`、
 `SYS_DUP = 22`、`SYS_DUP2 = 23`、`SYS_FSYNC = 24`、`SYS_MKDIR = 25`、
-`SYS_UNLINK = 26`。`SYS_OPEN = 5` 扩展为接受可写/创建 flags 与 `O_CREAT` 的 mode；
-`SYS_WRITE = 2` 扩展为写文件/管道 fd，同时保留控制台快路径。寄存器 ABI、既有号位、
-向量布局与「syscall 不发 EOI」规则不变。写/管道/FS syscall 在分配或进入同步块 IO/
-阻塞前检查调度阻塞守卫。
+`SYS_UNLINK = 26`、`SYS_EXECVE = 27`、`SYS_READDIR = 28`。`SYS_OPEN = 5`
+扩展为接受可写/创建 flags 与 `O_CREAT` 的 mode；`SYS_WRITE = 2` 扩展为写文件/管道
+fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布局与「syscall 不发 EOI」规则
+不变。写/管道/FS syscall 在分配或进入同步块 IO/阻塞前检查调度阻塞守卫。
 
 ## 验证 smoke
 

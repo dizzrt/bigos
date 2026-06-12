@@ -31,6 +31,7 @@ constexpr int ENOMEM = 12;        // out of kernel memory
 constexpr int EACCES = 13;        // permission denied
 constexpr int EFAULT = 14;        // bad address
 constexpr int EEXIST = 17;        // file exists
+constexpr int ENOTDIR = 20;       // not a directory
 constexpr int EISDIR = 21;        // is a directory
 constexpr int EINVAL = 22;        // invalid argument
 constexpr int EMFILE = 24;        // too many open files

@@ -19,6 +19,7 @@ namespace {
     using bigos::bigfs::INODE_SIZE;
     using bigos::bigfs::INODE_TABLE_START;
     using bigos::bigfs::INODES_PER_BLOCK;
+    using bigos::bigfs::ROOT_INODE;
     using bigos::bigfs::Status;
 
     constexpr uint32_t INODE_BITMAP_BLOCK = 1;
@@ -43,6 +44,7 @@ namespace {
 
     uint8_t *g_ram = nullptr;
     driver::block::BlockDevice g_device = {};
+    uint32_t g_open_refs[INODE_COUNT] = {};
     bool g_initialized = false;
 
     driver::block::BlockStatus ram_read_impl(
@@ -187,6 +189,17 @@ namespace {
             }
         }
         __inode->size = 0;
+    }
+
+    void maybe_free_unlinked_inode(uint32_t __inode, DiskInode *__node) noexcept {
+        if (__inode == ROOT_INODE || __inode >= INODE_COUNT || __node == nullptr)
+            return;
+        if (__node->type == bigos::bigfs::INODE_FREE || __node->link_count != 0 || g_open_refs[__inode] != 0)
+            return;
+        release_inode_blocks(__node);
+        __node->type = bigos::bigfs::INODE_FREE;
+        (void)store_inode(__inode, __node);
+        bitmap_free(INODE_BITMAP_BLOCK, __inode);
     }
 
     // --- directory helpers ---
@@ -472,12 +485,31 @@ namespace bigfs {
     }
 
     Status open(const char *__abs_path, uint64_t __flags, uint32_t __mode, uint32_t __uid, uint32_t __gid,
-        uint32_t *__out_inode, uint64_t *__out_size) noexcept {
-        if (!g_initialized || __abs_path == nullptr || __out_inode == nullptr || __out_size == nullptr)
+        uint32_t *__out_inode, uint64_t *__out_size, bool *__out_is_dir) noexcept {
+        if (!g_initialized || __abs_path == nullptr || __out_inode == nullptr || __out_size == nullptr ||
+            __out_is_dir == nullptr)
             return Status::Invalid;
         const char *rest = nullptr;
         if (!strip_prefix(__abs_path, &rest))
             return Status::Invalid;
+
+        const bool want_write =
+            (__flags & (bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_RDWR | bigos::vfs::OPEN_TRUNC)) != 0;
+        const char *root_cursor = rest;
+        while (*root_cursor == '/')
+            root_cursor++;
+        if (*root_cursor == 0) {
+            if (want_write || (__flags & bigos::vfs::OPEN_CREAT) != 0)
+                return Status::IsDirectory;
+            DiskInode root;
+            if (!load_inode(ROOT_INODE, &root) || root.type != INODE_DIRECTORY)
+                return Status::IoError;
+            g_open_refs[ROOT_INODE]++;
+            *__out_inode = ROOT_INODE;
+            *__out_size = root.size;
+            *__out_is_dir = true;
+            return Status::Success;
+        }
 
         uint32_t parent = 0;
         char leaf[DIRENT_NAME_MAX + 1];
@@ -491,9 +523,6 @@ namespace bigfs {
 
         uint32_t inode_num = 0;
         const bool exists = dir_lookup(&dir, leaf, &inode_num);
-        const bool want_write =
-            (__flags & (bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_RDWR | bigos::vfs::OPEN_TRUNC)) != 0;
-
         if (!exists) {
             if ((__flags & bigos::vfs::OPEN_CREAT) == 0)
                 return Status::NotFound;
@@ -521,8 +550,10 @@ namespace bigfs {
                 bitmap_free(INODE_BITMAP_BLOCK, new_inode);
                 return add;
             }
+            g_open_refs[new_inode]++;
             *__out_inode = new_inode;
             *__out_size = 0;
+            *__out_is_dir = false;
             return Status::Success;
         }
 
@@ -530,8 +561,18 @@ namespace bigfs {
         DiskInode file;
         if (!load_inode(inode_num, &file))
             return Status::IoError;
-        if (file.type == INODE_DIRECTORY)
-            return Status::IsDirectory;
+        if (file.type == INODE_DIRECTORY) {
+            if (want_write || (__flags & bigos::vfs::OPEN_CREAT) != 0)
+                return Status::IsDirectory;
+            const Status acc = check_access(__uid, __gid, &file, bigos::cred::Access::Read);
+            if (acc != Status::Success)
+                return acc;
+            g_open_refs[inode_num]++;
+            *__out_inode = inode_num;
+            *__out_size = file.size;
+            *__out_is_dir = true;
+            return Status::Success;
+        }
         if (want_write) {
             const Status acc = check_access(__uid, __gid, &file, bigos::cred::Access::Write);
             if (acc != Status::Success)
@@ -546,9 +587,22 @@ namespace bigfs {
             if (!store_inode(inode_num, &file))
                 return Status::IoError;
         }
+        g_open_refs[inode_num]++;
         *__out_inode = inode_num;
         *__out_size = file.size;
+        *__out_is_dir = false;
         return Status::Success;
+    }
+
+    void close_inode(uint32_t __inode) noexcept {
+        if (!g_initialized || __inode >= INODE_COUNT)
+            return;
+        if (g_open_refs[__inode] > 0)
+            g_open_refs[__inode]--;
+        DiskInode node;
+        if (!load_inode(__inode, &node))
+            return;
+        maybe_free_unlinked_inode(__inode, &node);
     }
 
     Status read(uint32_t __inode, uint64_t __offset, void *__dst, size_t __len, size_t *__out_read) noexcept {
@@ -741,11 +795,58 @@ namespace bigfs {
 
         if (!dir_remove_entry(&dir, leaf))
             return Status::NotFound;
-        release_inode_blocks(&tnode);
-        tnode.type = INODE_FREE;
         tnode.link_count = 0;
         (void)store_inode(target, &tnode);
-        bitmap_free(INODE_BITMAP_BLOCK, target);
+        maybe_free_unlinked_inode(target, &tnode);
+        return Status::Success;
+    }
+
+    Status readdir(uint32_t __inode, uint64_t __offset, DirectoryEntry *__entries, size_t __max_entries,
+        size_t *__out_entries, uint64_t *__next_offset) noexcept {
+        if (__out_entries != nullptr)
+            *__out_entries = 0;
+        if (__next_offset != nullptr)
+            *__next_offset = __offset;
+        if (!g_initialized || __entries == nullptr || __max_entries == 0 || __next_offset == nullptr)
+            return Status::Invalid;
+        if (__offset % DIRENT_SIZE != 0)
+            return Status::Invalid;
+        DiskInode dir;
+        if (!load_inode(__inode, &dir))
+            return Status::Invalid;
+        if (dir.type != INODE_DIRECTORY)
+            return Status::NotDirectory;
+
+        const uint64_t max_slots = (uint64_t)DIRECT_BLOCKS * DIRENTS_PER_BLOCK;
+        uint64_t slot = __offset / DIRENT_SIZE;
+        size_t produced = 0;
+        while (slot < max_slots && produced < __max_entries) {
+            const uint32_t block_index = (uint32_t)(slot / DIRENTS_PER_BLOCK);
+            const uint32_t entry_index = (uint32_t)(slot % DIRENTS_PER_BLOCK);
+            slot++;
+            const uint32_t block_no = dir.direct[block_index];
+            if (block_no == 0)
+                continue;
+            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, block_no);
+            if (block == nullptr)
+                return Status::IoError;
+            DiskDirent *ent = (DiskDirent *)(block->data + entry_index * DIRENT_SIZE);
+            if (ent->inode_plus_one != 0) {
+                DiskInode child;
+                const uint32_t child_inode = ent->inode_plus_one - 1;
+                if (load_inode(child_inode, &child) && child.type != INODE_FREE) {
+                    __entries[produced].type =
+                        child.type == INODE_DIRECTORY ? bigos::vfs::DIRENT_TYPE_DIRECTORY : bigos::vfs::DIRENT_TYPE_FILE;
+                    memcpy(__entries[produced].name, ent->name, sizeof(__entries[produced].name));
+                    __entries[produced].name[DIRENT_NAME_MAX] = 0;
+                    produced++;
+                }
+            }
+            bigos::bcache::put(block);
+        }
+        if (__out_entries != nullptr)
+            *__out_entries = produced;
+        *__next_offset = slot * DIRENT_SIZE;
         return Status::Success;
     }
 

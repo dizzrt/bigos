@@ -32,10 +32,14 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     string = read_source('user/libc/include/string.h')
     unistd = read_source('user/libc/include/unistd.h')
     fcntl = read_source('user/libc/include/fcntl.h')
+    dirent = read_source('user/libc/include/bigos_dirent.h')
+    stat = read_source('user/libc/include/sys/stat.h')
+    types = read_source('user/libc/include/sys/types.h')
     wait = read_source('user/libc/include/sys/wait.h')
 
     for include in ('"stdio.h"', '"stdlib.h"', '"string.h"', '"errno.h"',
-                    '"unistd.h"', '"fcntl.h"', '"sys/types.h"', '"sys/wait.h"'):
+                    '"unistd.h"', '"fcntl.h"', '"bigos_dirent.h"', '"sys/stat.h"',
+                    '"sys/types.h"', '"sys/wait.h"'):
         assert include in libc
 
     assert 'typedef struct __bigos_FILE FILE;' in stdio
@@ -47,6 +51,10 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'int strncmp(const char *a, const char *b, size_t n);' in string
     assert 'ssize_t write(int fd, const void *buf, size_t len);' in unistd
     assert '#define O_CREAT' in fcntl
+    assert 'struct bigos_dirent' in dirent
+    assert 'ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries);' in dirent
+    assert 'typedef unsigned int mode_t;' in types
+    assert 'int mkdir(const char *path, mode_t mode);' in stat
     assert '#define WAIT_ANY' in wait
     assert 'pid_t wait_status(pid_t pid, int *status);' in wait
 
@@ -91,6 +99,7 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'wait_status(pid, &status)' in smoke
     assert 'require_file_contains("/rw/smoke_args.txt"' in smoke
     assert 'require_file_contains("/rw/smoke_libc_subset.txt"' in smoke
+    assert 'test_runtime_filesystem();' in smoke
     assert 'write_all_or_exit(input[1], "/bin/smoke/exit 7\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo redir-ok > /rw/smoke_shell_redir.txt\\n");' in smoke

@@ -9,14 +9,16 @@
 #ifndef _BIGOS_LIBC_H
 #define _BIGOS_LIBC_H
 
-#include "errno.h"     /* IWYU pragma: export */
-#include "fcntl.h"     /* IWYU pragma: export */
-#include "stdio.h"     /* IWYU pragma: export */
-#include "stdlib.h"    /* IWYU pragma: export */
-#include "string.h"    /* IWYU pragma: export */
-#include "sys/types.h" /* IWYU pragma: export */
-#include "sys/wait.h"  /* IWYU pragma: export */
-#include "unistd.h"    /* IWYU pragma: export */
+#include "errno.h"        /* IWYU pragma: export */
+#include "bigos_dirent.h" /* IWYU pragma: export */
+#include "fcntl.h"        /* IWYU pragma: export */
+#include "stdio.h"        /* IWYU pragma: export */
+#include "stdlib.h"       /* IWYU pragma: export */
+#include "string.h"       /* IWYU pragma: export */
+#include "sys/stat.h"     /* IWYU pragma: export */
+#include "sys/types.h"    /* IWYU pragma: export */
+#include "sys/wait.h"     /* IWYU pragma: export */
+#include "unistd.h"       /* IWYU pragma: export */
 
 /* --- raw syscall primitives (rax=number, rdi/rsi/rdx/r10/r8/r9) --- */
 long syscall0(long n);
