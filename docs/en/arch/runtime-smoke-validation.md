@@ -12,6 +12,14 @@ BigOS stage 9 productizes the existing default-off runtime smokes as a narrow va
 
 The runner explicitly configures each case through `xmake f`, builds through the existing xmake-backed flow, prepares the existing Legacy BIOS/MBR/exFAT raw image, launches QEMU with `--display none`, and waits for the expected COM1 marker within the case-specific timeout.
 
+## Validation Inventory
+
+Behavior-oriented validation distinguishes three entry classes:
+
+- Default path: the `default-init` case uses the normal build with all smoke switches disabled, packages PID-1 init, `/bin/sh`, and bounded `/bin/*`, then observes the deterministic init/shell serial markers through QEMU headless logs.
+- Default-off smoke: `userland-runtime`, `writable-fs`, `pipe`, `filesystem-read`, `filesystem-user-elf`, and related cases enable one explicit smoke switch at a time to validate userland, process/fd, pipe/redirection, and filesystem behavior without changing normal boot defaults.
+- Scenario evidence: graphical QEMU, Bochs, manual keyboard input, emulator input injection, or hardware-adjacent checks are recorded only when they add evidence for console usability or low-level boot/IRQ/timer/ATA/port-IO risks.
+
 ## Matrix Cases
 
 | Case | xmake switches | Expected marker | Timeout | Boundary |
@@ -35,6 +43,22 @@ The runner explicitly configures each case through `xmake f`, builds through the
 | `default-init` | _(none)_ | `BIGOS_USER_EXEC` | 40s | Default build with no smoke switch; normal boot packages PID-1 init, `/bin/sh`, and bounded `/bin/*`. |
 
 Each case enables only the listed smoke switch and explicitly disables the other smoke switches before building. Outside the runner, all runtime smoke options remain default-off unless a developer explicitly configures them with `xmake f ...=y`.
+
+## Behavior-Oriented Matrix
+
+Stage 26 promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. These checks remain bounded to the current x86_64 Legacy BIOS/MBR/exFAT backend and do not require UEFI, OVMF, ESP/FAT images, virtio, AHCI/SATA, NVMe, SMP, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
+
+| Capability | Input or path | Expected observable result | Failure signal | Layer | Environment dependency |
+| --- | --- | --- | --- | --- | --- |
+| Default init and `/bin/sh` reachability | `default-init` normal boot, no smoke switch | PID-1 init starts and resident `/bin/sh` is launched, observed by `BIGOS_INIT_ENTER` then `BIGOS_USER_EXEC` | Missing expected marker, timeout, emulator exit, or panic marker | QEMU headless runtime assertion | xmake, cross-binutils, QEMU, serial log, Legacy BIOS raw image |
+| Simple C args/env/stdout/stderr | `userland-runtime` runs `/bin/smoke/args`, `/bin/smoke/env`, and `/bin/smoke/out` | `/rw` records expected `argc`/`argv`, deterministic environment boundary text, and stdout/stderr transcript content | `BIGOS_USERLAND_FAILED <reason>`, missing `/rw` record, wrong exit status, or missing pass marker | Default-off userland runtime assertion | xmake, cross-binutils, QEMU, serial log, RAM-backed `/rw` |
+| Simple C `errno` and exit status | `userland-runtime` runs failing open/exec wrappers and `/bin/smoke/exit 7` | Error wrappers report documented `errno`, failed `execve` leaves caller alive, parent observes requested child status | Failure marker, mismatched status, wrong `errno`, or missing continuation output | Default-off userland runtime assertion | xmake, cross-binutils, QEMU, serial log |
+| Shell continuation and unsupported syntax | Non-interactive `/bin/sh` script runs a non-zero program, unsupported pipe syntax, then `echo shell-alive` | Shell reports deterministic syntax/error text and continues to the next command | Missing error text, missing `shell-alive`, shell crash, or missing pass marker | Default-off userland runtime assertion; manual interactive evidence optional | QEMU headless for scripted assertion; display/input only for optional interactive notes |
+| `exec`/`wait` and fd inheritance | Userland smoke forks, execs packaged programs, waits, and preserves stdio or redirected descriptors | Child output or `/rw` records are visible, parent wait returns the expected child/status, inherited descriptors remain usable | Failed wait, wrong status, missing output, descriptor failure, or failure marker | Default-off userland runtime assertion | xmake, cross-binutils, QEMU, serial log |
+| `dup`, redirection, and unrelated fd state | Userland smoke duplicates an fd, closes the original, redirects shell output to `/rw`, and reads it back | Duplicate fd writes survive original close; redirected file contains expected data; shell transcript remains usable | Wrong file content, failed dup/readback, shell fd corruption, or failure marker | Default-off userland runtime assertion | QEMU headless, serial log, RAM-backed `/rw` |
+| Pipe endpoint behavior | Userland smoke transfers `pipe-data`; shell runs `echo pipe-ok | /bin/cat`; `pipe` smoke checks endpoint accounting | Downstream reader sees the bytes, EOF appears after writers close, unrelated fds remain usable | Wrong data, missing EOF, `EPIPE`/endpoint mismatch, missing pass marker, or panic | Default-off userland runtime assertion plus narrow pipe smoke | QEMU headless, serial log |
+| Runtime `/rw` filesystem operations | Userland smoke creates files/dirs, writes, fsyncs, seeks, reads back, enumerates `/rw`, unlinks, and checks read-only backend rejection | File contents, directory entries, unlink behavior, and `EROFS`/`ENOENT` errors match the bounded VFS contract | Wrong content, missing dirent, unexpected persistence requirement, wrong `errno`, or failure marker | Default-off userland runtime assertion plus writable-fs smoke | QEMU headless, serial log, RAM-backed `/rw` |
+| Low-level boot/IRQ/timer/storage behavior | Narrow memory/timer/scheduler/blocking/filesystem cases; Bochs or QEMU+Bochs when relevant | Expected markers and optional intermediate markers appear; cross-emulator notes record result when available | Missing marker, panic, timeout, skipped cross-validation without risk note | Source/spec, build, QEMU headless, optional Bochs/graphical evidence | Toolchain plus selected emulator; Bochs/display/ROM only when scenario requires |
 
 The `default-init` case is the behavior-assertion case driven by no smoke switch:
 it builds the default configuration (every smoke option set to `=n`) and asserts

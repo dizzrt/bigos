@@ -241,14 +241,14 @@ runtime behavior checks, and environment-dependent checks.
 
 ### Stage 26: Behavior-Oriented Validation / 阶段 26：行为导向验证
 
-- Promote runtime-observable behavior checks for the interactive shell, simple C
-  programs, process/fd semantics, filesystem operations, and userland
-  compatibility so later refactoring and backend work have regression protection.
-- 推进面向运行时可观察行为的检查，覆盖交互式 shell、简单 C 程序、进程/fd 语义、文件系统
-  操作和用户态兼容性，为后续重构与 backend 工作提供回归保护。
-- Boundary change: behavior assertions become the preferred validation direction
-  for the minimal usable system. Preserved boundaries: environment-dependent
-  emulator and hardware checks remain layered rather than mandatory for every
-  change.
-- 边界变化：行为断言成为最小可用系统的优先验证方向。保持边界：依赖环境的模拟器和硬件
+- Status: complete. Runtime-observable behavior validation is now the preferred
+  regression-protection direction for the interactive shell, simple C programs,
+  process/fd semantics, filesystem operations, and bounded userland
+  compatibility.
+- 状态：已完成。面向运行时可观察行为的验证现在是交互式 shell、简单 C 程序、进程/fd
+  语义、文件系统操作和有界用户态兼容性的优先回归保护方向。
+- Boundary status: behavior assertions are now part of the minimal usable system
+  validation baseline. Preserved boundaries: environment-dependent emulator and
+  hardware checks remain layered rather than mandatory for every change.
+- 边界状态：行为断言现在是最小可用系统验证基线的一部分。保持边界：依赖环境的模拟器和硬件
   检查保持分层，而不是每次变更都强制要求。

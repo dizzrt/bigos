@@ -12,6 +12,14 @@ BigOS 阶段 9 将现有默认关闭的 runtime smoke 产品化为一组窄验�
 
 runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed flow 构建，准备现有 Legacy BIOS/MBR/exFAT raw image，使用 `--display none` 启动 QEMU，并在 case-specific timeout 内等待预期 COM1 marker。
 
+## 验证入口盘点
+
+行为导向验证区分三类入口：
+
+- 默认路径：`default-init` case 使用所有 smoke 开关关闭的 normal build，打包 PID-1 init、`/bin/sh` 和有界 `/bin/*`，并通过 QEMU headless 日志观察确定性的 init/shell 串口 marker。
+- 默认关闭 smoke：`userland-runtime`、`writable-fs`、`pipe`、`filesystem-read`、`filesystem-user-elf` 等 case 每次只启用一个显式 smoke 开关，用于验证 userland、process/fd、pipe/redirection 和 filesystem 行为，且不改变 normal boot 默认值。
+- 场景化证据：graphical QEMU、Bochs、手工键盘输入、emulator input injection 或硬件相邻检查只在为 console usability 或底层 boot/IRQ/timer/ATA/port-IO 风险补充证据时记录。
+
 ## 矩阵 Case
 
 | Case | xmake 开关 | 预期 marker | Timeout | 边界 |
@@ -35,6 +43,22 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `default-init` | _(无)_ | `BIGOS_USER_EXEC` | 40s | 不加任何 smoke 开关的默认构建；normal boot 打包 PID-1 init、`/bin/sh` 和 bounded `/bin/*`。 |
 
 每个 case 只启用表中列出的 smoke 开关，并在构建前显式关闭其他 smoke 开关。runner 之外，所有 runtime smoke 选项仍保持默认关闭，除非开发者通过 `xmake f ...=y` 显式配置。
+
+## 行为导向矩阵
+
+阶段 26 将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查仍保持在当前 x86_64 Legacy BIOS/MBR/exFAT backend 边界内，不要求 UEFI、OVMF、ESP/FAT image、virtio、AHCI/SATA、NVMe、SMP、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
+
+| Capability | 输入或路径 | 预期可观察结果 | 失败信号 | 验证层 | 环境依赖 |
+| --- | --- | --- | --- | --- | --- |
+| 默认 init 与 `/bin/sh` 可达性 | `default-init` normal boot，无 smoke 开关 | PID-1 init 启动并 launch 常驻 `/bin/sh`，通过 `BIGOS_INIT_ENTER` 后出现 `BIGOS_USER_EXEC` 观察 | 缺失预期 marker、timeout、emulator 退出或 panic marker | QEMU headless runtime 断言 | xmake、cross-binutils、QEMU、串口日志、Legacy BIOS raw image |
+| 简单 C 参数/环境/stdout/stderr | `userland-runtime` 运行 `/bin/smoke/args`、`/bin/smoke/env` 和 `/bin/smoke/out` | `/rw` 记录预期 `argc`/`argv`、确定性 environment 边界文本和 stdout/stderr transcript 内容 | `BIGOS_USERLAND_FAILED <reason>`、缺失 `/rw` 记录、错误 exit status 或缺失 pass marker | 默认关闭 userland runtime 断言 | xmake、cross-binutils、QEMU、串口日志、RAM-backed `/rw` |
+| 简单 C `errno` 与退出状态 | `userland-runtime` 运行失败 open/exec wrapper 和 `/bin/smoke/exit 7` | 错误 wrapper 报告文档化 `errno`，失败 `execve` 后 caller 存活，parent 观察到请求的 child status | failure marker、status 不匹配、`errno` 错误或缺失 continuation 输出 | 默认关闭 userland runtime 断言 | xmake、cross-binutils、QEMU、串口日志 |
+| Shell continuation 与 unsupported syntax | 非交互 `/bin/sh` 脚本运行非零程序、unsupported pipe syntax，再运行 `echo shell-alive` | shell 输出确定性 syntax/error 文本并继续执行下一条命令 | 缺失错误文本、缺失 `shell-alive`、shell 崩溃或缺失 pass marker | 默认关闭 userland runtime 断言；可选手工交互证据 | QEMU headless 执行脚本断言；display/input 仅用于可选交互记录 |
+| `exec`/`wait` 与 fd 继承 | userland smoke fork、exec packaged program、wait，并保持 stdio 或 redirected descriptor | child output 或 `/rw` 记录可见，parent wait 返回预期 child/status，继承 descriptor 仍可用 | wait 失败、status 错误、缺失输出、descriptor 失败或 failure marker | 默认关闭 userland runtime 断言 | xmake、cross-binutils、QEMU、串口日志 |
+| `dup`、redirection 与无关 fd 状态 | userland smoke 复制 fd、关闭原 fd、将 shell 输出重定向到 `/rw` 并读回 | duplicate fd 在原 fd 关闭后仍可写；重定向文件包含预期数据；shell transcript 仍可用 | 文件内容错误、dup/readback 失败、shell fd 损坏或 failure marker | 默认关闭 userland runtime 断言 | QEMU headless、串口日志、RAM-backed `/rw` |
+| Pipe 端点行为 | userland smoke 传输 `pipe-data`；shell 运行 `echo pipe-ok | /bin/cat`；`pipe` smoke 检查端点计数 | downstream reader 看到字节，writer 全关后出现 EOF，无关 fd 仍可用 | 数据错误、缺失 EOF、`EPIPE`/端点状态不匹配、缺失 pass marker 或 panic | 默认关闭 userland runtime 断言加窄 pipe smoke | QEMU headless、串口日志 |
+| 运行时 `/rw` 文件系统操作 | userland smoke 创建文件/目录、write、fsync、seek、读回、枚举 `/rw`、unlink，并检查只读 backend 拒写 | 文件内容、目录项、unlink 行为和 `EROFS`/`ENOENT` 错误符合有界 VFS 契约 | 内容错误、缺失 dirent、意外持久化要求、`errno` 错误或 failure marker | 默认关闭 userland runtime 断言加 writable-fs smoke | QEMU headless、串口日志、RAM-backed `/rw` |
+| 底层 boot/IRQ/timer/storage 行为 | 窄 memory/timer/scheduler/blocking/filesystem case；相关时使用 Bochs 或 QEMU+Bochs | 预期 marker 与可选中间 marker 出现；可用时记录跨 emulator 结果 | 缺失 marker、panic、timeout，或跳过 cross-validation 但无风险记录 | source/spec、build、QEMU headless、可选 Bochs/graphical 证据 | toolchain 加所选 emulator；Bochs/display/ROM 仅在场景需要时要求 |
 
 `default-init` 是不依赖任何 smoke 开关的行为断言 case：它以默认配置（所有 smoke 选项设为 `=n`）构建，并断言 normal boot 到达常驻 PID-1 init 和 `/bin/sh`，以 `BIGOS_USER_EXEC` 作为 QEMU headless marker。缺失该 marker 即判定为失败，不会被重新解读为通过。
 
