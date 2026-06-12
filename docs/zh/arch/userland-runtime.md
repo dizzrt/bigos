@@ -134,7 +134,7 @@ runtime 边界内：
 - `/bin/echo` 和 `/bin/cat`：正常打包用户命令。
 - `/bin/smoke/*` 探针：仅用于显式 `userland_smoke` 验证镜像。
 
-镜像布局仍沿用现有 Legacy BIOS / MBR / exFAT 路径；阶段 19 及后续用户态阶段只在
+镜像布局仍沿用现有 Legacy BIOS / MBR / exFAT 路径；当前有界用户态基线只在
 `/boot/user` 与 `/bin` 下新增文件，不引入 UEFI、AHCI、NVMe、virtio 或新的文件系统后端。
 每个用户程序都保持为静态 freestanding ELF64 `ET_EXEC`，并受共享 64 KiB user-ELF 上限约束。
 

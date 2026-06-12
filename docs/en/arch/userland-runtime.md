@@ -154,11 +154,11 @@ freestanding ELF64 `ET_EXEC` images using `user/crt0`, `user/libc`, and
 - `/bin/echo` and `/bin/cat` for normal packaged user commands.
 - `/bin/smoke/*` probes only for the explicit `userland_smoke` validation image.
 
-The image layout remains the existing Legacy BIOS / MBR / exFAT path; stage 19
-and later userland stages add files under `/boot/user` and `/bin` but do not
-introduce UEFI, AHCI, NVMe, virtio, or a new filesystem backend. Every user
-program remains a static freestanding ELF64 `ET_EXEC` image bounded by the shared
-64 KiB user-ELF limit.
+The image layout remains the existing Legacy BIOS / MBR / exFAT path; the
+current bounded userland baseline adds files under `/boot/user` and `/bin` but
+does not introduce UEFI, AHCI, NVMe, virtio, or a new filesystem backend. Every
+user program remains a static freestanding ELF64 `ET_EXEC` image bounded by the
+shared 64 KiB user-ELF limit.
 
 ## Validation
 

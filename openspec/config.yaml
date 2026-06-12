@@ -10,14 +10,15 @@ context: |
   - The kernel boots from an x86 disk image, enters long mode, loads an ELF64
     kernel named "kernel", and jumps to the higher-half kernel address
     0xffffffff80000000.
-  - The current Stage 19 baseline covers bootstrapping, VGA text and COM1 serial
-    output, a kernel-owned IDT with exception/IRQ/syscall dispatch, i8259 PIC,
-    PIT IRQ0 tick, keyboard TTY/console input, buddy/slab/kmalloc/virtual memory,
-    direct map, owned empty page-table reclamation, a single-core scheduler,
-    `int 0x80` syscall dispatch, process lifecycle, demand paging, bounded
-    `fork`/COW, signals, time/identity, fd/VFS, pipe/dup, RAM-backed writable
-    `/rw`, page/buffer cache, `execve`, default PID-1 init, minimal user
-    crt0/libc, `/bin/sh`, packaged `/bin/*`, and default-off runtime smokes.
+  - The current bounded userland baseline covers bootstrapping, VGA text and
+    COM1 serial output, a kernel-owned IDT with exception/IRQ/syscall dispatch,
+    i8259 PIC, PIT IRQ0 tick, keyboard TTY/console input, buddy/slab/kmalloc/
+    virtual memory, direct map, owned empty page-table reclamation, a single-core
+    scheduler, `int 0x80` syscall dispatch, process lifecycle, demand paging,
+    bounded `fork`/COW, signals, time/identity, fd/VFS, pipe/dup, RAM-backed
+    writable `/rw`, page/buffer cache, `execve`, default PID-1 init, minimal user
+    crt0/libc, `/bin/sh`, packaged `/bin/*`, bounded POSIX-like process/I/O
+    behavior, and behavior-oriented default-off runtime smokes.
 
   Tech stack:
   - C++17 and C17 in freestanding mode.

@@ -123,8 +123,9 @@ programs, enters resident PID-1 init, and starts `/bin/sh`; QEMU headless defaul
 validation observes `BIGOS_USER_EXEC`. `--user_program_smoke`,
 `--user_elf_smoke`, and `--userland_smoke` select default-off user-program
 validation paths in place of the normal init payload. `kernel/core/proc/**`,
-`kernel/core/fs/**`, and `user/**` are normal Stage 19 baseline subsystems; smoke
-switches only select extra validation entry points or marker programs.
+`kernel/core/fs/**`, and `user/**` are normal bounded userland baseline
+subsystems; smoke switches only select extra validation entry points or marker
+programs.
 
 For bounded emulator smoke against memory markers:
 
@@ -268,9 +269,9 @@ Notes:
   while preserving OpenSpec-required structural keywords when needed for tooling.
 - For reviews, focus on correctness, undefined behavior, bootability, memory
   safety, interrupt safety, and initialization order.
-- For documentation sync, keep Stage 9-19 bounded capabilities aligned with
-  `roadmap.md`, current source, and archived OpenSpec specs without describing
-  BigOS as a complete POSIX or general-purpose OS.
+- For documentation sync, keep the current bounded userland baseline aligned
+  with `roadmap.md`, current source, and archived OpenSpec specs without
+  describing BigOS as a complete POSIX or general-purpose OS.
 - Keep `roadmap.md` at project-planning level only: describe implemented
   capabilities, missing capabilities, medium/long-term planning, and staged
   development priorities. Do not add concrete entry points, file paths, commands,

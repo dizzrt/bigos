@@ -159,96 +159,55 @@ runtime behavior checks, and environment-dependent checks.
 
 分层组织验证，让后续工作能区分源码检查、构建检查、运行时行为检查和依赖本地环境的检查。
 
-### Stage 20: Interactive Console Usability / 阶段 20：交互式控制台可用性
+## Completed Capability Baseline / 已完成能力基线
 
-- Status: complete. The default bounded userland shell is usable from the
-  runtime text console, including visible prompts, typed input echo, and command
-  output, while bounded serial/log validation remains preserved.
-- 状态：已完成。默认有界用户态 shell 已可从运行时文本控制台使用，包括可见 prompt、
-  输入回显和命令输出，同时保留有界串口/日志验证。
-- Boundary status: default console I/O is now a user-visible interactive path.
-  Preserved boundaries: no full POSIX terminal, job control, termios, SMP, or new
-  boot/architecture runtime parity.
-- 边界状态：默认 console I/O 现在是用户可见的交互路径。保持边界：不引入完整 POSIX
-  terminal、作业控制、termios、SMP，或新的 boot/architecture 运行时等价能力。
+Stages 20 through 26 are complete and now form a compressed minimal usable system
+baseline. Keep the detailed implementation and validation history in dedicated
+architecture docs and OpenSpec records; this roadmap tracks only project-level
+capabilities and boundaries.
 
-### Stage 21: Minimal C Program Baseline / 阶段 21：最小 C 程序运行基线
+阶段 20 到阶段 26 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
+专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
 
-- Status: complete. Simple statically linked C user programs are now a
-  first-class compatibility target with a stable process entry model,
-  argument/environment handoff, syscall wrappers, error reporting, basic output,
-  and small packaged utilities.
-- 状态：已完成。简单静态链接 C 用户程序现在是一等兼容目标，具备稳定的进程入口模型、
-  参数/环境传递、syscall wrapper、错误报告、基础输出和小型打包工具。
-- Boundary status: simple C programs are now a user-visible baseline. Preserved
-  boundaries: no dynamic linking, shared libraries, hosted runtime, or complete
-  POSIX libc.
-- 边界状态：简单 C 程序现在是用户可见基线。保持边界：不引入动态链接、共享库、
-  hosted runtime 或完整 POSIX libc。
-
-### Stage 22: Minimal C Library Subset / 阶段 22：最小 C 标准库子集
-
-- Status: complete. The freestanding userland support is now documented as a
-  minimal C library subset aligned with actual kernel syscall behavior and the
-  needs of simple C programs.
-- 状态：已完成。freestanding 用户态支持现在已被文档化为最小 C 标准库子集，并与实际内核
-  syscall 行为和简单 C 程序需求保持一致。
-- Boundary status: libc compatibility is now a staged project baseline.
-  Preserved boundaries: no locale, threads, complete hosted stdio, dynamic
+- Interactive console usability: the default bounded userland shell is usable
+  through the runtime text console. Preserved boundaries: no full POSIX terminal,
+  job control, termios, SMP, or new boot/architecture runtime parity.
+- 交互式控制台可用性：默认有界用户态 shell 可通过运行时文本控制台使用。保持边界：
+  不引入完整 POSIX terminal、作业控制、termios、SMP，或新的 boot/architecture
+  运行时等价能力。
+- Minimal C program and libc subset: simple static freestanding C user programs
+  and the repository's bounded libc-style support are part of the user-visible
+  baseline. Preserved boundaries: no dynamic linking, shared libraries, hosted
+  runtime, complete POSIX libc, threads, locale, complete hosted stdio, dynamic
   loader, or broad standards conformance claim.
-- 边界状态：libc 兼容性现在是阶段性项目基线。保持边界：不引入 locale、线程、完整 hosted
-  stdio、动态加载器，或广泛标准兼容声明。
-
-### Stage 23: POSIX-Like Process And I/O Subset / 阶段 23：POSIX-like 进程与 I/O 子集
-
-- Status: complete. The bounded UNIX-like behavior around process lifecycle,
-  image replacement, waiting, fd inheritance, pipes, duplication, redirection,
-  signals, time, identity, and shell command execution is now a staged baseline.
-- 状态：已完成。围绕进程生命周期、镜像替换、等待、fd 继承、pipe、duplication、重定向、
-  signals、time、identity 和 shell 命令执行的有界 UNIX-like 行为现在是阶段性基线。
-- Boundary status: earlier POSIX-like planning language is narrowed into an
-  explicit bounded process/I/O subset. Preserved boundaries: no sessions,
-  terminal process groups, job control, complete permissions model, or complete
-  POSIX process model.
-- 边界状态：早期 POSIX-like 规划表述已收窄为明确的有界进程/I/O 子集。保持边界：
-  不引入 session、terminal process group、作业控制、完整权限模型或完整 POSIX 进程模型。
-
-### Stage 24: Bounded Runtime Filesystem Usability / 阶段 24：有界运行时文件系统可用性
-
-- Status: complete. Bounded writable runtime storage now supports documented
-  file creation, read, write, seek, sync, directory, and removal behavior for
-  simple C programs within explicit limits.
-- 状态：已完成。有界可写运行时存储现在支持简单 C 程序在明确限制内使用有文档描述的文件
-  创建、读取、写入、seek、sync、目录和删除行为。
-- Boundary status: runtime file behavior is now part of the minimal usable
-  system baseline. Preserved boundaries: no persistent full writable filesystem,
-  broad file-backed mapping, async I/O, or broad storage/device support.
-- 边界状态：运行时文件行为现在是最小可用系统基线的一部分。保持边界：不引入持久完整可写
-  文件系统、广泛 file-backed mapping、async I/O 或广泛存储/设备支持。
-
-### Stage 25: x86_64/Core Decoupling Discipline / 阶段 25：x86_64 与内核核心解耦纪律
-
-- Status: complete. Existing x86_64 backend mechanisms have been separated from
-  kernel core concepts at real consumption points without adding a speculative
-  second runnable backend.
-- 状态：已完成。现有 x86_64 backend 机制已在真实消费点与内核核心概念解耦，且未引入缺少
-  实际消费场景的第二可运行 backend。
-- Boundary status: architecture abstraction is now an active maintenance
-  discipline. Preserved boundaries: the runnable backend remains x86_64 with the
-  existing legacy boot/storage path.
-- 边界状态：架构抽象现在是主动维护纪律。保持边界：当前可运行 backend 仍是 x86_64 与现有
-  legacy boot/storage 路径。
-
-### Stage 26: Behavior-Oriented Validation / 阶段 26：行为导向验证
-
-- Status: complete. Runtime-observable behavior validation is now the preferred
-  regression-protection direction for the interactive shell, simple C programs,
-  process/fd semantics, filesystem operations, and bounded userland
-  compatibility.
-- 状态：已完成。面向运行时可观察行为的验证现在是交互式 shell、简单 C 程序、进程/fd
-  语义、文件系统操作和有界用户态兼容性的优先回归保护方向。
-- Boundary status: behavior assertions are now part of the minimal usable system
-  validation baseline. Preserved boundaries: environment-dependent emulator and
-  hardware checks remain layered rather than mandatory for every change.
-- 边界状态：行为断言现在是最小可用系统验证基线的一部分。保持边界：依赖环境的模拟器和硬件
-  检查保持分层，而不是每次变更都强制要求。
+- 最小 C 程序与 libc 子集：简单静态 freestanding C 用户程序和仓库内有界 libc 风格支持
+  已是用户可见基线。保持边界：不引入动态链接、共享库、hosted runtime、完整 POSIX libc、
+  线程、locale、完整 hosted stdio、动态加载器或广泛标准兼容声明。
+- Bounded POSIX-like process and I/O subset: process lifecycle, image
+  replacement, wait/exit behavior, fd inheritance, pipes, duplication,
+  redirection, signals, time, identity, and shell command execution are bounded
+  compatibility targets. Preserved boundaries: no sessions, terminal process
+  groups, job control, complete permissions model, or complete POSIX process
+  model.
+- 有界 POSIX-like 进程与 I/O 子集：进程生命周期、镜像替换、wait/exit 行为、fd 继承、
+  pipe、duplication、重定向、signals、time、identity 和 shell 命令执行是有界兼容目标。
+  保持边界：不引入 session、terminal process group、作业控制、完整权限模型或完整
+  POSIX 进程模型。
+- Bounded runtime filesystem usability: runtime file behavior is part of the
+  minimal usable system baseline for simple programs. Preserved boundaries: no
+  persistent full writable filesystem, broad file-backed mapping, async I/O, or
+  broad storage/device support.
+- 有界运行时文件系统可用性：运行时文件行为已成为简单程序最小可用系统基线的一部分。
+  保持边界：不引入持久完整可写文件系统、广泛 file-backed mapping、async I/O 或广泛
+  存储/设备支持。
+- x86_64/core decoupling discipline: architecture abstraction is an active
+  maintenance discipline at real consumption points. Preserved boundaries: the
+  runnable backend remains x86_64 with the existing legacy boot/storage path.
+- x86_64 与内核核心解耦纪律：架构抽象已是在真实消费点执行的主动维护纪律。保持边界：
+  当前可运行 backend 仍是 x86_64 与现有 legacy boot/storage 路径。
+- Behavior-oriented validation: runtime-observable behavior assertions are the
+  preferred regression-protection direction for the minimal usable system.
+  Preserved boundaries: environment-dependent emulator and hardware checks remain
+  layered rather than mandatory for every change.
+- 行为导向验证：面向运行时可观察行为的断言是最小可用系统的优先回归保护方向。保持边界：
+  依赖环境的模拟器和硬件检查保持分层，而不是每次变更都强制要求。

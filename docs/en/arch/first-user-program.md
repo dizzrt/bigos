@@ -45,8 +45,8 @@ Init markers are distinct from the smoke `BIGOS_USER_*` markers:
   prototype and a new normal-boot failure mode.
 - When init exits normally via `SYS_EXIT`, the kernel emits `BIGOS_INIT_EXIT`
   (after the shared `BIGOS_USER_EXIT`) and falls through to the existing
-  deferred reaper and idle scheduling, rather than panicking. Stage 19 replaces
-  the one-shot init payload with a resident PID-1 that starts and restarts
+  deferred reaper and idle scheduling, rather than panicking. The current
+  bounded userland baseline uses a resident PID-1 that starts and restarts
   `/bin/sh`, while orphan adoption remains bounded to the current process model.
 
 ## Process Lifecycle

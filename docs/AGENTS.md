@@ -8,12 +8,14 @@ This subtree contains bilingual project documentation. `docs/en` is canonical; `
 - Use `docs/zh/...` only as the synchronized Simplified Chinese mirror or to clarify translation consistency.
 - Keep `docs/en` and `docs/zh` Markdown file sets isomorphic: every Markdown file below one language root must have the same relative path below the other.
 - When updating technical facts, paths, markers, ABI details, build flags, validation notes, or non-goals, update both language versions in the same change.
-- Treat the Stage 19 bounded userland baseline as current behavior: default
-  PID-1 init, `/bin/sh`, demand paging, bounded `fork`/COW, signals,
-  time/identity, writable `/rw`, pipe/dup, minimal user crt0/libc, and
-  `userland_smoke`. Keep non-goals explicit for full POSIX coverage, dynamic
-  linking, job control, broad file-backed `mmap`, async I/O, SMP, and runnable
-  UEFI.
+- Treat the current bounded userland baseline as single-core, mostly
+  synchronous, and tied to the x86_64 Legacy BIOS/MBR/exFAT path: default PID-1
+  init, `/bin/sh`, bounded POSIX-like process/I/O behavior, demand paging,
+  bounded `fork`/COW, signals, time/identity, writable `/rw`, pipe/dup, minimal
+  user crt0/libc, and behavior-oriented validation. Keep non-goals explicit for
+  full POSIX coverage, dynamic linking, job control, terminal process groups,
+  broad file-backed `mmap`, async I/O, SMP, broad storage/device support, and
+  runnable UEFI.
 - Keep `roadmap.md` limited to project-level implemented capabilities, missing
   capabilities, medium/long-term planning, and staged development priorities.
   Do not put concrete entry points, file paths, commands, validation markers,

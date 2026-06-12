@@ -4,13 +4,14 @@ Language: English | [简体中文](README-zh.md)
 
 BigOS is an early-stage x86_64 operating system kernel written mainly in
 freestanding C++17, C17, and assembly. It has grown from a boot/kernel skeleton
-into a single-core kernel with a bounded userland loop: bootstrapping,
-text/serial output, interrupt/exception/syscall handling, a PIT timer tick, a
-keyboard-driven TTY input path, a bounded timer-aware kernel-thread scheduler,
-wait queues and timeout sleep, an `int 0x80` syscall entry, process lifecycle
-core, fd/VFS services, writable `/rw` files, pipes/dup, default-on PID-1 init,
-a minimal user crt0/libc, `/bin/sh`, bounded ELF64 user-program loading,
-VMA-backed user-memory validation, and a fairly complete early kernel
+into a smoke-tested, single-core, mostly synchronous research kernel on the
+current x86_64 Legacy BIOS/MBR/exFAT path. Its bounded userland loop includes
+bootstrapping, text/serial output, interrupt/exception/syscall handling, a PIT
+timer tick, keyboard-driven TTY input, a bounded timer-aware kernel-thread
+scheduler, wait queues and timeout sleep, an `int 0x80` syscall entry, process
+lifecycle core, fd/VFS services, writable `/rw` files, pipes/dup, default-on
+PID-1 init, a minimal user crt0/libc, `/bin/sh`, bounded ELF64 user-program
+loading, VMA-backed user-memory validation, and a fairly complete early kernel
 memory-management stack.
 
 This repository is a research/toy OS kernel project, not a hosted application or
@@ -18,10 +19,12 @@ service.
 
 ## Status
 
-The project has iterated past kernel infrastructure bring-up into a single-core
-kernel with timer, input, scheduling, syscall, read/write VFS primitives,
-bounded user ELF loading, a resident PID-1 init, and a minimal userland runtime
-on top of the boot path, interrupt foundation, and early memory management.
+The project has iterated past kernel infrastructure bring-up into the current
+Stage 26-era minimal usable system baseline: a single-core, mostly synchronous
+kernel with timer, input, scheduling, syscall, a bounded POSIX-like process/I/O
+subset, read/write VFS primitives, bounded user ELF loading, a resident PID-1
+init, and a minimal userland runtime on top of the boot path, interrupt
+foundation, and early memory management.
 
 Implemented or partially implemented:
 

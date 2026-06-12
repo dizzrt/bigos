@@ -4,8 +4,9 @@
 
 Current project-level status lives in `README.md`, `README-zh.md`, `AGENTS.md`,
 `openspec/config.yaml`, and `roadmap.md`. Architecture docs should describe
-Stage 19 capabilities as bounded current behavior, not as complete POSIX
-coverage.
+the current bounded userland baseline as a single-core, mostly synchronous,
+x86_64 Legacy BIOS/MBR/exFAT research kernel with a bounded POSIX-like subset,
+not as complete POSIX coverage or a complete general-purpose OS.
 
 `roadmap.md` is for project-level implemented capabilities, missing capabilities,
 medium/long-term planning, and staged development priorities. Keep concrete

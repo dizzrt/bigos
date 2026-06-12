@@ -4,19 +4,21 @@
 
 BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
 C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为具备有界用户态闭环的单核内核：
-引导流程、文本/串口输出、中断/异常/syscall 处理、PIT timer tick、键盘驱动的
-TTY 输入路径、具备 bounded timer semantics 的内核线程调度器、`int 0x80` syscall 入口、
-进程生命周期、fd/VFS 服务、可写 `/rw` 文件、pipe/dup、默认开启的 PID-1 init、
-最小用户态 crt0/libc、`/bin/sh`、bounded ELF64 用户程序加载器、VMA-backed 用户内存校验，
-以及一套相对完整的早期内核内存管理。
+这是运行在当前 x86_64 Legacy BIOS/MBR/exFAT 路径上的、经过 smoke 验证、单核且以同步为主的
+研究内核。它的有界用户态闭环包括引导流程、文本/串口输出、中断/异常/syscall 处理、PIT
+timer tick、键盘驱动的 TTY 输入路径、具备 bounded timer semantics 的内核线程调度器、
+`int 0x80` syscall 入口、进程生命周期、fd/VFS 服务、可写 `/rw` 文件、pipe/dup、
+默认开启的 PID-1 init、最小用户态 crt0/libc、`/bin/sh`、bounded ELF64 用户程序加载器、
+VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管理。
 
 本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
 
 ## 状态
 
-项目已从内核基础设施引导阶段，迭代为在 boot 路径、中断基础设施和早期内存管理之上，
-具备 timer、输入、调度、syscall、读写 VFS 原语、bounded 用户 ELF 加载、
-常驻 PID-1 init 和最小用户态运行时的单核内核。
+项目已从内核基础设施引导阶段，迭代为当前 Stage 26 后的最小可用系统基线：在 boot 路径、
+中断基础设施和早期内存管理之上，具备 timer、输入、调度、syscall、有界 POSIX-like
+进程/I/O 子集、读写 VFS 原语、bounded 用户 ELF 加载、常驻 PID-1 init 和最小用户态运行时的
+单核、以同步为主的内核。
 
 已经实现或部分实现：
 
