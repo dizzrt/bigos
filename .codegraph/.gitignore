@@ -14,3 +14,6 @@ cache/
 
 # Hook markers
 .dirty
+
+*.pid
+*.sock
