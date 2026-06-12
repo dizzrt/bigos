@@ -211,3 +211,161 @@ capabilities and boundaries.
   layered rather than mandatory for every change.
 - 行为导向验证：面向运行时可观察行为的断言是最小可用系统的优先回归保护方向。保持边界：
   依赖环境的模拟器和硬件检查保持分层，而不是每次变更都强制要求。
+
+## Future Mainline / 后续主线
+
+The next stages should keep the roadmap at capability-planning granularity. Each
+stage should close one observable kernel-to-userland capability loop: kernel
+contract, freestanding libc exposure, shell or packaged user-program consumption,
+and behavior-oriented validation. Detailed syscall numbers, source entry points,
+commands, markers, and validation logs belong in OpenSpec changes, architecture
+docs, or source-adjacent notes rather than this roadmap.
+
+后续阶段应继续保持 capability-planning 粒度。每个阶段应闭合一个可观察的
+kernel-to-userland 能力环：内核契约、freestanding libc 暴露、shell 或打包用户程序消费、
+以及行为导向验证。具体 syscall 编号、源码入口、命令、marker 和验证日志应放在
+OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 roadmap 中。
+
+### Stage 27: Minimal Metadata Contract / 最小元数据契约
+
+- Add the minimal file and directory metadata contract needed by simple programs,
+  with bounded `stat`/`fstat`-style behavior exposed consistently through the
+  kernel, libc, shell/user tools, and behavior checks.
+- 补齐简单程序所需的最小文件与目录元数据契约，通过内核、libc、shell/用户工具和行为检查
+  一致暴露有界 `stat`/`fstat` 风格行为。
+- Keep the scope bounded: no symbolic links, device-node model, complete POSIX
+  metadata database, or broad standards-conformance claim.
+- 保持范围有界：不引入符号链接、设备节点模型、完整 POSIX 元数据数据库或广泛标准兼容声明。
+
+### Stage 28: Cwd And Relative Paths / Cwd 与相对路径
+
+- Introduce a per-process current-directory contract and relative path resolution
+  across path-taking kernel and userland interfaces.
+- 引入每进程 current-directory 契约，并让接收路径的内核与用户态接口具备一致的相对路径解析。
+- Preserve expected bounded inheritance behavior across process creation and
+  image replacement, while avoiding mount namespaces, `chroot`, symlink
+  traversal, or complete path-canonicalization semantics.
+- 在进程创建与镜像替换之间保持符合直觉的有界继承行为，同时不引入 mount namespace、
+  `chroot`、符号链接遍历或完整路径规范化语义。
+
+### Stage 29: Userland Path Tools / 用户态路径工具
+
+- Make the path and metadata contracts naturally consumable from the interactive
+  shell and small static user programs, so filesystem usability is not limited to
+  raw kernel interfaces.
+- 让路径与元数据契约能被交互式 shell 和小型静态用户程序自然消费，使文件系统可用性不局限于
+  原始内核接口。
+- Focus on small, bounded user-visible utilities and shell builtins; do not turn
+  this stage into a complete POSIX utility suite, shell language, globbing, or
+  scripting environment.
+- 聚焦小型、有界、用户可见的工具与 shell builtin；不要把本阶段扩展成完整 POSIX 工具集、
+  shell 语言、glob 或脚本环境。
+
+### Stage 30: Constrained Rename / 受限 Rename
+
+- Add a bounded rename capability for the writable runtime filesystem and expose
+  it through libc and userland tools as one coherent capability.
+- 为可写运行时文件系统增加有界 rename 能力，并通过 libc 与用户态工具作为一个完整能力暴露。
+- Keep the first contract conservative: no hard links, symbolic links, cross-mount
+  rename, full directory rename semantics, or full POSIX atomic-replacement
+  guarantee unless a later stage explicitly expands the contract.
+- 第一版契约应保持保守：不引入硬链接、符号链接、跨挂载 rename、完整目录 rename 语义或完整
+  POSIX atomic replacement 保证，除非后续阶段明确扩展。
+
+### Stage 31: Runtime Filesystem Semantics / 运行时文件系统语义
+
+- Harden observable filesystem errors, metadata consistency, permissions edges,
+  directory behavior, and read-only versus writable backend differences.
+- 硬化可观察的文件系统错误、元数据一致性、权限边界、目录行为，以及只读 backend 与可写
+  backend 的差异。
+- Continue to defer journaling, cross-reboot persistence, ACLs, extended
+  attributes, broad file-backed mappings, async I/O, and broad storage or device
+  support.
+- 继续推迟 journaling、跨重启持久化、ACL、扩展属性、广泛 file-backed mapping、async I/O
+  以及广泛存储或设备支持。
+
+### Stage 32: Shell Usability Hardening / Shell 可用性硬化
+
+- Improve the bounded interactive shell experience around path handling, error
+  reporting, exit-status propagation, pipes, redirection, and small utility
+  composition.
+- 改善有界交互式 shell 在路径处理、错误展示、退出状态传播、pipe、重定向和小工具组合方面的
+  使用体验。
+- Preserve the existing boundary: no job control, terminal process groups,
+  sessions, complete terminal control, or complete POSIX shell language.
+- 保持既有边界：不引入作业控制、terminal process group、session、完整终端控制或完整
+  POSIX shell 语言。
+
+### Stage 33: Syscall And User ABI Boundary / Syscall 与用户 ABI 边界
+
+- Tighten the architecture boundary around syscall ABI, user-visible register
+  conventions, user headers, and kernel/user contract documentation before adding
+  more backends.
+- 在增加更多 backend 前，收紧 syscall ABI、用户可见寄存器约定、用户态头文件和 kernel/user
+  契约文档周围的架构边界。
+- Do not use this stage to add a second runtime backend; use it to prevent
+  x86_64-specific assumptions from spreading further into user-facing code.
+- 不在本阶段新增第二个运行时 backend；本阶段用于防止 x86_64-specific 假设继续扩散到面向
+  用户态的代码中。
+
+### Stage 34: Interrupt, Timer, And Context Boundary / 中断、计时与上下文边界
+
+- Separate interrupt, timer, context-switch, and scheduler-facing architecture
+  mechanisms from portable kernel policy at real consumption points.
+- 在真实消费点上，将中断、计时、上下文切换和调度器面对的架构机制与可移植内核策略分离。
+- Preserve the current single-core execution model and avoid folding SMP or new
+  backend runtime parity into this cleanup stage.
+- 保持当前单核执行模型，避免把 SMP 或新 backend 运行时等价能力混入本清理阶段。
+
+### Stage 35: VM And User-Entry Boundary / VM 与用户态入口边界
+
+- Clarify the boundaries between core virtual-memory policy, address-space
+  switching, user-entry mechanics, and architecture-specific fault handling.
+- 明确 core 虚拟内存策略、地址空间切换、用户态入口机制和架构特定 fault handling 之间的边界。
+- Keep this as architecture-boundary hardening, not a broad file-backed `mmap`,
+  dynamic-linking, or second-architecture implementation stage.
+- 将本阶段保持为架构边界硬化，而不是广泛 file-backed `mmap`、动态链接或第二架构实现阶段。
+
+### Stage 36: Backend Expansion Spike / Backend 扩展试探
+
+- Choose one real backend-expansion spike only after the preceding architecture
+  boundaries have enough real consumers. A modern x86_64 boot backend is the
+  lower-risk path; a second ISA spike is the stronger test of multi-architecture
+  assumptions.
+- 只有在前序架构边界已有足够真实消费点之后，才选择一个真实 backend 扩展试探。现代 x86_64
+  boot backend 风险较低；第二 ISA 试探更能检验多架构假设。
+- Preserve the current runnable backend until any new backend reaches explicit
+  runtime parity.
+- 在任何新 backend 明确达到运行时等价前，保留当前可运行 backend。
+
+### Stage 37: Terminal Preparation / 终端能力准备
+
+- Prepare a minimal terminal abstraction for future interactive work, including
+  bounded input ownership and control-character semantics where they are needed
+  by the shell and user programs.
+- 为后续交互能力准备最小终端抽象，包括 shell 与用户程序需要的有界输入归属和控制字符语义。
+- Do not treat this as full terminal control, sessions, job control, process
+  groups, or complete POSIX terminal support.
+- 不将本阶段视为完整终端控制、session、作业控制、process group 或完整 POSIX terminal 支持。
+
+### Stage 38: SMP Preparation / SMP 准备
+
+- Design and stage the locking model, per-CPU state, scheduler boundaries,
+  interrupt-routing assumptions, TLB shootdown requirements, and memory-ordering
+  rules needed before enabling real SMP execution.
+- 设计并分阶段引入真正启用 SMP 前所需的锁模型、per-CPU 状态、调度器边界、中断路由假设、
+  TLB shootdown 要求和内存序规则。
+- Keep real multi-core execution disabled until these assumptions are explicit and
+  validated on the single-core baseline.
+- 在这些假设明确并通过单核基线验证前，保持真正的多核执行关闭。
+
+### Stage 39 And Later / Stage 39 及之后
+
+- Pick one major expansion at a time after the foundation above: real SMP,
+  dynamic linking, a persistent writable filesystem, broader POSIX compatibility
+  families, or additional runtime-parity backends.
+- 在上述基础完成后，一次只选择一个大型扩展方向：真正 SMP、动态链接、持久可写文件系统、
+  更广的 POSIX 兼容能力族，或更多运行时等价 backend。
+- Continue to state compatibility as explicit bounded subsets until the project
+  intentionally changes its maturity target.
+- 在项目有意改变成熟度目标前，继续将兼容性表述为明确有界子集。
