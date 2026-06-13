@@ -71,6 +71,7 @@ namespace bigos::sys {
         SYS_FSTAT = 30,        // (fd, struct bigos_metadata *out) -> 0 or negative errno.
         SYS_CHDIR = 31,        // (path) -> 0 or negative errno; cwd changes only after directory validation.
         SYS_GETCWD = 32,       // (user buffer, len) -> 0 or -ERANGE/-EFAULT/-EINVAL.
+        SYS_RENAME = 33,       // (oldpath, newpath) -> 0 or negative errno; bounded /rw regular-file rename.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

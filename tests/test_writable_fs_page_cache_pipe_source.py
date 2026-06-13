@@ -37,6 +37,7 @@ def test_syscall_numbers_appended_after_sigreturn() -> None:
     assert 'SYS_FSTAT = 30' in header
     assert 'SYS_CHDIR = 31' in header
     assert 'SYS_GETCWD = 32' in header
+    assert 'SYS_RENAME = 33' in header
     # Frozen ABI anchors must not move.
     assert 'SYS_OPEN = 5' in header
     assert 'SYS_WRITE = 2' in header
@@ -118,7 +119,7 @@ def test_vfs_file_operations_gain_write_and_lseek() -> None:
     assert 'bool writable;' in header
     assert 'ReadOnlyFs' in header
     # Read-only exFAT backend leaves write/lseek null and is rejected with EROFS.
-    assert '{&exfat_read, &exfat_close, nullptr, nullptr, nullptr}' in source
+    assert '{&exfat_read, &exfat_close, nullptr, nullptr, &exfat_readdir}' in source
     assert 'return Status::ReadOnlyFs;' in source
     # Writable open captures caller identity/mode for bigfs.
     assert 'bigos::bigfs::open(__path, __flags, __mode, __uid, __gid' in source
@@ -158,9 +159,14 @@ def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:
 
     assert 'struct DirectoryEntry' in bigfs_h
     assert 'Status readdir(' in bigfs_h
+    assert 'Status rename(' in bigfs_h
     assert 'uint32_t g_open_refs[INODE_COUNT]' in bigfs
     assert 'void close_inode(uint32_t __inode)' in bigfs
     assert 'maybe_free_unlinked_inode' in bigfs
+    assert 'bigos::bigfs::rename(' in vfs
+    assert 'rename("/rw/runtime_rename_src.txt", "/rw/runtime_rename_dst.txt")' in smoke
+    assert 'rename("/rw/runtime_rename_dst.txt", "/rw/runtime_rename_existing.txt")' in smoke
+    assert "('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rename', 'stat', 'pwd')" in read_source('tools/boot_debug.py')
     assert 'tnode.link_count = 0;' in bigfs
     assert 'bigos::vfs::DIRENT_TYPE_DIRECTORY' in bigfs
     assert 'Status readdir(File *__file' in vfs

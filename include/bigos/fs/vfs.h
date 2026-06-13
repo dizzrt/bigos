@@ -116,6 +116,9 @@ namespace vfs {
     Status mkdir(const char *__path, const char *__cwd, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__path, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__path, const char *__cwd, uint32_t __uid, uint32_t __gid) noexcept;
+    Status rename(const char *__old_path, const char *__new_path, uint32_t __uid, uint32_t __gid) noexcept;
+    Status rename(const char *__old_path, const char *__new_path, const char *__cwd, uint32_t __uid,
+        uint32_t __gid) noexcept;
     void retain(File *__file) noexcept;
     void release(File *__file) noexcept;
 }   // namespace vfs

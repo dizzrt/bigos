@@ -290,6 +290,26 @@ namespace sys {
             return vfs_status_to_syscall(bigos::vfs::unlink(path, bigos::proc::current_cwd(), uid, gid));
         }
 
+        static int64_t sys_rename(uint64_t __old_path, uint64_t __new_path) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            char old_path[SYS_PATH_MAX_LEN + 1];
+            char new_path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__old_path, old_path, sizeof(old_path)) ||
+                !copy_user_path(__new_path, new_path, sizeof(new_path)))
+                return -bigos::EFAULT;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+            bigos::proc::Process *process = bigos::proc::current_process();
+            const uint32_t uid = process != nullptr ? process->uid : 0;
+            const uint32_t gid = process != nullptr ? process->gid : 0;
+            return vfs_status_to_syscall(
+                bigos::vfs::rename(old_path, new_path, bigos::proc::current_cwd(), uid, gid));
+        }
+
         static int64_t sys_readdir(uint64_t __fd, uint64_t __entries, uint64_t __max_entries) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
@@ -623,6 +643,9 @@ namespace sys {
                 break;
             case SYS_UNLINK:
                 result = __detail::sys_unlink(__frame->rdi);
+                break;
+            case SYS_RENAME:
+                result = __detail::sys_rename(__frame->rdi, __frame->rsi);
                 break;
             case SYS_EXECVE:
                 // execve replaces the current process image and enters the new

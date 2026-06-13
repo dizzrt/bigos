@@ -42,6 +42,11 @@ namespace {
         char name[bigos::bigfs::DIRENT_NAME_MAX + 1];
     };
 
+    struct DirSlot {
+        bigos::bcache::BufferBlock *block;
+        DiskDirent *entry;
+    };
+
     uint8_t *g_ram = nullptr;
     driver::block::BlockDevice g_device = {};
     uint32_t g_open_refs[INODE_COUNT] = {};
@@ -223,6 +228,87 @@ namespace {
             bigos::bcache::put(block);
         }
         return false;
+    }
+
+    bool dir_find_slot(const DiskInode *__dir, const char *__name, DirSlot *__out) noexcept {
+        if (__out == nullptr)
+            return false;
+        __out->block = nullptr;
+        __out->entry = nullptr;
+        for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
+            const uint32_t block_no = __dir->direct[i];
+            if (block_no == 0)
+                continue;
+            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, block_no);
+            if (block == nullptr)
+                continue;
+            for (uint32_t e = 0; e < DIRENTS_PER_BLOCK; e++) {
+                DiskDirent *ent = (DiskDirent *)(block->data + e * bigos::bigfs::DIRENT_SIZE);
+                if (ent->inode_plus_one != 0 && str_eq(ent->name, __name)) {
+                    __out->block = block;
+                    __out->entry = ent;
+                    return true;
+                }
+            }
+            bigos::bcache::put(block);
+        }
+        return false;
+    }
+
+    Status dir_reserve_slot(uint32_t __dir_inode, DiskInode *__dir, DirSlot *__out) noexcept {
+        if (__out == nullptr)
+            return Status::Invalid;
+        __out->block = nullptr;
+        __out->entry = nullptr;
+        for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
+            const uint32_t block_no = __dir->direct[i];
+            if (block_no == 0)
+                continue;
+            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, block_no);
+            if (block == nullptr)
+                return Status::IoError;
+            for (uint32_t e = 0; e < DIRENTS_PER_BLOCK; e++) {
+                DiskDirent *ent = (DiskDirent *)(block->data + e * bigos::bigfs::DIRENT_SIZE);
+                if (ent->inode_plus_one == 0) {
+                    __out->block = block;
+                    __out->entry = ent;
+                    return Status::Success;
+                }
+            }
+            bigos::bcache::put(block);
+        }
+        for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
+            if (__dir->direct[i] != 0)
+                continue;
+            uint32_t new_block = 0;
+            const Status status = alloc_data_block(&new_block);
+            if (status != Status::Success)
+                return status;
+            __dir->direct[i] = new_block;
+            __dir->size += BLOCK_SIZE;
+            if (!store_inode(__dir_inode, __dir)) {
+                free_data_block(new_block);
+                __dir->direct[i] = 0;
+                return Status::IoError;
+            }
+            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, new_block);
+            if (block == nullptr)
+                return Status::IoError;
+            __out->block = block;
+            __out->entry = (DiskDirent *)block->data;
+            return Status::Success;
+        }
+        return Status::NoSpace;
+    }
+
+    void dirent_set(DiskDirent *__entry, const char *__name, uint32_t __child) noexcept {
+        __entry->inode_plus_one = __child + 1;
+        memset(__entry->name, 0, sizeof(__entry->name));
+        size_t n = 0;
+        while (__name[n] != 0 && n < bigos::bigfs::DIRENT_NAME_MAX) {
+            __entry->name[n] = __name[n];
+            n++;
+        }
     }
 
     Status dir_add_entry(uint32_t __dir_inode, DiskInode *__dir, const char *__name, uint32_t __child) noexcept {
@@ -798,6 +884,90 @@ namespace bigfs {
         tnode.link_count = 0;
         (void)store_inode(target, &tnode);
         maybe_free_unlinked_inode(target, &tnode);
+        return Status::Success;
+    }
+
+    Status rename(const char *__old_abs_path, const char *__new_abs_path, uint32_t __uid, uint32_t __gid) noexcept {
+        if (!g_initialized || __old_abs_path == nullptr || __new_abs_path == nullptr)
+            return Status::Invalid;
+        const char *old_rest = nullptr;
+        const char *new_rest = nullptr;
+        if (!strip_prefix(__old_abs_path, &old_rest) || !strip_prefix(__new_abs_path, &new_rest))
+            return Status::Invalid;
+
+        uint32_t old_parent = 0;
+        uint32_t new_parent = 0;
+        char old_leaf[DIRENT_NAME_MAX + 1];
+        char new_leaf[DIRENT_NAME_MAX + 1];
+        Status status = resolve_parent(old_rest, &old_parent, old_leaf, sizeof(old_leaf));
+        if (status != Status::Success)
+            return status;
+        status = resolve_parent(new_rest, &new_parent, new_leaf, sizeof(new_leaf));
+        if (status != Status::Success)
+            return status;
+
+        if (old_parent == new_parent && str_eq(old_leaf, new_leaf))
+            return Status::Success;
+
+        DiskInode old_dir;
+        DiskInode new_dir;
+        if (!load_inode(old_parent, &old_dir) || old_dir.type != INODE_DIRECTORY)
+            return Status::NotDirectory;
+        if (!load_inode(new_parent, &new_dir) || new_dir.type != INODE_DIRECTORY)
+            return Status::NotDirectory;
+
+        uint32_t target = 0;
+        if (!dir_lookup(&old_dir, old_leaf, &target))
+            return Status::NotFound;
+        uint32_t existing = 0;
+        if (dir_lookup(&new_dir, new_leaf, &existing))
+            return Status::Exists;
+
+        const Status old_acc = check_access(__uid, __gid, &old_dir, bigos::cred::Access::Write);
+        if (old_acc != Status::Success)
+            return old_acc;
+        if (new_parent != old_parent) {
+            const Status new_acc = check_access(__uid, __gid, &new_dir, bigos::cred::Access::Write);
+            if (new_acc != Status::Success)
+                return new_acc;
+        }
+
+        DiskInode target_node;
+        if (!load_inode(target, &target_node))
+            return Status::IoError;
+        if (target_node.type == INODE_DIRECTORY)
+            return Status::IsDirectory;
+        if (target_node.type != INODE_REGULAR)
+            return Status::Invalid;
+
+        if (old_parent == new_parent) {
+            DirSlot src = {};
+            if (!dir_find_slot(&old_dir, old_leaf, &src))
+                return Status::NotFound;
+            dirent_set(src.entry, new_leaf, target);
+            bigos::bcache::mark_dirty(src.block);
+            bigos::bcache::put(src.block);
+            return Status::Success;
+        }
+
+        DirSlot dst = {};
+        status = dir_reserve_slot(new_parent, &new_dir, &dst);
+        if (status != Status::Success)
+            return status;
+
+        DirSlot src = {};
+        if (!dir_find_slot(&old_dir, old_leaf, &src)) {
+            bigos::bcache::put(dst.block);
+            return Status::NotFound;
+        }
+
+        dirent_set(dst.entry, new_leaf, target);
+        src.entry->inode_plus_one = 0;
+        memset(src.entry->name, 0, sizeof(src.entry->name));
+        bigos::bcache::mark_dirty(dst.block);
+        bigos::bcache::mark_dirty(src.block);
+        bigos::bcache::put(src.block);
+        bigos::bcache::put(dst.block);
         return Status::Success;
     }
 

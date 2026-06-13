@@ -2,17 +2,17 @@
 
 定义 BigOS 最小可写文件系统能力：与现有只读 exFAT 挂载并存的可写后端，支持
 `O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC` 打开、文件 `write` 与 `lseek`、文件创建/截断、
-目录项 `mkdir`/`unlink` 的最小子集，inode 携带 owner/mode 元数据并以 `cred::may_access`
+目录项 `mkdir`/`unlink` 和受限常规文件 `rename` 的最小子集，inode 携带 owner/mode 元数据并以 `cred::may_access`
 为实际访问强制点，所有写经块缓冲缓存，只读后端对写请求确定性 `-EROFS`。该能力本阶段默认
 承载介质为 RAM-backed 块设备、只保证运行期一致性而不承诺跨重启持久化，不引入完整 POSIX
-文件语义（无硬/软链接、无 rename、无 mmap 文件映射、无 ACL/xattr），并以默认关闭的运行时
+文件语义（无硬/软链接、无完整目录 rename 或 POSIX atomic replacement、无 mmap 文件映射、无 ACL/xattr），并以默认关闭的运行时
 smoke 验证。
 
 ## Requirements
 
 ### Requirement: 可写文件系统后端与只读 exFAT 并存
 
-BigOS SHALL 提供一个最小可写文件系统后端，与现有只读 exFAT 挂载并存且不改变只读 exFAT 的发现、挂载与读语义。可写后端 MUST 经块缓冲缓存读写其超级块、inode、目录项与数据块，MUST 维护文件 inode 的 owner（uid/gid）与 mode 元数据，MUST 有界（块大小、inode 数、文件大小、目录项数均有上限），且 MUST NOT 引入硬/软链接、`rename`、journaling、ACL/xattr 或文件 mmap。本阶段可写后端的默认承载介质 MUST 为 RAM-backed 块设备（不改动现有磁盘镜像/MBR/分区/exFAT 只读发现契约），其正确性语义只覆盖运行期一致性，MUST NOT 承诺跨重启持久化；磁盘分区承载 MUST 不在本阶段范围。
+BigOS SHALL 提供一个最小可写文件系统后端，与现有只读 exFAT 挂载并存且不改变只读 exFAT 的发现、挂载与读语义。可写后端 MUST 经块缓冲缓存读写其超级块、inode、目录项与数据块，MUST 维护文件 inode 的 owner（uid/gid）与 mode 元数据，MUST 有界（块大小、inode 数、文件大小、目录项数均有上限），且 MUST NOT 引入硬/软链接、完整目录 rename、POSIX atomic replacement、journaling、ACL/xattr 或文件 mmap。本阶段可写后端的默认承载介质 MUST 为 RAM-backed 块设备（不改动现有磁盘镜像/MBR/分区/exFAT 只读发现契约），其正确性语义只覆盖运行期一致性，MUST NOT 承诺跨重启持久化；磁盘分区承载 MUST 不在本阶段范围。
 
 #### Scenario: 可写后端挂载且不影响只读 exFAT
 
@@ -74,7 +74,7 @@ BigOS SHALL 提供从打开文件对象当前 offset 的有界写入与 `lseek` 
 
 ### Requirement: 目录项创建与删除
 
-BigOS SHALL 在可写后端支持最小目录项创建（`mkdir`）与删除（`unlink`）。操作 MUST 在执行前经访问权限判定，对已存在/不存在、目录非空、对目录 `unlink`、空间耗尽与只读后端确定性失败，且 MUST NOT 引入完整 `readdir`/`getdents` 遍历或 `rename`。
+BigOS SHALL 在可写后端支持最小目录项创建（`mkdir`）、删除（`unlink`）与受限常规文件 `rename`。操作 MUST 在执行前经访问权限判定，对已存在/不存在、目录非空、对目录 `unlink`、空间耗尽与只读后端确定性失败，且 MUST NOT 引入完整 `readdir`/`getdents` 遍历、完整目录 rename 或 POSIX atomic replacement。
 
 #### Scenario: mkdir 创建目录
 
@@ -123,7 +123,7 @@ BigOS SHALL 通过默认关闭的运行时 smoke 与源码/行为断言验证可
 
 ### Requirement: 运行时文件系统行为可被简单 C 程序依赖
 
-BigOS SHALL 将 RAM-backed 可写后端定义为有界运行时文件系统能力，使简单静态 C 程序能够在 `/rw` 范围内可靠使用文件创建、打开、读取、写入、定位、同步、目录创建、最小目录枚举和删除。该能力 MUST 保持运行期一致性，MUST 对路径长度、文件大小、目录项、inode、数据块和打开文件引用设置有界限制，MUST NOT 承诺跨重启持久化、磁盘分区承载、journaling、rename、硬/软链接、ACL/xattr、完整目录遍历、完整 POSIX `readdir/getdents` 兼容或 broad file-backed `mmap`。
+BigOS SHALL 将 RAM-backed 可写后端定义为有界运行时文件系统能力，使简单静态 C 程序能够在 `/rw` 范围内可靠使用文件创建、打开、读取、写入、定位、同步、目录创建、最小目录枚举、删除和受限常规文件 rename。该能力 MUST 保持运行期一致性，MUST 对路径长度、文件大小、目录项、inode、数据块和打开文件引用设置有界限制，MUST NOT 承诺跨重启持久化、磁盘分区承载、journaling、完整目录 rename、硬/软链接、ACL/xattr、完整目录遍历、完整 POSIX `readdir/getdents` 兼容或 broad file-backed `mmap`。
 
 #### Scenario: 简单程序创建并读回文件
 - **WHEN** 简单 C 程序在 `/rw` 下创建文件、写入有界内容、seek 回起点并读取
@@ -199,3 +199,53 @@ BigOS SHALL 保证运行时可写文件的成功写入经 page/buffer cache 立�
 - **WHEN** `fsync` 因 RAM-backed 块设备或缓存写回失败而失败
 - **THEN** BigOS MUST 返回确定性错误
 - **AND** MUST NOT 静默丢弃仍需写回的脏数据
+
+### Requirement: 可写后端支持受限常规文件 rename
+
+BigOS SHALL 在 RAM-backed `/rw` 可写运行时文件系统内支持受限常规文件 `rename`。该操作 MUST 只在同一可写后端内移动或改名常规文件目录项，MUST 经权限、路径长度、父目录存在性、对象类型、容量和目标状态检查后再提交目录项更新，MUST 保持运行期一致性，且 MUST NOT 引入硬链接、符号链接、跨挂载 rename、完整目录 rename、完整 POSIX atomic replacement、journaling 或跨重启持久化承诺。
+
+#### Scenario: 常规文件重命名成功
+
+- **WHEN** 调用方在 `/rw` 内对一个存在的常规文件执行 rename，且源父目录和目标父目录可写、目标名称不存在、容量充足
+- **THEN** BigOS MUST 让目标路径在同一运行期内可查找并指向原文件内容
+- **AND** 源路径 MUST 不再可查找
+
+#### Scenario: 同一父目录同一名称返回 no-op
+
+- **WHEN** 调用方在 `/rw` 内执行 rename，且源路径和目标路径解析为同一父目录下的同一目录项名称
+- **THEN** BigOS MUST 返回成功
+- **AND** MUST NOT 修改目录项、inode 元数据、文件数据、fd 引用或 open file offset
+
+#### Scenario: 目标已存在时保守失败
+
+- **WHEN** 调用方把 `/rw` 常规文件 rename 到一个已存在目标路径，且源目标不是同一父目录同一名称
+- **THEN** BigOS MUST 返回确定性 `-EEXIST` 或等价目标已存在错误
+- **AND** MUST NOT 移除源目录项，MUST NOT 修改目标对象
+
+#### Scenario: 不支持对象和跨后端被拒绝
+
+- **WHEN** 调用方尝试 rename 目录、只读 exFAT 路径、跨挂载路径、缺失源路径、缺失目标父目录或不支持对象类型
+- **THEN** BigOS MUST 返回确定性错误
+- **AND** MUST NOT 修改 `/rw`、只读 boot assets、exFAT 发现状态或无关目录项
+
+#### Scenario: 失败不发布半成品目录项
+
+- **WHEN** rename 因权限、容量、IO、非法路径或内部状态检查失败
+- **THEN** BigOS MUST 保持源路径、目标路径、inode 元数据和文件数据处于失败前的可解释状态
+- **AND** MUST NOT panic，内核态 fault 诊断路径除外
+
+### Requirement: rename 后 open file 引用保持稳定
+
+BigOS SHALL 在 rename 改变目录项名称时保持已打开文件对象的引用生命周期稳定。已打开 fd MUST 继续引用原 inode/data blocks；rename 成功后新的路径查找 MUST 看到目标名称，源名称 MUST 不再可见；仍有 open fd 时不得提前释放对应文件对象、inode 或数据块。
+
+#### Scenario: rename 已打开文件后 fd 仍有效
+
+- **WHEN** 进程打开 `/rw` 常规文件后对其路径执行 rename
+- **THEN** 已打开 fd MUST 在关闭前继续按打开权限访问同一文件内容
+- **AND** 新目标路径的后续 open/read MUST 观察同一运行期文件内容
+
+#### Scenario: rename 不改变 dup 后 fd 共享关系
+
+- **WHEN** 进程 dup 一个文件 fd 后对该文件路径执行 rename
+- **THEN** dup 后 fd MUST 继续共享同一 open file object 和 offset
+- **AND** rename MUST NOT 破坏 fd 引用计数或进程退出/reap 时的关闭规则

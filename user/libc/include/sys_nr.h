@@ -41,5 +41,6 @@
 #define SYS_FSTAT       30
 #define SYS_CHDIR       31
 #define SYS_GETCWD      32
+#define SYS_RENAME      33
 
 #endif /* _BIGOS_USER_SYS_H */

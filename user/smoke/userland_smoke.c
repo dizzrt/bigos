@@ -27,7 +27,7 @@
  */
 #include "libc.h"
 
-#define CAPTURE_MAX 512
+#define CAPTURE_MAX 2048
 
 static void emit(const char *s) {
     write(1, s, strlen(s));
@@ -130,8 +130,12 @@ static void run_program(const char *path, char **child_argv, char **envp) {
 static void require_file_contains(const char *path, const char *expect) {
     int fd = open(path, O_RDONLY, 0);
     if (fd < 0) {
-        if (errno == ENOENT)
-            fail("record-open-enoent");
+        if (errno == ENOENT) {
+            emit("BIGOS_USERLAND_FAILED record-open-enoent path=");
+            emit(path);
+            emit("\n");
+            exit(1);
+        }
         if (errno == EWOULDBLOCK)
             fail("record-open-wouldblock");
         if (errno == EACCES)
@@ -141,13 +145,34 @@ static void require_file_contains(const char *path, const char *expect) {
         fail("record-open");
     }
     char buf[CAPTURE_MAX];
-    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    size_t total = 0;
+    for (;;) {
+        size_t chunk = sizeof(buf) - 1 - total;
+        if (chunk > 512)
+            chunk = 512;
+        ssize_t n = read(fd, buf + total, chunk);
+        if (n < 0) {
+            close(fd);
+            fail("record-read");
+        }
+        if (n == 0)
+            break;
+        total += (size_t)n;
+        if (total >= sizeof(buf) - 1)
+            break;
+    }
     close(fd);
-    if (n <= 0)
+    if (total == 0)
         fail("record-read");
-    buf[n] = 0;
-    if (!contains(buf, expect))
-        fail("record-content");
+    buf[total] = 0;
+    if (!contains(buf, expect)) {
+        emit("BIGOS_USERLAND_FAILED record-content path=");
+        emit(path);
+        emit(" expect=");
+        emit(expect);
+        emit("\n");
+        exit(1);
+    }
 }
 
 /* crt0 contract: argc >= 1 and argv[0] non-NULL. */
@@ -274,6 +299,12 @@ static int dirents_contain(struct bigos_dirent *entries, ssize_t n, const char *
 static void test_runtime_filesystem(void) {
     unlink("/rw/runtime_file.txt");
     unlink("/rw/runtime_unlink.txt");
+    unlink("/rw/runtime_rename_src.txt");
+    unlink("/rw/runtime_rename_dst.txt");
+    unlink("/rw/runtime_rename_existing.txt");
+    unlink("/rw/runtime_rename_ro.txt");
+    if (mkdir("/rw/runtime_rename_dir", 0755) < 0 && errno != EEXIST)
+        fail("runtime-rename-dir-setup");
     if (mkdir("/rw/runtime_dir", 0755) < 0 && errno != EEXIST)
         fail("runtime-mkdir");
     struct stat st;
@@ -324,6 +355,54 @@ static void test_runtime_filesystem(void) {
     if (!dirents_contain(entries, count, "runtime_dir", BIGOS_DIRENT_TYPE_DIRECTORY))
         fail("runtime-readdir-dir");
 
+    fd = open("/rw/runtime_rename_src.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        fail("runtime-rename-open");
+    if (write(fd, "rename-data", 11) != 11)
+        fail("runtime-rename-write");
+    if (rename("/rw/runtime_rename_src.txt", "/rw/runtime_rename_dst.txt") != 0)
+        fail("runtime-rename");
+    if (stat("/rw/runtime_rename_src.txt", &st) != -1 || errno != ENOENT)
+        fail("runtime-rename-source-gone");
+    if (stat("/rw/runtime_rename_dst.txt", &st) != 0 || st.st_size != 11 || !S_ISREG(st.st_mode))
+        fail("runtime-rename-stat");
+    if (lseek(fd, 0, SEEK_SET) != 0)
+        fail("runtime-rename-open-seek");
+    n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n != 11)
+        fail("runtime-rename-open-read");
+    buf[n] = 0;
+    if (strcmp(buf, "rename-data") != 0)
+        fail("runtime-rename-open-content");
+    require_file_contains("/rw/runtime_rename_dst.txt", "rename-data");
+    if (rename("/rw/runtime_rename_dst.txt", "/rw/runtime_rename_dst.txt") != 0)
+        fail("runtime-rename-noop");
+
+    int existing = open("/rw/runtime_rename_existing.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (existing < 0)
+        fail("runtime-rename-existing-open");
+    if (write(existing, "existing", 8) != 8)
+        fail("runtime-rename-existing-write");
+    close(existing);
+    errno = 0;
+    if (rename("/rw/runtime_rename_dst.txt", "/rw/runtime_rename_existing.txt") != -1 || errno != EEXIST)
+        fail("runtime-rename-eexist");
+    require_file_contains("/rw/runtime_rename_dst.txt", "rename-data");
+    require_file_contains("/rw/runtime_rename_existing.txt", "existing");
+    errno = 0;
+    if (rename("/rw/runtime_rename_missing.txt", "/rw/runtime_rename_new.txt") != -1 || errno != ENOENT)
+        fail("runtime-rename-missing");
+    errno = 0;
+    if (rename("/boot/user/init.elf", "/rw/runtime_rename_ro.txt") != -1 || errno != EROFS)
+        fail("runtime-rename-rofs-old");
+    errno = 0;
+    if (rename("/rw/runtime_rename_dst.txt", "/boot/runtime_rename_dst.txt") != -1 || errno != EROFS)
+        fail("runtime-rename-rofs-new");
+    errno = 0;
+    if (rename("/rw/runtime_rename_dir", "/rw/runtime_rename_dir_new") != -1 || errno != EISDIR)
+        fail("runtime-rename-dir");
+
     fd = open("/rw/runtime_unlink.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (fd < 0)
         fail("runtime-unlink-open");
@@ -360,6 +439,8 @@ static void test_current_directory(char **envp) {
     unlink("/rw/cwd_test/note.txt");
     unlink("/rw/cwd_test/child.txt");
     unlink("/rw/cwd_test/pwd.txt");
+    unlink("/rw/cwd_test/sub/rel_old.txt");
+    unlink("/rw/cwd_test/sub/rel_new.txt");
     if (mkdir("/rw/cwd_test", 0755) < 0 && errno != EEXIST)
         fail("cwd-mkdir");
     if (mkdir("/rw/cwd_test/sub", 0755) < 0 && errno != EEXIST)
@@ -381,6 +462,16 @@ static void test_current_directory(char **envp) {
     errno = 0;
     if (getcwd(small, sizeof(small)) != NULL || errno != ERANGE)
         fail("cwd-erange");
+
+    int rel_fd = open("rel_old.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (rel_fd < 0)
+        fail("cwd-rename-open");
+    if (write(rel_fd, "relative-rename", 15) != 15)
+        fail("cwd-rename-write");
+    close(rel_fd);
+    if (rename("rel_old.txt", "rel_new.txt") != 0)
+        fail("cwd-rename");
+    require_file_contains("/rw/cwd_test/sub/rel_new.txt", "relative-rename");
 
     fd = open("../note.txt", O_RDONLY, 0);
     if (fd < 0)
@@ -493,6 +584,8 @@ static void test_smoke_shell(char **envp) {
     unlink("/rw/smoke_shell_io.txt");
     unlink("/rw/smoke_shell_redir.txt");
     unlink("/rw/smoke_shell_path_file.txt");
+    unlink("/rw/smoke_shell_renamed.txt");
+    unlink("/rw/smoke_shell_existing.txt");
     unlink("/rw/smoke_shell_cat_redir.txt");
     unlink("/rw/smoke_shell_stat.txt");
     unlink("/rw/smoke_shell_ls_rw.txt");
@@ -537,11 +630,16 @@ static void test_smoke_shell(char **envp) {
     write_all_or_exit(input[1], "/bin/pwd\n");
     write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\n");
     write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt\n");
-    write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt > smoke_shell_cat_redir.txt\n");
-    write_all_or_exit(input[1], "/bin/stat smoke_shell_path_file.txt > smoke_shell_stat.txt\n");
+    write_all_or_exit(input[1], "echo existing > smoke_shell_existing.txt\n");
+    write_all_or_exit(input[1], "/bin/rename smoke_shell_path_file.txt smoke_shell_renamed.txt\n");
+    write_all_or_exit(input[1], "/bin/cat smoke_shell_renamed.txt\n");
+    write_all_or_exit(input[1], "/bin/rename smoke_shell_renamed.txt smoke_shell_existing.txt\n");
+    write_all_or_exit(input[1], "/bin/rename /boot/user/init.elf smoke_shell_ro.txt\n");
+    write_all_or_exit(input[1], "/bin/cat smoke_shell_renamed.txt > smoke_shell_cat_redir.txt\n");
+    write_all_or_exit(input[1], "/bin/stat smoke_shell_renamed.txt > smoke_shell_stat.txt\n");
     write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\n");
     write_all_or_exit(input[1], "ls . > smoke_shell_ls_rw.txt\n");
-    write_all_or_exit(input[1], "cat smoke_shell_path_file.txt | /bin/cat\n");
+    write_all_or_exit(input[1], "cat smoke_shell_renamed.txt | /bin/cat\n");
     write_all_or_exit(input[1], "/bin/cat /rw/no_such_path_tool\n");
     write_all_or_exit(input[1], "/bin/rm /boot/user/init.elf\n");
     write_all_or_exit(input[1], "/bin/rm smoke_shell_cat_redir.txt\n");
@@ -561,10 +659,13 @@ static void test_smoke_shell(char **envp) {
     require_file_contains("/rw/smoke_shell_io.txt", "cat: /rw/no_such_path_tool: open errno=2");
     require_file_contains("/rw/smoke_shell_io.txt", "rm: /boot/user/init.elf: errno=30");
     require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_cat_redir.txt: errno=2");
-    require_file_contains("/rw/smoke_shell_path_file.txt", "shell-path-content");
-    require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_path_file.txt type=file");
+    require_file_contains("/rw/smoke_shell_renamed.txt", "shell-path-content");
+    require_file_contains("/rw/smoke_shell_existing.txt", "existing");
+    require_file_contains("/rw/smoke_shell_io.txt", "rename: smoke_shell_renamed.txt -> smoke_shell_existing.txt: errno=17");
+    require_file_contains("/rw/smoke_shell_io.txt", "rename: /boot/user/init.elf -> smoke_shell_ro.txt: errno=30");
+    require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_renamed.txt type=file");
     require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir smoke_shell_path_dir");
-    require_file_contains("/rw/smoke_shell_ls_rw.txt", "file smoke_shell_path_file.txt");
+    require_file_contains("/rw/smoke_shell_ls_rw.txt", "file smoke_shell_renamed.txt");
     require_file_contains("/rw/smoke_shell_io.txt", "shell-alive");
 }
 

@@ -70,7 +70,7 @@ USER_INIT_ELF_PATH = '/boot/user/init.elf'
 # them by absolute path; the shell PATH lookup defaults to /bin. The same
 # USER_ELF_MAX_FILE_BYTES limit is enforced for both init and execve targets.
 USER_BIN_DIR = BUILD_DIR / 'bin' / 'user' / 'bin'
-USER_BIN_PROGRAMS = ('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'stat', 'pwd')
+USER_BIN_PROGRAMS = ('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rename', 'stat', 'pwd')
 USER_SMOKE_BIN_DIR = USER_BIN_DIR / 'smoke'
 USER_SMOKE_BIN_PROGRAMS = ('args', 'env', 'out', 'errno', 'exit', 'libc_subset')
 USER_BIN_MAX_BYTES = USER_INIT_ELF_MAX_BYTES

@@ -138,6 +138,10 @@ int unlink(const char *path) {
     return (int)errno_translate(syscall1(SYS_UNLINK, (long)path));
 }
 
+int rename(const char *oldpath, const char *newpath) {
+    return (int)errno_translate(syscall2(SYS_RENAME, (long)oldpath, (long)newpath));
+}
+
 int stat(const char *path, struct stat *st) {
     return (int)errno_translate(syscall2(SYS_STAT, (long)path, (long)st));
 }

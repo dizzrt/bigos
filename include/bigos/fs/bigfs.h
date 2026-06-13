@@ -78,6 +78,7 @@ namespace bigfs {
 
     Status mkdir(const char *__abs_path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__abs_path, uint32_t __uid, uint32_t __gid) noexcept;
+    Status rename(const char *__old_abs_path, const char *__new_abs_path, uint32_t __uid, uint32_t __gid) noexcept;
     Status readdir(uint32_t __inode, uint64_t __offset, DirectoryEntry *__entries, size_t __max_entries,
         size_t *__out_entries, uint64_t *__next_offset) noexcept;
 

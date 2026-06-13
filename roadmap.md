@@ -45,16 +45,16 @@ BigOS 当前提供一个经过 smoke 验证、单核、以同步为主、具备�
   paging、`fork`/COW、signals、time/identity 原语、进程镜像替换和每进程 current
   directory 状态。
 - A minimal storage and filesystem layer with synchronous block I/O, read-only
-  boot assets, a bounded writable runtime area, page/buffer cache, pipes, fd
-  duplication, relative path resolution, and bounded file/directory metadata
-  queries.
+  boot assets, a bounded writable runtime area, constrained rename, page/buffer
+  cache, pipes, fd duplication, relative path resolution, and bounded
+  file/directory metadata queries.
 - 最小存储与文件系统层，包括同步块 I/O、只读启动资产、有界可写运行时区域、
-  page/buffer cache、pipe、fd duplication、相对路径解析和有界文件/目录元数据查询。
+  受限 rename、page/buffer cache、pipe、fd duplication、相对路径解析和有界文件/目录元数据查询。
 - A minimal freestanding userland with resident init behavior, an interactive
-  text-console shell, basic libc-style support, current-directory wrappers, and
-  small packaged path/user programs.
+  text-console shell, basic libc-style support, current-directory and rename
+  wrappers, and small packaged path/user programs.
 - 最小 freestanding 用户态，包括常驻 init 行为、交互式文本控制台 shell、基础 libc
-  风格支持、current-directory wrapper 和小型路径/用户程序。
+  风格支持、current-directory 与 rename wrapper，以及小型路径/用户程序。
 
 ## Current Boundary / 当前边界
 
@@ -165,12 +165,12 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 29 are complete and now form a compressed minimal usable system
+Stages 20 through 30 are complete and now form a compressed minimal usable system
 baseline. Keep the detailed implementation and validation history in dedicated
 architecture docs and OpenSpec records; this roadmap tracks only project-level
 capabilities and boundaries.
 
-阶段 20 到阶段 29 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
+阶段 20 到阶段 30 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
 专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
@@ -198,12 +198,13 @@ capabilities and boundaries.
   保持边界：不引入 session、terminal process group、作业控制、完整权限模型或完整
   POSIX 进程模型。
 - Bounded runtime filesystem usability: runtime file behavior is part of the
-  minimal usable system baseline for simple programs. Preserved boundaries: no
-  persistent full writable filesystem, broad file-backed mapping, async I/O, or
-  broad storage/device support.
+  minimal usable system baseline for simple programs, including constrained
+  rename inside the writable runtime area. Preserved boundaries: no persistent
+  full writable filesystem, broad file-backed mapping, async I/O, or broad
+  storage/device support.
 - 有界运行时文件系统可用性：运行时文件行为已成为简单程序最小可用系统基线的一部分。
-  保持边界：不引入持久完整可写文件系统、广泛 file-backed mapping、async I/O 或广泛
-  存储/设备支持。
+  其中包括可写运行时区域内的受限 rename。保持边界：不引入持久完整可写文件系统、广泛
+  file-backed mapping、async I/O 或广泛存储/设备支持。
 - Minimal metadata contract: simple programs can observe bounded file and
   directory metadata through kernel, libc, user-tool, and behavior-validation
   paths. Preserved boundaries: no symbolic links, device-node model, complete
@@ -222,14 +223,14 @@ capabilities and boundaries.
   namespace、`chroot`、符号链接或完整路径规范化语义。
 - Bounded userland path tools: small packaged tools make directory listing, file
   content viewing, metadata observation, writable runtime path creation/removal,
-  and shell composition observable from the bounded userland. Preserved
-  boundaries: no complete POSIX utility suite, recursive traversal, globbing,
-  scripting environment, locale-aware formatting, dynamic linking, hosted libc,
-  or complete POSIX shell behavior.
+  constrained rename, and shell composition observable from the bounded
+  userland. Preserved boundaries: no complete POSIX utility suite, recursive
+  traversal, globbing, scripting environment, locale-aware formatting, dynamic
+  linking, hosted libc, or complete POSIX shell behavior.
 - 有界用户态路径工具：小型打包工具让目录列举、文件内容查看、元数据观察、可写运行时路径
-  创建/删除和 shell 组合行为可从有界用户态观察。保持边界：不引入完整 POSIX 工具集、
-  递归遍历、globbing、脚本环境、locale-aware 格式化、动态链接、hosted libc 或完整
-  POSIX shell 行为。
+  创建/删除、受限 rename 和 shell 组合行为可从有界用户态观察。保持边界：不引入完整
+  POSIX 工具集、递归遍历、globbing、脚本环境、locale-aware 格式化、动态链接、hosted
+  libc 或完整 POSIX shell 行为。
 - x86_64/core decoupling discipline: architecture abstraction is an active
   maintenance discipline at real consumption points. Preserved boundaries: the
   runnable backend remains x86_64 with the existing legacy boot/storage path.
@@ -288,14 +289,16 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 30: Constrained Rename / 受限 Rename
 
-- Add a bounded rename capability for the writable runtime filesystem and expose
-  it through libc and userland tools as one coherent capability.
-- 为可写运行时文件系统增加有界 rename 能力，并通过 libc 与用户态工具作为一个完整能力暴露。
-- Keep the first contract conservative: no hard links, symbolic links, cross-mount
-  rename, full directory rename semantics, or full POSIX atomic-replacement
-  guarantee unless a later stage explicitly expands the contract.
-- 第一版契约应保持保守：不引入硬链接、符号链接、跨挂载 rename、完整目录 rename 语义或完整
-  POSIX atomic replacement 保证，除非后续阶段明确扩展。
+- Status: complete; this capability is now part of the completed baseline rather
+  than future mainline scope.
+- 状态：已完成；该能力现在属于已完成基线，不再属于后续主线范围。
+- The current baseline includes bounded rename for regular files in the writable
+  runtime filesystem, with libc and userland tool exposure.
+- 当前基线包括可写运行时文件系统内常规文件的有界 rename，并已通过 libc 与用户态工具暴露。
+- Preserved boundaries: no hard links, symbolic links, cross-mount rename, full
+  directory rename semantics, or full POSIX atomic-replacement guarantee.
+- 保持边界：不引入硬链接、符号链接、跨挂载 rename、完整目录 rename 语义或完整 POSIX
+  atomic replacement 保证。
 
 ### Stage 31: Runtime Filesystem Semantics / 运行时文件系统语义
 

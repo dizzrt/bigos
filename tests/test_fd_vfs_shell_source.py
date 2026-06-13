@@ -120,6 +120,7 @@ def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
     assert 'SYS_OPEN = 5' in header
     assert 'SYS_READ = 6' in header
     assert 'SYS_CLOSE = 7' in header
+    assert 'SYS_RENAME = 33' in header
     assert 'SYS_IO_MAX_LEN = 512' in header
     assert 'copy_user_path' in syscall
     assert 'if (!bigos::sched::can_block())' in syscall
@@ -131,6 +132,8 @@ def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
     assert 'bigos::proc::close_fd_current' in syscall
     assert 'sys_stat(__frame->rdi, __frame->rsi)' in syscall
     assert 'sys_fstat(__frame->rdi, __frame->rsi)' in syscall
+    assert 'sys_rename(__frame->rdi, __frame->rsi)' in syscall
+    assert 'bigos::vfs::rename(old_path, new_path, bigos::proc::current_cwd(), uid, gid)' in syscall
     assert 'sizeof(bigos::Metadata)' in syscall
     assert 'validate_user_io_buffer' in proc
     assert 'user_range_writable(process->address_space_root, __addr, __len)' in proc
@@ -151,6 +154,7 @@ def test_bounded_metadata_contract_is_vfs_backed() -> None:
     assert 'Status stat_absolute(const char *__path, bigos::Metadata *__out)' in vfs_h
     assert 'Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out)' in vfs_h
     assert 'Status stat(File *__file, bigos::Metadata *__out)' in vfs_h
+    assert 'Status rename(const char *__old_path, const char *__new_path, const char *__cwd' in vfs_h
     assert 'fill_metadata_defaults(__out)' in vfs
     assert '__out->object_id = 0;' in vfs
     assert 'bigos::fs::lookup(&g_mount, __path, &metadata)' in vfs
@@ -174,6 +178,7 @@ def test_current_directory_resolution_contract_is_shared() -> None:
     assert 'bigos::vfs::open(__path, process->cwd' in proc
     assert 'case SYS_CHDIR:' in syscall
     assert 'case SYS_GETCWD:' in syscall
+    assert 'case SYS_RENAME:' in syscall
 
 
 def test_existing_smokes_use_vfs_open_read_close_path() -> None:

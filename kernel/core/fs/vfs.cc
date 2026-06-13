@@ -788,6 +788,29 @@ namespace vfs {
         return unlink(resolved, __uid, __gid);
     }
 
+    Status rename(const char *__old_path, const char *__new_path, uint32_t __uid, uint32_t __gid) noexcept {
+        if (!g_initialized)
+            return Status::NotInitialized;
+        if (__old_path == nullptr || __new_path == nullptr || __old_path[0] != '/' || __new_path[0] != '/')
+            return Status::InvalidArgument;
+        if (!bigos::bigfs::owns_path(__old_path) || !bigos::bigfs::owns_path(__new_path))
+            return Status::ReadOnlyFs;
+        return bigfs_to_vfs(bigos::bigfs::rename(__old_path, __new_path, __uid, __gid));
+    }
+
+    Status rename(const char *__old_path, const char *__new_path, const char *__cwd, uint32_t __uid,
+        uint32_t __gid) noexcept {
+        char old_resolved[MAX_PATH_LEN + 1];
+        char new_resolved[MAX_PATH_LEN + 1];
+        Status status = resolve_path(__old_path, __cwd, old_resolved, sizeof(old_resolved));
+        if (status != Status::Success)
+            return status;
+        status = resolve_path(__new_path, __cwd, new_resolved, sizeof(new_resolved));
+        if (status != Status::Success)
+            return status;
+        return rename(old_resolved, new_resolved, __uid, __gid);
+    }
+
     void retain(File *__file) noexcept {
         if (__file != nullptr)
             __file->ref_count++;

@@ -1590,8 +1590,8 @@ namespace bigos::proc {
         }
 
         bigos::vfs::File *file = nullptr;
-        bigos::vfs::Status status = bigos::vfs::open(__path, process->cwd, bigos::vfs::OPEN_RDONLY, 0,
-            bigos::cred::ROOT_UID, 0, &file);
+        bigos::vfs::Status status =
+            bigos::vfs::open(__path, process->cwd, bigos::vfs::OPEN_RDONLY, 0, bigos::cred::ROOT_UID, 0, &file);
         if (status != bigos::vfs::Status::Success)
             return execve_open_errno(status);
 
@@ -2363,6 +2363,11 @@ namespace bigos::proc {
         if (process == nullptr)
             halt_failed("BIGOS_USER_FAULT_FAILED no-process\n");
 
+        // Once the process becomes waitable, keep this CPU on the exiting thread
+        // until sched::thread_exit() switches away. Otherwise a timer preemption
+        // can let the parent reap and free this process kernel stack while this
+        // thread is still running on it.
+        bigos::irq::disableIRQ();
         mark_current_faulted(__reason);
         g_current_process = nullptr;
         bigos::sched::set_current_user_process(nullptr);
@@ -2374,6 +2379,11 @@ namespace bigos::proc {
         if (process == nullptr)
             halt_failed("BIGOS_USER_EXIT_FAILED no-process\n");
 
+        // Once the process becomes waitable, keep this CPU on the exiting thread
+        // until sched::thread_exit() switches away. Otherwise a timer preemption
+        // can let the parent reap and free this process kernel stack while this
+        // thread is still running on it.
+        bigos::irq::disableIRQ();
         process->state = ProcessState::Terminated;
         process->exit_code = __code;
         // Reparent any surviving children to PID-1 init before this process

@@ -193,7 +193,7 @@ BigOS SHALL provide a layered validation path for the bounded POSIX-like process
 
 ### Requirement: 运行时文件操作纳入有界 POSIX-like I/O 子集
 
-BigOS SHALL 将运行时文件创建、打开、读取、写入、定位、同步、目录创建、最小目录枚举和删除纳入当前有界 POSIX-like 进程与 I/O 子集。该子集 MUST 继续明确不是完整 POSIX：不提供 session、terminal process group、job control、完整权限模型、完整目录遍历、完整 POSIX `readdir/getdents` 兼容、rename、link、symlink、文件锁、async I/O、SMP、动态链接、完整 POSIX libc 或 broad file-backed `mmap`。
+BigOS SHALL 将运行时文件创建、打开、读取、写入、定位、同步、目录创建、最小目录枚举、删除和受限常规文件 rename 纳入当前有界 POSIX-like 进程与 I/O 子集。该子集 MUST 继续明确不是完整 POSIX：不提供 session、terminal process group、job control、完整权限模型、完整目录遍历、完整 POSIX `readdir/getdents` 兼容、完整目录 rename、POSIX atomic replacement、link、symlink、文件锁、async I/O、SMP、动态链接、完整 POSIX libc 或 broad file-backed `mmap`。
 
 #### Scenario: 文档描述有界文件 I/O 子集
 - **WHEN** BigOS 文档、OpenSpec 或用户程序说明描述运行时文件 I/O
