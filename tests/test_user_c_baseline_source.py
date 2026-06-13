@@ -16,7 +16,10 @@ def test_smoke_probe_programs_are_packaged_only_for_userland_smoke() -> None:
         assert f"'{name}'" in boot_debug
     assert '"stat"' in xmake
     assert 'user", "bin", "stat.c"' in xmake
+    assert '"pwd"' in xmake
+    assert 'user", "bin", "pwd.c"' in xmake
     assert "'stat'" in boot_debug
+    assert "'pwd'" in boot_debug
 
     assert 'path.join(projectdir, "user", "smoke", "bin"' in xmake
     assert 'if has_config("userland_smoke") then' in xmake
@@ -62,6 +65,8 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'char *getenv(const char *name);' in stdlib
     assert 'int strncmp(const char *a, const char *b, size_t n);' in string
     assert 'ssize_t write(int fd, const void *buf, size_t len);' in unistd
+    assert 'int chdir(const char *path);' in unistd
+    assert 'char *getcwd(char *buf, size_t size);' in unistd
     assert '#define O_CREAT' in fcntl
     assert 'struct bigos_dirent' in dirent
     assert 'ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries);' in dirent
@@ -117,15 +122,15 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'require_file_contains("/rw/smoke_args.txt"' in smoke
     assert 'require_file_contains("/rw/smoke_libc_subset.txt"' in smoke
     assert 'test_runtime_filesystem();' in smoke
+    assert 'test_current_directory(envp);' in smoke
     assert 'fstat(fd, &st)' in smoke
     assert 'write_all_or_exit(input[1], "/bin/smoke/exit 7\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "echo redir-ok > /rw/smoke_shell_redir.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/cat < /rw/smoke_shell_redir.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/stat /rw/smoke_shell_redir.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "| /bin/cat\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "cd /rw\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/pwd\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo shell-alive\\n");' in smoke
     assert 'unlink("/rw/smoke_args.txt")' in smoke
     assert 'require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_io.txt", "sh: syntax error near |")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_redir.txt", "redir-ok")' in smoke
     assert 'bounded /bin/smoke C programs' in boot_debug

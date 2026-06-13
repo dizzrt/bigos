@@ -91,22 +91,31 @@ namespace vfs {
     const char *status_name(Status __status) noexcept;
     Status init() noexcept;
     bool initialized() noexcept;
+    // Normalizes absolute paths from root and relative paths from __cwd into a
+    // bounded absolute path. Supports POSIX-style "." and ".." components only;
+    // root's parent remains root and empty/overlong paths fail deterministically.
+    Status resolve_path(const char *__path, const char *__cwd, char *__out, size_t __out_len) noexcept;
     Status open_absolute(const char *__path, uint64_t __flags, File **__out_file) noexcept;
     // Writable/creating open. __mode/__uid/__gid apply to O_CREAT; for read-only
     // opens they are ignored. The simpler open_absolute() forwards here as a
     // read-only request preserving its existing semantics.
     Status open_absolute(const char *__path, uint64_t __flags, uint32_t __mode, uint32_t __uid, uint32_t __gid,
         File **__out_file) noexcept;
+    Status open(const char *__path, const char *__cwd, uint64_t __flags, uint32_t __mode, uint32_t __uid,
+        uint32_t __gid, File **__out_file) noexcept;
     Status read(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
     Status write(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
     Status lseek(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
     Status fsync(File *__file) noexcept;
     Status readdir(File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
     Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept;
+    Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out) noexcept;
     Status stat(File *__file, bigos::Metadata *__out) noexcept;
     // Directory mutation on the writable backend. owner/identity are the caller's.
     Status mkdir(const char *__path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
+    Status mkdir(const char *__path, const char *__cwd, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__path, uint32_t __uid, uint32_t __gid) noexcept;
+    Status unlink(const char *__path, const char *__cwd, uint32_t __uid, uint32_t __gid) noexcept;
     void retain(File *__file) noexcept;
     void release(File *__file) noexcept;
 }   // namespace vfs

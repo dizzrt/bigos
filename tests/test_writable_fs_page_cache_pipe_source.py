@@ -35,6 +35,8 @@ def test_syscall_numbers_appended_after_sigreturn() -> None:
     assert 'SYS_READDIR = 28' in header
     assert 'SYS_STAT = 29' in header
     assert 'SYS_FSTAT = 30' in header
+    assert 'SYS_CHDIR = 31' in header
+    assert 'SYS_GETCWD = 32' in header
     # Frozen ABI anchors must not move.
     assert 'SYS_OPEN = 5' in header
     assert 'SYS_WRITE = 2' in header
@@ -52,6 +54,7 @@ def test_errno_single_source_adds_new_codes() -> None:
         ('ESPIPE', 29),
         ('EROFS', 30),
         ('EPIPE', 32),
+        ('ERANGE', 34),
     ):
         assert f'{name} = {value};' in header
 
@@ -135,6 +138,8 @@ def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
         'case SYS_READDIR:',
         'case SYS_STAT:',
         'case SYS_FSTAT:',
+        'case SYS_CHDIR:',
+        'case SYS_GETCWD:',
     ):
         assert branch in source
     # Allocation / blocking syscalls check the scheduler blocking guard.
@@ -166,6 +171,8 @@ def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:
     assert 'fstat(fd, &st)' in smoke
     assert 'stat("/rw/runtime_unlink.txt", &st) != -1 || errno != ENOENT' in smoke
     assert 'open("/rw/runtime_unlink.txt", O_RDONLY, 0) != -1 || errno != ENOENT' in smoke
+    assert 'test_current_directory(envp)' in smoke
+    assert 'getcwd(small, sizeof(small)) != NULL || errno != ERANGE' in smoke
     assert 'open("/boot/user/init.elf", O_WRONLY, 0)' in smoke
 
 

@@ -39,6 +39,7 @@ constexpr int ENOSPC = 28;        // no space left on device
 constexpr int ESPIPE = 29;        // illegal seek (not seekable, e.g. pipe)
 constexpr int EROFS = 30;         // read-only file system
 constexpr int EPIPE = 32;         // broken pipe (all read ends closed)
+constexpr int ERANGE = 34;        // result too large for caller buffer
 constexpr int ENOSYS = 38;        // function not implemented
 NAMESPACE_BIGOS_END
 

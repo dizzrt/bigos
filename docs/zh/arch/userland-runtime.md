@@ -8,14 +8,15 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
 - `user/crt0/crt0.s`：用户入口 `_start`，消费 `kernel/core/proc/proc.cc` 中
   `copy_exec_args_to_stack` 生成的初始用户栈。
 - `user/libc`：有界最小 C 标准库子集，包括 syscall wrapper、errno 翻译、
-  字符串/内存函数、基于 `brk` 的 `malloc`/`free`、带 opaque standard streams
+  cwd wrapper、字符串/内存函数、基于 `brk` 的 `malloc`/`free`、带 opaque standard streams
   的 fd-backed 极简 stdio、`printf`、`fprintf(stderr, ...)`，以及只读
   `environ`/`getenv`。
 - `user/init/init.c`：常驻 PID-1，通过 `fork` + `execve` 启动 `/bin/sh`，
   等待子进程，并在 shell 退出后重新拉起。
-- `user/sh/sh.c`：有界交互 shell，支持内建命令、PATH 查找、
+- `user/sh/sh.c`：有界交互 shell，支持内建命令、cwd-aware PATH 查找、
   `fork` + `execve` + `wait`、单级管道，以及基本 `<` / `>` 重定向。
-- `user/bin/*`：打包进镜像的小型用户程序，例如 `/bin/echo` 和 `/bin/cat`。
+- `user/bin/*`：打包进镜像的小型用户程序，例如 `/bin/echo`、`/bin/cat`、
+  `/bin/stat` 和 `/bin/pwd`。
 - `user/smoke/bin/*`：仅用于验证的 C 探针，只在默认关闭的 `userland_smoke` 路径被选择时构建并打包到 `/bin/smoke/*`。
 - `user/smoke/userland_smoke.c`：默认关闭的确定性验证程序，覆盖 crt0、libc
   wrapper、errno、stdout/stderr、smoke C 程序执行、fork/exec/wait、pipe、重定向和 malloc。
@@ -39,6 +40,16 @@ rsp -> argc
 `_start` 将 `argc` 放入 `rdi`、`argv` 放入 `rsi`、`envp` 放入 `rdx`，按
 System V x86_64 调用边界对齐栈，调用 `main(argc, argv, envp)`，并用 `main`
 返回值经 `SYS_EXIT` 退出。它不会返回到未定义地址。
+
+## 当前目录
+
+每个用户进程拥有一个有界 cwd 字符串，默认初始化为 `/`。`fork` 会独立复制 cwd，
+`execve` 会保留 cwd，`chdir` 只有在内核解析目标并确认它是目录后才提交新 cwd。
+Path-taking wrapper 会把绝对路径或相对路径原样交给内核；libc 与 shell 不实现单独的 namespace、
+symlink traversal、`chroot` 或 `realpath`。
+
+Resolver 支持普通 component、重复 separator、POSIX-style `.` 与 `..`，并让 root 的父目录保持 root。
+`getcwd` 把 NUL 结尾 cwd 复制到调用者缓冲区；有效缓冲区过小时报告 `ERANGE`。
 
 ## SYS_EXECVE ABI
 
@@ -65,13 +76,14 @@ rdx = char *const envp[]
 
 Shell 有意保持很小：
 
-- 内建命令：`exit` 和 `echo`。
+- 内建命令：`exit`、`echo` 和 `cd`。`cd` 在 shell 进程内执行，因此 cwd 变化会保留到下一条命令。
 - Prompt：只在 stdin 与 stdout 仍连接到默认 console fast path 时显示确定性的 `$ `。
 - 输入反馈：printable character、newline 和 backspace 由 `read(0, ...)` 返回后的非中断 shell consumer 回显。
 - 命令查找：包含 `/` 的路径直接执行；其他命令按 `PATH` 尝试，默认回退 `/bin`。
 - 执行方式：外部命令通过 `fork` + `execve` + `wait` 运行。
 - 管道：支持一个 `a | b` 单级管道。
 - 重定向：每条命令最多一个输入 `< file` 和一个输出 `> file`。
+- cwd 行为：包含 `/` 的相对命令路径、重定向路径和 `/bin/pwd` 等小工具都使用内核 cwd 契约。
 - 输出：builtin、子进程 stdout 和确定性的可恢复错误都使用现有 fd/syscall 路径；未重定向时，默认 fd `1` 与 fd `2` 会到达可见 console。
 - 容量：行长、参数数量、PATH 候选数量与路径长度都在 `user/sh/sh.c` 中有固定上限。
 
@@ -87,7 +99,7 @@ termios、完整 FILE API、动态链接或完整 POSIX libc。
   `libc.h`。
 - 类型与常量：`size_t`、`ssize_t`、`off_t`、`pid_t`、`NULL`、已实现的
   open flags、seek 常量、`WAIT_ANY`，以及与 `include/bigos/errno.h` 保持一致
-  的 errno 数值。
+  的 errno 数值，包括用于 `getcwd` 小缓冲区的 `ERANGE`。
 - Syscall wrapper：内核负 errno 返回会翻译为用户态正 `errno`，并返回 `-1` 或
   接口文档化的失败哨兵；成功 wrapper 不会清零或改写既有 `errno`。
 - 字符串与内存：子集包含已实现的有界例程，例如 `strlen`、`strcmp`、
@@ -131,7 +143,7 @@ runtime 边界内：
 
 - `/boot/user/init.elf`：默认常驻 C init 或选中的 smoke 程序。
 - `/bin/sh`：交互 shell。
-- `/bin/echo` 和 `/bin/cat`：正常打包用户命令。
+- `/bin/echo`、`/bin/cat`、`/bin/stat` 和 `/bin/pwd`：正常打包用户命令。
 - `/bin/smoke/*` 探针：仅用于显式 `userland_smoke` 验证镜像。
 
 镜像布局仍沿用现有 Legacy BIOS / MBR / exFAT 路径；当前有界用户态基线只在
@@ -150,8 +162,9 @@ uv run python tools/boot_debug.py run --emulator qemu --display none --expect-se
 
 `BIGOS_USERLAND_PASSED` 验证非交互运行时路径。简单 C 程序基线增加面向 smoke-only
 C 探针的行为断言：smoke 会观察它们的 stdout/stderr，验证参数和环境报告，验证失败
-wrapper 的 `errno` 翻译以及成功路径不改写 `errno`，观察请求的退出码探针，检查有界
-libc subset 探针，并通过 `/bin/sh` 运行探针以确认 shell 在外部程序非零退出后继续运行。
+wrapper 的 `errno` 翻译以及成功路径不改写 `errno`，观察请求的退出码探针，检查 cwd-relative
+open/stat/`..`、fork 继承、通过 `/bin/pwd` 观察 exec 保留、shell `cd` 和有界 libc subset
+探针，并通过 `/bin/sh` 运行探针以确认 shell 在外部程序非零退出后继续运行。
 交互控制台可用性还保留 default-init headless marker 断言（`BIGOS_USER_EXEC`），并增加
 可选的手工或 emulator-input 检查，用于观察文本 console 上的 prompt、输入回显、
 backspace feedback 和命令输出。若本地 display、ROM、keyboard input 或 injection 能力不可用，

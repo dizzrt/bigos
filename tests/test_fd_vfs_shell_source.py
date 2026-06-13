@@ -124,7 +124,7 @@ def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
     assert 'copy_user_path' in syscall
     assert 'if (!bigos::sched::can_block())' in syscall
     assert 'bigos::vfs::init()' in syscall
-    assert 'bigos::vfs::open_absolute(path, __flags, (uint32_t)__mode, uid, gid, &file)' in syscall
+    assert 'bigos::vfs::open(path, bigos::proc::current_cwd(), __flags, (uint32_t)__mode, uid, gid, &file)' in syscall
     assert 'bigos::proc::install_fd_current(file, false)' in syscall
     assert 'bigos::proc::read_fd_current' in syscall
     assert 'bigos::proc::copy_to_current_user_buffer' in syscall
@@ -149,12 +149,31 @@ def test_bounded_metadata_contract_is_vfs_backed() -> None:
     assert 'uint64_t object_id;' in header
     assert 'uint64_t reserved[4];' in header
     assert 'Status stat_absolute(const char *__path, bigos::Metadata *__out)' in vfs_h
+    assert 'Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out)' in vfs_h
     assert 'Status stat(File *__file, bigos::Metadata *__out)' in vfs_h
     assert 'fill_metadata_defaults(__out)' in vfs
     assert '__out->object_id = 0;' in vfs
     assert 'bigos::fs::lookup(&g_mount, __path, &metadata)' in vfs
     assert 'bigos::bigfs::stat(__inode' in vfs
     assert 'return Status::Unsupported;' in vfs
+
+
+def test_current_directory_resolution_contract_is_shared() -> None:
+    header = read_source('include/bigos/proc.h')
+    vfs_h = read_source('include/bigos/fs/vfs.h')
+    vfs = read_source('kernel/core/fs/vfs.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+
+    assert 'char cwd[bigos::vfs::MAX_PATH_LEN + 1];' in header
+    assert 'Status resolve_path(const char *__path, const char *__cwd' in vfs_h
+    assert "root's parent remains root" in vfs_h
+    assert "component[0] == '.' && component[1] == '.'" in vfs
+    assert 'memcpy(child->cwd, parent->cwd, sizeof(child->cwd));' in proc
+    assert 'init_cwd(__process);' in proc
+    assert 'bigos::vfs::open(__path, process->cwd' in proc
+    assert 'case SYS_CHDIR:' in syscall
+    assert 'case SYS_GETCWD:' in syscall
 
 
 def test_existing_smokes_use_vfs_open_read_close_path() -> None:
@@ -205,6 +224,8 @@ def test_shell_errors_and_builtin_redirection_use_fd_paths() -> None:
     assert 'write_all(2, detail);' in shell
     assert 'static int run_builtin(int argc, char **argv, int out_fd)' in shell
     assert 'int fd = out_fd >= 0 ? out_fd : 1;' in shell
+    assert 'strcmp(argv[0], "cd") == 0' in shell
+    assert 'chdir(argv[1])' in shell
     assert 'if (run_builtin(n, args, out_fd))' in shell
     assert 'sh: line too long' in shell
     assert 'sh: command not found: ' in shell

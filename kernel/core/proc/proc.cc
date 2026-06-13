@@ -1079,9 +1079,8 @@ namespace {
         // the correct ring3 context (current process / user CR3 / rsp0) whenever
         // this thread is switched back in.
         bigos::sched::set_current_user_process(child);
-        // Capture the kernel root (active here on the kernel thread) so exit/fault
-        // can switch back before teardown, identical to run_user_process.
-        child->kernel_address_space_root = bigos::mm::read_cr3();
+        if (child->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+            bigos::mm::activate_address_space_root(child->kernel_address_space_root);
         bigos::arch::x86::set_tss_rsp0(child->kernel_stack_top);
         bigos::serial_puts("BIGOS_FORK_CHILD_ENTER\n");
         bigos::mm::activate_address_space_root(child->address_space_root);
@@ -1258,6 +1257,7 @@ namespace bigos::proc {
         __process->euid = bigos::cred::ROOT_UID;
         __process->egid = bigos::cred::ROOT_UID;
         __process->start_unix_time = bigos::time::current_unix_time();
+        init_cwd(__process);
         bigos::signal::init_state(__process);
         init_fd_table(__process);
         if (!publish_process(__process, ROOT_PARENT_PID))
@@ -1441,6 +1441,7 @@ namespace bigos::proc {
         __process->euid = bigos::cred::ROOT_UID;
         __process->egid = bigos::cred::ROOT_UID;
         __process->start_unix_time = bigos::time::current_unix_time();
+        init_cwd(__process);
         bigos::signal::init_state(__process);
         init_fd_table(__process);
         if (!publish_process(__process, g_current_process != nullptr ? g_current_process->pid : ROOT_PARENT_PID)) {
@@ -1474,12 +1475,16 @@ namespace bigos::proc {
         if (process->address_space_root == (bigos::mm::read_cr3() & 0x000ffffffffff000ull))
             return UserElfLoadError::MapFailed;
 
-        Process prepared = {};
-        UserElfLoadError error = create_elf_user_process(&prepared, __image, __image_len, __args);
-        if (error != UserElfLoadError::Success)
+        Process *prepared = alloc_process_object();
+        if (prepared == nullptr)
+            return UserElfLoadError::OutOfMemory;
+        UserElfLoadError error = create_elf_user_process(prepared, __image, __image_len, __args);
+        if (error != UserElfLoadError::Success) {
+            free_process_object(prepared);
             return error;
+        }
 
-        unpublish_process(&prepared);
+        unpublish_process(prepared);
         const uint64_t old_root = process->address_space_root;
         const UserRange old_code = process->code;
         const UserRange old_data = process->data;
@@ -1489,21 +1494,22 @@ namespace bigos::proc {
         const uint64_t old_data_phys = process->data_phys;
         const uint64_t old_stack_phys = process->stack_phys;
 
-        process->address_space_root = prepared.address_space_root;
-        process->entry = prepared.entry;
-        process->code = prepared.code;
-        process->data = prepared.data;
-        process->stack = prepared.stack;
-        process->vmas = prepared.vmas;
-        process->initial_stack = prepared.initial_stack;
-        process->code_phys = prepared.code_phys;
-        process->data_phys = prepared.data_phys;
-        process->stack_phys = prepared.stack_phys;
+        process->address_space_root = prepared->address_space_root;
+        process->entry = prepared->entry;
+        process->code = prepared->code;
+        process->data = prepared->data;
+        process->stack = prepared->stack;
+        process->vmas = prepared->vmas;
+        process->initial_stack = prepared->initial_stack;
+        process->code_phys = prepared->code_phys;
+        process->data_phys = prepared->data_phys;
+        process->stack_phys = prepared->stack_phys;
 
-        if (prepared.kernel_stack_base != nullptr)
-            bigos::free_pages(prepared.kernel_stack_base);
-        prepared.address_space_root = bigos::mm::INVALID_PHYS_ADDR;
-        prepared.kernel_stack_base = nullptr;
+        if (prepared->kernel_stack_base != nullptr)
+            bigos::free_pages(prepared->kernel_stack_base);
+        prepared->address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+        prepared->kernel_stack_base = nullptr;
+        free_process_object(prepared);
 
         if (old_root != bigos::mm::INVALID_PHYS_ADDR && !bigos::mm::teardown_user_address_space(old_root)) {
             process->exit_code = EXEC_FAILURE_STATUS;
@@ -1584,7 +1590,8 @@ namespace bigos::proc {
         }
 
         bigos::vfs::File *file = nullptr;
-        bigos::vfs::Status status = bigos::vfs::open_absolute(__path, bigos::vfs::OPEN_RDONLY, &file);
+        bigos::vfs::Status status = bigos::vfs::open(__path, process->cwd, bigos::vfs::OPEN_RDONLY, 0,
+            bigos::cred::ROOT_UID, 0, &file);
         if (status != bigos::vfs::Status::Success)
             return execve_open_errno(status);
 
@@ -1594,28 +1601,23 @@ namespace bigos::proc {
             return -bigos::ENOEXEC;
         }
 
-        void *image = bigos::kmalloc((size_t)file_size);
-        if (image == nullptr) {
-            bigos::vfs::release(file);
-            return -bigos::ENOMEM;
-        }
+        // Keep exec staging in kernel static storage instead of kmalloc. Syscall
+        // execution may still run under the caller's user CR3 until commit, and
+        // freshly grown heap pages are not guaranteed to be mapped there.
+        static uint8_t exec_image[USER_ELF_MAX_FILE_BYTES];
+        void *image = exec_image;
 
         size_t bytes_read = 0;
         status = bigos::vfs::read(file, image, (size_t)file_size, &bytes_read);
         bigos::vfs::release(file);
         if (status != bigos::vfs::Status::Success || bytes_read != file_size) {
-            bigos::free(image);
             return -bigos::EIO;
         }
 
-        // exec_current_from_elf_image refuses to replace the active root, so move
-        // onto the kernel address space first (the kernel stack stays mapped).
         const uint64_t user_root = process->address_space_root;
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::mm::activate_address_space_root(process->kernel_address_space_root);
-
         const UserElfLoadError error = exec_current_from_elf_image(image, file_size, __args);
-        bigos::free(image);
         if (error != UserElfLoadError::Success) {
             // exec_current_from_elf_image only tears down the old image on the rare
             // teardown-failure path, which also marks the process a zombie. In that
@@ -1662,6 +1664,63 @@ namespace bigos::proc {
 
     Process *current_process() noexcept {
         return g_current_process;
+    }
+
+    const char *current_cwd() noexcept {
+        const Process *process = g_current_process;
+        if (process == nullptr || process->cwd[0] == 0)
+            return "/";
+        return process->cwd;
+    }
+
+    bool init_cwd(Process *__process, const char *__cwd) noexcept {
+        if (__process == nullptr || __cwd == nullptr)
+            return false;
+        size_t len = 0;
+        while (len <= bigos::vfs::MAX_PATH_LEN && __cwd[len] != 0)
+            len++;
+        if (len == 0 || len > bigos::vfs::MAX_PATH_LEN || __cwd[0] != '/')
+            return false;
+        memcpy(__process->cwd, __cwd, len + 1);
+        return true;
+    }
+
+    int64_t chdir_current(const char *__path) noexcept {
+        Process *process = g_current_process;
+        if (process == nullptr || __path == nullptr)
+            return -bigos::EINVAL;
+        if (!bigos::sched::can_block())
+            return -bigos::EWOULDBLOCK;
+        if (!bigos::vfs::initialized()) {
+            const bigos::vfs::Status init_status = bigos::vfs::init();
+            if (init_status != bigos::vfs::Status::Success)
+                return (int64_t)init_status;
+        }
+
+        char resolved[bigos::vfs::MAX_PATH_LEN + 1];
+        bigos::vfs::Status status = bigos::vfs::resolve_path(__path, process->cwd, resolved, sizeof(resolved));
+        if (status != bigos::vfs::Status::Success)
+            return (int64_t)status;
+        bigos::Metadata metadata = {};
+        status = bigos::vfs::stat_absolute(resolved, &metadata);
+        if (status != bigos::vfs::Status::Success)
+            return (int64_t)status;
+        if (metadata.type != BIGOS_METADATA_TYPE_DIRECTORY)
+            return -bigos::ENOTDIR;
+        memcpy(process->cwd, resolved, strlen(resolved) + 1);
+        return 0;
+    }
+
+    int64_t getcwd_current(char *__dst, size_t __dst_len) noexcept {
+        const Process *process = g_current_process;
+        if (process == nullptr || __dst == nullptr || __dst_len == 0)
+            return -bigos::EINVAL;
+        const char *cwd = process->cwd[0] != 0 ? process->cwd : "/";
+        const size_t len = strlen(cwd) + 1;
+        if (__dst_len < len)
+            return -bigos::ERANGE;
+        memcpy(__dst, cwd, len);
+        return 0;
     }
 
     void restore_current_user_context(Process *__process) noexcept {
@@ -2024,6 +2083,7 @@ namespace bigos::proc {
         child->data = parent->data;
         child->stack = parent->stack;
         child->initial_stack = parent->initial_stack;
+        child->kernel_address_space_root = parent->kernel_address_space_root;
         child->state = ProcessState::Created;
         child->reap_pending = false;
         child->resources_reclaimed = false;
@@ -2037,6 +2097,7 @@ namespace bigos::proc {
         child->euid = parent->euid;
         child->egid = parent->egid;
         child->start_unix_time = bigos::time::current_unix_time();
+        memcpy(child->cwd, parent->cwd, sizeof(child->cwd));
 
         // Signal inheritance: the child inherits the disposition table and blocked
         // mask field-by-field; its pending set starts empty (POSIX fork). No new

@@ -39,18 +39,22 @@ BigOS 当前提供一个经过 smoke 验证、单核、以同步为主、具备�
   空间管理和有界用户 fault 处理。
 - A bounded process and syscall layer with process lifecycle management,
   file-descriptor based I/O, anonymous demand paging, `fork`/COW, signals,
-  time/identity primitives, and image replacement.
+  time/identity primitives, image replacement, and per-process current-directory
+  state.
 - 有界进程与 syscall 层，包括进程生命周期管理、基于文件描述符的 I/O、匿名 demand
-  paging、`fork`/COW、signals、time/identity 原语和进程镜像替换。
+  paging、`fork`/COW、signals、time/identity 原语、进程镜像替换和每进程 current
+  directory 状态。
 - A minimal storage and filesystem layer with synchronous block I/O, read-only
   boot assets, a bounded writable runtime area, page/buffer cache, pipes, fd
-  duplication, and bounded file/directory metadata queries.
+  duplication, relative path resolution, and bounded file/directory metadata
+  queries.
 - 最小存储与文件系统层，包括同步块 I/O、只读启动资产、有界可写运行时区域、
-  page/buffer cache、pipe、fd duplication 和有界文件/目录元数据查询。
+  page/buffer cache、pipe、fd duplication、相对路径解析和有界文件/目录元数据查询。
 - A minimal freestanding userland with resident init behavior, an interactive
-  text-console shell, basic libc-style support, and small packaged user programs.
+  text-console shell, basic libc-style support, current-directory wrappers, and
+  small packaged user programs.
 - 最小 freestanding 用户态，包括常驻 init 行为、交互式文本控制台 shell、基础 libc
-  风格支持和小型用户程序。
+  风格支持、current-directory wrapper 和小型用户程序。
 
 ## Current Boundary / 当前边界
 
@@ -161,12 +165,12 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 27 are complete and now form a compressed minimal usable system
+Stages 20 through 28 are complete and now form a compressed minimal usable system
 baseline. Keep the detailed implementation and validation history in dedicated
 architecture docs and OpenSpec records; this roadmap tracks only project-level
 capabilities and boundaries.
 
-阶段 20 到阶段 27 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
+阶段 20 到阶段 28 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
 专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
@@ -208,6 +212,14 @@ capabilities and boundaries.
 - 最小元数据契约：简单程序可通过内核、libc、用户工具和行为验证路径观察有界文件与目录
   元数据。保持边界：不引入符号链接、设备节点模型、完整 POSIX 元数据数据库、稳定 inode
   身份、ACL、扩展属性或广泛标准兼容声明。
+- Cwd and relative path handling: simple programs and the bounded shell can use
+  per-process current directories, relative path resolution, and POSIX-style `.`
+  and `..` components across supported path-taking operations. Preserved
+  boundaries: no mount namespaces, `chroot`, symbolic links, or complete
+  path-canonicalization semantics.
+- Cwd 与相对路径处理：简单程序和有界 shell 可在受支持的路径操作中使用每进程 current
+  directory、相对路径解析，以及 POSIX-style `.` 和 `..` 组件。保持边界：不引入 mount
+  namespace、`chroot`、符号链接或完整路径规范化语义。
 - x86_64/core decoupling discipline: architecture abstraction is an active
   maintenance discipline at real consumption points. Preserved boundaries: the
   runnable backend remains x86_64 with the existing legacy boot/storage path.
@@ -236,27 +248,30 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 28: Cwd And Relative Paths / Cwd 与相对路径
 
-- Introduce a per-process current-directory contract and relative path resolution
-  across path-taking kernel and userland interfaces.
-- 引入每进程 current-directory 契约，并让接收路径的内核与用户态接口具备一致的相对路径解析。
-- Preserve expected bounded inheritance behavior across process creation and
-  image replacement, while avoiding mount namespaces, `chroot`, symlink
-  traversal, or complete path-canonicalization semantics.
-- 在进程创建与镜像替换之间保持符合直觉的有界继承行为，同时不引入 mount namespace、
-  `chroot`、符号链接遍历或完整路径规范化语义。
+- Status: complete; this capability is now part of the completed baseline rather
+  than future mainline scope.
+- 状态：已完成；该能力现在属于已完成基线，不再属于后续主线范围。
+- The current baseline includes a per-process current-directory contract and
+  relative path resolution across supported path-taking kernel and userland
+  interfaces.
+- 当前基线包括每进程 current-directory 契约，并让受支持的接收路径的内核与用户态接口具备一致的
+  相对路径解析。
+- Preserved boundaries: no mount namespaces, `chroot`, symlink traversal, or
+  complete path-canonicalization semantics.
+- 保持边界：不引入 mount namespace、`chroot`、符号链接遍历或完整路径规范化语义。
 
 ### Stage 29: Userland Path Tools / 用户态路径工具
 
-- Make the path and metadata contracts naturally consumable from the interactive
-  shell and small static user programs, so filesystem usability is not limited to
-  raw kernel interfaces.
-- 让路径与元数据契约能被交互式 shell 和小型静态用户程序自然消费，使文件系统可用性不局限于
-  原始内核接口。
-- Focus on small, bounded user-visible utilities and shell builtins; do not turn
-  this stage into a complete POSIX utility suite, shell language, globbing, or
-  scripting environment.
-- 聚焦小型、有界、用户可见的工具与 shell builtin；不要把本阶段扩展成完整 POSIX 工具集、
-  shell 语言、glob 或脚本环境。
+- Continue making path and metadata contracts naturally consumable from the
+  interactive shell and small static user programs beyond the current cwd, `cd`,
+  and `pwd` baseline.
+- 在当前 cwd、`cd` 和 `pwd` 基线之外，继续让路径与元数据契约能被交互式 shell 和小型静态
+  用户程序自然消费。
+- Focus on additional small, bounded user-visible utilities and shell builtins;
+  do not turn this stage into a complete POSIX utility suite, shell language,
+  globbing, or scripting environment.
+- 聚焦额外的小型、有界、用户可见的工具与 shell builtin；不要把本阶段扩展成完整 POSIX
+  工具集、shell 语言、glob 或脚本环境。
 
 ### Stage 30: Constrained Rename / 受限 Rename
 

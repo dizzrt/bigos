@@ -161,6 +161,9 @@ namespace bigos::proc {
         // current allocated entry count; the lowest free slot is still preferred.
         FdEntry *fd_table;
         uint32_t fd_capacity;
+        // Per-process current directory as a bounded absolute VFS path. It is
+        // inline so fork copies independently and reap has no cwd heap teardown.
+        char cwd[bigos::vfs::MAX_PATH_LEN + 1];
         // True when the Process object itself was allocated from the kernel heap
         // via alloc_process_object() and must be freed on reap. Static smoke
         // objects keep this false so the reaper never frees static storage.
@@ -249,6 +252,10 @@ namespace bigos::proc {
     bool validate_user_io_buffer(uint64_t __addr, uint64_t __len) noexcept;
     bool copy_current_user_buffer(uint64_t __addr, void *__dst, uint64_t __len) noexcept;
     bool copy_to_current_user_buffer(uint64_t __addr, const void *__src, uint64_t __len) noexcept;
+    const char *current_cwd() noexcept;
+    bool init_cwd(Process *__process, const char *__cwd = "/") noexcept;
+    int64_t chdir_current(const char *__path) noexcept;
+    int64_t getcwd_current(char *__dst, size_t __dst_len) noexcept;
     int64_t brk_current(uint64_t __new_break) noexcept;
     int64_t map_anonymous_current(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept;
     bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept;

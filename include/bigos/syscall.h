@@ -69,6 +69,8 @@ namespace bigos::sys {
                                // or negative errno; minimal bounded /rw directory enumeration.
         SYS_STAT = 29,         // (path, struct bigos_metadata *out) -> 0 or negative errno.
         SYS_FSTAT = 30,        // (fd, struct bigos_metadata *out) -> 0 or negative errno.
+        SYS_CHDIR = 31,        // (path) -> 0 or negative errno; cwd changes only after directory validation.
+        SYS_GETCWD = 32,       // (user buffer, len) -> 0 or -ERANGE/-EFAULT/-EINVAL.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

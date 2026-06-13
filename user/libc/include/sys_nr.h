@@ -39,5 +39,7 @@
 #define SYS_READDIR     28
 #define SYS_STAT        29
 #define SYS_FSTAT       30
+#define SYS_CHDIR       31
+#define SYS_GETCWD      32
 
 #endif /* _BIGOS_USER_SYS_H */

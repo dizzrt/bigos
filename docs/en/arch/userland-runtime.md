@@ -9,14 +9,15 @@ environment.
 - `user/crt0/crt0.s`: user entry `_start`. It consumes the initial stack produced
   by `copy_exec_args_to_stack` in `kernel/core/proc/proc.cc`.
 - `user/libc`: bounded minimal C library subset, syscall wrappers, errno
-  translation, string/memory helpers, `brk`-backed `malloc`/`free`, tiny
+  translation, cwd wrappers, string/memory helpers, `brk`-backed `malloc`/`free`, tiny
   fd-backed stdio with opaque standard streams, `printf`,
   `fprintf(stderr, ...)`, and read-only `environ`/`getenv`.
 - `user/init/init.c`: resident PID-1. It starts `/bin/sh` with
   `fork` + `execve`, waits for children, and restarts the shell when it exits.
-- `user/sh/sh.c`: bounded interactive shell with builtins, PATH lookup,
+- `user/sh/sh.c`: bounded interactive shell with builtins, cwd-aware PATH lookup,
   `fork` + `execve` + `wait`, one-stage pipes, and basic `<` / `>` redirection.
-- `user/bin/*`: small packaged user binaries such as `/bin/echo` and `/bin/cat`.
+- `user/bin/*`: small packaged user binaries such as `/bin/echo`, `/bin/cat`,
+  `/bin/stat`, and `/bin/pwd`.
 - `user/smoke/bin/*`: validation-only C probes that are built and packaged under
   `/bin/smoke/*` only when the default-off `userland_smoke` path is selected.
 - `user/smoke/userland_smoke.c`: default-off deterministic validation program
@@ -44,6 +45,19 @@ the stack for the System V x86_64 call boundary, calls
 `main(argc, argv, envp)`, and exits through `SYS_EXIT` with `main`'s return
 value. It never returns to an undefined address.
 
+## Current Directory
+
+Each user process owns a bounded cwd string initialized to `/`. `fork` copies it
+independently, `execve` preserves it, and `chdir` commits a new cwd only after
+the kernel resolves the target and verifies that it is a directory. Path-taking
+wrappers pass absolute or relative paths unchanged to the kernel; libc and the
+shell do not implement a separate namespace, symlink traversal, `chroot`, or
+`realpath`.
+
+The resolver supports ordinary components, repeated separators, POSIX-style `.`
+and `..`, and keeps root's parent at root. `getcwd` copies the NUL-terminated cwd
+into a caller buffer and reports `ERANGE` when a valid buffer is too small.
+
 ## SYS_EXECVE ABI
 
 `SYS_EXECVE` is appended as syscall number `27`.
@@ -70,7 +84,8 @@ The user libc mirror headers `user/libc/include/sys_nr.h` and
 
 The shell is intentionally small:
 
-- Builtins: `exit` and `echo`.
+- Builtins: `exit`, `echo`, and `cd`. `cd` runs in the shell process so the cwd
+  change survives the next command.
 - Prompt: deterministic `$ ` only when stdin and stdout are still connected to
   the default console fast paths.
 - Input feedback: printable characters, newline, and backspace are echoed from
@@ -80,6 +95,8 @@ The shell is intentionally small:
 - Execution: external commands run via `fork` + `execve` + `wait`.
 - Pipes: one `a | b` stage.
 - Redirection: one input `< file` and one output `> file` per command.
+- Cwd behavior: relative command paths containing `/`, redirection paths, and
+  small tools such as `/bin/pwd` use the kernel cwd contract.
 - Output: builtins, child stdout, and deterministic recoverable errors use the
   existing fd/syscall path; default fd `1` and fd `2` reach the visible console
   when not redirected.
@@ -99,7 +116,7 @@ The user libc exposes a documented bounded subset for simple static C programs:
   `libc.h`.
 - Types and constants: `size_t`, `ssize_t`, `off_t`, `pid_t`, `NULL`, the
   implemented open flags, seek constants, `WAIT_ANY`, and errno values mirrored
-  from `include/bigos/errno.h`.
+  from `include/bigos/errno.h`, including `ERANGE` for small `getcwd` buffers.
 - Syscall wrappers: negative kernel errno returns become positive user `errno`
   and `-1` or the documented failure sentinel; successful wrappers do not clear
   or rewrite an existing `errno` value.
@@ -151,7 +168,8 @@ freestanding ELF64 `ET_EXEC` images using `user/crt0`, `user/libc`, and
 
 - `/boot/user/init.elf` for the default resident C init or the selected smoke.
 - `/bin/sh` for the interactive shell.
-- `/bin/echo` and `/bin/cat` for normal packaged user commands.
+- `/bin/echo`, `/bin/cat`, `/bin/stat`, and `/bin/pwd` for normal packaged user
+  commands.
 - `/bin/smoke/*` probes only for the explicit `userland_smoke` validation image.
 
 The image layout remains the existing Legacy BIOS / MBR / exFAT path; the
@@ -175,9 +193,11 @@ uv run python tools/boot_debug.py run --emulator qemu --display none --expect-se
 program baseline adds behavior assertions for the smoke-only C probes: the smoke
 observes their stdout/stderr, verifies argument and environment reporting,
 verifies `errno` translation through failing wrappers and success paths that do
-not rewrite `errno`, observes the requested exit-code probe, checks the bounded
-libc subset probe, and runs probes through `/bin/sh` to confirm the shell
-continues after a non-zero external program. Interactive console usability also
+not rewrite `errno`, observes the requested exit-code probe, checks cwd-relative
+open/stat/`..`, fork inheritance, exec preservation through `/bin/pwd`, shell
+`cd`, and the bounded libc subset probe, and runs probes through `/bin/sh` to
+confirm the shell continues after a non-zero external program. Interactive
+console usability also
 keeps the default-init headless marker assertion (`BIGOS_USER_EXEC`) while
 adding optional manual or emulator-input checks for prompt visibility, input
 echo, backspace feedback, and command output on the text console. When local

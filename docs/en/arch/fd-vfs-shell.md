@@ -8,17 +8,21 @@ and the minimal userland runtime.
 ## VFS Boundary
 
 - `include/bigos/fs/vfs.h` defines the public shell: `Vnode`, `File`,
-  `FileOperations`, read-only open flags, deterministic status codes, and
-  `init`/`open_absolute`/`read`/`release`.
+  `FileOperations`, open flags, deterministic status codes, cwd-aware path
+  resolution, and `init`/`open`/`open_absolute`/`read`/`release`.
 - `kernel/core/fs/vfs.cc` owns one root mount. `vfs::init()` initializes the ATA
   PIO primary-master block device, discovers the existing MBR exFAT partition,
   mounts it read-only, and publishes the root only after the mount succeeds.
 - The exFAT backend is an adapter over `find_exfat_partition`, `mount_exfat`,
   `lookup`, and `read_file`; it does not rewrite the parser or change on-disk
   support.
-- `open_absolute` accepts only bounded NUL-terminated absolute paths and
-  read-only flags. Relative paths, `.`/`..` components, directories, missing
-  files, and write/create/truncate flags fail deterministically.
+- Path-taking VFS entry points share a bounded resolver. Absolute paths resolve
+  from root; relative paths resolve from the current process cwd; repeated
+  separators are collapsed; POSIX-style `.` and `..` components are reduced; and
+  root's parent remains root.
+- The resolver does not implement symlink traversal, mount namespaces, `chroot`,
+  or full POSIX `realpath` canonicalization. Empty, overlong, or unsupported
+  paths fail deterministically before fd or filesystem state is published.
 - `read` uses the open file offset, clamps at EOF, advances the offset only after
   a successful backend read, and rejects offset arithmetic overflow.
 
@@ -36,6 +40,9 @@ and the minimal userland runtime.
   non-readable descriptors with a deterministic bad-fd error.
 - `exec` preserves descriptors unless their internal `close_on_exec` bit is set;
   rollback leaves the old fd table untouched.
+- Each user `Process` also owns an inline bounded cwd string. It initializes to
+  `/`, is copied independently by `fork`, is preserved by `execve`, and requires
+  no heap teardown during safe reap.
 - Exit and fault paths defer fd-backed object destruction to
   `reap_pending_processes()`, after active-stack and active-CR3 checks pass.
 
@@ -50,6 +57,10 @@ and the minimal userland runtime.
   metadata snapshot for an absolute path.
 - `SYS_FSTAT = 30`: `rdi=fd`, `rsi=struct stat*`, returns metadata for the open
   file object without advancing its offset.
+- `SYS_CHDIR = 31`: `rdi=path`, resolves the target, verifies it is a directory,
+  and commits the new cwd only on success.
+- `SYS_GETCWD = 32`: `rdi=user_buffer`, `rsi=len`, copies a NUL-terminated cwd
+  string or returns `-ERANGE` when the valid buffer is too small.
 - fd/VFS syscalls check `sched::can_block()` before initializing VFS, allocating
   file objects, or entering synchronous exFAT/ATA PIO reads.
 - The `int 0x80` vector and register ABI are unchanged. The syscall gate is a
@@ -59,9 +70,10 @@ and the minimal userland runtime.
 
 ## Validation
 
-- Source-level checks cover VFS root publication, open rejection, fd capacity,
-  bad fd and double-close behavior, EOF clamp, offset advancement, metadata
-  snapshots, exec close-on-exec handling, and safe reaper close-all.
+- Source-level checks cover VFS root publication, cwd resolution, open
+  rejection, fd capacity, bad fd and double-close behavior, EOF clamp, offset
+  advancement, metadata snapshots, exec close-on-exec handling, and safe reaper
+  close-all.
 - The existing `fs_smoke` case now validates `/boot/fs_smoke.txt` through
   VFS open/read/release and emits the existing
   `BIGOS_FS_EXFAT_READ_PASSED` marker.
@@ -84,9 +96,10 @@ and the minimal userland runtime.
 
 ## Non-Goals
 
-- This baseline still does not introduce cwd, relative path resolution, `select`,
-  complete POSIX `stat`, demand paging, COW, SMP, or a UEFI backend; those are
-  either later bounded capabilities or still non-goals.
+- This baseline still does not introduce `select`, complete POSIX `stat`, full
+  pathname canonicalization, symlink traversal, mount namespaces, `chroot`, SMP,
+  or a UEFI backend; those are either later bounded capabilities or still
+  non-goals.
 - Current project non-goals remain async I/O, broad or file-backed `mmap`, full
   POSIX filesystem/process semantics, dynamic linking, SMP, and a runnable UEFI
   backend.

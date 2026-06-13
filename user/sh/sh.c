@@ -2,7 +2,7 @@
  *
  * Read-parse-execute loop linked against crt0 and the user libc. Supports:
  *   - whitespace tokenization into a bounded argv,
- *   - builtins: exit, echo,
+ *   - builtins: exit, echo, cd,
  *   - external commands via PATH lookup + fork + execve + wait,
  *   - a single-stage pipe a | b,
  *   - basic > / < redirection.
@@ -215,6 +215,19 @@ static int run_builtin(int argc, char **argv, int out_fd) {
                 write(fd, argv[i], len);
         }
         write_all(fd, "\n");
+        return 1;
+    }
+    if (strcmp(argv[0], "cd") == 0) {
+        if (out_fd >= 0) {
+            sh_error("sh: cd does not write output", NULL);
+            return 1;
+        }
+        if (argc != 2) {
+            sh_error("sh: cd: usage: cd PATH", NULL);
+            return 1;
+        }
+        if (chdir(argv[1]) != 0)
+            sh_error("sh: cd failed: ", argv[1]);
         return 1;
     }
     return 0;

@@ -373,6 +373,88 @@ namespace vfs {
         return g_initialized;
     }
 
+    Status resolve_path(const char *__path, const char *__cwd, char *__out, size_t __out_len) noexcept {
+        if (__path == nullptr || __out == nullptr || __out_len < 2)
+            return Status::InvalidArgument;
+        if (__path[0] == 0)
+            return Status::InvalidArgument;
+
+        size_t in_len = 0;
+        while (in_len <= MAX_PATH_LEN && __path[in_len] != 0)
+            in_len++;
+        if (in_len == 0 || in_len > MAX_PATH_LEN)
+            return Status::InvalidArgument;
+
+        __out[0] = '/';
+        __out[1] = 0;
+        size_t out_len = 1;
+        const char *cursor = __path;
+
+        if (__path[0] == '/') {
+            while (*cursor == '/')
+                cursor++;
+        } else {
+            if (__cwd == nullptr || __cwd[0] != '/')
+                return Status::InvalidArgument;
+            size_t cwd_len = 0;
+            while (cwd_len <= MAX_PATH_LEN && __cwd[cwd_len] != 0)
+                cwd_len++;
+            if (cwd_len == 0 || cwd_len > MAX_PATH_LEN || cwd_len + 1 > __out_len)
+                return Status::InvalidArgument;
+            memcpy(__out, __cwd, cwd_len + 1);
+            out_len = cwd_len;
+        }
+
+        while (*cursor != 0) {
+            while (*cursor == '/')
+                cursor++;
+            if (*cursor == 0)
+                break;
+
+            const char *component = cursor;
+            size_t component_len = 0;
+            while (cursor[component_len] != 0 && cursor[component_len] != '/')
+                component_len++;
+            if (component_len > MAX_PATH_LEN)
+                return Status::InvalidArgument;
+
+            if (component_len == 1 && component[0] == '.') {
+                cursor += component_len;
+                continue;
+            }
+            if (component_len == 2 && component[0] == '.' && component[1] == '.') {
+                if (out_len > 1) {
+                    while (out_len > 1 && __out[out_len - 1] == '/')
+                        out_len--;
+                    while (out_len > 1 && __out[out_len - 1] != '/')
+                        out_len--;
+                    if (out_len > 1 && __out[out_len - 1] == '/')
+                        out_len--;
+                    __out[out_len] = 0;
+                    if (out_len == 0) {
+                        __out[0] = '/';
+                        __out[1] = 0;
+                        out_len = 1;
+                    }
+                }
+                cursor += component_len;
+                continue;
+            }
+
+            const size_t extra = (out_len == 1 ? 0 : 1) + component_len;
+            if (component_len == 0 || out_len + extra > MAX_PATH_LEN || out_len + extra + 1 > __out_len)
+                return Status::InvalidArgument;
+            if (out_len != 1)
+                __out[out_len++] = '/';
+            memcpy(__out + out_len, component, component_len);
+            out_len += component_len;
+            __out[out_len] = 0;
+            cursor += component_len;
+        }
+
+        return Status::Success;
+    }
+
     Status open_absolute(const char *__path, uint64_t __flags, File **__out_file) noexcept {
         // Read-only convenience overload. Writable callers pass identity/mode.
         return open_absolute(__path, __flags & ~(OPEN_WRONLY | OPEN_RDWR | OPEN_CREAT | OPEN_TRUNC), 0,
@@ -479,6 +561,15 @@ namespace vfs {
         file->writable = false;
         *__out_file = file;
         return Status::Success;
+    }
+
+    Status open(const char *__path, const char *__cwd, uint64_t __flags, uint32_t __mode, uint32_t __uid,
+        uint32_t __gid, File **__out_file) noexcept {
+        char resolved[MAX_PATH_LEN + 1];
+        const Status status = resolve_path(__path, __cwd, resolved, sizeof(resolved));
+        if (status != Status::Success)
+            return status;
+        return open_absolute(resolved, __flags, __mode, __uid, __gid, __out_file);
     }
 
     Status read(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
@@ -590,6 +681,15 @@ namespace vfs {
         return Status::Success;
     }
 
+    Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out) noexcept {
+        fill_metadata_defaults(__out);
+        char resolved[MAX_PATH_LEN + 1];
+        const Status status = resolve_path(__path, __cwd, resolved, sizeof(resolved));
+        if (status != Status::Success)
+            return status;
+        return stat_absolute(resolved, __out);
+    }
+
     Status stat(File *__file, bigos::Metadata *__out) noexcept {
         fill_metadata_defaults(__out);
         if (__out == nullptr)
@@ -631,6 +731,14 @@ namespace vfs {
         return bigfs_to_vfs(bigos::bigfs::mkdir(__path, __mode, __uid, __gid));
     }
 
+    Status mkdir(const char *__path, const char *__cwd, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept {
+        char resolved[MAX_PATH_LEN + 1];
+        const Status status = resolve_path(__path, __cwd, resolved, sizeof(resolved));
+        if (status != Status::Success)
+            return status;
+        return mkdir(resolved, __mode, __uid, __gid);
+    }
+
     Status unlink(const char *__path, uint32_t __uid, uint32_t __gid) noexcept {
         if (!g_initialized)
             return Status::NotInitialized;
@@ -639,6 +747,14 @@ namespace vfs {
         if (!bigos::bigfs::owns_path(__path))
             return Status::ReadOnlyFs;
         return bigfs_to_vfs(bigos::bigfs::unlink(__path, __uid, __gid));
+    }
+
+    Status unlink(const char *__path, const char *__cwd, uint32_t __uid, uint32_t __gid) noexcept {
+        char resolved[MAX_PATH_LEN + 1];
+        const Status status = resolve_path(__path, __cwd, resolved, sizeof(resolved));
+        if (status != Status::Success)
+            return status;
+        return unlink(resolved, __uid, __gid);
     }
 
     void retain(File *__file) noexcept {

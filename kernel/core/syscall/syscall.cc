@@ -8,6 +8,7 @@
 #include <bigos/timer.h>
 #include <bigos/tty.h>
 #include <irq/interrupt.h>
+#include <string.h>
 #ifdef BIGOS_USER_PROCESS
 #include <bigos/cred.h>
 #include <bigos/ipc/pipe.h>
@@ -147,7 +148,7 @@ namespace sys {
 
             bigos::vfs::File *file = nullptr;
             const bigos::vfs::Status open_status =
-                bigos::vfs::open_absolute(path, __flags, (uint32_t)__mode, uid, gid, &file);
+                bigos::vfs::open(path, bigos::proc::current_cwd(), __flags, (uint32_t)__mode, uid, gid, &file);
             if (open_status != bigos::vfs::Status::Success)
                 return vfs_status_to_syscall(open_status);
 
@@ -269,7 +270,7 @@ namespace sys {
             bigos::proc::Process *process = bigos::proc::current_process();
             const uint32_t uid = process != nullptr ? process->uid : 0;
             const uint32_t gid = process != nullptr ? process->gid : 0;
-            return vfs_status_to_syscall(bigos::vfs::mkdir(path, (uint32_t)__mode, uid, gid));
+            return vfs_status_to_syscall(bigos::vfs::mkdir(path, bigos::proc::current_cwd(), (uint32_t)__mode, uid, gid));
         }
 
         static int64_t sys_unlink(uint64_t __path) noexcept {
@@ -286,7 +287,7 @@ namespace sys {
             bigos::proc::Process *process = bigos::proc::current_process();
             const uint32_t uid = process != nullptr ? process->uid : 0;
             const uint32_t gid = process != nullptr ? process->gid : 0;
-            return vfs_status_to_syscall(bigos::vfs::unlink(path, uid, gid));
+            return vfs_status_to_syscall(bigos::vfs::unlink(path, bigos::proc::current_cwd(), uid, gid));
         }
 
         static int64_t sys_readdir(uint64_t __fd, uint64_t __entries, uint64_t __max_entries) noexcept {
@@ -327,7 +328,7 @@ namespace sys {
             }
 
             bigos::Metadata metadata = {};
-            const bigos::vfs::Status status = bigos::vfs::stat_absolute(path, &metadata);
+            const bigos::vfs::Status status = bigos::vfs::stat_path(path, bigos::proc::current_cwd(), &metadata);
             if (status != bigos::vfs::Status::Success)
                 return vfs_status_to_syscall(status);
             if (!bigos::proc::copy_to_current_user_buffer(__out, &metadata, sizeof(metadata)))
@@ -345,6 +346,32 @@ namespace sys {
             if (status != bigos::vfs::Status::Success)
                 return vfs_status_to_syscall(status);
             if (!bigos::proc::copy_to_current_user_buffer(__out, &metadata, sizeof(metadata)))
+                return -bigos::EFAULT;
+            return 0;
+        }
+
+        static int64_t sys_chdir(uint64_t __path) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+            return bigos::proc::chdir_current(path);
+        }
+
+        static int64_t sys_getcwd(uint64_t __buffer, uint64_t __len) noexcept {
+            if (__len == 0)
+                return -bigos::EINVAL;
+            if (!bigos::proc::validate_user_io_buffer(__buffer, __len))
+                return -bigos::EFAULT;
+            char cwd[SYS_PATH_MAX_LEN + 1];
+            const int64_t status = bigos::proc::getcwd_current(cwd, sizeof(cwd));
+            if (status < 0)
+                return status;
+            const size_t len = strlen(cwd) + 1;
+            if (__len < len)
+                return -bigos::ERANGE;
+            if (!bigos::proc::copy_to_current_user_buffer(__buffer, cwd, len))
                 return -bigos::EFAULT;
             return 0;
         }
@@ -613,6 +640,12 @@ namespace sys {
                 break;
             case SYS_FSTAT:
                 result = __detail::sys_fstat(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_CHDIR:
+                result = __detail::sys_chdir(__frame->rdi);
+                break;
+            case SYS_GETCWD:
+                result = __detail::sys_getcwd(__frame->rdi, __frame->rsi);
                 break;
             case SYS_BRK:
                 result = __detail::sys_brk(__frame->rdi);

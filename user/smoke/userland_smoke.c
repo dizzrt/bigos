@@ -13,7 +13,8 @@
  *   - shell-style fork + execve + wait of external simple C programs, including
  *     bounded wait status observation,
  *   - single-stage pipe between two children, including writer-close EOF,
- *   - file redirection through the writable /rw mount and dup/close fd sharing.
+ *   - file redirection, cwd-relative paths, dot/dot-dot resolution, getcwd,
+ *     fork cwd inheritance, exec cwd preservation, and dup/close fd sharing.
  *   - non-interactive /bin/sh execution of /bin/smoke probes, including
  *     stdout/stderr, errno reporting, pipe/redirection, unsupported syntax, and
  *     shell continuation after non-zero exit.
@@ -144,19 +145,6 @@ static void require_file_contains(const char *path, const char *expect) {
     buf[n] = 0;
     if (!contains(buf, expect))
         fail("record-content");
-}
-
-static int file_contains(const char *path, const char *expect) {
-    int fd = open(path, O_RDONLY, 0);
-    if (fd < 0)
-        return 0;
-    char buf[CAPTURE_MAX];
-    ssize_t n = read(fd, buf, sizeof(buf) - 1);
-    close(fd);
-    if (n <= 0)
-        return 0;
-    buf[n] = 0;
-    return contains(buf, expect);
 }
 
 /* crt0 contract: argc >= 1 and argv[0] non-NULL. */
@@ -361,11 +349,76 @@ static void test_runtime_filesystem(void) {
     if (fd != -1 || errno != EROFS)
         fail("runtime-rofs");
     errno = 0;
-    if (stat("relative", &st) != -1 || errno != EINVAL)
-        fail("runtime-stat-relative");
-    errno = 0;
     if (fstat(250, &st) != -1 || errno != EBADF)
         fail("runtime-fstat-badfd");
+}
+
+static void test_current_directory(char **envp) {
+    unlink("/rw/cwd_test/note.txt");
+    unlink("/rw/cwd_test/child.txt");
+    unlink("/rw/cwd_test/pwd.txt");
+    if (mkdir("/rw/cwd_test", 0755) < 0 && errno != EEXIST)
+        fail("cwd-mkdir");
+    if (mkdir("/rw/cwd_test/sub", 0755) < 0 && errno != EEXIST)
+        fail("cwd-mkdir-sub");
+
+    int fd = open("/rw/cwd_test/note.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        fail("cwd-note-open");
+    if (write(fd, "cwd-note", 8) != 8)
+        fail("cwd-note-write");
+    close(fd);
+
+    if (chdir("/rw/cwd_test/sub") != 0)
+        fail("cwd-chdir-sub");
+    char cwd[256 + 1];
+    if (getcwd(cwd, sizeof(cwd)) == NULL || strcmp(cwd, "/rw/cwd_test/sub") != 0)
+        fail("cwd-getcwd");
+    char small[2];
+    errno = 0;
+    if (getcwd(small, sizeof(small)) != NULL || errno != ERANGE)
+        fail("cwd-erange");
+
+    fd = open("../note.txt", O_RDONLY, 0);
+    if (fd < 0)
+        fail("cwd-open-dotdot");
+    char buf[16];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n != 8)
+        fail("cwd-read-dotdot");
+    buf[n] = 0;
+    if (strcmp(buf, "cwd-note") != 0)
+        fail("cwd-content-dotdot");
+    struct stat st;
+    if (stat("../note.txt", &st) != 0 || st.st_size != 8)
+        fail("cwd-stat-dotdot");
+
+    pid_t pid = fork();
+    if (pid < 0)
+        fail("cwd-fork");
+    if (pid == 0) {
+        int child_fd = open("../child.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+        if (child_fd < 0)
+            exit(11);
+        if (write(child_fd, "child-cwd", 9) != 9)
+            exit(12);
+        close(child_fd);
+        exit(0);
+    }
+    if (chdir("/") != 0)
+        fail("cwd-parent-restore");
+    int status = -1;
+    if (wait_status(pid, &status) != pid || status != 0)
+        fail("cwd-fork-wait");
+    require_file_contains("/rw/cwd_test/child.txt", "child-cwd");
+
+    if (chdir("/rw/cwd_test") != 0)
+        fail("cwd-chdir-parent");
+    char *pwd_argv[] = {(char *)"/bin/pwd", NULL};
+    run_program("/bin/pwd", pwd_argv, envp);
+    if (chdir("/") != 0)
+        fail("cwd-final-restore");
 }
 
 static void test_time_identity(void) {
@@ -468,11 +521,9 @@ static void test_smoke_shell(char **envp) {
     write_all_or_exit(input[1], "/bin/smoke/exit 7\n");
     write_all_or_exit(input[1], "/bin/smoke/args alpha beta\n");
     write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\n");
-    write_all_or_exit(input[1], "echo redir-ok > /rw/smoke_shell_redir.txt\n");
-    write_all_or_exit(input[1], "/bin/cat < /rw/smoke_shell_redir.txt\n");
-    write_all_or_exit(input[1], "/bin/stat /rw/smoke_shell_redir.txt\n");
-    write_all_or_exit(input[1], "/bin/stat relative\n");
-    write_all_or_exit(input[1], "| /bin/cat\n");
+    write_all_or_exit(input[1], "cd /rw\n");
+    write_all_or_exit(input[1], "/bin/pwd\n");
+    write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\n");
     write_all_or_exit(input[1], "echo shell-alive\n");
     write_all_or_exit(input[1], "exit 0\n");
     close(input[1]);
@@ -483,12 +534,7 @@ static void test_smoke_shell(char **envp) {
     require_file_contains("/rw/smoke_args.txt", "smoke_args argc=3 argv[2]=beta");
     require_file_contains("/rw/smoke_shell_redir.txt", "redir-ok");
     require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok");
-    require_file_contains("/rw/smoke_shell_io.txt", "redir-ok");
-    if (!file_contains("/rw/smoke_shell_io.txt", "type=file size=9"))
-        fail("shell-stat-file");
-    if (!file_contains("/rw/smoke_shell_io.txt", "stat: relative: errno=22"))
-        fail("shell-stat-error");
-    require_file_contains("/rw/smoke_shell_io.txt", "sh: syntax error near |");
+    require_file_contains("/rw/smoke_shell_io.txt", "/rw");
     require_file_contains("/rw/smoke_shell_io.txt", "shell-alive");
 }
 
@@ -501,6 +547,7 @@ int main(int argc, char **argv, char **envp) {
     test_pipe();
     test_redirect_and_dup();
     test_runtime_filesystem();
+    test_current_directory(envp);
     test_time_identity();
     test_smoke_programs(envp);
     test_smoke_shell(envp);

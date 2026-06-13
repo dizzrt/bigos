@@ -30,6 +30,7 @@
 #define ESPIPE      29
 #define EROFS       30
 #define EPIPE       32
+#define ERANGE      34
 #define ENOSYS      38
 
 /* Global errno set by the syscall wrappers on a negative kernel return. */

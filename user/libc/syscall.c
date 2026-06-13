@@ -146,6 +146,19 @@ int fstat(int fd, struct stat *st) {
     return (int)errno_translate(syscall2(SYS_FSTAT, (long)fd, (long)st));
 }
 
+int chdir(const char *path) {
+    return (int)errno_translate(syscall1(SYS_CHDIR, (long)path));
+}
+
+char *getcwd(char *buf, size_t size) {
+    long ret = syscall2(SYS_GETCWD, (long)buf, (long)size);
+    if (ret < 0) {
+        errno = (int)(-ret);
+        return NULL;
+    }
+    return buf;
+}
+
 ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries) {
     return (ssize_t)errno_translate(syscall3(SYS_READDIR, (long)fd, (long)entries, (long)max_entries));
 }
