@@ -1,10 +1,4 @@
-## Purpose
-
-Define the required kernel ELF `PT_LOAD` segment layout so the static kernel
-image separates executable text, read-only data, and writable data permissions
-while preserving the existing x86_64 higher-half boot contract.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Kernel ELF LOAD segments have separated permissions
 

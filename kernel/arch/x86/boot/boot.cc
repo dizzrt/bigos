@@ -456,21 +456,22 @@ uint64_t load_kernel() {
         error("invalid kernel");
     }
 
-    uint64_t phdr_bytes = (uint64_t)eheader->e_phentsize * eheader->e_phnum;
-    if (phdr_bytes > PHDR_BUFFER_SIZE || eheader->e_phoff + phdr_bytes < eheader->e_phoff ||
-        eheader->e_phoff + phdr_bytes > k_sede.dataLength) {
+    uint16_t phnum = eheader->e_phnum;
+    uint64_t phoff = eheader->e_phoff;
+    uint64_t phdr_bytes = (uint64_t)eheader->e_phentsize * phnum;
+    if (phdr_bytes > PHDR_BUFFER_SIZE || phoff + phdr_bytes < phoff || phoff + phdr_bytes > k_sede.dataLength) {
         error("invalid kernel phdr");
     }
 
     uint64_t entry_point = eheader->e_entry;
-    read_file_bytes(ehdr_lba48, eheader->e_phoff, phdr_bytes, phdr_buffer);
+    read_file_bytes(ehdr_lba48, phoff, phdr_bytes, phdr_buffer);
     Elf64_Phdr *pheaders = (Elf64_Phdr *)phdr_buffer;
 
     uint64_t kernel_memory_size = 0;
     uint64_t kernel_file_size = 0;
     bool entry_in_load_segment = false;
     bool has_load_segment = false;
-    for (uint16_t i = 0; i < eheader->e_phnum; i++) {
+    for (uint16_t i = 0; i < phnum; i++) {
         Elf64_Phdr *pheader = &pheaders[i];
         if (pheader->p_type != PT_LOAD) {
             continue;
@@ -499,7 +500,7 @@ uint64_t load_kernel() {
 
     setup_paging(kernel_memory_size);
 
-    for (uint16_t i = 0; i < eheader->e_phnum; i++) {
+    for (uint16_t i = 0; i < phnum; i++) {
         Elf64_Phdr *pheader = &pheaders[i];
         if (pheader->p_type != PT_LOAD) {
             continue;
