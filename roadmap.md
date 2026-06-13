@@ -52,9 +52,9 @@ BigOS 当前提供一个经过 smoke 验证、单核、以同步为主、具备�
   page/buffer cache、pipe、fd duplication、相对路径解析和有界文件/目录元数据查询。
 - A minimal freestanding userland with resident init behavior, an interactive
   text-console shell, basic libc-style support, current-directory wrappers, and
-  small packaged user programs.
+  small packaged path/user programs.
 - 最小 freestanding 用户态，包括常驻 init 行为、交互式文本控制台 shell、基础 libc
-  风格支持、current-directory wrapper 和小型用户程序。
+  风格支持、current-directory wrapper 和小型路径/用户程序。
 
 ## Current Boundary / 当前边界
 
@@ -165,12 +165,12 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 28 are complete and now form a compressed minimal usable system
+Stages 20 through 29 are complete and now form a compressed minimal usable system
 baseline. Keep the detailed implementation and validation history in dedicated
 architecture docs and OpenSpec records; this roadmap tracks only project-level
 capabilities and boundaries.
 
-阶段 20 到阶段 28 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
+阶段 20 到阶段 29 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
 专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
@@ -220,6 +220,16 @@ capabilities and boundaries.
 - Cwd 与相对路径处理：简单程序和有界 shell 可在受支持的路径操作中使用每进程 current
   directory、相对路径解析，以及 POSIX-style `.` 和 `..` 组件。保持边界：不引入 mount
   namespace、`chroot`、符号链接或完整路径规范化语义。
+- Bounded userland path tools: small packaged tools make directory listing, file
+  content viewing, metadata observation, writable runtime path creation/removal,
+  and shell composition observable from the bounded userland. Preserved
+  boundaries: no complete POSIX utility suite, recursive traversal, globbing,
+  scripting environment, locale-aware formatting, dynamic linking, hosted libc,
+  or complete POSIX shell behavior.
+- 有界用户态路径工具：小型打包工具让目录列举、文件内容查看、元数据观察、可写运行时路径
+  创建/删除和 shell 组合行为可从有界用户态观察。保持边界：不引入完整 POSIX 工具集、
+  递归遍历、globbing、脚本环境、locale-aware 格式化、动态链接、hosted libc 或完整
+  POSIX shell 行为。
 - x86_64/core decoupling discipline: architecture abstraction is an active
   maintenance discipline at real consumption points. Preserved boundaries: the
   runnable backend remains x86_64 with the existing legacy boot/storage path.
@@ -262,16 +272,19 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 29: Userland Path Tools / 用户态路径工具
 
-- Continue making path and metadata contracts naturally consumable from the
-  interactive shell and small static user programs beyond the current cwd, `cd`,
-  and `pwd` baseline.
-- 在当前 cwd、`cd` 和 `pwd` 基线之外，继续让路径与元数据契约能被交互式 shell 和小型静态
-  用户程序自然消费。
-- Focus on additional small, bounded user-visible utilities and shell builtins;
-  do not turn this stage into a complete POSIX utility suite, shell language,
-  globbing, or scripting environment.
-- 聚焦额外的小型、有界、用户可见的工具与 shell builtin；不要把本阶段扩展成完整 POSIX
-  工具集、shell 语言、glob 或脚本环境。
+- Status: complete; this capability is now part of the completed baseline rather
+  than future mainline scope.
+- 状态：已完成；该能力现在属于已完成基线，不再属于后续主线范围。
+- The current baseline includes small packaged path tools for bounded directory
+  listing, file content viewing, metadata observation, writable runtime path
+  changes, and shell composition.
+- 当前基线包括用于有界目录列举、文件内容查看、元数据观察、可写运行时路径变更和 shell 组合的
+  小型打包路径工具。
+- Preserved boundaries: no complete POSIX utility suite, recursive traversal,
+  globbing, scripting environment, locale-aware formatting, dynamic linking,
+  hosted libc, or complete POSIX shell behavior.
+- 保持边界：不引入完整 POSIX 工具集、递归遍历、globbing、脚本环境、locale-aware 格式化、
+  动态链接、hosted libc 或完整 POSIX shell 行为。
 
 ### Stage 30: Constrained Rename / 受限 Rename
 

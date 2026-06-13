@@ -44,6 +44,15 @@ namespace fs {
         bool no_fat_chain;
     };
 
+    constexpr uint32_t EXFAT_DIRENT_NAME_MAX = 27;
+    constexpr uint32_t EXFAT_DIRENT_TYPE_FILE = 1;
+    constexpr uint32_t EXFAT_DIRENT_TYPE_DIRECTORY = 2;
+
+    struct DirectoryEntry {
+        uint32_t type;
+        char name[EXFAT_DIRENT_NAME_MAX + 1];
+    };
+
     struct ReadResult {
         FsStatus status;
         size_t bytes_read;
@@ -56,6 +65,8 @@ namespace fs {
     ReadResult read_file(
         ExfatMount *__mount, const FileMetadata *__file, uint64_t __offset, void *__dst, size_t __len,
         size_t __dst_len) noexcept;
+    FsStatus readdir(ExfatMount *__mount, const FileMetadata *__directory, uint64_t __offset, DirectoryEntry *__entries,
+        size_t __max_entries, size_t *__entries_read, uint64_t *__next_offset) noexcept;
 }   // namespace fs
 NAMESPACE_BIGOS_END
 

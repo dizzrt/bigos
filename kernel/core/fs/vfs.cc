@@ -133,7 +133,40 @@ namespace {
 
     constexpr size_t VFS_DIRENT_BATCH_MAX = 16;
 
-    const bigos::vfs::FileOperations EXFAT_FILE_OPS = {&exfat_read, &exfat_close, nullptr, nullptr, nullptr};
+    bigos::vfs::Status exfat_readdir(bigos::vfs::File *__file, bigos::vfs::DirectoryEntry *__entries,
+        size_t __max_entries, size_t *__entries_read) noexcept {
+        if (__entries_read != nullptr)
+            *__entries_read = 0;
+        if (__file == nullptr || __file->private_data == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        if (__entries == nullptr || __max_entries == 0)
+            return bigos::vfs::Status::InvalidArgument;
+        if (__file->vnode == nullptr || !__file->vnode->is_directory)
+            return bigos::vfs::Status::NotDirectory;
+        if (__max_entries > VFS_DIRENT_BATCH_MAX)
+            return bigos::vfs::Status::InvalidArgument;
+
+        ExfatFileState *state = (ExfatFileState *)__file->private_data;
+        bigos::fs::DirectoryEntry local_entries[VFS_DIRENT_BATCH_MAX];
+        size_t count = 0;
+        uint64_t next_offset = __file->offset;
+        const bigos::fs::FsStatus status =
+            bigos::fs::readdir(&g_mount, &state->metadata, __file->offset, local_entries, __max_entries, &count, &next_offset);
+        if (status != bigos::fs::FsStatus::Success)
+            return fs_to_vfs(status);
+        for (size_t i = 0; i < count; i++) {
+            __entries[i].type = local_entries[i].type == bigos::fs::EXFAT_DIRENT_TYPE_DIRECTORY ?
+                                    bigos::vfs::DIRENT_TYPE_DIRECTORY :
+                                    bigos::vfs::DIRENT_TYPE_FILE;
+            memcpy(__entries[i].name, local_entries[i].name, sizeof(__entries[i].name));
+        }
+        __file->offset = next_offset;
+        if (__entries_read != nullptr)
+            *__entries_read = count;
+        return bigos::vfs::Status::Success;
+    }
+
+    const bigos::vfs::FileOperations EXFAT_FILE_OPS = {&exfat_read, &exfat_close, nullptr, nullptr, &exfat_readdir};
 
     void fill_metadata_defaults(bigos::Metadata *__out) noexcept {
         if (__out == nullptr)
@@ -529,8 +562,6 @@ namespace vfs {
         bigos::fs::FsStatus status = bigos::fs::lookup(&g_mount, __path, &metadata);
         if (status != bigos::fs::FsStatus::Success)
             return fs_to_vfs(status);
-        if (metadata.is_directory)
-            return Status::NotRegularFile;
 
         Vnode *vnode = (Vnode *)bigos::kmalloc(sizeof(Vnode));
         if (vnode == nullptr)

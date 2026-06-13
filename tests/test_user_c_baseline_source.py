@@ -14,12 +14,10 @@ def test_smoke_probe_programs_are_packaged_only_for_userland_smoke() -> None:
     for name in ('args', 'env', 'out', 'errno', 'exit', 'libc_subset'):
         assert f'"{name}"' in xmake
         assert f"'{name}'" in boot_debug
-    assert '"stat"' in xmake
-    assert 'user", "bin", "stat.c"' in xmake
-    assert '"pwd"' in xmake
-    assert 'user", "bin", "pwd.c"' in xmake
-    assert "'stat'" in boot_debug
-    assert "'pwd'" in boot_debug
+    for name in ('cat', 'ls', 'mkdir', 'rm', 'stat', 'pwd'):
+        assert f'"{name}"' in xmake
+        assert f'user", "bin", "{name}.c"' in xmake
+        assert f"'{name}'" in boot_debug
 
     assert 'path.join(projectdir, "user", "smoke", "bin"' in xmake
     assert 'if has_config("userland_smoke") then' in xmake
@@ -81,6 +79,35 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'pid_t wait_status(pid_t pid, int *status);' in wait
 
 
+def test_bounded_path_tool_sources_use_libc_contracts() -> None:
+    cat = read_source('user/bin/cat.c')
+    ls = read_source('user/bin/ls.c')
+    mkdir_tool = read_source('user/bin/mkdir.c')
+    rm = read_source('user/bin/rm.c')
+    stat_tool = read_source('user/bin/stat.c')
+
+    assert 'Not a complete POSIX cat' in cat
+    assert 'open(path, O_RDONLY, 0)' in cat
+    assert 'read(fd, buf, sizeof(buf))' in cat
+    assert 'return copy_fd(0, NULL);' in cat
+
+    assert 'Not a complete POSIX ls' in ls
+    assert 'stat(path, &st)' in ls
+    assert 'bigos_readdir(fd, entries, BIGOS_DIRENT_MAX_BATCH)' in ls
+    assert 'entry_type(entries[i].type)' in ls
+
+    assert 'Not a complete POSIX mkdir' in mkdir_tool
+    assert 'mkdir(argv[i], 0755)' in mkdir_tool
+    assert 'usage: mkdir PATH...' in mkdir_tool
+
+    assert 'Not recursive and not a complete POSIX rm' in rm
+    assert 'unlink(argv[i])' in rm
+    assert 'usage: rm PATH...' in rm
+
+    assert 'bounded metadata observer' in stat_tool
+    assert 'stable inode' not in stat_tool
+
+
 def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
     args = read_source('user/smoke/bin/args.c')
     env = read_source('user/smoke/bin/env.c')
@@ -111,6 +138,7 @@ def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
 def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     smoke = read_source('user/smoke/userland_smoke.c')
     boot_debug = read_source('tools/boot_debug.py')
+    proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'run_program("/bin/smoke/args"' in smoke
     assert 'run_program("/bin/smoke/env"' in smoke
@@ -129,8 +157,29 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'write_all_or_exit(input[1], "cd /rw\\n");' in smoke
     assert 'write_all_or_exit(input[1], "/bin/pwd\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt > smoke_shell_cat_redir.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/stat smoke_shell_path_file.txt > smoke_shell_stat.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "ls . > smoke_shell_ls_rw.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "cat smoke_shell_path_file.txt | /bin/cat\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/cat /rw/no_such_path_tool\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/rm /boot/user/init.elf\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/rm smoke_shell_cat_redir.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/stat smoke_shell_cat_redir.txt\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo shell-alive\\n");' in smoke
     assert 'unlink("/rw/smoke_args.txt")' in smoke
     assert 'require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok")' in smoke
     assert 'require_file_contains("/rw/smoke_shell_redir.txt", "redir-ok")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_io.txt", "cat: /rw/no_such_path_tool: open errno=2")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_io.txt", "rm: /boot/user/init.elf: errno=30")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_cat_redir.txt: errno=2")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_path_file.txt type=file")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir smoke_shell_path_dir")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "file smoke_shell_path_file.txt")' in smoke
+    wait_index = proc.index('int64_t wait_current')
+    mark_index = proc.index('mark_reap_pending(match);', wait_index)
+    reap_index = proc.index('reap_pending_processes();', mark_index)
+    return_index = proc.index('return (int64_t)waited_pid;', reap_index)
+    assert mark_index < reap_index < return_index
     assert 'bounded /bin/smoke C programs' in boot_debug

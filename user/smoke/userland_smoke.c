@@ -18,6 +18,9 @@
  *   - non-interactive /bin/sh execution of /bin/smoke probes, including
  *     stdout/stderr, errno reporting, pipe/redirection, unsupported syntax, and
  *     shell continuation after non-zero exit.
+ *   - shell-launched bounded path tools, including PATH lookup, explicit paths,
+ *     cwd-relative path handling, directory listing, metadata, mkdir, rm,
+ *     redirection, a single pipe, and deterministic failure recovery.
  *   - the bounded libc subset probe for fine-grained headers, fprintf(stderr),
  *     string/memory semantics, read-only environment, and allocator failure.
  *   - bounded signal termination plus time and identity wrappers.
@@ -489,7 +492,16 @@ static void test_smoke_shell(char **envp) {
         fail("shell-pipe-fds");
     unlink("/rw/smoke_shell_io.txt");
     unlink("/rw/smoke_shell_redir.txt");
+    unlink("/rw/smoke_shell_path_file.txt");
+    unlink("/rw/smoke_shell_cat_redir.txt");
+    unlink("/rw/smoke_shell_stat.txt");
+    unlink("/rw/smoke_shell_ls_rw.txt");
     unlink("/rw/smoke_args.txt");
+    int path_file = open("/rw/smoke_shell_path_file.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (path_file < 0)
+        fail("shell-path-file-open");
+    write_all_or_exit(path_file, "shell-path-content\n");
+    close(path_file);
     int transcript = open("/rw/smoke_shell_io.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (transcript < 0)
         fail("shell-transcript-open");
@@ -524,17 +536,35 @@ static void test_smoke_shell(char **envp) {
     write_all_or_exit(input[1], "cd /rw\n");
     write_all_or_exit(input[1], "/bin/pwd\n");
     write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\n");
+    write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt\n");
+    write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt > smoke_shell_cat_redir.txt\n");
+    write_all_or_exit(input[1], "/bin/stat smoke_shell_path_file.txt > smoke_shell_stat.txt\n");
+    write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\n");
+    write_all_or_exit(input[1], "ls . > smoke_shell_ls_rw.txt\n");
+    write_all_or_exit(input[1], "cat smoke_shell_path_file.txt | /bin/cat\n");
+    write_all_or_exit(input[1], "/bin/cat /rw/no_such_path_tool\n");
+    write_all_or_exit(input[1], "/bin/rm /boot/user/init.elf\n");
+    write_all_or_exit(input[1], "/bin/rm smoke_shell_cat_redir.txt\n");
+    write_all_or_exit(input[1], "/bin/stat smoke_shell_cat_redir.txt\n");
     write_all_or_exit(input[1], "echo shell-alive\n");
     write_all_or_exit(input[1], "exit 0\n");
     close(input[1]);
-
     if (wait(pid) != pid)
         fail("shell-wait");
+
     require_file_contains("/rw/smoke_exit.txt", "smoke_exit requested=7");
     require_file_contains("/rw/smoke_args.txt", "smoke_args argc=3 argv[2]=beta");
     require_file_contains("/rw/smoke_shell_redir.txt", "redir-ok");
     require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok");
     require_file_contains("/rw/smoke_shell_io.txt", "/rw");
+    require_file_contains("/rw/smoke_shell_io.txt", "shell-path-content");
+    require_file_contains("/rw/smoke_shell_io.txt", "cat: /rw/no_such_path_tool: open errno=2");
+    require_file_contains("/rw/smoke_shell_io.txt", "rm: /boot/user/init.elf: errno=30");
+    require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_cat_redir.txt: errno=2");
+    require_file_contains("/rw/smoke_shell_path_file.txt", "shell-path-content");
+    require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_path_file.txt type=file");
+    require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir smoke_shell_path_dir");
+    require_file_contains("/rw/smoke_shell_ls_rw.txt", "file smoke_shell_path_file.txt");
     require_file_contains("/rw/smoke_shell_io.txt", "shell-alive");
 }
 

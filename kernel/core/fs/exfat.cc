@@ -241,6 +241,52 @@ namespace {
         return bigos::fs::FsStatus::Success;
     }
 
+    bigos::fs::FsStatus parse_entry_set_for_listing(const uint8_t *__dir, size_t __dir_len, size_t __offset,
+        bigos::fs::DirectoryEntry *__out, size_t *__set_size) noexcept {
+        if (__out == nullptr || __set_size == nullptr)
+            return bigos::fs::FsStatus::InvalidArgument;
+        const uint8_t *file = __dir + __offset;
+        const uint32_t secondary_count = file[1];
+        if (secondary_count < 2)
+            return bigos::fs::FsStatus::MalformedFilesystem;
+        const size_t set_size = (size_t)(secondary_count + 1) * ENTRY_SIZE;
+        if (__offset + set_size > __dir_len)
+            return bigos::fs::FsStatus::MalformedFilesystem;
+        const uint8_t *stream = file + ENTRY_SIZE;
+        if (stream[0] != ENTRY_STREAM)
+            return bigos::fs::FsStatus::MalformedFilesystem;
+
+        const uint16_t attributes = le16(file + 4);
+        const bool is_directory = (attributes & ATTR_DIRECTORY) != 0;
+        const bool is_file = (attributes & ATTR_ARCHIVE) != 0;
+        if (!is_directory && !is_file)
+            return bigos::fs::FsStatus::Unsupported;
+
+        const uint32_t name_length = stream[3];
+        const uint32_t name_entry_count = secondary_count - 1;
+        if (name_length > name_entry_count * 15 || name_length > MAX_COMPONENT_LENGTH)
+            return bigos::fs::FsStatus::MalformedFilesystem;
+
+        __out->type = is_directory ? bigos::fs::EXFAT_DIRENT_TYPE_DIRECTORY : bigos::fs::EXFAT_DIRENT_TYPE_FILE;
+        uint32_t out_index = 0;
+        uint32_t name_index = 0;
+        for (uint32_t entry_index = 0; entry_index < name_entry_count; entry_index++) {
+            const uint8_t *name_entry = file + (2 + entry_index) * ENTRY_SIZE;
+            if (name_entry[0] != ENTRY_NAME)
+                return bigos::fs::FsStatus::MalformedFilesystem;
+            for (uint32_t char_index = 0; char_index < 15 && name_index < name_length; char_index++, name_index++) {
+                const uint16_t ch = le16(name_entry + 2 + char_index * 2);
+                if (out_index < bigos::fs::EXFAT_DIRENT_NAME_MAX)
+                    __out->name[out_index++] = (ch >= 0x20 && ch <= 0x7e) ? (char)ch : '?';
+            }
+        }
+        if (name_index != name_length)
+            return bigos::fs::FsStatus::MalformedFilesystem;
+        __out->name[out_index] = 0;
+        *__set_size = set_size;
+        return bigos::fs::FsStatus::Success;
+    }
+
     bigos::fs::FsStatus read_fat_entry(
         bigos::fs::ExfatMount *__mount, uint32_t __cluster, uint32_t *__next_cluster) noexcept {
         if (!cluster_valid(__mount, __cluster) || __next_cluster == nullptr)
@@ -580,6 +626,96 @@ namespace fs {
             bigos::free(visited);
         bigos::free(cluster_buffer);
         return {status, copied};
+    }
+
+    FsStatus readdir(ExfatMount *__mount, const FileMetadata *__directory, uint64_t __offset, DirectoryEntry *__entries,
+        size_t __max_entries, size_t *__entries_read, uint64_t *__next_offset) noexcept {
+        if (__entries_read != nullptr)
+            *__entries_read = 0;
+        if (__next_offset != nullptr)
+            *__next_offset = __offset;
+        if (__mount == nullptr || __directory == nullptr || __entries == nullptr || __entries_read == nullptr ||
+            __next_offset == nullptr || __max_entries == 0)
+            return FsStatus::InvalidArgument;
+        if (!__directory->is_directory || __directory->first_cluster < FIRST_DATA_CLUSTER)
+            return FsStatus::NotRegularFile;
+
+        uint8_t *cluster_buffer = (uint8_t *)bigos::kmalloc(__mount->bytes_per_cluster);
+        if (cluster_buffer == nullptr)
+            return FsStatus::OutOfMemory;
+        const size_t visited_bytes = (__mount->cluster_count + 7) / 8;
+        uint8_t *visited = nullptr;
+        if (!__directory->no_fat_chain) {
+            visited = (uint8_t *)bigos::kmalloc(visited_bytes);
+            if (visited == nullptr) {
+                bigos::free(cluster_buffer);
+                return FsStatus::OutOfMemory;
+            }
+            memset(visited, 0, visited_bytes);
+        }
+
+        FsStatus status = FsStatus::Success;
+        size_t emitted = 0;
+        uint32_t cluster = __directory->first_cluster;
+        const uint64_t total_len =
+            __directory->data_length == 0 ? __mount->bytes_per_cluster : __directory->data_length;
+        const uint64_t max_clusters = (total_len + __mount->bytes_per_cluster - 1) / __mount->bytes_per_cluster;
+        for (uint64_t step = 0; step < max_clusters && emitted < __max_entries; step++) {
+            if (mark_chain_visit(visited, cluster)) {
+                status = FsStatus::MalformedFilesystem;
+                break;
+            }
+            status = read_cluster(__mount, cluster, cluster_buffer);
+            if (status != FsStatus::Success)
+                break;
+
+            size_t scan_len = __mount->bytes_per_cluster;
+            const uint64_t cluster_base = step * (uint64_t)__mount->bytes_per_cluster;
+            if (cluster_base + scan_len > total_len)
+                scan_len = (size_t)(total_len - cluster_base);
+
+            for (size_t offset = 0; offset + ENTRY_SIZE <= scan_len && emitted < __max_entries;) {
+                const uint64_t absolute_offset = cluster_base + offset;
+                const uint8_t entry_type = cluster_buffer[offset];
+                if (entry_type == 0) {
+                    *__next_offset = total_len;
+                    status = FsStatus::Success;
+                    goto done;
+                }
+                if (absolute_offset < __offset || entry_type != ENTRY_FILE) {
+                    offset += ENTRY_SIZE;
+                    continue;
+                }
+
+                size_t set_size = 0;
+                status = parse_entry_set_for_listing(cluster_buffer, scan_len, offset, &__entries[emitted], &set_size);
+                if (status != FsStatus::Success)
+                    goto done;
+                emitted++;
+                offset += set_size;
+                *__next_offset = cluster_base + offset;
+            }
+
+            if (step + 1 == max_clusters)
+                break;
+            uint32_t next = 0;
+            status = next_cluster(__mount, __directory, cluster, &next);
+            if (status != FsStatus::Success)
+                break;
+            if (next == 0) {
+                status = FsStatus::MalformedFilesystem;
+                break;
+            }
+            cluster = next;
+        }
+
+    done:
+        if (visited != nullptr)
+            bigos::free(visited);
+        bigos::free(cluster_buffer);
+        if (status == FsStatus::Success)
+            *__entries_read = emitted;
+        return status;
     }
 }   // namespace fs
 NAMESPACE_BIGOS_END

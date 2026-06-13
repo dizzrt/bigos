@@ -2438,6 +2438,7 @@ namespace bigos::proc {
         const uint32_t waited_pid = match->pid;
         match->wait_status_consumed = true;
         mark_reap_pending(match);
+        reap_pending_processes();
         return (int64_t)waited_pid;
     }
 

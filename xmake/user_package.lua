@@ -68,6 +68,9 @@ on_build(function()
         { "sh", path.join(projectdir, "user", "sh", "sh.c") },
         { "echo", path.join(projectdir, "user", "bin", "echo.c") },
         { "cat", path.join(projectdir, "user", "bin", "cat.c") },
+        { "ls", path.join(projectdir, "user", "bin", "ls.c") },
+        { "mkdir", path.join(projectdir, "user", "bin", "mkdir.c") },
+        { "rm", path.join(projectdir, "user", "bin", "rm.c") },
         { "stat", path.join(projectdir, "user", "bin", "stat.c") },
         { "pwd", path.join(projectdir, "user", "bin", "pwd.c") },
     }

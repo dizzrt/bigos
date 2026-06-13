@@ -434,10 +434,16 @@ namespace sched {
             __detail::refresh_time_slice(next);
         }
 
+        // Terminated threads are never resumed. Do not leave saved_sp pointing
+        // into the exit stack, because the process reaper may free that stack
+        // after the parent observes the wait status.
+        uint64_t discarded_sp = 0;
+        prev->saved_sp = 0;
+
         __detail::g_current = next;
         __detail::leave_scheduler_critical();
         __detail::prepare_address_space_before_switch(next);
-        switch_context(&prev->saved_sp, next->saved_sp);
+        switch_context(&discarded_sp, next->saved_sp);
 
         // Unreachable: a terminated thread is never scheduled again.
         for (;;)

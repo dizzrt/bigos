@@ -135,6 +135,13 @@ def test_yield_is_round_robin_single_core() -> None:
     # No peer: keep running without corrupting the queue.
     assert 'if (next == nullptr)' in yield_body
 
+    exit_start = sched.index('void thread_exit()')
+    exit_end = sched.index('void start()')
+    exit_body = sched[exit_start:exit_end]
+    assert 'uint64_t discarded_sp = 0;' in exit_body
+    assert 'prev->saved_sp = 0;' in exit_body
+    assert 'switch_context(&discarded_sp, next->saved_sp)' in exit_body
+
 
 def test_context_switch_prepares_next_address_space_before_loading_stack() -> None:
     # sched_h = read_source('include/bigos/sched.h')

@@ -233,6 +233,8 @@ static int run_builtin(int argc, char **argv, int out_fd) {
     return 0;
 }
 
+static int move_fd_from_stdio(int fd);
+
 /* Parses and strips redirections (> file, < file) from argv, opening the files
  * and returning fds via in_fd/out_fd (or -1). Returns 0 on success, -1 on a
  * deterministic error (missing filename or open failure). */
@@ -251,6 +253,11 @@ static int apply_redirects(char **argv, int *argc, int *in_fd, int *out_fd) {
                 sh_error("sh: cannot open ", argv[r + 1]);
                 return -1;
             }
+            fd = move_fd_from_stdio(fd);
+            if (fd < 0) {
+                sh_error("sh: cannot move output fd", NULL);
+                return -1;
+            }
             *out_fd = fd;
             r++;
         } else if (strcmp(argv[r], "<") == 0) {
@@ -261,6 +268,11 @@ static int apply_redirects(char **argv, int *argc, int *in_fd, int *out_fd) {
             int fd = open(argv[r + 1], O_RDONLY, 0);
             if (fd < 0) {
                 sh_error("sh: cannot open ", argv[r + 1]);
+                return -1;
+            }
+            fd = move_fd_from_stdio(fd);
+            if (fd < 0) {
+                sh_error("sh: cannot move input fd", NULL);
                 return -1;
             }
             *in_fd = fd;
@@ -291,24 +303,24 @@ static int argv_count(char **argv) {
 }
 
 static int dup_non_stdio(int fd) {
-    int temps[2] = {-1, -1};
-    for (int i = 0; i < 3; i++) {
+    int temps[3] = {-1, -1, -1};
+    for (int i = 0; i < 4; i++) {
         int moved = dup(fd);
         if (moved < 0) {
             break;
         }
-        if (moved >= 2) {
-            for (int j = 0; j < 2; j++)
+        if (moved >= 3) {
+            for (int j = 0; j < 3; j++)
                 if (temps[j] >= 0)
                     close(temps[j]);
             return moved;
         }
-        if (i < 2)
+        if (i < 3)
             temps[i] = moved;
         else
             close(moved);
     }
-    for (int j = 0; j < 2; j++)
+    for (int j = 0; j < 3; j++)
         if (temps[j] >= 0)
             close(temps[j]);
     return -1;
@@ -334,6 +346,16 @@ static int move_pipe_fds_from_stdio(int fds[2]) {
         }
     }
     return 0;
+}
+
+static int move_fd_from_stdio(int fd) {
+    if (fd >= 3)
+        return fd;
+    int moved = dup_non_stdio(fd);
+    if (moved < 0)
+        return -1;
+    close(fd);
+    return moved;
 }
 
 static int is_echo_builtin(char **argv) {
