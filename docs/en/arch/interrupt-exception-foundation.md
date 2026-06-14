@@ -53,6 +53,7 @@ The foundation-stage `InterruptFrame.rsp` was the interrupted stack pointer comp
 
 - `0x00..0x1f`: CPU exceptions; no PIC EOI is sent.
 - `0x20..0x2f`: remapped i8259 external IRQs; an EOI is sent after the handler returns.
+- `0x80`: software-interrupt syscall entry; no PIC EOI is sent.
 - Other vectors: emit deterministic unknown-vector diagnostics and return.
 
 Unregistered external IRQs use a safe default handler that prints the vector/IRQ line and then sends EOI so the PIC is not wedged.

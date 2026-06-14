@@ -58,6 +58,11 @@ for a later cooperative scheduling point, but it does not allocate, free, block,
 call `mdelay()`, access filesystem services, print bulk output, or switch
 threads from IRQ return.
 
+The same scheduler-owned hook may record bounded timer-preemption intent when an
+ordinary thread's time slice expires. It does not own hardware acknowledgement or
+context switching; the external IRQ dispatch sends EOI, and the scheduler
+processes any pending switch only at the documented IRQ-return boundary.
+
 ## ISR ABI Runtime Invariants
 
 The ISR entry path (`kernel/core/irq/interrupt.s`) preserves the following ABI
@@ -76,9 +81,10 @@ invariants without changing the `InterruptFrame` layout or register-save order:
 
 ## Non-Goals
 
-This foundation does not introduce preemption, IRQ-return context switching,
-SMP tick accounting, APIC/IOAPIC, HPET, TSC calibration, user-visible time APIs,
-or POSIX sleep policy.
+This foundation does not introduce SMP tick accounting, APIC/IOAPIC, HPET, TSC
+calibration, user-visible time APIs, or POSIX sleep policy. Timer-driven
+preemption is limited to the current single-core scheduler boundary and does not
+claim SMP, real-time, or POSIX scheduling semantics.
 
 `mdelay()` is not scheduler sleep. It does not yield, does not block on a wait
 queue, and only has coarse timing semantics after PIT IRQ0 delivery is enabled.

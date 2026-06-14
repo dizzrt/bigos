@@ -15,8 +15,9 @@ x86_64 机制。本工作不新增可运行 UEFI backend、non-x86 backend、SMP
   和 `int 0x80` dispatch，但 IDT descriptor、vector table 安装、CR2 读取、保存寄存器
   frame layout 和 EOI 规则仍是 x86_64/i8259 实现细节。
 - Scheduler 和 process 代码可以保存 scheduler stack pointer、请求地址空间切换、
-  进入或恢复 user context，但 AMD64 callee-saved switch frame、`iretq` entry frame、
-  GDT selector 和 TSS `rsp0` 细节留在 x86_64 实现内。
+  进入或恢复 user context，并消费窄 `bigos::arch_context` 语义边界，但 AMD64
+  callee-saved switch frame、`iretq` entry frame、GDT selector 和 TSS `rsp0`
+  细节留在 x86_64 实现内。
 - Memory management 可以暴露按页数分配 kernel page、user-root 操作和地址空间激活，
   但 4-level PML4 布局、recursive self-mapping、direct-map 常量、PTE bit position、
   `invlpg` 和 CR3 指令属于 x86_64 paging 细节。
@@ -33,7 +34,9 @@ x86_64 机制。本工作不新增可运行 UEFI backend、non-x86 backend、SMP
 - `kernel/core/irq` 拥有当前 IDT setup、ISR stub、x86 exception state、IRQ dispatch、
   syscall vector dispatch 和 i8259 EOI 分流。
 - `kernel/core/sched` 拥有单核 scheduler 策略，而 assembly context-switch frame
-  仍是 AMD64 ABI 细节。
+  仍是 AMD64 ABI 细节。scheduler policy 通过 `include/bigos/arch_context.h`
+  边界消费 IRQ-return context eligibility 和 kernel context switch，而不是
+  open-code raw frame offset 或 assembly symbol。
 - `kernel/mm` 拥有当前 x86_64 page-table 操作和 CR3 activation，因为尚不存在
   alternate paging backend。
 - `kernel/core/proc` 和 `include/bigos/user_mode.h` 消费 user-mode entry、TSS `rsp0`、
@@ -53,6 +56,9 @@ x86_64 机制。本工作不新增可运行 UEFI backend、non-x86 backend、SMP
   i8259 EOI 的规则。
 - fork、signal、syscall、IRQ-return preemption 和 context switching 消费的
   interrupt frame 与 scheduler context-switch frame layout。
+- `include/bigos/arch_context.h` 边界只是当前 x86_64 backend 的 core-facing
+  contract；它不承诺完整 HAL、SMP、UEFI runtime parity、non-x86 runtime
+  parity、APIC/IOAPIC 支持或 HPET 支持。
 - x86_64 page-table layout、recursive self-mapping window、direct map window、
   CR3 root 语义和 TLB invalidation 行为。
 - 默认可运行 backend 使用的 raw disk image layout、Legacy BIOS/MBR/exFAT boot

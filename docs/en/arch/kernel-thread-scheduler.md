@@ -5,7 +5,10 @@ BigOS stage 11 keeps the minimal kernel-thread model single-core, but extends th
 ## Scope
 
 - Define a kernel thread control block (TCB): thread ID, lifecycle state, saved stack pointer, kernel stack range, entry function and argument, intrusive run queue node, intrusive wait/sleep nodes, and terminated-list node.
-- Provide an x86_64 cooperative context switch (`switch_context`) that saves/restores System V callee-saved registers (`rbp`, `rbx`, `r12`-`r15`) and stack pointer.
+- Provide a scheduler-facing kernel context-switch boundary through
+  `bigos::arch_context::switch_kernel_context()`. The current implementation
+  enters the x86_64 `switch_context` assembly primitive, which saves/restores
+  System V callee-saved registers (`rbp`, `rbx`, `r12`-`r15`) and stack pointer.
 - Provide single-core round-robin `yield()`, `sched::start()` entry, and scheduler-owned idle thread.
 - Replace the bare `hlt` loop at the end of `kernel()` with the idle thread.
 - Let timer IRQ0 account ordinary thread time slices, record reschedule intent, and wake expired sleepers through bounded, IRQ-context-safe `sched::on_timer_tick()`.
@@ -53,7 +56,17 @@ Stage 4 ordinary kernel threads use a fixed 1-page kernel stack by default, and 
 
 ## Context Switch
 
-`switch_context(uint64_t *old_sp, uint64_t new_sp)` (`kernel/core/sched/switch.s`) saves the current thread's callee-saved registers and stack pointer into `*old_sp`, loads the target stack, and `ret`s into its saved return point. Cooperative `yield()`/`thread_exit()` still use it directly. IRQ-return preemption uses a scheduler-owned bridge after EOI; the bridge saves the interrupted thread's current kernel stack continuation and later resumes it so the original `InterruptFrame` is restored by `isr_common` before `iretq`.
+`bigos::arch_context::switch_kernel_context()` is the scheduler-facing context
+primitive. It treats saved stack pointer values as opaque scheduler-owned kernel
+context tokens and enters `switch_context(uint64_t *old_sp, uint64_t new_sp)`
+(`kernel/core/sched/switch.s`) in the current x86_64 backend. The assembly saves
+the current thread's callee-saved registers and stack pointer into `*old_sp`,
+loads the target stack, and `ret`s into its saved return point. Cooperative
+`yield()`/`thread_exit()` and IRQ-return preemption use this same boundary rather
+than open-coding assembly frame offsets. IRQ-return preemption uses a
+scheduler-owned bridge after EOI; the bridge saves the interrupted thread's
+current kernel stack continuation and later resumes it so the original
+`InterruptFrame` is restored by `isr_common` before `iretq`.
 
 `create_kernel_thread()` preconstructs a new thread stack. The first time it is scheduled, `switch_context` returns into scheduler-owned `thread_trampoline`; the trampoline enables interrupts and calls the thread entry. If the entry returns, control enters `thread_exit()`.
 
@@ -73,7 +86,13 @@ Callers execute `cli` before `switch_context`, and each resume point executes `s
 
 The timer IRQ0 handler continues to advance ticks through `bigos::timer::on_tick()`, then calls bounded IRQ-context-safe `bigos::sched::on_timer_tick()`. The scheduler hook decrements the current ordinary thread's time slice, records pending reschedule intent on expiry, and wakes expired sleepers through allocation-free intrusive state; it does not allocate, free, block, print bulk output, or switch directly from the timer handler.
 
-External IRQ dispatch keeps centralized EOI ownership. After a registered handler returns, `irq_dispatch` sends exactly one i8259 EOI, then calls `sched::maybe_preempt_on_irq_return()`. That bridge switches only when preemption is enabled, the interrupted frame is kernel-mode, the current thread is still ordinary/running, and a runnable peer exists. CPU exceptions and `int 0x80` syscalls never enter the bridge, send no i8259 EOI, and remain outside sleep/process-lifecycle recovery paths.
+External IRQ dispatch keeps centralized EOI ownership. After a registered
+handler returns, `irq_dispatch` sends exactly one i8259 EOI, then calls
+`sched::maybe_preempt_on_irq_return()`. That bridge switches only when
+preemption is enabled, `bigos::arch_context` reports a kernel IRQ-return
+context, the current thread is still ordinary/running, and a runnable peer
+exists. CPU exceptions and `int 0x80` syscalls never enter the bridge, send no
+i8259 EOI, and remain outside sleep/process-lifecycle recovery paths.
 
 ## Validation Smoke
 

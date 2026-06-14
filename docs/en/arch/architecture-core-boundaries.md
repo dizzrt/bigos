@@ -19,9 +19,10 @@ code should own the mechanism that implements it.
   table installation, CR2 reads, saved register frame layout, and EOI rules
   remain x86_64/i8259 implementation details.
 - Scheduler and process code may save a scheduler stack pointer, request address
-  space activation, and enter/resume user context, but AMD64 callee-saved switch
-  frames, `iretq` entry frames, GDT selectors, and TSS `rsp0` details stay in
-  the x86_64 implementation.
+  space activation, enter/resume user context, and consume the narrow
+  `bigos::arch_context` semantic boundary, but AMD64 callee-saved switch frames,
+  `iretq` entry frames, GDT selectors, and TSS `rsp0` details stay in the
+  x86_64 implementation.
 - Memory-management code may expose page-count kernel allocation, user-root
   operations, and address-space activation, but 4-level PML4 layout, recursive
   self-mapping, direct-map constants, PTE bit positions, `invlpg`, and CR3
@@ -40,7 +41,10 @@ runtime seams:
 - `kernel/core/irq` owns the current IDT setup, ISR stubs, x86 exception state,
   IRQ dispatch, syscall vector dispatch, and i8259 EOI split.
 - `kernel/core/sched` owns the single-core scheduler policy while the assembly
-  context-switch frame remains an AMD64 ABI detail.
+  context-switch frame remains an AMD64 ABI detail. Scheduler policy consumes
+  IRQ-return context eligibility and kernel context switching through the
+  `include/bigos/arch_context.h` boundary rather than open-coding raw frame
+  offsets or the assembly symbol.
 - `kernel/mm` owns current x86_64 page-table manipulation and CR3 activation
   because no alternate paging backend exists yet.
 - `kernel/core/proc` and `include/bigos/user_mode.h` consume user-mode entry,
@@ -63,6 +67,9 @@ separate change declares and validates the behavior change:
   that the syscall path does not send an i8259 EOI.
 - Interrupt frame and scheduler context-switch frame layouts consumed by fork,
   signal, syscall, IRQ-return preemption, and context switching.
+- The `include/bigos/arch_context.h` boundary is a current x86_64 backend
+  core-facing contract only. It does not promise a complete HAL, SMP, UEFI
+  runtime parity, non-x86 runtime parity, APIC/IOAPIC support, or HPET support.
 - x86_64 page-table layout, recursive self-mapping window, direct map window,
   CR3 root semantics, and TLB invalidation behavior.
 - Raw disk image layout, Legacy BIOS/MBR/exFAT boot packaging, and ATA PIO

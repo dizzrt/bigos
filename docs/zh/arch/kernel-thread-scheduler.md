@@ -5,7 +5,9 @@ BigOS 阶段 11 仍保持最小内核线程模型的单核边界，但把调度�
 ## 范围
 
 - 定义内核线程控制块（TCB）：线程 ID、生命周期状态、saved stack pointer、内核栈范围、入口函数与参数、intrusive run queue、wait/sleep 与 terminated list 节点。
-- 提供 x86_64 cooperative context switch（`switch_context`），保存/恢复 System V callee-saved 寄存器（rbp、rbx、r12-r15）与栈指针。
+- 通过 `bigos::arch_context::switch_kernel_context()` 提供 scheduler-facing
+  kernel context-switch boundary。当前实现进入 x86_64 `switch_context` assembly
+  primitive，保存/恢复 System V callee-saved 寄存器（rbp、rbx、r12-r15）与栈指针。
 - 提供单核 round-robin `yield()`、`sched::start()` 入口与 scheduler-owned idle 线程。
 - 用 idle 线程替代 `kernel()` 尾部裸 `hlt` loop。
 - timer IRQ0 通过 bounded、IRQ-context-safe 的 `sched::on_timer_tick()` 统计普通线程 time slice、记录 reschedule intent 并唤醒到期 sleeper。
@@ -47,7 +49,15 @@ run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表�
 
 ## Context Switch
 
-`switch_context(uint64_t *old_sp, uint64_t new_sp)`（`kernel/core/sched/switch.s`）保存当前线程的 callee-saved 寄存器与栈指针到 `*old_sp`，加载目标线程栈并 `ret` 进入其保存的返回点。cooperative `yield()` / `thread_exit()` 仍直接使用它。IRQ-return preemption 使用 scheduler-owned bridge，在 EOI 之后保存被中断线程的当前内核栈 continuation，稍后恢复它，让原始 `InterruptFrame` 继续由 `isr_common` 恢复并通过 `iretq` 返回。
+`bigos::arch_context::switch_kernel_context()` 是 scheduler-facing context
+primitive。它把 saved stack pointer 视为 scheduler-owned opaque kernel context
+token，并在当前 x86_64 backend 进入 `switch_context(uint64_t *old_sp,
+uint64_t new_sp)`（`kernel/core/sched/switch.s`）。assembly 会把当前线程的
+callee-saved 寄存器与栈指针保存到 `*old_sp`，加载目标线程栈并 `ret` 进入其保存的
+返回点。cooperative `yield()` / `thread_exit()` 与 IRQ-return preemption 都使用同一
+边界，而不是 open-code assembly frame offset。IRQ-return preemption 使用
+scheduler-owned bridge，在 EOI 之后保存被中断线程的当前内核栈 continuation，稍后
+恢复它，让原始 `InterruptFrame` 继续由 `isr_common` 恢复并通过 `iretq` 返回。
 
 新线程栈由 `create_kernel_thread()` 预构造：首次被调度时 `switch_context` 的 `ret` 进入 scheduler-owned `thread_trampoline`，trampoline 先开启中断，再调用线程入口函数；入口返回时进入 `thread_exit()`。
 
@@ -67,7 +77,11 @@ run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表�
 
 timer IRQ0 handler 继续通过 `bigos::timer::on_tick()` 推进 tick，然后调用 bounded、IRQ-context-safe 的 `bigos::sched::on_timer_tick()`。scheduler hook 会递减当前普通线程 time slice，在到期时记录 pending reschedule intent，并通过 allocation-free intrusive state 唤醒到期 sleeper；它不分配、不释放、不阻塞、不 bulk 输出，也不直接从 timer handler 切换线程。
 
-外部 IRQ dispatch 继续集中拥有 EOI。注册 handler 返回后，`irq_dispatch` 发送恰好一次 i8259 EOI，然后调用 `sched::maybe_preempt_on_irq_return()`。该 bridge 只在 preemption enabled、被中断 frame 属于 kernel-mode、当前线程仍是普通 running 线程、且存在 runnable peer 时切换。CPU exception 与 `int 0x80` syscall 从不进入该 bridge，不发送 i8259 EOI，也不接入 sleep/process-lifecycle recovery 路径。
+外部 IRQ dispatch 继续集中拥有 EOI。注册 handler 返回后，`irq_dispatch` 发送恰好一次
+i8259 EOI，然后调用 `sched::maybe_preempt_on_irq_return()`。该 bridge 只在 preemption
+enabled、`bigos::arch_context` 判断为 kernel IRQ-return context、当前线程仍是普通
+running 线程、且存在 runnable peer 时切换。CPU exception 与 `int 0x80` syscall 从不进入
+该 bridge，不发送 i8259 EOI，也不接入 sleep/process-lifecycle recovery 路径。
 
 ## 验证 Smoke
 

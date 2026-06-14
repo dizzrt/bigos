@@ -1,5 +1,6 @@
 #include <bigos/sched.h>
 
+#include <bigos/arch_context.h>
 #include <bigos/io.h>
 #include <bigos/memory.h>
 #ifdef BIGOS_USER_PROCESS
@@ -14,11 +15,6 @@
 
 NAMESPACE_BIGOS_BEG
 namespace sched {
-
-    // x86_64 cooperative context switch (kernel/core/sched/switch.s). Saves the
-    // System V callee-saved set plus rsp at *old_sp and loads new_sp. Must be
-    // called with maskable interrupts disabled.
-    extern "C" void switch_context(uint64_t *__old_sp, uint64_t __new_sp) noexcept;
 
     namespace __detail {
         // Stage 4 fixes the default normal kernel thread stack at one page. No
@@ -180,8 +176,7 @@ namespace sched {
         }
 
         bool can_preempt_from_irq_return(const irq::InterruptFrame *__frame) noexcept {
-            constexpr uint64_t RPL_MASK = 0x3;
-            return __frame != nullptr && (__frame->cs & RPL_MASK) == 0 && g_scheduler_started &&
+            return arch_context::is_kernel_irq_return_context(__frame) && g_scheduler_started &&
                    is_ordinary_running_thread(g_current) && g_reschedule_pending && g_preemption_disable_depth == 0 &&
                    g_scheduler_critical_depth == 0 && g_nonblocking_depth <= 1 && has_runnable_peer();
         }
@@ -298,7 +293,7 @@ namespace sched {
 
             g_current = next;
             prepare_address_space_before_switch(next);
-            switch_context(&__prev->saved_sp, next->saved_sp);
+            arch_context::switch_kernel_context(&__prev->saved_sp, next->saved_sp);
             restore_user_context_on_resume();
         }
 
@@ -400,7 +395,7 @@ namespace sched {
         __detail::g_current = next;
         __detail::leave_scheduler_critical();
         __detail::prepare_address_space_before_switch(next);
-        switch_context(&prev->saved_sp, next->saved_sp);
+        arch_context::switch_kernel_context(&prev->saved_sp, next->saved_sp);
 
         // Resumed: the thread that switched back to us left interrupts masked.
         __detail::restore_user_context_on_resume();
@@ -443,7 +438,7 @@ namespace sched {
         __detail::g_current = next;
         __detail::leave_scheduler_critical();
         __detail::prepare_address_space_before_switch(next);
-        switch_context(&discarded_sp, next->saved_sp);
+        arch_context::switch_kernel_context(&discarded_sp, next->saved_sp);
 
         // Unreachable: a terminated thread is never scheduled again.
         for (;;)
@@ -663,7 +658,7 @@ namespace sched {
         ++__detail::g_irq_return_preemptions;
         __detail::leave_scheduler_critical();
 
-        switch_context(&prev->saved_sp, next->saved_sp);
+        arch_context::switch_kernel_context(&prev->saved_sp, next->saved_sp);
         __detail::restore_user_context_on_resume();
     }
 

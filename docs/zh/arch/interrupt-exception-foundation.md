@@ -53,6 +53,7 @@ foundation 阶段的 `InterruptFrame.rsp` 是 ring-0 interrupt entry 可计算�
 
 - `0x00..0x1f`：CPU exception，不发送 PIC EOI。
 - `0x20..0x2f`：remapped i8259 external IRQ，handler 返回后发送 EOI。
+- `0x80`：software-interrupt syscall entry，不发送 PIC EOI。
 - 其他 vector：输出 deterministic unknown-vector 诊断并返回。
 
 未注册 external IRQ 会走安全默认 handler，输出 vector/IRQ line 后发送 EOI，避免 PIC 卡住。
