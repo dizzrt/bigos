@@ -101,7 +101,7 @@ namespace sys {
                 if (process != nullptr && process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
                     !bigos::arch::vm_user::is_active_address_space(process->kernel_address_space_root))
                     bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
-                bigos::terminal::console_write(bounded);
+                (void)bigos::terminal::default_terminal_write(bounded);
                 if (!bigos::arch::vm_user::is_active_address_space(active_root))
                     bigos::arch::vm_user::activate_address_space(active_root);
                 return (int64_t)__len;
@@ -176,6 +176,8 @@ namespace sys {
                 const int r = bigos::terminal::read_char_blocking(&ch, 0);
                 if (r < 0)
                     return -bigos::EIO;
+                if (r == 0)
+                    return 0;
                 if (!bigos::proc::copy_to_current_user_buffer(__buffer, &ch, 1))
                     return -bigos::EFAULT;
                 return 1;

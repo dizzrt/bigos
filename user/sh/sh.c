@@ -15,6 +15,9 @@
 #define SH_MAX_ARGC     32
 #define SH_PATH_MAX     256
 #define SH_DEFAULT_PATH "/bin"
+#define SH_READ_LINE_TOO_LONG  (-1)
+#define SH_READ_LINE_EOF       (-2)
+#define SH_READ_LINE_INTERRUPT (-3)
 
 static int fd_has_installed_file(int fd) {
     int dup_fd = dup(fd);
@@ -74,22 +77,36 @@ static int should_echo_input(char ch) {
     return ch == '\t' || (ch >= ' ' && ch < 0x7f);
 }
 
+static int is_unsupported_control(char ch) {
+    unsigned char byte = (unsigned char)ch;
+    return byte < ' ' && ch != '\t' && ch != '\n' && ch != '\b' && byte != 0x03 && byte != 0x04;
+}
+
 /* Reads one newline-terminated line from stdin into buf (bounded by cap-1).
- * Returns the length, 0 on EOF with no data, or -1 on an over-length line
- * (the remainder of the line is drained). */
+ * Returns the length, SH_READ_LINE_EOF on EOF with no data,
+ * SH_READ_LINE_INTERRUPT on the bounded interrupt-like terminal event, or
+ * SH_READ_LINE_TOO_LONG when the remainder of an over-length line is drained. */
 static int read_line(char *buf, int cap, int interactive) {
     int len = 0;
     for (;;) {
         char ch;
         ssize_t n = read(0, &ch, 1);
         if (n <= 0)
-            return len > 0 ? len : 0;
+            return len > 0 ? len : SH_READ_LINE_EOF;
         if (ch == '\n') {
             if (interactive)
                 write_all(1, "\n");
             buf[len] = 0;
             return len;
         }
+        if (ch == 0x03) {
+            buf[0] = 0;
+            if (interactive)
+                write_all(1, "^C\n");
+            return SH_READ_LINE_INTERRUPT;
+        }
+        if (ch == 0x04)
+            return len > 0 ? len : SH_READ_LINE_EOF;
         if (ch == '\b' || ch == 0x7f) {
             if (len > 0) {
                 len--;
@@ -98,11 +115,13 @@ static int read_line(char *buf, int cap, int interactive) {
             }
             continue;
         }
+        if (is_unsupported_control(ch))
+            continue;
         if (len >= cap - 1) {
             /* Drain the rest of the over-length line. */
             while (n > 0 && ch != '\n')
                 n = read(0, &ch, 1);
-            return -1;
+            return SH_READ_LINE_TOO_LONG;
         }
         buf[len++] = ch;
         if (interactive && should_echo_input(ch)) {
@@ -581,7 +600,16 @@ int main(int argc, char **argv, char **envp) {
         if (interactive)
             write_all(1, prompt);
         int len = read_line(line, sizeof(line), interactive);
-        if (len < 0) {
+        if (len == SH_READ_LINE_EOF) {
+            if (interactive)
+                write_all(1, "\n");
+            return last_status;
+        }
+        if (len == SH_READ_LINE_INTERRUPT) {
+            last_status = 130;
+            continue;
+        }
+        if (len == SH_READ_LINE_TOO_LONG) {
             sh_error("sh: line too long", NULL);
             last_status = 2;
             continue;

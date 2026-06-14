@@ -12,12 +12,13 @@ keyboard IRQ1
   -> input::handle_keyboard_scancode()
   -> PS/2 set-1 bounded decode
   -> terminal::enqueue_input()
-  -> non-interrupt consumer read_char()/drain()
+  -> fixed TerminalInputRecord ring
+  -> non-interrupt consumer read_input_record()/read_char()/drain()
   -> optional blocking consumer read_char_blocking()
   -> default user stdin when fd 0 has no installed file
 ```
 
-The keyboard ISR reads one scancode byte, updates fixed decoder state, and enqueues supported characters into the TTY input buffer. On a successful enqueue, the TTY layer may wake one blocked reader through the bounded scheduler wakeup helper. The ISR does not call `kprintf()`, `kput()`, VGA/serial output, dynamic allocation, blocking waits, `mdelay()`, filesystem, syscall, user-mode paths, or direct context switching.
+The keyboard ISR reads one scancode byte, updates fixed decoder state, and enqueues supported characters into the TTY input buffer as fixed-size terminal input records. On a successful enqueue, the TTY layer may wake one blocked reader through the bounded scheduler wakeup helper. The ISR does not call `kprintf()`, `kput()`, VGA/serial output, dynamic allocation, blocking waits, `mdelay()`, filesystem, syscall, user-mode paths, or direct context switching.
 
 ## Scancode Policy
 
@@ -32,7 +33,9 @@ Extended scancode prefixes `0xe0`/`0xe1` and unmapped scancodes are counted as u
 
 ## TTY Input Buffer
 
-The TTY input buffer is a static fixed-capacity ring buffer with capacity `TTY_INPUT_CAPACITY`. The IRQ producer writes through `terminal::enqueue_input()`; non-interrupt consumers read through `terminal::read_char()` or `terminal::drain()`.
+The TTY input buffer is a static fixed-capacity ring buffer with capacity `TTY_INPUT_CAPACITY`. The IRQ producer writes through `terminal::enqueue_input()` or `terminal::enqueue_input_record()`; non-interrupt consumers may read the raw bounded record through `terminal::read_input_record()` or use the byte-compatible `terminal::read_char()` and `terminal::drain()` helpers.
+
+Each `TerminalInputRecord` is either a character record or a control record. The bounded control subset is line end, backspace, delete-like, EOF-like, interrupt-like, and unsupported control. `\r` is normalized to line end for the byte-compatible consumer, EOF-like input becomes a deterministic empty-read result on default console stdin, interrupt-like input is delivered as the bounded `0x03` byte for the shell to cancel the current line, and unsupported controls are consumed as deterministic no-ops by the terminal consumer.
 
 Overflow is deterministic: when the ring buffer is full, new input is dropped and the drop counter increments; unread input is not overwritten. Empty-buffer reads return `false` or `0` and do not sleep, wait for the scheduler, or depend on processes or user mode.
 
@@ -40,7 +43,7 @@ Overflow is deterministic: when the ring buffer is full, new input is dropped an
 
 Stage 10 adds `terminal::read_char_blocking()` as an additive non-interrupt API. It first tries the existing non-blocking `read_char()` path. If the input buffer is empty, it waits on the TTY input wait queue through `sched::wait_queue_wait_until()`, using a predicate checked with IRQs disabled so a producer wakeup cannot be missed between the empty check and enqueue.
 
-The blocking API is valid only from ordinary running kernel-thread context where `sched::can_block()` succeeds. It returns `1` when it writes a character to the caller buffer, or a deterministic negative wait error such as timeout, invalid argument, or forbidden blocking context. Existing `read_char()` and `drain()` behavior remains non-blocking and does not depend on scheduler progress.
+The blocking API is valid only from ordinary running kernel-thread context where `sched::can_block()` succeeds. It returns `1` when it writes a character to the caller buffer, `0` for the bounded EOF-like terminal event, or a deterministic negative wait error such as timeout, invalid argument, or forbidden blocking context. Existing `read_char()` and `drain()` behavior remains non-blocking and does not depend on scheduler progress.
 
 The automated blocking smoke uses a synthetic producer that calls `terminal::enqueue_input()` and therefore exercises the same TTY wakeup path without requiring manual keyboard input. Manual keyboard validation remains optional and should record emulator input capability when used.
 
@@ -48,7 +51,7 @@ Interactive console usability connects the same blocking consumer to default use
 
 ## Console Output Boundary
 
-Ordinary runtime text output uses `terminal::console_put()` and `terminal::console_write()`. The current backend writes VGA text mode. Interactive console usability routes user writes to fd `1` or fd `2` through this visible console when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
+Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps the existing `terminal::console_put()` and `terminal::console_write()` VGA text-mode backend. Interactive console usability routes user writes to fd `1` or fd `2` through this visible console when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
 
 Basic control-character behavior:
 
@@ -85,8 +88,8 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 The default interactive shell path intentionally stays below POSIX terminal scope:
 
-- Keyboard IRQ1 only decodes and enqueues supported bytes, then performs the bounded TTY wakeup.
-- Printable input, newline feedback, and backspace feedback are produced by the non-interrupt shell consumer after `read(0, ...)` returns.
+- Keyboard IRQ1 only decodes and enqueues fixed-size input records, then performs the bounded TTY wakeup.
+- Printable input, newline feedback, backspace feedback, EOF-like exit, interrupt-like line cancellation, and unsupported-control no-op behavior are produced by the non-interrupt terminal or shell consumer after `read(0, ...)` returns.
 - `/bin/sh` shows its deterministic `$ ` prompt only when fd `0` and fd `1` are still bound to the default console fast paths; pipes or redirected files suppress the prompt.
 - stdout and stderr are visible on VGA text mode through fd `1` and fd `2` when those descriptors are not redirected.
 

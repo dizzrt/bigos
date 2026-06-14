@@ -168,13 +168,13 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 36 are complete and now form a compressed minimal usable system
+Stages 20 through 37 are complete and now form a compressed minimal usable system
 baseline plus a completed backend-expansion spike. Keep the detailed
 implementation and validation history in dedicated architecture docs and
 OpenSpec records; this roadmap tracks only project-level capabilities and
 boundaries.
 
-阶段 20 到阶段 36 已完成，并共同形成压缩后的最小可用系统基线及已完成的 backend
+阶段 20 到阶段 37 已完成，并共同形成压缩后的最小可用系统基线及已完成的 backend
 扩展试探。详细实现与验证历史应保留在专门架构文档和 OpenSpec 记录中；本 roadmap
 只跟踪项目级能力与边界。
 
@@ -389,6 +389,9 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 37: Terminal Preparation / 终端能力准备
 
+- Status: complete; this capability is now part of the completed baseline rather
+  than future mainline scope.
+- 状态：已完成；该能力现在属于已完成基线，不再属于后续主线范围。
 - Prepare a minimal terminal abstraction for future interactive work, including
   bounded input ownership and control-character semantics where they are needed
   by the shell and user programs.

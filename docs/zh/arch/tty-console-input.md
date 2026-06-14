@@ -12,12 +12,13 @@ keyboard IRQ1
   -> input::handle_keyboard_scancode()
   -> PS/2 set-1 bounded decode
   -> terminal::enqueue_input()
-  -> non-interrupt consumer read_char()/drain()
+  -> fixed TerminalInputRecord ring
+  -> non-interrupt consumer read_input_record()/read_char()/drain()
   -> optional blocking consumer read_char_blocking()
   -> fd 0 未安装文件时的默认用户态 stdin
 ```
 
-keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并在产生受支持字符时入队到 TTY 输入缓冲。成功入队后，TTY 层可以通过 bounded scheduler wakeup helper 唤醒一个 blocked reader。ISR 不调用 `kprintf()`、`kput()`、VGA/serial 输出、动态分配、阻塞等待、`mdelay()`、filesystem、syscall、用户态相关路径或直接 context switch。
+keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并在产生受支持字符时以固定大小 terminal input record 入队到 TTY 输入缓冲。成功入队后，TTY 层可以通过 bounded scheduler wakeup helper 唤醒一个 blocked reader。ISR 不调用 `kprintf()`、`kput()`、VGA/serial 输出、动态分配、阻塞等待、`mdelay()`、filesystem、syscall、用户态相关路径或直接 context switch。
 
 ## Scancode 策略
 
@@ -32,7 +33,9 @@ keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并�
 
 ## TTY 输入缓冲
 
-TTY 输入缓冲是静态固定容量 ring buffer，容量为 `TTY_INPUT_CAPACITY`。IRQ producer 使用 `terminal::enqueue_input()` 写入，非中断 consumer 使用 `terminal::read_char()` 或 `terminal::drain()` 读取。
+TTY 输入缓冲是静态固定容量 ring buffer，容量为 `TTY_INPUT_CAPACITY`。IRQ producer 使用 `terminal::enqueue_input()` 或 `terminal::enqueue_input_record()` 写入；非中断 consumer 可以通过 `terminal::read_input_record()` 读取原始有界 record，也可以继续使用 byte-compatible 的 `terminal::read_char()` 和 `terminal::drain()` helper。
+
+每个 `TerminalInputRecord` 要么是 character record，要么是 control record。有界 control 子集包括 line end、backspace、delete-like、EOF-like、interrupt-like 和 unsupported control。byte-compatible consumer 会把 `\r` 归一为 line end，EOF-like input 在默认 console stdin 上表现为确定性的 empty-read result，interrupt-like input 以有界 `0x03` byte 交给 shell 取消当前行，unsupported control 由 terminal consumer 作为确定性 no-op 消费。
 
 Overflow 策略是确定性的：当 ring buffer 满时丢弃新输入并递增 drop counter，不覆盖 unread input。空 buffer 读取返回 `false` 或 `0`，不 sleep、不等待 scheduler，也不依赖进程或用户态。
 
@@ -40,7 +43,7 @@ Overflow 策略是确定性的：当 ring buffer 满时丢弃新输入并递增 
 
 阶段 10 以 additive 方式增加 `terminal::read_char_blocking()` 非中断 API。它会先尝试既有 non-blocking `read_char()` 路径；如果输入缓冲为空，则通过 `sched::wait_queue_wait_until()` 挂入 TTY input wait queue，并在 IRQ disabled 状态下检查 predicate，避免 empty check 和入队之间漏掉 producer wakeup。
 
-blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-thread 上下文调用。成功写出字符时返回 `1`，否则返回 timeout、invalid argument 或 forbidden blocking context 等确定性负 wait error。既有 `read_char()` 与 `drain()` 仍保持非阻塞，不依赖 scheduler 进度。
+blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-thread 上下文调用。成功写出字符时返回 `1`，遇到有界 EOF-like terminal event 时返回 `0`，否则返回 timeout、invalid argument 或 forbidden blocking context 等确定性负 wait error。既有 `read_char()` 与 `drain()` 仍保持非阻塞，不依赖 scheduler 进度。
 
 自动化 blocking smoke 使用 synthetic producer 调用 `terminal::enqueue_input()`，因此不依赖手工键盘输入也能覆盖同一 TTY wakeup 路径。手工键盘验证仍是可选项，使用时需要记录 emulator input capability。
 
@@ -48,7 +51,7 @@ blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-threa
 
 ## Console 输出边界
 
-普通运行期文本输出使用 `terminal::console_put()` 和 `terminal::console_write()`，当前 backend 写 VGA text mode。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到这个可见 console；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
+普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装现有 `terminal::console_put()` 和 `terminal::console_write()` VGA text-mode backend。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到这个可见 console；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
 
 基础控制字符行为：
 
@@ -85,8 +88,8 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 默认交互 shell 路径刻意保持在 POSIX terminal 范围以下：
 
-- Keyboard IRQ1 只解码并入队受支持 byte，然后执行 bounded TTY wakeup。
-- Printable input、newline feedback 和 backspace feedback 由 `read(0, ...)` 返回后的非中断 shell consumer 产生。
+- Keyboard IRQ1 只解码并入队固定大小 input record，然后执行 bounded TTY wakeup。
+- Printable input、newline feedback、backspace feedback、EOF-like exit、interrupt-like line cancellation 和 unsupported-control no-op 行为由 `read(0, ...)` 返回后的非中断 terminal 或 shell consumer 产生。
 - `/bin/sh` 只在 fd `0` 与 fd `1` 仍绑定到默认 console fast path 时显示确定性的 `$ ` prompt；pipe 或重定向文件会抑制 prompt。
 - 当 fd `1` 与 fd `2` 未被重定向时，stdout 和 stderr 会通过 VGA text mode 可见。
 

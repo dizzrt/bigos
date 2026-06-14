@@ -30,4 +30,12 @@ namespace bigos::terminal {
             ++s;
         }
     }
+
+    bool default_terminal_write(const char *s) noexcept {
+        if (!g_console_ready || s == nullptr)
+            return false;
+
+        console_write(s);
+        return true;
+    }
 }   // namespace bigos::terminal

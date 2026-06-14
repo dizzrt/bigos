@@ -71,7 +71,8 @@ QEMU headless runs continue to use serial/log marker assertions and do not
 require graphical display, manual keyboard input, or emulator scancode
 injection. When graphical QEMU, Bochs, manual keyboard input, or input injection
 is available, validation notes should record the backend, display/input method,
-typed command, observed prompt/echo/output, and result. If those capabilities
+typed command, observed prompt/echo/output, EOF-like input, interrupt-like line
+cancellation, unsupported-control behavior, and result. If those capabilities
 are unavailable, mark the interactive portion skipped or blocked and record the
 source-level, build, and headless checks used as substitutes plus the remaining
 console-usability risk.

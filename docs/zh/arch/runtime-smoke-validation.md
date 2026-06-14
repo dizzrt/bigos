@@ -66,6 +66,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 serial/log marker 断言，不要求图形 display、手工键盘输入或 emulator scancode
 injection。若 graphical QEMU、Bochs、手工键盘输入或 input injection 可用，validation
 notes 应记录 backend、display/input method、输入命令、观察到的 prompt/echo/output
+、EOF-like input、interrupt-like line cancellation、unsupported-control behavior
 和结果。若这些能力不可用，需要将交互部分标记为 skipped 或 blocked，并记录替代的
 source-level、build、headless 检查以及剩余 console-usability 风险。
 
