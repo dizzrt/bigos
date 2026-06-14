@@ -90,6 +90,32 @@ separate change declares and validates the behavior change:
 - Minimal syscall ABI: syscall number and arguments in the existing x86_64
   registers, result returned in `rax`, and bounded user-buffer validation.
 
+## SMP Preparation Boundary
+
+The current SMP-ready boundary is a bootstrap-CPU contract, not real SMP
+execution. CPU-local accessors may describe current thread, current process,
+active address-space root, IRQ-visible nesting, preemption-disable depth, and
+pending reschedule state, but every default path resolves to CPU 0 and fails
+closed for unsupported non-bootstrap CPU targets.
+
+- Scheduler ownership remains single-core: ready queues, wait queues, sleep
+  lists, the idle thread, and reschedule intent belong to the bootstrap
+  scheduler domain. There is no cross-CPU run queue, migration, load balancing,
+  remote wakeup, or IPI nudging.
+- IRQ routing remains on the existing IDT/i8259/PIT/keyboard/syscall model.
+  Exception and external IRQ paths are non-blocking; `int 0x80` keeps the
+  existing syscall ABI and does not send an i8259 EOI.
+- TLB invalidation is expressed through a boundary that carries address-space
+  root, virtual page or range, target CPU mask, and completion requirement. The
+  single-core implementation accepts only the bootstrap CPU target and completes
+  with local `invlpg` or CR3 reload.
+- Shared scheduler state, IRQ-visible state, and page-table updates publish under
+  interrupt-disabled sections or the selected local boundary before becoming
+  visible to handlers, fault paths, or future remote CPUs.
+- LAPIC, IOAPIC, per-CPU timers, AP startup, SIPI trampolines, IPI delivery,
+  shootdown acknowledgements, CPU hotplug, NUMA, RCU, and true parallel
+  scheduling remain future dependencies.
+
 ## Review Checklist
 
 Use this checklist for changes touching `kernel/core`, `kernel/mm`, public

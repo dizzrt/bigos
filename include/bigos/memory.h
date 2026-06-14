@@ -59,6 +59,23 @@ namespace mm {
         constexpr PageAttr USER_CODE = PRESENT | USER;
     }   // namespace page_attr
 
+    enum class TlbInvalidationScope : uint8_t {
+        Page,
+        Range,
+        AddressSpace,
+    };
+
+    struct TlbInvalidationRequest {
+        TlbInvalidationScope scope;
+        uint64_t address_space_root;
+        uint64_t start_vaddr;
+        uint64_t length;
+        uint64_t target_cpu_mask;
+        bool require_completion;
+    };
+
+    constexpr uint64_t TLB_TARGET_BOOTSTRAP_CPU = 1ull;
+
     // Non-interrupt-context-only page-table primitives. They write the active
     // kernel address space through the recursive self-mapping and mask same-CPU
     // maskable IRQ interleaving while updating entries; callers MUST NOT invoke
@@ -71,8 +88,14 @@ namespace mm {
     // user mapping so the leaf remains reachable from ring3 in a later change.
     _attr_nodiscard_ bool map_page(uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept;
 
+    // Single-core-compatible TLB invalidation boundary. The current
+    // implementation accepts only the bootstrap CPU target mask and completes by
+    // local invlpg or CR3 reload; future SMP shootdown will extend this boundary
+    // with remote target sets, IPI delivery and acknowledgement ordering.
+    void invalidate_tlb(const TlbInvalidationRequest &__request) noexcept;
+
     // unmap_page() clears the PTE for __vaddr (if present) and invalidates the TLB
-    // entry via invlpg, matching the existing kernel unmap failure semantics.
+    // through the SMP-prepared local invalidation boundary.
     void unmap_page(uint64_t __vaddr) noexcept;
 
     // Derives a fresh user address-space page-table root from the current kernel

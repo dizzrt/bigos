@@ -168,14 +168,14 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 37 are complete and now form a compressed minimal usable system
-baseline plus a completed backend-expansion spike. Keep the detailed
+Stages 20 through 38 are complete and now form a compressed minimal usable system
+baseline plus completed backend-expansion and SMP-preparation foundations. Keep the detailed
 implementation and validation history in dedicated architecture docs and
 OpenSpec records; this roadmap tracks only project-level capabilities and
 boundaries.
 
-阶段 20 到阶段 37 已完成，并共同形成压缩后的最小可用系统基线及已完成的 backend
-扩展试探。详细实现与验证历史应保留在专门架构文档和 OpenSpec 记录中；本 roadmap
+阶段 20 到阶段 38 已完成，并共同形成压缩后的最小可用系统基线及已完成的 backend
+扩展试探和 SMP 准备基础。详细实现与验证历史应保留在专门架构文档和 OpenSpec 记录中；本 roadmap
 只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
@@ -402,14 +402,19 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 38: SMP Preparation / SMP 准备
 
-- Design and stage the locking model, per-CPU state, scheduler boundaries,
-  interrupt-routing assumptions, TLB shootdown requirements, and memory-ordering
-  rules needed before enabling real SMP execution.
-- 设计并分阶段引入真正启用 SMP 前所需的锁模型、per-CPU 状态、调度器边界、中断路由假设、
-  TLB shootdown 要求和内存序规则。
-- Keep real multi-core execution disabled until these assumptions are explicit and
-  validated on the single-core baseline.
-- 在这些假设明确并通过单核基线验证前，保持真正的多核执行关闭。
+- Status: complete; this capability is now part of the completed baseline rather
+  than future mainline scope.
+- 状态：已完成；该能力现在属于已完成基线，不再属于后续主线范围。
+- The current baseline includes explicit locking model, per-CPU state, scheduler
+  boundary, interrupt-routing assumption, TLB invalidation, and memory-ordering
+  contracts needed before enabling real SMP execution.
+- 当前基线包括真正启用 SMP 前所需的锁模型、per-CPU 状态、调度器边界、中断路由假设、
+  TLB invalidation 和内存序契约。
+- Preserved boundaries: real multi-core execution, AP startup, APIC-backed
+  default interrupt delivery, cross-CPU scheduling, and user-visible ABI changes
+  remain out of scope.
+- 保持边界：真正多核执行、AP 启动、APIC-backed 默认中断投递、跨 CPU 调度和用户可见
+  ABI 变化仍不在范围内。
 
 ### Stage 39 And Later / Stage 39 及之后
 

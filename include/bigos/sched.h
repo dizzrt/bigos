@@ -22,7 +22,9 @@ namespace sched {
 
     // Intrusive single-core wait queue. The opaque links point at scheduler-owned
     // TCBs; callers own only the queue head/tail storage and never allocate nodes
-    // on the sleep/wakeup fast path.
+    // on the sleep/wakeup fast path. SMP-preparation boundary: waiters and
+    // producers belong to the bootstrap scheduler domain only; cross-CPU wake,
+    // remote enqueue, and IPI nudging are intentionally unsupported.
     struct WaitQueue {
         void *head;
         void *tail;
@@ -102,7 +104,8 @@ namespace sched {
                               timer::tick_t __timeout_ticks = 0) noexcept;
 
     // Allocation-free wakeups. IRQ handlers may call these bounded helpers, but
-    // they only make waiters runnable for a later cooperative scheduling point.
+    // they only make waiters runnable on the bootstrap run queue for a later
+    // cooperative scheduling point. They do not perform remote CPU wakeups.
     uint32_t wake_one(WaitQueue *__queue) noexcept;
     uint32_t wake_all(WaitQueue *__queue) noexcept;
 
@@ -113,8 +116,9 @@ namespace sched {
     // IRQ-context-safe bounded scheduler tick hook.
     //
     // Called from the timer IRQ0 path after on_tick(). It performs bounded
-    // time-slice accounting, records reschedule intent, and wakes sleepers. It
-    // MUST NOT allocate, free, block, do bulk IO, or switch threads directly.
+    // time-slice accounting, records bootstrap-CPU reschedule intent, and wakes
+    // sleepers. It MUST NOT allocate, free, block, do bulk IO, switch threads
+    // directly, or assume a per-CPU timer/IPI exists.
     void on_timer_tick() noexcept;
 
     // External IRQ-return bridge. irq_dispatch calls this only after the

@@ -2,6 +2,7 @@
 #include <arch/x86/boot/boot_info.h>
 #include <bigos/io.h>   //TODO remove later
 #include <bigos/panic.h>
+#include <bigos/percpu.h>
 
 #include "vmem.h"
 #include "buddy.h"
@@ -55,8 +56,26 @@ static inline bool paging_present(uint64_t __descriptor) noexcept {
     return (__descriptor & 0x1ul) != 0;
 }
 
-static inline void flush_kernel_tlb_page(uint64_t __vaddr) noexcept {
+static inline void local_invlpg(uint64_t __vaddr) noexcept {
     asm volatile("invlpg (%0)" ::"r"(__vaddr) : "memory");
+}
+
+static inline void reload_local_cr3() noexcept {
+    uint64_t cr3;
+    asm volatile("movq %%cr3, %0" : "=r"(cr3));
+    asm volatile("movq %0, %%cr3" ::"r"(cr3) : "memory");
+}
+
+static inline void invalidate_active_tlb_page(uint64_t __root_phys, uint64_t __vaddr) noexcept {
+    bigos::mm::TlbInvalidationRequest request = {
+        bigos::mm::TlbInvalidationScope::Page,
+        __root_phys & PAGING_DESCRIPTOR_ADDR_MASK,
+        __vaddr,
+        PAGE_SIZE,
+        bigos::mm::TLB_TARGET_BOOTSTRAP_CPU,
+        true,
+    };
+    bigos::mm::invalidate_tlb(request);
 }
 
 struct PagingDescriptorChange {
@@ -595,7 +614,7 @@ static bool reclaim_active_empty_tables(uint64_t __root_phys, uint64_t __vaddr, 
 
     if (page_table_owned_by(pt_phys, __root_phys, __owner, PageTableLevel::Pt) && page_table_empty(pt_phys)) {
         pde = 0;
-        flush_kernel_tlb_page(__vaddr);
+        invalidate_active_tlb_page(__root_phys, __vaddr);
         if (!decrement_present_entry(pd_phys))
             return false;
         unregister_page_table(pt_phys);
@@ -606,7 +625,7 @@ static bool reclaim_active_empty_tables(uint64_t __root_phys, uint64_t __vaddr, 
 
     if (page_table_owned_by(pd_phys, __root_phys, __owner, PageTableLevel::Pd) && page_table_empty(pd_phys)) {
         pdpte = 0;
-        flush_kernel_tlb_page(__vaddr);
+        invalidate_active_tlb_page(__root_phys, __vaddr);
         if (!decrement_present_entry(pdpt_phys))
             return false;
         unregister_page_table(pd_phys);
@@ -617,7 +636,7 @@ static bool reclaim_active_empty_tables(uint64_t __root_phys, uint64_t __vaddr, 
 
     if (page_table_owned_by(pdpt_phys, __root_phys, __owner, PageTableLevel::Pdpt) && page_table_empty(pdpt_phys)) {
         pml4e = 0;
-        flush_kernel_tlb_page(__vaddr);
+        invalidate_active_tlb_page(__root_phys, __vaddr);
         unregister_page_table(pdpt_phys);
         bigos::mm::__detail::free_physical_order((void *)pdpt_phys);
     }
@@ -732,7 +751,7 @@ static void rollback_direct_map_range(uint64_t __phys_base, uint64_t __mapped_pa
         }
         if ((pde & PAGING_DESCRIPTOR_LARGE_PAGE) != 0) {
             pde = 0;
-            flush_kernel_tlb_page(vaddr);
+            invalidate_active_tlb_page(bigos::mm::read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK, vaddr);
             uint64_t pages_to_next_pd = 1u << (INDEX_PD_OFFSET - INDEX_PT_OFFSET);
             i += pages_to_next_pd - (i % pages_to_next_pd);
             continue;
@@ -741,7 +760,7 @@ static void rollback_direct_map_range(uint64_t __phys_base, uint64_t __mapped_pa
         uint64_t *pte = &self_mapping_pt(vaddr)[get_pt_index(vaddr)];
         if (paging_present(*pte)) {
             *pte = 0;
-            flush_kernel_tlb_page(vaddr);
+            invalidate_active_tlb_page(bigos::mm::read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK, vaddr);
         }
         i++;
     }
@@ -828,6 +847,32 @@ static void init_direct_map_v1(const BootInfo *__info) noexcept {
 
 NAMESPACE_BIGOS_BEG
 namespace mm {
+    void invalidate_tlb(const TlbInvalidationRequest &__request) noexcept {
+        if (__request.target_cpu_mask != TLB_TARGET_BOOTSTRAP_CPU || !bigos::cpu::is_bootstrap_cpu())
+            bigos::kpanic(bigos::PanicCode::Generic, "mm-tlb", "unsupported TLB shootdown target\n");
+
+        // Order page-table writes before the local invalidation completion point.
+        asm volatile("" ::: "memory");
+
+        if (__request.scope == TlbInvalidationScope::AddressSpace) {
+            reload_local_cr3();
+            return;
+        }
+
+        uint64_t len = __request.length == 0 ? PAGE_SIZE : __request.length;
+        uint64_t vaddr = align_down_page(__request.start_vaddr);
+        const uint64_t end = align_up_page(__request.start_vaddr + len);
+        while (vaddr < end) {
+            local_invlpg(vaddr);
+            if (__request.scope == TlbInvalidationScope::Page)
+                break;
+            vaddr += PAGE_SIZE;
+        }
+
+        if (__request.require_completion)
+            asm volatile("" ::: "memory");
+    }
+
     namespace __detail {
         void init_direct_map(const BootInfoHeader *__boot_info) {
             gDirectMapRangeCount = 0;
@@ -999,7 +1044,7 @@ namespace mm {
                 bigos::irq::InterruptGuard guard;
                 *pte = 0;
                 if ((__root_phys & PAGING_DESCRIPTOR_ADDR_MASK) == (read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK))
-                    flush_kernel_tlb_page(__vaddr);
+                    invalidate_active_tlb_page(__root_phys, __vaddr);
             }
             if (!decrement_present_entry(pt_phys))
                 return false;
@@ -1052,7 +1097,7 @@ namespace mm {
             {
                 bigos::irq::InterruptGuard guard;
                 *pte = 0;
-                flush_kernel_tlb_page(__vaddr);
+                invalidate_active_tlb_page(root_phys, __vaddr);
             }
             if (!decrement_present_entry(pt_phys) ||
                 !reclaim_active_empty_tables(root_phys, __vaddr, PageTableOwner::KernelVmem))
@@ -1257,7 +1302,7 @@ namespace mm {
             bigos::irq::InterruptGuard guard;
             *pte = (__phys & PAGING_DESCRIPTOR_ADDR_MASK) | __attr;
             if ((__root_phys & PAGING_DESCRIPTOR_ADDR_MASK) == (read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK))
-                flush_kernel_tlb_page(__vaddr);
+                invalidate_active_tlb_page(__root_phys, __vaddr);
         }
         return true;
     }
@@ -1270,6 +1315,7 @@ namespace mm {
 
     void activate_address_space_root(uint64_t __root_phys) noexcept {
         asm volatile("movq %0, %%cr3" ::"r"(__root_phys) : "memory");
+        bigos::cpu::set_current_address_space_root(__root_phys & PAGING_DESCRIPTOR_ADDR_MASK);
     }
 
 #ifdef BIGOS_USER_VMEM_SMOKE
@@ -1346,7 +1392,7 @@ namespace mm {
             if (pte != nullptr && paging_present(*pte)) {
                 bigos::irq::InterruptGuard guard;
                 *pte = 0;
-                flush_kernel_tlb_page(vaddr);
+                invalidate_active_tlb_page(read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK, vaddr);
             }
         }
     }

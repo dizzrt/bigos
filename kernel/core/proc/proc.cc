@@ -5,6 +5,7 @@
 #include <bigos/cred.h>
 #include <bigos/io.h>
 #include <bigos/memory.h>
+#include <bigos/percpu.h>
 #include <bigos/panic.h>
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
@@ -100,7 +101,19 @@ namespace {
         '\n',
     };
 
+    // Bootstrap-CPU current process slot. Accesses still use this single-core
+    // storage today, while updates are mirrored into the CPU-local state boundary
+    // so future SMP work can split it per CPU without changing proc callers.
     bigos::proc::Process *g_current_process = nullptr;
+
+    void set_current_process_slot(bigos::proc::Process *__process) noexcept {
+        g_current_process = __process;
+        bigos::cpu::set_current_process(__process);
+    }
+
+    bigos::proc::Process *current_process_slot() noexcept {
+        return (bigos::proc::Process *)bigos::cpu::current_state().current_process;
+    }
     // Intrusive process registry: a singly-anchored doubly linked list head plus
     // a live count bounded by MAX_PROCESSES_SOFT_LIMIT. Replaces the former fixed
     // g_process_table[MAX_PROCESSES] array; nodes are embedded in each Process.
@@ -369,7 +382,7 @@ namespace {
         uint64_t phys = bigos::mm::INVALID_PHYS_ADDR;
         if (bigos::mm::__detail::unmap_user_page_in_root(__process->address_space_root, __vaddr, &phys) &&
             phys != bigos::mm::INVALID_PHYS_ADDR)
-            free_user_frame(phys);
+            bigos::mm::frame_ref_dec_and_maybe_free(phys);
     }
 
     bigos::proc::Process *lookup_process(uint32_t __pid) noexcept {
@@ -1074,7 +1087,7 @@ namespace {
             g_user_mode_initialized = true;
         }
 
-        g_current_process = child;
+        set_current_process_slot(child);
         child->state = bigos::proc::ProcessState::Running;
         // Bind this kernel thread to the child process so the scheduler restores
         // the correct ring3 context (current process / user CR3 / rsp0) whenever
@@ -1095,7 +1108,7 @@ namespace bigos::proc {
             return;
         g_process_list_head = nullptr;
         g_process_count = 0;
-        g_current_process = nullptr;
+        set_current_process_slot(nullptr);
         g_reap_head_pid = 0;
         g_next_pid = 1;
         bigos::sched::init_wait_queue(&g_process_wait_queue);
@@ -1445,7 +1458,8 @@ namespace bigos::proc {
         init_cwd(__process);
         bigos::signal::init_state(__process);
         init_fd_table(__process);
-        if (!publish_process(__process, g_current_process != nullptr ? g_current_process->pid : ROOT_PARENT_PID)) {
+        if (!publish_process(
+                __process, current_process_slot() != nullptr ? current_process_slot()->pid : ROOT_PARENT_PID)) {
             error = UserElfLoadError::OutOfMemory;
             goto fail;
         }
@@ -1470,7 +1484,7 @@ namespace bigos::proc {
 
     UserElfLoadError exec_current_from_elf_image(
         const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running)
             return UserElfLoadError::InvalidArgument;
         if (bigos::arch::vm_user::is_active_address_space(process->address_space_root))
@@ -1576,7 +1590,7 @@ namespace bigos::proc {
     }
 
     int64_t execve_current(const char *__path, const ExecArgs *__args) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr)
             return -bigos::EFAULT;
         // Synchronous block IO / allocation follows: refuse in non-blockable
@@ -1625,7 +1639,7 @@ namespace bigos::proc {
             // case the old image is gone, so exit the thread rather than returning
             // to a dead address space.
             if (process->state != ProcessState::Running) {
-                g_current_process = nullptr;
+                set_current_process_slot(nullptr);
                 bigos::sched::thread_exit();
             }
             bigos::arch::vm_user::activate_user_address_space(user_root);
@@ -1649,7 +1663,7 @@ namespace bigos::proc {
             g_user_mode_initialized = true;
         }
 
-        g_current_process = __process;
+        set_current_process_slot(__process);
         __process->state = ProcessState::Running;
         // Bind this kernel thread to the process so the scheduler restores the
         // correct ring3 context (current process / user CR3 / rsp0) on resume.
@@ -1664,11 +1678,11 @@ namespace bigos::proc {
     }
 
     Process *current_process() noexcept {
-        return g_current_process;
+        return (Process *)bigos::cpu::current_state().current_process;
     }
 
     const char *current_cwd() noexcept {
-        const Process *process = g_current_process;
+        const Process *process = current_process_slot();
         if (process == nullptr || process->cwd[0] == 0)
             return "/";
         return process->cwd;
@@ -1687,7 +1701,7 @@ namespace bigos::proc {
     }
 
     int64_t chdir_current(const char *__path) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || __path == nullptr)
             return -bigos::EINVAL;
         if (!bigos::sched::can_block())
@@ -1713,7 +1727,7 @@ namespace bigos::proc {
     }
 
     int64_t getcwd_current(char *__dst, size_t __dst_len) noexcept {
-        const Process *process = g_current_process;
+        const Process *process = current_process_slot();
         if (process == nullptr || __dst == nullptr || __dst_len == 0)
             return -bigos::EINVAL;
         const char *cwd = process->cwd[0] != 0 ? process->cwd : "/";
@@ -1736,7 +1750,7 @@ namespace bigos::proc {
         if (__process == nullptr || __process->state != ProcessState::Running) {
             return;
         }
-        g_current_process = __process;
+        set_current_process_slot(__process);
         bigos::arch::vm_user::set_kernel_stack_top(__process->kernel_stack_top);
         if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::arch::vm_user::activate_user_address_space(__process->address_space_root);
@@ -1748,10 +1762,10 @@ namespace bigos::proc {
             return;
         }
 
-        Process *current = g_current_process;
+        Process *current = current_process_slot();
         if (current != nullptr && current->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::arch::vm_user::activate_kernel_address_space(current->kernel_address_space_root);
-        g_current_process = nullptr;
+        set_current_process_slot(nullptr);
     }
 
     Process *find_process(uint32_t __pid) noexcept {
@@ -1790,7 +1804,7 @@ namespace bigos::proc {
     }
 
     bool validate_user_buffer(uint64_t __addr, uint64_t __len) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_WRITE_MAX_LEN)
             return false;
         return internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Read) &&
@@ -1798,7 +1812,7 @@ namespace bigos::proc {
     }
 
     bool validate_user_io_buffer(uint64_t __addr, uint64_t __len) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_IO_MAX_LEN)
             return false;
         return internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Write) &&
@@ -1806,7 +1820,7 @@ namespace bigos::proc {
     }
 
     bool copy_current_user_buffer(uint64_t __addr, void *__dst, uint64_t __len) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_WRITE_MAX_LEN)
             return false;
         if (!internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Read))
@@ -1815,7 +1829,7 @@ namespace bigos::proc {
     }
 
     bool copy_to_current_user_buffer(uint64_t __addr, const void *__src, uint64_t __len) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_IO_MAX_LEN)
             return false;
         if (!internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Write))
@@ -1824,7 +1838,7 @@ namespace bigos::proc {
     }
 
     int64_t brk_current(uint64_t __new_break) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
             return -bigos::EWOULDBLOCK;
         if (__new_break == 0)
@@ -1862,7 +1876,7 @@ namespace bigos::proc {
     }
 
     int64_t map_anonymous_current(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
             return -bigos::EWOULDBLOCK;
         if (__flags != 0 || __len == 0 || __len > USER_ANON_MAX_PAGES * PAGE_SIZE)
@@ -1913,7 +1927,7 @@ namespace bigos::proc {
     bool cow_split_current(Process *__process, uint64_t __page, const VmaEntry *__vma) noexcept;
 
     bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         // Allocation-safe, running-process precondition. A real ring3 #PF reaches
         // here under the nonblocking guard with IF=0, so can_block() would always
         // be false; the materialization/COW path only allocates (never blocks),
@@ -2037,7 +2051,7 @@ namespace bigos::proc {
     }
 
     int64_t fork_current(const bigos::irq::InterruptFrame *__parent_frame) noexcept {
-        Process *parent = g_current_process;
+        Process *parent = current_process_slot();
         if (parent == nullptr || parent->state != ProcessState::Running || __parent_frame == nullptr)
             return -bigos::EINVAL;
         if (!bigos::sched::can_block())
@@ -2143,7 +2157,7 @@ namespace bigos::proc {
     }
 
     int64_t install_fd_current(bigos::vfs::File *__file, bool __close_on_exec) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __file == nullptr)
             return -bigos::EBADF;
         // Reuse the lowest free slot within the current capacity.
@@ -2169,7 +2183,7 @@ namespace bigos::proc {
     bigos::vfs::Status read_fd_current(uint32_t __fd, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
         if (__bytes_read != nullptr)
             *__bytes_read = 0;
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return bigos::vfs::Status::BadFileDescriptor;
         FdEntry *entry = &process->fd_table[__fd];
@@ -2179,7 +2193,7 @@ namespace bigos::proc {
     }
 
     int64_t close_fd_current(uint32_t __fd) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return -bigos::EBADF;
         FdEntry *entry = &process->fd_table[__fd];
@@ -2197,7 +2211,7 @@ namespace bigos::proc {
         uint32_t __fd, const void *__src, size_t __len, size_t *__bytes_written) noexcept {
         if (__bytes_written != nullptr)
             *__bytes_written = 0;
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return bigos::vfs::Status::BadFileDescriptor;
         FdEntry *entry = &process->fd_table[__fd];
@@ -2208,7 +2222,7 @@ namespace bigos::proc {
 
     bigos::vfs::Status lseek_fd_current(
         uint32_t __fd, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return bigos::vfs::Status::BadFileDescriptor;
         FdEntry *entry = &process->fd_table[__fd];
@@ -2218,7 +2232,7 @@ namespace bigos::proc {
     }
 
     bigos::vfs::Status fsync_fd_current(uint32_t __fd) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return bigos::vfs::Status::BadFileDescriptor;
         FdEntry *entry = &process->fd_table[__fd];
@@ -2231,7 +2245,7 @@ namespace bigos::proc {
         uint32_t __fd, bigos::vfs::DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept {
         if (__entries_read != nullptr)
             *__entries_read = 0;
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return bigos::vfs::Status::BadFileDescriptor;
         FdEntry *entry = &process->fd_table[__fd];
@@ -2241,7 +2255,7 @@ namespace bigos::proc {
     }
 
     bigos::vfs::Status stat_fd_current(uint32_t __fd, bigos::Metadata *__out) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return bigos::vfs::Status::BadFileDescriptor;
         FdEntry *entry = &process->fd_table[__fd];
@@ -2251,14 +2265,14 @@ namespace bigos::proc {
     }
 
     bigos::vfs::File *file_for_fd_current(uint32_t __fd) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
             return nullptr;
         return process->fd_table[__fd].file;
     }
 
     int64_t dup_fd_current(uint32_t __oldfd) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __oldfd >= process->fd_capacity)
             return -bigos::EBADF;
         FdEntry *old = &process->fd_table[__oldfd];
@@ -2279,7 +2293,7 @@ namespace bigos::proc {
     }
 
     int64_t dup2_fd_current(uint32_t __oldfd, uint32_t __newfd) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __oldfd >= process->fd_capacity)
             return -bigos::EBADF;
         FdEntry *old = &process->fd_table[__oldfd];
@@ -2340,7 +2354,7 @@ namespace bigos::proc {
     }
 
     void mark_current_faulted(int64_t __reason) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr)
             return;
         process->state = ProcessState::Faulted;
@@ -2356,7 +2370,7 @@ namespace bigos::proc {
     }
 
     [[noreturn]] void fault_current_and_exit(int64_t __reason) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr)
             halt_failed("BIGOS_USER_FAULT_FAILED no-process\n");
 
@@ -2366,13 +2380,13 @@ namespace bigos::proc {
         // thread is still running on it.
         bigos::irq::disableIRQ();
         mark_current_faulted(__reason);
-        g_current_process = nullptr;
+        set_current_process_slot(nullptr);
         bigos::sched::set_current_user_process(nullptr);
         bigos::sched::thread_exit();
     }
 
     [[noreturn]] void exit_current(int64_t __code) noexcept {
-        Process *process = g_current_process;
+        Process *process = current_process_slot();
         if (process == nullptr)
             halt_failed("BIGOS_USER_EXIT_FAILED no-process\n");
 
@@ -2395,13 +2409,13 @@ namespace bigos::proc {
             bigos::serial_puts("BIGOS_INIT_EXIT\n");
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
-        g_current_process = nullptr;
+        set_current_process_slot(nullptr);
         bigos::sched::set_current_user_process(nullptr);
         bigos::sched::thread_exit();
     }
 
     int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept {
-        Process *parent = g_current_process;
+        Process *parent = current_process_slot();
         if (parent == nullptr)
             return -bigos::ECHILD;
         if (!bigos::sched::can_block())
@@ -2530,7 +2544,7 @@ namespace bigos::proc {
         if (!create_first_user_process(__process))
             return false;
 
-        g_current_process = __process;
+        set_current_process_slot(__process);
         __process->state = ProcessState::Running;
 
         const uint64_t heap_base = __process->vmas.heap_base;
@@ -2574,7 +2588,7 @@ namespace bigos::proc {
 
         // Deterministic teardown of the constructed process through the existing
         // lifecycle/reaper; the inactive root is reclaimed by reap.
-        g_current_process = nullptr;
+        set_current_process_slot(nullptr);
         __process->state = ProcessState::Terminated;
         mark_zombie_or_reap_pending(__process);
         reap_pending_processes();
@@ -2620,7 +2634,7 @@ namespace bigos::proc {
         if (!g_proc_initialized)
             init();
 
-        Process *saved_current = g_current_process;
+        Process *saved_current = current_process_slot();
         bool ok = true;
 
         // 1. Process registry growth beyond the former fixed 16-process cap.
@@ -2660,7 +2674,7 @@ namespace bigos::proc {
             } else {
                 fdproc->state = ProcessState::Running;
                 init_fd_table(fdproc);
-                g_current_process = fdproc;
+                set_current_process_slot(fdproc);
 
                 constexpr uint32_t kFdCount = 20;
                 for (uint32_t i = 0; i < kFdCount && ok; i++) {
@@ -2690,7 +2704,7 @@ namespace bigos::proc {
                 }
                 close_all_fds(fdproc);
                 free_fd_table(fdproc);
-                g_current_process = nullptr;
+                set_current_process_slot(nullptr);
                 free_process_object(fdproc);
             }
         }
@@ -2705,7 +2719,7 @@ namespace bigos::proc {
             scrub_process(&inject_proc);
             inject_proc.state = ProcessState::Running;
             init_fd_table(&inject_proc);
-            g_current_process = &inject_proc;
+            set_current_process_slot(&inject_proc);
             bigos::vfs::File *file = growable_make_dummy_file();
             if (file == nullptr) {
                 ok = false;
@@ -2716,12 +2730,12 @@ namespace bigos::proc {
                 bigos::vfs::release(file);
             }
             free_fd_table(&inject_proc);
-            g_current_process = nullptr;
+            set_current_process_slot(nullptr);
             g_growable_force_alloc_fail = false;
         }
 
         g_growable_force_alloc_fail = false;
-        g_current_process = saved_current;
+        set_current_process_slot(saved_current);
         return ok;
     }
 
@@ -2755,7 +2769,7 @@ namespace bigos::proc {
     bool fork_cow_smoke_run() noexcept {
         if (!g_proc_initialized)
             init();
-        Process *saved_current = g_current_process;
+        Process *saved_current = current_process_slot();
         bool ok = true;
 
         static Process parent;
@@ -2765,7 +2779,7 @@ namespace bigos::proc {
 
         if (!create_first_user_process(&parent))
             return false;
-        g_current_process = &parent;
+        set_current_process_slot(&parent);
         parent.state = ProcessState::Running;
 
         const uint64_t data_page = USER_DATA_BASE;
@@ -2817,7 +2831,7 @@ namespace bigos::proc {
         // 2. Write-time split on the parent: shared -> private copy.
         const uint64_t cow_write_fault = 0x1 | 0x2 | 0x4;   // present + write + user
         if (ok) {
-            g_current_process = &parent;
+            set_current_process_slot(&parent);
             if (!try_handle_user_page_fault(data_page, cow_write_fault))
                 ok = false;
         }
@@ -2839,7 +2853,7 @@ namespace bigos::proc {
 
         // 3. Lone-owner in-place restore on the child: no copy, same frame.
         if (ok) {
-            g_current_process = &child;
+            set_current_process_slot(&child);
             if (!try_handle_user_page_fault(data_page, cow_write_fault))
                 ok = false;
         }
@@ -2861,7 +2875,7 @@ namespace bigos::proc {
                           parent.address_space_root, data_page, parent_phys2, cow_shared_attr(parent_attr2)))
                 ok = false;
             if (ok) {
-                g_current_process = &parent;
+                set_current_process_slot(&parent);
                 g_fork_cow_force_alloc_fail = true;
                 const bool split = try_handle_user_page_fault(data_page, cow_write_fault);
                 g_fork_cow_force_alloc_fail = false;
@@ -2879,7 +2893,7 @@ namespace bigos::proc {
 
         // Teardown both roots through the reference-counted path; ordered release
         // must free each frame exactly once and never early-free a shared frame.
-        g_current_process = nullptr;
+        set_current_process_slot(nullptr);
         if (child.address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
             !bigos::mm::teardown_user_address_space(child.address_space_root))
             ok = false;
@@ -2898,7 +2912,7 @@ namespace bigos::proc {
         if (parent.kernel_stack_base != nullptr)
             bigos::free_pages(parent.kernel_stack_base);
 
-        g_current_process = saved_current;
+        set_current_process_slot(saved_current);
         return ok;
     }
 
@@ -2944,7 +2958,7 @@ namespace bigos::proc {
 
         // 2. Identity: a non-fork-created process is root; fork inheritance copies
         // the identity quad field-by-field.
-        Process *saved_current = g_current_process;
+        Process *saved_current = current_process_slot();
         static Process parent;
         static Process child;
         scrub_process(&parent);
@@ -3005,7 +3019,7 @@ namespace bigos::proc {
         }
 
         // Teardown the parent created above through the reference-counted path.
-        g_current_process = nullptr;
+        set_current_process_slot(nullptr);
         if (parent.table_published)
             unpublish_process(&parent);
         if (parent.address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
@@ -3016,7 +3030,7 @@ namespace bigos::proc {
         if (parent.kernel_stack_base != nullptr)
             bigos::free_pages(parent.kernel_stack_base);
 
-        g_current_process = saved_current;
+        set_current_process_slot(saved_current);
         return ok;
     }
 
@@ -3058,7 +3072,7 @@ namespace bigos::proc {
         if (sig::valid_signo(0) || sig::valid_signo(sig::SIG_MAX + 1))
             ok = false;
 
-        Process *saved_current = g_current_process;
+        Process *saved_current = current_process_slot();
         static Process proc;
         scrub_process(&proc);
 
@@ -3066,7 +3080,7 @@ namespace bigos::proc {
             ok = false;
 
         if (ok) {
-            g_current_process = &proc;
+            set_current_process_slot(&proc);
             proc.state = ProcessState::Running;
 
             // 2. kill sets pending; SIGKILL set_disposition rejected; mask drops
@@ -3151,7 +3165,7 @@ namespace bigos::proc {
         }
 
         // Teardown the created process through the reference-counted path.
-        g_current_process = nullptr;
+        set_current_process_slot(nullptr);
         if (proc.table_published)
             unpublish_process(&proc);
         if (proc.address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
@@ -3162,7 +3176,7 @@ namespace bigos::proc {
         if (proc.kernel_stack_base != nullptr)
             bigos::free_pages(proc.kernel_stack_base);
 
-        g_current_process = saved_current;
+        set_current_process_slot(saved_current);
         return ok;
     }
 

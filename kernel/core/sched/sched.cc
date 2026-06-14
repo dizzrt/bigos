@@ -3,6 +3,7 @@
 #include <bigos/arch_context.h>
 #include <bigos/io.h>
 #include <bigos/memory.h>
+#include <bigos/percpu.h>
 #ifdef BIGOS_USER_PROCESS
 #include <bigos/proc.h>
 #endif
@@ -66,27 +67,52 @@ namespace sched {
             void *user_process;
         };
 
-        // Single-core scheduler state. There is no per-CPU run queue, no SMP
-        // balancing, no IPI, and no cross-CPU synchronization.
-        TCB *g_current = nullptr;
-        TCB *g_idle = nullptr;
-        TCB *g_run_head = nullptr;
-        TCB *g_run_tail = nullptr;
-        TCB *g_sleep_head = nullptr;
-        TCB *g_terminated_head = nullptr;
-        ThreadId g_next_id = INVALID_THREAD_ID + 1;
-        bool g_scheduler_started = false;
-        volatile uint32_t g_nonblocking_depth = 0;
-        volatile uint32_t g_scheduler_critical_depth = 0;
-        volatile uint32_t g_preemption_disable_depth = 0;
+        // Bootstrap-CPU scheduler state. This is the single-core implementation
+        // slot behind the CPU-local access boundary; it is not SMP-safe global
+        // state and must not be shared by APs, remote wakeups, or load balancing.
+        struct SchedulerCpuState {
+            TCB *current;
+            TCB *idle;
+            TCB *run_head;
+            TCB *run_tail;
+            TCB *sleep_head;
+            TCB *terminated_head;
+            ThreadId next_id;
+            bool scheduler_started;
+            volatile uint32_t nonblocking_depth;
+            volatile uint32_t scheduler_critical_depth;
+            volatile uint32_t preemption_disable_depth;
+            volatile uint64_t reschedule_intent;
+            volatile bool reschedule_pending;
+            volatile uint64_t slice_expired_events;
+            volatile uint64_t deferred_preemption_events;
+            volatile uint64_t irq_return_preemptions;
+        };
+
+        SchedulerCpuState g_boot_cpu_sched = {
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, INVALID_THREAD_ID + 1, false,
+            0,       0,       0,       0,       false,   0,       0,                     0,
+        };
+
+        TCB *&g_current = g_boot_cpu_sched.current;
+        TCB *&g_idle = g_boot_cpu_sched.idle;
+        TCB *&g_run_head = g_boot_cpu_sched.run_head;
+        TCB *&g_run_tail = g_boot_cpu_sched.run_tail;
+        TCB *&g_sleep_head = g_boot_cpu_sched.sleep_head;
+        TCB *&g_terminated_head = g_boot_cpu_sched.terminated_head;
+        ThreadId &g_next_id = g_boot_cpu_sched.next_id;
+        bool &g_scheduler_started = g_boot_cpu_sched.scheduler_started;
+        volatile uint32_t &g_nonblocking_depth = g_boot_cpu_sched.nonblocking_depth;
+        volatile uint32_t &g_scheduler_critical_depth = g_boot_cpu_sched.scheduler_critical_depth;
+        volatile uint32_t &g_preemption_disable_depth = g_boot_cpu_sched.preemption_disable_depth;
 
         // Bounded reschedule intent recorded by the timer IRQ. The intent is
         // consumed only at explicit scheduler-owned safe boundaries.
-        volatile uint64_t g_reschedule_intent = 0;
-        volatile bool g_reschedule_pending = false;
-        volatile uint64_t g_slice_expired_events = 0;
-        volatile uint64_t g_deferred_preemption_events = 0;
-        volatile uint64_t g_irq_return_preemptions = 0;
+        volatile uint64_t &g_reschedule_intent = g_boot_cpu_sched.reschedule_intent;
+        volatile bool &g_reschedule_pending = g_boot_cpu_sched.reschedule_pending;
+        volatile uint64_t &g_slice_expired_events = g_boot_cpu_sched.slice_expired_events;
+        volatile uint64_t &g_deferred_preemption_events = g_boot_cpu_sched.deferred_preemption_events;
+        volatile uint64_t &g_irq_return_preemptions = g_boot_cpu_sched.irq_return_preemptions;
 
         // The boot/main thread storage. After start() the boot context becomes
         // the scheduler-owned idle thread and reuses its existing kernel stack.
@@ -106,6 +132,7 @@ namespace sched {
         void enter_scheduler_critical() noexcept {
             ++g_preemption_disable_depth;
             ++g_scheduler_critical_depth;
+            bigos::cpu::set_preemption_disable_depth(g_preemption_disable_depth);
         }
 
         void leave_scheduler_critical() noexcept {
@@ -113,13 +140,25 @@ namespace sched {
                 --g_scheduler_critical_depth;
             if (g_preemption_disable_depth > 0)
                 --g_preemption_disable_depth;
+            bigos::cpu::set_preemption_disable_depth(g_preemption_disable_depth);
         }
 
         void request_reschedule() noexcept {
             ++g_reschedule_intent;
             g_reschedule_pending = true;
+            bigos::cpu::set_reschedule_pending(true);
             if (g_preemption_disable_depth > 0)
                 ++g_deferred_preemption_events;
+        }
+
+        void set_current(TCB *__t) noexcept {
+            g_current = __t;
+            bigos::cpu::set_current_thread(__t);
+        }
+
+        void set_reschedule_pending(bool __pending) noexcept {
+            g_reschedule_pending = __pending;
+            bigos::cpu::set_reschedule_pending(__pending);
         }
 
         bool has_runnable_peer() noexcept {
@@ -291,7 +330,7 @@ namespace sched {
                 refresh_time_slice(next);
             }
 
-            g_current = next;
+            set_current(next);
             prepare_address_space_before_switch(next);
             arch_context::switch_kernel_context(&__prev->saved_sp, next->saved_sp);
             restore_user_context_on_resume();
@@ -391,8 +430,8 @@ namespace sched {
 
         next->state = ThreadState::Running;
         __detail::refresh_time_slice(next);
-        __detail::g_reschedule_pending = false;
-        __detail::g_current = next;
+        __detail::set_reschedule_pending(false);
+        __detail::set_current(next);
         __detail::leave_scheduler_critical();
         __detail::prepare_address_space_before_switch(next);
         arch_context::switch_kernel_context(&prev->saved_sp, next->saved_sp);
@@ -435,7 +474,7 @@ namespace sched {
         uint64_t discarded_sp = 0;
         prev->saved_sp = 0;
 
-        __detail::g_current = next;
+        __detail::set_current(next);
         __detail::leave_scheduler_critical();
         __detail::prepare_address_space_before_switch(next);
         arch_context::switch_kernel_context(&discarded_sp, next->saved_sp);
@@ -469,7 +508,7 @@ namespace sched {
         __detail::g_boot_tcb.user_process = nullptr;
 
         __detail::g_idle = &__detail::g_boot_tcb;
-        __detail::g_current = &__detail::g_boot_tcb;
+        __detail::set_current(&__detail::g_boot_tcb);
         __detail::g_scheduler_started = true;
 
         // Idle thread owns halt behavior: run any runnable thread, otherwise
@@ -502,20 +541,24 @@ namespace sched {
 
     void enter_nonblocking_context() noexcept {
         ++__detail::g_nonblocking_depth;
+        bigos::cpu::set_nonblocking_depth(__detail::g_nonblocking_depth);
     }
 
     void leave_nonblocking_context() noexcept {
         if (__detail::g_nonblocking_depth > 0)
             --__detail::g_nonblocking_depth;
+        bigos::cpu::set_nonblocking_depth(__detail::g_nonblocking_depth);
     }
 
     void disable_preemption() noexcept {
         ++__detail::g_preemption_disable_depth;
+        bigos::cpu::set_preemption_disable_depth(__detail::g_preemption_disable_depth);
     }
 
     void enable_preemption() noexcept {
         if (__detail::g_preemption_disable_depth > 0)
             --__detail::g_preemption_disable_depth;
+        bigos::cpu::set_preemption_disable_depth(__detail::g_preemption_disable_depth);
     }
 
     bool preemption_enabled() noexcept {
@@ -653,8 +696,8 @@ namespace sched {
 
         next->state = ThreadState::Running;
         __detail::refresh_time_slice(next);
-        __detail::g_current = next;
-        __detail::g_reschedule_pending = false;
+        __detail::set_current(next);
+        __detail::set_reschedule_pending(false);
         ++__detail::g_irq_return_preemptions;
         __detail::leave_scheduler_critical();
 
