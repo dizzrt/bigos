@@ -16,7 +16,7 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
 - `user/sh/sh.c`：有界交互 shell，支持内建命令、cwd-aware PATH 查找、
   `fork` + `execve` + `wait`、单级管道，以及基本 `<` / `>` 重定向。
 - `user/bin/*`：打包进镜像的小型用户程序，例如 `/bin/echo`、`/bin/cat`、
-  `/bin/stat` 和 `/bin/pwd`。
+  `/bin/ls`、`/bin/mkdir`、`/bin/rm`、`/bin/rename`、`/bin/stat` 和 `/bin/pwd`。
 - `user/smoke/bin/*`：仅用于验证的 C 探针，只在默认关闭的 `userland_smoke` 路径被选择时构建并打包到 `/bin/smoke/*`。
 - `user/smoke/userland_smoke.c`：默认关闭的确定性验证程序，覆盖 crt0、libc
   wrapper、errno、stdout/stderr、smoke C 程序执行、fork/exec/wait、pipe、重定向和 malloc。
@@ -63,9 +63,9 @@ rdx = char *const envp[]
 ```
 
 成功时替换当前进程镜像并进入新程序，不返回。失败时返回负 errno，例如
-`-ENOENT`、`-EACCES`、`-ENOEXEC`、`-E2BIG`、`-EFAULT` 或 `-ENOMEM`。内核在
-读取目标 ELF 前，会通过 VMA-backed 用户缓冲校验和有界 `EXEC_MAX_*` 限制复制
-`path`、`argv` 与 `envp`。
+`-ENOENT`、`-EACCES`、`-ENOEXEC`、`-E2BIG`、`-EFAULT`、`-ENOMEM`、
+`-EWOULDBLOCK` 或 `-EIO`。内核在读取目标 ELF 前，会通过 VMA-backed 用户缓冲校验和有界
+`EXEC_MAX_*` 限制复制 `path`、`argv` 与 `envp`。
 
 用户 libc 镜像头 `user/libc/include/sys_nr.h` 与
 `user/libc/include/errno.h` 刻意不 include C++ 内核头。
@@ -88,23 +88,31 @@ Shell 有意保持很小：
 - 容量：行长、参数数量、PATH 候选数量与路径长度都在 `user/sh/sh.c` 中有固定上限。
 
 本阶段不实现作业控制、后台进程、glob、变量展开、shell 脚本、子 shell、终端进程组、
-termios、完整 FILE API、动态链接或完整 POSIX libc。
+termios、完整目录 API、symlink、持久完整可写文件系统、广泛 file-backed `mmap`、完整
+FILE API、动态链接或完整 POSIX libc。
 
 ## 最小 libc 子集
 
 用户态 libc 为简单静态 C 程序暴露有文档边界的有界子集：
 
 - 头文件：`stdio.h`、`stdlib.h`、`string.h`、`errno.h`、`unistd.h`、
-  `fcntl.h`、`sys/types.h`、`sys/wait.h`，以及兼容用 umbrella 头
-  `libc.h`。
+  `fcntl.h`、`sys/types.h`、`sys/wait.h`、`sys/stat.h`、`bigos_dirent.h`，
+  以及兼容用 umbrella 头 `libc.h`。
 - 类型与常量：`size_t`、`ssize_t`、`off_t`、`pid_t`、`NULL`、已实现的
   open flags、seek 常量、`WAIT_ANY`，以及与 `include/bigos/errno.h` 保持一致
   的 errno 数值，包括用于 `getcwd` 小缓冲区的 `ERANGE`。
+- 文件元数据与目录 helper：`struct stat`、`S_ISDIR`、`S_ISREG` 和
+  `struct bigos_dirent` 只描述当前有界文件/目录子集。`bigos_readdir` 读取有界批次；
+  它不是完整 POSIX `readdir` API，也不暴露持久完整文件系统语义。
 - Syscall wrapper：内核负 errno 返回会翻译为用户态正 `errno`，并返回 `-1` 或
   接口文档化的失败哨兵；成功 wrapper 不会清零或改写既有 `errno`。
+- BigOS-specific helper：`wait_status`、`bigos_readdir`、`brk_raw`、
+  `mmap_anon`、`time_now` 和 `get_tick` 是 public bounded ABI helper，因为当前
+  shell、smoke、libc 或打包用户程序路径会使用它们。Raw `syscall0` 到 `syscall6`
+  仍是兼容 umbrella export 与低层 ABI helper，不是 POSIX `syscall(2)` 兼容。
 - 字符串与内存：子集包含已实现的有界例程，例如 `strlen`、`strcmp`、
-  `strncmp`、`memcpy`、`memset` 和 overlap-safe `memmove`。NULL 指针输入仍遵循
-  普通 C 前置条件，BigOS 不额外承诺 hosted 安全检查。
+  `strncmp`、`memcpy`、`memset` 和 overlap-safe `memmove`，以及当前用户程序解析路径使用的
+  `strchr`。NULL 指针输入仍遵循普通 C 前置条件，BigOS 不额外承诺 hosted 安全检查。
 - 堆：`malloc` 返回 16 字节对齐的可写内存；有界失败时返回 `NULL`，且不破坏
   既有块。`free(NULL)` 无副作用。分配器不承诺线程安全、完整 coalescing、
   `realloc` 或 hosted allocator 行为。
@@ -143,7 +151,8 @@ runtime 边界内：
 
 - `/boot/user/init.elf`：默认常驻 C init 或选中的 smoke 程序。
 - `/bin/sh`：交互 shell。
-- `/bin/echo`、`/bin/cat`、`/bin/stat` 和 `/bin/pwd`：正常打包用户命令。
+- `/bin/echo`、`/bin/cat`、`/bin/ls`、`/bin/mkdir`、`/bin/rm`、`/bin/rename`、
+  `/bin/stat` 和 `/bin/pwd`：正常打包用户命令。
 - `/bin/smoke/*` 探针：仅用于显式 `userland_smoke` 验证镜像。
 
 镜像布局仍沿用现有 Legacy BIOS / MBR / exFAT 路径；当前有界用户态基线只在

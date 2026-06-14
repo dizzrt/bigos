@@ -20,7 +20,12 @@
 #include "sys/wait.h"     /* IWYU pragma: export */
 #include "unistd.h"       /* IWYU pragma: export */
 
-/* --- raw syscall primitives (rax=number, rdi/rsi/rdx/r10/r8/r9) --- */
+/* --- BigOS-specific raw syscall primitives ---
+ *
+ * Low-level ABI helpers for libc and explicitly BigOS-specific callers only:
+ * rax=number, args=rdi/rsi/rdx/r10/r8/r9, raw kernel return in rax. Higher-level
+ * wrappers remain responsible for errno translation. This is not POSIX
+ * syscall(2) compatibility and must not be used to imply unsupported syscalls. */
 long syscall0(long n);
 long syscall1(long n, long a0);
 long syscall2(long n, long a0, long a1);

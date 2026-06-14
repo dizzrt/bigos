@@ -17,7 +17,8 @@ environment.
 - `user/sh/sh.c`: bounded interactive shell with builtins, cwd-aware PATH lookup,
   `fork` + `execve` + `wait`, one-stage pipes, and basic `<` / `>` redirection.
 - `user/bin/*`: small packaged user binaries such as `/bin/echo`, `/bin/cat`,
-  `/bin/stat`, and `/bin/pwd`.
+  `/bin/ls`, `/bin/mkdir`, `/bin/rm`, `/bin/rename`, `/bin/stat`, and
+  `/bin/pwd`.
 - `user/smoke/bin/*`: validation-only C probes that are built and packaged under
   `/bin/smoke/*` only when the default-off `userland_smoke` path is selected.
 - `user/smoke/userland_smoke.c`: default-off deterministic validation program
@@ -71,9 +72,10 @@ rdx = char *const envp[]
 
 On success it replaces the current process image and enters the new program; it
 does not return. On failure it returns a negative errno such as `-ENOENT`,
-`-EACCES`, `-ENOEXEC`, `-E2BIG`, `-EFAULT`, or `-ENOMEM`. The kernel copies
-`path`, `argv`, and `envp` through VMA-backed user-buffer validation and bounded
-`EXEC_MAX_*` limits before reading the target ELF through VFS.
+`-EACCES`, `-ENOEXEC`, `-E2BIG`, `-EFAULT`, `-ENOMEM`, `-EWOULDBLOCK`, or `-EIO`.
+The kernel copies `path`, `argv`, and `envp` through VMA-backed user-buffer
+validation and bounded `EXEC_MAX_*` limits before reading the target ELF through
+VFS.
 
 The user libc mirror headers `user/libc/include/sys_nr.h` and
 `user/libc/include/errno.h` intentionally do not include C++ kernel headers.
@@ -105,25 +107,36 @@ The shell is intentionally small:
 
 This does not implement job control, background processes, globbing, variable
 expansion, shell scripts, sub-shells, terminal process groups, termios, a full
-FILE API, dynamic linking, or a complete POSIX libc.
+directory API, symlinks, a persistent full writable filesystem, broad
+file-backed `mmap`, a full FILE API, dynamic linking, or a complete POSIX libc.
 
 ## Minimal libc Subset
 
 The user libc exposes a documented bounded subset for simple static C programs:
 
 - Headers: `stdio.h`, `stdlib.h`, `string.h`, `errno.h`, `unistd.h`,
-  `fcntl.h`, `sys/types.h`, `sys/wait.h`, plus the compatibility umbrella
-  `libc.h`.
+  `fcntl.h`, `sys/types.h`, `sys/wait.h`, `sys/stat.h`, `bigos_dirent.h`, plus
+  the compatibility umbrella `libc.h`.
 - Types and constants: `size_t`, `ssize_t`, `off_t`, `pid_t`, `NULL`, the
   implemented open flags, seek constants, `WAIT_ANY`, and errno values mirrored
   from `include/bigos/errno.h`, including `ERANGE` for small `getcwd` buffers.
+- File metadata and directory helpers: `struct stat`, `S_ISDIR`, `S_ISREG`, and
+  `struct bigos_dirent` describe only the current bounded file/directory subset.
+  `bigos_readdir` reads bounded batches; it is not a complete POSIX `readdir`
+  API and does not expose persistent full-filesystem semantics.
 - Syscall wrappers: negative kernel errno returns become positive user `errno`
   and `-1` or the documented failure sentinel; successful wrappers do not clear
   or rewrite an existing `errno` value.
+- BigOS-specific helpers: `wait_status`, `bigos_readdir`, `brk_raw`,
+  `mmap_anon`, `time_now`, and `get_tick` are public bounded ABI helpers because
+  current shell, smoke, libc, or packaged user-program paths use them. Raw
+  `syscall0` through `syscall6` remain compatibility umbrella exports and
+  low-level ABI helpers, not POSIX `syscall(2)` compatibility.
 - Strings and memory: the subset includes the implemented bounded routines such
   as `strlen`, `strcmp`, `strncmp`, `memcpy`, `memset`, and overlap-safe
-  `memmove`. Null pointer inputs keep ordinary C preconditions and are not given
-  extra BigOS-specific safety promises.
+  `memmove`, plus `strchr` for current user-program parsing paths. Null pointer
+  inputs keep ordinary C preconditions and are not given extra BigOS-specific
+  safety promises.
 - Heap: `malloc` returns 16-byte-aligned writable memory or `NULL` on bounded
   failure without corrupting existing blocks. `free(NULL)` is a no-op. The
   allocator does not promise thread safety, complete coalescing, `realloc`, or
@@ -168,8 +181,8 @@ freestanding ELF64 `ET_EXEC` images using `user/crt0`, `user/libc`, and
 
 - `/boot/user/init.elf` for the default resident C init or the selected smoke.
 - `/bin/sh` for the interactive shell.
-- `/bin/echo`, `/bin/cat`, `/bin/stat`, and `/bin/pwd` for normal packaged user
-  commands.
+- `/bin/echo`, `/bin/cat`, `/bin/ls`, `/bin/mkdir`, `/bin/rm`, `/bin/rename`,
+  `/bin/stat`, and `/bin/pwd` for normal packaged user commands.
 - `/bin/smoke/*` probes only for the explicit `userland_smoke` validation image.
 
 The image layout remains the existing Legacy BIOS / MBR / exFAT path; the

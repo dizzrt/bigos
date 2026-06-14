@@ -165,12 +165,12 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 32 are complete and now form a compressed minimal usable system
+Stages 20 through 33 are complete and now form a compressed minimal usable system
 baseline. Keep the detailed implementation and validation history in dedicated
 architecture docs and OpenSpec records; this roadmap tracks only project-level
 capabilities and boundaries.
 
-阶段 20 到阶段 32 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
+阶段 20 到阶段 33 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
 专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
@@ -335,15 +335,18 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 33: Syscall And User ABI Boundary / Syscall 与用户 ABI 边界
 
-- Tighten the architecture boundary around syscall ABI, user-visible register
-  conventions, user headers, and kernel/user contract documentation before adding
-  more backends.
-- 在增加更多 backend 前，收紧 syscall ABI、用户可见寄存器约定、用户态头文件和 kernel/user
-  契约文档周围的架构边界。
-- Do not use this stage to add a second runtime backend; use it to prevent
-  x86_64-specific assumptions from spreading further into user-facing code.
-- 不在本阶段新增第二个运行时 backend；本阶段用于防止 x86_64-specific 假设继续扩散到面向
-  用户态的代码中。
+- Status: complete; this capability is now part of the completed baseline rather
+  than future mainline scope.
+- 状态：已完成；该能力现在属于已完成基线，不再属于后续主线范围。
+- The current baseline tightens the architecture boundary around syscall ABI,
+  user-visible register conventions, user headers, and kernel/user contract
+  documentation.
+- 当前基线已收紧 syscall ABI、用户可见寄存器约定、用户态头文件和 kernel/user 契约文档周围的
+  架构边界。
+- Preserved boundaries: no second runtime backend, no new ISA parity, and no
+  broader POSIX or hosted libc compatibility claim.
+- 保持边界：不引入第二个运行时 backend、新 ISA 运行时等价能力，或更广的 POSIX/hosted
+  libc 兼容声明。
 
 ### Stage 34: Interrupt, Timer, And Context Boundary / 中断、计时与上下文边界
 

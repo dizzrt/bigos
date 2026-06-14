@@ -61,8 +61,15 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 其后是 `SYS_KILL`（16）、`SYS_SIGACTION`（17）、`SYS_SIGPROCMASK`（18）、`SYS_SIGRETURN`（19）、`SYS_LSEEK`（20）、`SYS_PIPE`（21）、`SYS_DUP`（22）、`SYS_DUP2`（23）、`SYS_FSYNC`（24）、`SYS_MKDIR`（25）、`SYS_UNLINK`（26）。
 
 - `SYS_EXECVE`（number=27）：以 append-only 方式把内核内已有的当前进程镜像替换路径（`exec_current_from_elf_image` + 只读 VFS 读路径）暴露给 CPL3。ABI：`rdi` = 用户 `path`，`rsi` = `argv`（NULL 结尾用户指针数组），`rdx` = `envp`。path 受 `SYS_PATH_MAX_LEN` 约束，argv/envp 向量受 `EXEC_MAX_ARGC` / `EXEC_MAX_ENVC` / `EXEC_MAX_STRING_BYTES` 约束；所有用户缓冲先经 VMA-backed 校验拷入再使用。成功时以新 ELF64 `ET_EXEC` 镜像替换当前进程地址空间并进入新程序入口，因此不返回调用点。失败时返回确定性负 errno（`-ENOENT`、`-EACCES`、`-ENOEXEC`、`-E2BIG`、`-EFAULT`、`-ENOMEM`、`-EWOULDBLOCK`、`-EIO`），调用镜像可继续执行。与其他 fd/VFS syscall 一样，它在分配或进入同步存储 IO 前检查 `sched::can_block()` 守卫；不改动任何既有 syscall 号、寄存器约定、`VECTOR_SYSCALL` / DPL 布局或「syscall 不发 EOI」规则。
+- `SYS_READDIR`（number=28）：从已打开 fd 读取有界目录项批次到用户 `struct bigos_dirent[]`。ABI：`rdi` = fd，`rsi` = 用户 entries 缓冲区，`rdx` = 请求项数。请求受 `SYS_DIRENT_MAX_ENTRIES` 约束，经用户缓冲校验 copy out，返回 entry count 或确定性负 fd/VFS errno。
+- `SYS_STAT`（number=29）/ `SYS_FSTAT`（number=30）：把有界元数据复制到用户 `struct stat`。`SYS_STAT` 使用 `rdi` = 用户 path、`rsi` = 用户输出指针；`SYS_FSTAT` 使用 `rdi` = fd、`rsi` = 用户输出指针。它们只暴露当前文件/目录元数据子集，不表示完整 POSIX `stat(2)` 语义。
+- `SYS_CHDIR`（number=31）：使用 `rdi` = 用户 path；只有在完成有界路径复制、解析并确认目标为目录后，才提交进程 cwd。
+- `SYS_GETCWD`（number=32）：使用 `rdi` = 用户缓冲区、`rsi` = 缓冲区大小；复制 NUL 结尾 cwd，或返回确定性 `-ERANGE`、`-EFAULT`、`-EINVAL`。
+- `SYS_RENAME`（number=33）：使用 `rdi` = 旧用户 path、`rsi` = 新用户 path。它受限于当前有界可写 `/rw` regular-file rename 语义，不表示完整持久文件系统或跨设备 rename 支持。
 
 syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
+
+用户态 raw syscall primitive `syscall0` 到 `syscall6` 仍是 BigOS-specific 低层 helper。它们把 number 与返回值绑定到 `rax`，参数绑定到 `rdi`、`rsi`、`rdx`、`r10`、`r8`、`r9`，并列出 `rcx`、`r11` 与 `memory` clobber。源码级 contract 测试会检查这些约束，避免 wrapper 修改静默偏离 ABI；更高层 libc wrapper 仍负责把内核负返回值翻译为正 `errno` 与接口文档化的失败哨兵。
 
 ## 验证：默认关闭构建开关 + 确定性 marker
 

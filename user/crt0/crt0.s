@@ -11,6 +11,8 @@
 # main(argc, argv, envp). When main returns its value is the SYS_EXIT code.
 # crt0 never returns to an undefined address.
 
+.equ SYS_EXIT, 3
+
 .section .text
 .global _start
 _start:
@@ -27,7 +29,7 @@ _start:
     call main                      # main(argc, argv, envp); return value in eax
 
     movl %eax, %edi                # SYS_EXIT exit code = main return value
-    movq $3, %rax                  # SYS_EXIT
+    movq $SYS_EXIT, %rax
     int $0x80
 1:
     hlt                            # exit must not return; halt defensively

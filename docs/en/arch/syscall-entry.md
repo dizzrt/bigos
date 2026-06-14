@@ -82,8 +82,34 @@ an EOI:
   checks the `sched::can_block()` guard before allocation or synchronous storage
   IO, and it does not change any existing syscall number, register convention,
   `VECTOR_SYSCALL` / DPL layout, or the "syscall sends no EOI" rule.
+- `SYS_READDIR` (number=28): reads a bounded batch of directory entries from an
+  open fd into a user `struct bigos_dirent[]`. ABI: `rdi` = fd, `rsi` = user
+  entries buffer, `rdx` = requested entry count. The request is bounded by
+  `SYS_DIRENT_MAX_ENTRIES`, copies out through user-buffer validation, and
+  returns an entry count or a deterministic negative fd/VFS errno.
+- `SYS_STAT` (number=29) / `SYS_FSTAT` (number=30): copy bounded metadata into a
+  user `struct stat`. `SYS_STAT` takes `rdi` = user path and `rsi` = user output
+  pointer; `SYS_FSTAT` takes `rdi` = fd and `rsi` = user output pointer. These
+  expose the current file-vs-directory metadata subset only, not complete POSIX
+  `stat(2)` semantics.
+- `SYS_CHDIR` (number=31): takes `rdi` = user path and commits the process cwd
+  only after bounded path copy, resolution, and directory validation.
+- `SYS_GETCWD` (number=32): takes `rdi` = user buffer and `rsi` = buffer size,
+  then copies the NUL-terminated cwd or returns deterministic `-ERANGE`,
+  `-EFAULT`, or `-EINVAL`.
+- `SYS_RENAME` (number=33): takes `rdi` = old user path and `rsi` = new user path.
+  It is restricted to the current bounded writable `/rw` regular-file semantics
+  and does not imply full persistent filesystem or cross-device rename support.
 
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
+
+Userland raw syscall primitives `syscall0` through `syscall6` remain
+BigOS-specific low-level helpers. They bind the number and return value to `rax`,
+arguments to `rdi`, `rsi`, `rdx`, `r10`, `r8`, and `r9`, and list `rcx`, `r11`,
+and `memory` clobbers. A source-level contract test checks these constraints so
+wrapper edits cannot silently drift from this ABI; higher-level libc wrappers
+remain responsible for translating negative kernel returns into positive
+`errno` plus the documented failure sentinel.
 
 ## Validation: Default-Off Build Switches And Deterministic Markers
 

@@ -35,6 +35,20 @@ def parse_user_defines(source: str) -> dict[str, int]:
     return {name: int(value) for name, value in re.findall(r'^#define\s+([A-Z][A-Z0-9_]+)\s+(\d+)$', source, re.M)}
 
 
+def extract_c_function(source: str, signature: str) -> str:
+    start = source.index(signature)
+    body_start = source.index('{', start)
+    depth = 0
+    for index in range(body_start, len(source)):
+        if source[index] == '{':
+            depth += 1
+        elif source[index] == '}':
+            depth -= 1
+            if depth == 0:
+                return source[start:index + 1]
+    raise AssertionError(f'function body not found for {signature}')
+
+
 def test_syscall_vector_constant_is_named_and_centralized() -> None:
     interrupt_h = read_source('include/irq/interrupt.h')
 
@@ -84,6 +98,44 @@ def test_user_libc_syscall_and_errno_mirrors_match_kernel_headers() -> None:
     assert user_errno['ENOENT'] == 2
     assert user_errno['E2BIG'] == 7
     assert user_errno['ENOEXEC'] == 8
+
+
+def test_user_crt0_exit_number_matches_shared_syscall_mirror() -> None:
+    crt0 = read_source('user/crt0/crt0.s')
+    user_syscalls = parse_user_defines(read_source('user/libc/include/sys_nr.h'))
+
+    assert '.equ SYS_EXIT, 3' in crt0
+    assert 'movq $SYS_EXIT, %rax' in crt0
+    assert user_syscalls['SYS_EXIT'] == 3
+
+
+def test_user_raw_syscall_primitives_follow_register_contract() -> None:
+    syscall_c = read_source('user/libc/syscall.c')
+
+    for nr_args in range(7):
+        params = ', '.join(['long n', *[f'long a{i}' for i in range(nr_args)]])
+        body = extract_c_function(syscall_c, f'long syscall{nr_args}({params})')
+
+        assert '"int $0x80"' in body
+        assert '"=a"(ret)' in body
+        assert '"a"(n)' in body
+        assert '"rcx", "r11", "memory"' in body
+
+        if nr_args >= 1:
+            assert '"D"(a0)' in body
+        if nr_args >= 2:
+            assert '"S"(a1)' in body
+        if nr_args >= 3:
+            assert '"d"(a2)' in body
+        if nr_args >= 4:
+            assert 'register long r10 __asm__("r10") = a3;' in body
+            assert '"r"(r10)' in body
+        if nr_args >= 5:
+            assert 'register long r8 __asm__("r8") = a4;' in body
+            assert '"r"(r8)' in body
+        if nr_args >= 6:
+            assert 'register long r9 __asm__("r9") = a5;' in body
+            assert '"r"(r9)' in body
 
 
 def test_syscall_abi_mapping_is_documented_in_arch_docs() -> None:
