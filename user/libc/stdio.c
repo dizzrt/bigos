@@ -156,3 +156,20 @@ int fprintf(FILE *stream, const char *fmt, ...) {
     va_end(ap);
     return count;
 }
+
+void perror(const char *s) {
+    int fd = stream_fd(stderr);
+    if (fd < 0)
+        return;
+    if (s != NULL && s[0] != 0) {
+        int count = 0;
+        if (print_str(fd, s, &count) < 0)
+            return;
+        if (print_str(fd, ": ", &count) < 0)
+            return;
+    }
+    int count = 0;
+    if (print_str(fd, strerror(errno), &count) < 0)
+        return;
+    (void)write_char_fd(fd, '\n');
+}

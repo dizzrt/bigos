@@ -241,6 +241,28 @@ namespace sys {
             return 0;
         }
 
+#ifdef BIGOS_USER_PROCESS
+        static uint64_t *iret_tail(irq::InterruptFrame *__frame) noexcept {
+            return (uint64_t *)((uint8_t *)__frame + sizeof(irq::InterruptFrame));
+        }
+
+        static void load_user_stack_tail(irq::InterruptFrame *__frame) noexcept {
+            if (__frame == nullptr || !bigos::arch::vm_user::is_user_return_frame(__frame))
+                return;
+            uint64_t *tail = iret_tail(__frame);
+            __frame->rsp = tail[0];
+            __frame->ss = tail[1];
+        }
+
+        static void store_user_stack_tail(irq::InterruptFrame *__frame) noexcept {
+            if (__frame == nullptr || !bigos::arch::vm_user::is_user_return_frame(__frame))
+                return;
+            uint64_t *tail = iret_tail(__frame);
+            tail[0] = __frame->rsp;
+            tail[1] = __frame->ss;
+        }
+#endif
+
         static int64_t sys_dup(uint64_t __oldfd) noexcept {
             return bigos::proc::dup_fd_current((uint32_t)__oldfd);
         }
@@ -713,8 +735,12 @@ namespace sys {
             case SYS_SIGRETURN:
                 // sigreturn restores the interrupted user context (including rax)
                 // directly into the frame and must NOT have rax overwritten by the
-                // shared return-value path below. It sends no i8259 EOI.
+                // shared return-value path below. The real ring3 rsp/ss live in
+                // the iret tail, so synchronize it around the restore. It sends no
+                // i8259 EOI.
+                __detail::load_user_stack_tail(__frame);
                 bigos::signal::sigreturn(__frame);
+                __detail::store_user_stack_tail(__frame);
                 return;
 #endif
             default:

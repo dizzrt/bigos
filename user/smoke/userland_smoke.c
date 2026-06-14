@@ -226,7 +226,7 @@ static void test_fork_exec(char **envp) {
         execve("/bin/echo", argv, envp);
         exit(127);
     }
-    pid_t reaped = wait(pid);
+    pid_t reaped = waitpid(pid, NULL, 0);
     if (reaped != pid)
         fail("wait");
 }
@@ -249,7 +249,7 @@ static void test_pipe(void) {
     close(fds[1]);
     char buf[16];
     ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-    wait(pid);
+    waitpid(pid, NULL, 0);
     if (n <= 0)
         fail("pipe-read");
     buf[n] = 0;
@@ -593,10 +593,95 @@ static void test_time_identity(void) {
     long now = time_now();
     if (now <= 0)
         fail("time");
+    time_t out = 0;
+    time_t now2 = time(&out);
+    if (now2 <= 0 || out != now2)
+        fail("time-wrapper");
     unsigned long tick0 = get_tick();
     unsigned long tick1 = get_tick();
     if (tick1 < tick0)
         fail("tick");
+}
+
+static void test_wait_wrappers(char **envp) {
+    (void)envp;
+    pid_t pid = fork();
+    if (pid < 0)
+        fail("waitpid-fork");
+    if (pid == 0) {
+        exit(5);
+    }
+    int status = -1;
+    errno = 0;
+    if (waitpid(pid, &status, 1) != -1 || errno != EINVAL)
+        fail("waitpid-options");
+    if (wait(&status) != pid || status != 5)
+        fail("wait-any-status");
+
+    pid = fork();
+    if (pid < 0)
+        fail("wait-specific-fork");
+    if (pid == 0)
+        exit(6);
+    status = -1;
+    if (waitpid(pid, &status, 0) != pid || status != 6)
+        fail("waitpid-status");
+}
+
+static void test_error_text(void) {
+    if (strcmp(strerror(ENOENT), "No such file or directory") != 0)
+        fail("strerror-known");
+    if (strcmp(strerror(12345), "Unknown error") != 0)
+        fail("strerror-unknown");
+    errno = ENOENT;
+    perror("smoke_perror");
+}
+
+static volatile int g_signal_handler_seen;
+static volatile unsigned long g_signal_spin;
+
+static void smoke_usr1_handler(int signo) {
+    if (signo == SIGUSR1)
+        g_signal_handler_seen = 1;
+}
+
+static void spin_in_user_mode(unsigned long rounds) {
+    for (unsigned long i = 0; i < rounds; i++)
+        g_signal_spin += i | 1ul;
+}
+
+static void test_signal_handler_return(void) {
+    struct sigaction act;
+    struct sigaction oldact;
+    act.sa_handler = smoke_usr1_handler;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+    if (sigaction(SIGUSR1, &act, &oldact) != 0)
+        fail("sigaction-install");
+    if (oldact.sa_handler != SIG_DFL)
+        fail("sigaction-old");
+
+    sigset_t set;
+    sigset_t oldmask;
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    if (sigprocmask(SIG_BLOCK, &set, &oldmask) != 0)
+        fail("sigmask-block");
+    if (oldmask != 0)
+        fail("sigmask-old");
+    if (kill(getpid(), SIGUSR1) != 0)
+        fail("sigmask-kill");
+    spin_in_user_mode(200000ul);
+    if (g_signal_handler_seen != 0)
+        fail("sigmask-blocked");
+    if (sigprocmask(SIG_UNBLOCK, &set, &oldmask) != 0)
+        fail("sigmask-unblock");
+    if ((oldmask & (1ul << (SIGUSR1 - 1))) == 0)
+        fail("sigmask-unblock-old");
+    for (int i = 0; i < 80 && g_signal_handler_seen == 0; i++)
+        spin_in_user_mode(200000ul);
+    if (g_signal_handler_seen != 1)
+        fail("signal-handler-return");
 }
 
 static void test_signal_default_terminate(void) {
@@ -605,7 +690,7 @@ static void test_signal_default_terminate(void) {
         fail("signal-fork");
     if (pid == 0) {
         for (;;)
-            (void)get_tick();
+            spin_in_user_mode(200000ul);
     }
 
     if (kill(pid, 9) != 0)
@@ -722,7 +807,7 @@ static void test_smoke_shell(char **envp) {
     write_all_or_exit(input[1], "echo shell-alive\n");
     write_all_or_exit(input[1], "exit 0\n");
     close(input[1]);
-    if (wait(pid) != pid)
+    if (waitpid(pid, NULL, 0) != pid)
         fail("shell-wait");
 
     require_file_contains("/rw/smoke_exit.txt", "smoke_exit requested=7");
@@ -761,13 +846,16 @@ int main(int argc, char **argv, char **envp) {
     test_runtime_filesystem();
     test_current_directory(envp);
     test_time_identity();
+    test_wait_wrappers(envp);
+    test_error_text();
+    test_signal_handler_return();
     test_smoke_programs(envp);
     test_smoke_shell(envp);
     test_signal_default_terminate();
     emit("BIGOS_USERLAND_PASSED\n");
     /* Idle: as PID-1 this must not exit; reap any further children. */
     for (;;) {
-        if (wait(WAIT_ANY) < 0) {
+        if (wait(NULL) < 0) {
         }
     }
     return 0;

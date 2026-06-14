@@ -9,6 +9,36 @@
 
 int errno = 0;
 
+#define BIGOS_SIG_MIN 1
+#define BIGOS_SIG_MAX 31
+#define BIGOS_SIG_COUNT BIGOS_SIG_MAX
+#define BIGOS_SIGACTION_DEFAULT 0
+#define BIGOS_SIGACTION_IGNORE  1
+#define BIGOS_SIGACTION_HANDLER 2
+
+struct bigos_signal_disp {
+    unsigned long action;
+    unsigned long handler;
+};
+
+static sighandler_t g_signal_handlers[BIGOS_SIG_COUNT + 1];
+char __bigos_signal_stack[1024] __attribute__((aligned(16)));
+
+void __bigos_signal_dispatch(int signo);
+void __bigos_signal_trampoline(void);
+
+__asm__(".global __bigos_signal_trampoline\n"
+        "__bigos_signal_trampoline:\n"
+        "    mov %rsp, %r12\n"
+        "    lea __bigos_signal_stack+1024(%rip), %rsp\n"
+        "    and $-16, %rsp\n"
+        "    call __bigos_signal_dispatch\n"
+        "    mov %r12, %rsp\n"
+        "    mov $19, %rax\n"
+        "    int $0x80\n"
+        "1:\n"
+        "    jmp 1b\n");
+
 long syscall0(long n) {
     long ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(n) : "rcx", "r11", "memory");
@@ -102,8 +132,16 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
     return (int)errno_translate(syscall3(SYS_EXECVE, (long)path, (long)argv, (long)envp));
 }
 
-pid_t wait(pid_t pid) {
-    return wait_status(pid, NULL);
+pid_t wait(int *status) {
+    return waitpid((pid_t)WAIT_ANY, status, 0);
+}
+
+pid_t waitpid(pid_t pid, int *status, int options) {
+    if (options != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return wait_status(pid, status);
 }
 
 pid_t wait_status(pid_t pid, int *status) {
@@ -204,6 +242,128 @@ long time_now(void) {
     return syscall0(SYS_GET_TIME);
 }
 
+time_t time(time_t *out) {
+    time_t now = (time_t)syscall0(SYS_GET_TIME);
+    if (out != NULL)
+        *out = now;
+    return now;
+}
+
 unsigned long get_tick(void) {
     return (unsigned long)syscall0(SYS_GET_TICK);
+}
+
+static int valid_user_signo(int signo) {
+    return signo >= BIGOS_SIG_MIN && signo <= BIGOS_SIG_MAX;
+}
+
+static sigset_t signo_bit(int signo) {
+    return (sigset_t)1ul << (signo - 1);
+}
+
+int sigemptyset(sigset_t *set) {
+    if (set == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    *set = 0;
+    return 0;
+}
+
+int sigfillset(sigset_t *set) {
+    if (set == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    *set = (sigset_t)((1ul << BIGOS_SIG_COUNT) - 1ul);
+    return 0;
+}
+
+int sigaddset(sigset_t *set, int signo) {
+    if (set == NULL || !valid_user_signo(signo)) {
+        errno = EINVAL;
+        return -1;
+    }
+    *set |= signo_bit(signo);
+    return 0;
+}
+
+int sigdelset(sigset_t *set, int signo) {
+    if (set == NULL || !valid_user_signo(signo)) {
+        errno = EINVAL;
+        return -1;
+    }
+    *set &= ~signo_bit(signo);
+    return 0;
+}
+
+int sigismember(const sigset_t *set, int signo) {
+    if (set == NULL || !valid_user_signo(signo)) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (*set & signo_bit(signo)) != 0;
+}
+
+void __bigos_signal_dispatch(int signo) {
+    if (!valid_user_signo(signo))
+        return;
+    sighandler_t handler = g_signal_handlers[signo];
+    if (handler != NULL && handler != SIG_DFL && handler != SIG_IGN)
+        handler(signo);
+}
+
+int sigaction(int signo, const struct sigaction *act, struct sigaction *oldact) {
+    if (!valid_user_signo(signo)) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    struct bigos_signal_disp raw_old;
+    struct bigos_signal_disp *old_ptr = oldact != NULL ? &raw_old : NULL;
+    unsigned long action = BIGOS_SIGACTION_DEFAULT;
+    unsigned long handler = 0;
+    sighandler_t user_handler = SIG_DFL;
+
+    if (act != NULL) {
+        if (act->sa_flags != 0) {
+            errno = EINVAL;
+            return -1;
+        }
+        user_handler = act->sa_handler;
+        if (user_handler == SIG_DFL) {
+            action = BIGOS_SIGACTION_DEFAULT;
+            handler = 0;
+        } else if (user_handler == SIG_IGN) {
+            action = BIGOS_SIGACTION_IGNORE;
+            handler = 0;
+        } else {
+            action = BIGOS_SIGACTION_HANDLER;
+            handler = (unsigned long)__bigos_signal_trampoline;
+        }
+    }
+
+    long ret = errno_translate(syscall4(SYS_SIGACTION, (long)signo, (long)action, (long)handler, (long)old_ptr));
+    if (ret < 0)
+        return -1;
+
+    if (oldact != NULL) {
+        oldact->sa_mask = 0;
+        oldact->sa_flags = 0;
+        if (raw_old.action == BIGOS_SIGACTION_IGNORE) {
+            oldact->sa_handler = SIG_IGN;
+        } else if (raw_old.action == BIGOS_SIGACTION_HANDLER) {
+            oldact->sa_handler = g_signal_handlers[signo] != NULL ? g_signal_handlers[signo] : SIG_DFL;
+        } else {
+            oldact->sa_handler = SIG_DFL;
+        }
+    }
+    if (act != NULL)
+        g_signal_handlers[signo] = user_handler;
+    return 0;
+}
+
+int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
+    sigset_t requested = set != NULL ? *set : 0;
+    return (int)errno_translate(syscall3(SYS_SIGPROCMASK, (long)how, (long)requested, (long)oldset));
 }

@@ -94,11 +94,11 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 38 are complete and now form a compressed minimal usable
+Stages 20 through 39 are complete and now form a compressed minimal usable
 system baseline. The completed work can be treated as the foundation for future
 planning rather than as individual future-stage items.
 
-阶段 20 到阶段 38 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
+阶段 20 到阶段 39 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
 基础能力，而不是继续把它们作为未来阶段逐项展开。
 
 - Kernel foundation: x86_64 legacy boot, text/serial output,
@@ -138,7 +138,7 @@ user-visible capability goal.
 后续工作应推动 BigOS 走向更成熟、可用的系统，同时保持当前 x86_64-only 的交付目标。
 多个扩展方向可以并行推进，但每个主线阶段仍应有清晰的用户可见能力目标。
 
-### Stage 39: Usability And POSIX Surface Hardening / 可用性与 POSIX 表层能力硬化
+### Stage 39 (Complete): Usability And POSIX Surface Hardening / 可用性与 POSIX 表层能力硬化（已完成）
 
 - Mature the existing shell, process, file, fd, pipe, redirection, signal, time,
   identity, and error-reporting behavior into a more coherent bounded Unix-like

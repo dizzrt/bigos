@@ -1,9 +1,7 @@
 ## Purpose
 
 定义 BigOS 最小交互式 `/bin/sh` 能力：提供有界读-解析-执行循环、内建命令、基于 `fork`/`execve`/`wait` 的外部命令执行、PATH 查找，以及单级管道和基本重定向。
-
 ## Requirements
-
 ### Requirement: 交互式读-解析-执行循环
 
 BigOS SHALL 提供一个最小交互式 shell `/bin/sh`（C 语言，链接用户 crt0 与用户 libc）。shell MUST 从标准输入读取一行、按空白把该行解析为命令名与参数（argv），并执行命令，随后回到读行状态。行长、argv 个数与管道段数 MUST 有界；超出上界时 shell MUST 确定性报错并继续循环，而不是崩溃。
@@ -105,7 +103,6 @@ BigOS userland SHALL provide a small static `/bin/pwd` user program that reports
 - **WHEN** `getcwd` fails because of buffer sizing, user-memory validation, or another deterministic kernel error
 - **THEN** `/bin/pwd` MUST report an errno-based failure through stderr or stdout and exit nonzero
 - **AND** MUST NOT require hosted libc error formatting or complete POSIX utility behavior
-
 
 ### Requirement: 经 fork+execve+wait 运行外部命令
 
@@ -324,3 +321,37 @@ BigOS shell SHALL make prompt text, line-input feedback, control-character feedb
 - **WHEN** shell executes builtins or external commands after terminal input processing
 - **THEN** command stdout/stderr MUST remain visible through the ordinary fd/syscall path
 - **AND** prompt, echo, or control-character feedback MUST NOT be confused with child process failure, shell crash, or smoke marker output
+
+### Requirement: Shell fd isolation after failure
+The BigOS shell SHALL preserve its parent-loop standard input, output, and error descriptors after failed redirection, failed pipe setup, failed fork, failed exec, unsupported syntax, or child command failure.
+
+#### Scenario: Failed output redirection does not break shell stdout
+- **WHEN** a command with output redirection fails before the child command runs
+- **THEN** the shell reports the error, returns to the prompt or next command, and later output still appears on the original stdout
+
+#### Scenario: Failed input redirection does not break shell stdin
+- **WHEN** a command with input redirection fails because the input path cannot be opened
+- **THEN** the shell reports the error, keeps the original stdin usable, and can read the next command
+
+### Requirement: Shell single-pipe status and close behavior
+The BigOS shell SHALL keep single-stage pipe support bounded and deterministic, closing unused pipe endpoints in all participating processes and reporting the right-side command status as the pipe command status.
+
+#### Scenario: Pipe writer EOF reaches reader
+- **WHEN** the left command exits and all write ends are closed
+- **THEN** the right command observes EOF after consuming the pipe contents
+
+#### Scenario: Pipe status follows right command
+- **WHEN** both sides of a single-stage pipe complete
+- **THEN** the shell records the bounded status of the right-side command as the pipeline status
+
+### Requirement: Shell Stage 39 diagnostic consistency
+The BigOS shell SHALL produce deterministic diagnostics and bounded statuses for command-not-found, exec failure, unsupported syntax, parse errors, and external command non-zero exits.
+
+#### Scenario: Command not found status
+- **WHEN** a command without a slash cannot be found through the bounded PATH lookup
+- **THEN** the shell reports a command-not-found diagnostic and records status 127
+
+#### Scenario: Unsupported syntax status
+- **WHEN** a command line contains syntax outside the supported bounded shell grammar
+- **THEN** the shell reports unsupported syntax and records status 2 without partially executing the command
+

@@ -1,6 +1,6 @@
 /* BigOS PID-1 init: resident C init linked against crt0 and the user libc.
  *
- * Starts /bin/sh via fork + execve, then loops in wait() reaping exited children
+ * Starts /bin/sh via fork + execve, then loops in waitpid() reaping exited children
  * (including orphans reparented to PID-1). When /bin/sh exits it is relaunched.
  * init itself never exits. fork/execve/wait failures are reported deterministically
  * and routed through the existing reaper / BIGOS_INIT_* boundaries. */
@@ -30,7 +30,7 @@ int main(int argc, char **argv, char **envp) {
     pid_t shell_pid = spawn_shell(envp);
 
     for (;;) {
-        pid_t reaped = wait(WAIT_ANY);
+        pid_t reaped = waitpid((pid_t)WAIT_ANY, NULL, 0);
         if (reaped < 0) {
             /* No children to wait for (transient); keep the shell alive. */
             if (shell_pid < 0)

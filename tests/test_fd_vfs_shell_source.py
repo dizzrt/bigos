@@ -229,11 +229,11 @@ def test_shell_errors_and_builtin_redirection_use_fd_paths() -> None:
     assert 'static void sh_error(const char *prefix, const char *detail)' in shell
     assert 'write_all(2, prefix);' in shell
     assert 'write_all(2, detail);' in shell
-    assert 'static int run_builtin(int argc, char **argv, int out_fd)' in shell
+    assert 'static int run_builtin(int argc, char **argv, int out_fd, int last_status, int *status)' in shell
     assert 'int fd = out_fd >= 0 ? out_fd : 1;' in shell
     assert 'strcmp(argv[0], "cd") == 0' in shell
     assert 'chdir(argv[1])' in shell
-    assert 'if (run_builtin(n, args, out_fd))' in shell
+    assert 'if (run_builtin(n, args, out_fd, last_status, &status))' in shell
     assert 'sh: line too long' in shell
     assert 'sh: command not found: ' in shell
 
@@ -282,12 +282,15 @@ def test_runtime_filesystem_error_mapping_and_user_visible_boundary() -> None:
     assert 'return (int64_t)__status;' in syscall
     assert 'static long errno_translate(long ret)' in libc
     assert 'errno = (int)(-ret);' in libc
+    assert 'const char *strerror(int errnum)' in read_source('user/libc/string.c')
+    assert 'void perror(const char *s)' in read_source('user/libc/stdio.c')
     assert 'status_name(' not in libc
     assert 'status_name(' not in shell
     assert 'status_name(' not in tools
     assert 'errno=' in tools
-    assert 'sh: cannot open ' in shell
-    assert 'sh: cd failed: ' in shell
+    assert 'static void sh_errno_error(const char *prefix, const char *detail, int err)' in shell
+    assert 'sh_errno_error("sh: cannot open ", argv[r + 1], errno)' in shell
+    assert 'sh_errno_error("sh: cd failed: ", argv[1], errno)' in shell
 
 
 def test_runtime_filesystem_blocking_guard_review_is_documented() -> None:

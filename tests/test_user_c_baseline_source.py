@@ -34,7 +34,9 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     stdio = read_source('user/libc/include/stdio.h')
     stdlib = read_source('user/libc/include/stdlib.h')
     string = read_source('user/libc/include/string.h')
+    signal = read_source('user/libc/include/signal.h')
     unistd = read_source('user/libc/include/unistd.h')
+    time_h = read_source('user/libc/include/time.h')
     fcntl = read_source('user/libc/include/fcntl.h')
     dirent = read_source('user/libc/include/bigos_dirent.h')
     stat = read_source('user/libc/include/sys/stat.h')
@@ -43,6 +45,7 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
 
     for include in (
         '"stdio.h"',
+        '"signal.h"',
         '"stdlib.h"',
         '"string.h"',
         '"errno.h"',
@@ -52,16 +55,24 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
         '"sys/stat.h"',
         '"sys/types.h"',
         '"sys/wait.h"',
+        '"time.h"',
     ):
         assert include in libc
 
     assert 'typedef struct __bigos_FILE FILE;' in stdio
     assert 'extern FILE *stderr;' in stdio
     assert 'int fprintf(FILE *stream, const char *fmt, ...);' in stdio
+    assert 'void perror(const char *s);' in stdio
     assert 'fopen(' not in stdio and 'fclose(' not in stdio
     assert 'void *malloc(size_t n);' in stdlib
     assert 'char *getenv(const char *name);' in stdlib
     assert 'int strncmp(const char *a, const char *b, size_t n);' in string
+    assert 'const char *strerror(int errnum);' in string
+    assert '#define SIGUSR1 10' in signal
+    assert 'typedef unsigned long sigset_t;' in signal
+    assert 'struct sigaction' in signal
+    assert 'int sigaction(int signo, const struct sigaction *act, struct sigaction *oldact);' in signal
+    assert 'int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);' in signal
     assert 'ssize_t write(int fd, const void *buf, size_t len);' in unistd
     assert 'int chdir(const char *path);' in unistd
     assert 'char *getcwd(char *buf, size_t size);' in unistd
@@ -76,7 +87,11 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'int stat(const char *path, struct stat *st);' in stat
     assert 'int fstat(int fd, struct stat *st);' in stat
     assert '#define WAIT_ANY' in wait
+    assert 'pid_t wait(int *status);' in wait
+    assert 'pid_t waitpid(pid_t pid, int *status, int options);' in wait
     assert 'pid_t wait_status(pid_t pid, int *status);' in wait
+    assert 'typedef long time_t;' in time_h
+    assert 'time_t time(time_t *out);' in time_h
 
 
 def test_bounded_path_tool_sources_use_libc_contracts() -> None:
@@ -127,8 +142,10 @@ def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
     assert 'record("smoke_errno open=-1 errno=2\\n")' in errno_probe
     assert 'return status;' in exit_probe
     assert '#include "../../libc/include/stdio.h"' in libc_subset
+    assert '#include "../../libc/include/signal.h"' in libc_subset
     assert '#include "../../libc/include/sys/wait.h"' in libc_subset
     assert 'WAIT_ANY == 0' in libc_subset
+    assert 'SIGUSR1 != 10' in libc_subset
     assert 'fprintf(stderr, "smoke_libc_subset stderr errno=%d env=%s\\n"' in libc_subset
     assert 'malloc((size_t)-64)' in libc_subset
     assert 'memmove(buf + 2, buf, 4)' in libc_subset
@@ -151,6 +168,9 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'require_file_contains("/rw/smoke_libc_subset.txt"' in smoke
     assert 'test_runtime_filesystem();' in smoke
     assert 'test_current_directory(envp);' in smoke
+    assert 'test_wait_wrappers(envp);' in smoke
+    assert 'test_error_text();' in smoke
+    assert 'test_signal_handler_return();' in smoke
     assert 'fstat(fd, &st)' in smoke
     assert 'write_all_or_exit(input[1], "/bin/smoke/exit 7\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\\n");' in smoke
@@ -158,11 +178,11 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'write_all_or_exit(input[1], "/bin/pwd\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\\n");' in smoke
     assert 'write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt > smoke_shell_cat_redir.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/stat smoke_shell_path_file.txt > smoke_shell_stat.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/cat smoke_shell_renamed.txt > smoke_shell_cat_redir.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/stat smoke_shell_renamed.txt > smoke_shell_stat.txt\\n");' in smoke
     assert 'write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\\n");' in smoke
     assert 'write_all_or_exit(input[1], "ls . > smoke_shell_ls_rw.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "cat smoke_shell_path_file.txt | /bin/cat\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "cat smoke_shell_renamed.txt | /bin/cat\\n");' in smoke
     assert 'write_all_or_exit(input[1], "/bin/cat /rw/no_such_path_tool\\n");' in smoke
     assert 'write_all_or_exit(input[1], "/bin/rm /boot/user/init.elf\\n");' in smoke
     assert 'write_all_or_exit(input[1], "/bin/rm smoke_shell_cat_redir.txt\\n");' in smoke
@@ -174,9 +194,9 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'require_file_contains("/rw/smoke_shell_io.txt", "cat: /rw/no_such_path_tool: open errno=2")' in smoke
     assert 'require_file_contains("/rw/smoke_shell_io.txt", "rm: /boot/user/init.elf: errno=30")' in smoke
     assert 'require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_cat_redir.txt: errno=2")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_path_file.txt type=file")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_renamed.txt type=file")' in smoke
     assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir smoke_shell_path_dir")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "file smoke_shell_path_file.txt")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "file smoke_shell_renamed.txt")' in smoke
     wait_index = proc.index('int64_t wait_current')
     mark_index = proc.index('mark_reap_pending(match);', wait_index)
     reap_index = proc.index('reap_pending_processes();', mark_index)

@@ -267,6 +267,8 @@ Notes:
 - For OpenSpec work, write change artifacts in Chinese by default, including
   proposal, design, specs, tasks, validation notes, and documentation tasks,
   while preserving OpenSpec-required structural keywords when needed for tooling.
+- For OpenSpec work, keep change names focused on the capability or behavior and
+  do not include roadmap stage numbers in change names.
 - For reviews, focus on correctness, undefined behavior, bootability, memory
   safety, interrupt safety, and initialization order.
 - For documentation sync, keep the current bounded userland baseline aligned

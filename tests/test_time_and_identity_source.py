@@ -172,6 +172,16 @@ def test_identity_time_syscall_numbers_appended_after_fork() -> None:
     assert 'SYS_GETGID = 15' in syscall_h
 
 
+def test_user_time_wrapper_exposes_bounded_seconds() -> None:
+    time_h = read_source('user/libc/include/time.h')
+    libc = read_source('user/libc/syscall.c')
+
+    assert 'typedef long time_t;' in time_h
+    assert 'time_t time(time_t *out);' in time_h
+    assert 'time_t time(time_t *out)' in libc
+    assert 'syscall0(SYS_GET_TIME)' in libc
+
+
 def test_identity_time_syscall_dispatch_branches() -> None:
     syscall = read_source('kernel/core/syscall/syscall.cc')
 

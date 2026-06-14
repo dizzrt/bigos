@@ -21,6 +21,7 @@ def read_source(relative: str) -> str:
 
 def test_signal_numbers_and_bitmap_width() -> None:
     sig_h = read_source('include/bigos/signal.h')
+    user_sig_h = read_source('user/libc/include/signal.h')
 
     # Fixed non-realtime numbers reuse conventional POSIX values.
     assert 'SIGKILL = 9' in sig_h
@@ -33,16 +34,53 @@ def test_signal_numbers_and_bitmap_width() -> None:
     assert 'using SigSet = uint64_t;' in sig_h
     assert 'SIG_MAX = 31' in sig_h
     assert 'SIG_COUNT = SIG_MAX' in sig_h
+    for token in (
+        '#define SIGKILL 9',
+        '#define SIGUSR1 10',
+        '#define SIGSEGV 11',
+        '#define SIGUSR2 12',
+        '#define SIGTERM 15',
+        '#define SIGCHLD 17',
+        'typedef unsigned long sigset_t;',
+        '#define SIG_BLOCK   0',
+        '#define SIG_UNBLOCK 1',
+        '#define SIG_SETMASK 2',
+    ):
+        assert token in user_sig_h
 
 
 def test_signal_syscall_numbers_appended_after_getgid() -> None:
     syscall_h = read_source('include/bigos/syscall.h')
+    user_sys_h = read_source('user/libc/include/sys_nr.h')
 
     assert 'SYS_GETGID = 15' in syscall_h
     assert 'SYS_KILL = 16' in syscall_h
     assert 'SYS_SIGACTION = 17' in syscall_h
     assert 'SYS_SIGPROCMASK = 18' in syscall_h
     assert 'SYS_SIGRETURN = 19' in syscall_h
+    assert '#define SYS_SIGACTION   17' in user_sys_h
+    assert '#define SYS_SIGPROCMASK 18' in user_sys_h
+    assert '#define SYS_SIGRETURN   19' in user_sys_h
+
+
+def test_user_signal_wrappers_and_trampoline_contract() -> None:
+    user_sig_h = read_source('user/libc/include/signal.h')
+    libc = read_source('user/libc/syscall.c')
+
+    assert 'struct sigaction' in user_sig_h
+    assert 'sighandler_t sa_handler;' in user_sig_h
+    assert 'sigset_t sa_mask;' in user_sig_h
+    assert 'int sa_flags;' in user_sig_h
+    assert 'int sigaction(int signo, const struct sigaction *act, struct sigaction *oldact);' in user_sig_h
+    assert 'int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);' in user_sig_h
+    assert 'void __bigos_signal_trampoline(void);' in libc
+    assert 'char __bigos_signal_stack[1024] __attribute__((aligned(16)));' in libc
+    assert 'lea __bigos_signal_stack+1024(%rip), %rsp' in libc
+    assert 'mov %r12, %rsp' in libc
+    assert 'mov $19, %rax' in libc
+    assert 'int $0x80' in libc
+    assert 'syscall4(SYS_SIGACTION' in libc
+    assert 'syscall3(SYS_SIGPROCMASK' in libc
 
 
 def test_errno_has_eperm_and_esrch_single_source() -> None:
@@ -119,19 +157,23 @@ def test_irq_return_delivery_point_is_user_frame_only() -> None:
     deliver_index = interrupt.index('bigos::signal::deliver_pending_to_user(__frame, current)')
     assert preempt_index < deliver_index
     gate = interrupt[preempt_index:deliver_index]
-    assert '(__frame->cs & 0x3) == 0x3' in gate
+    assert 'bigos::arch::vm_user::is_user_return_frame(__frame)' in gate
     assert 'has_deliverable_signal(current)' in gate
+    assert '__detail::load_user_stack_tail(__frame);' in interrupt
+    assert '__detail::store_user_stack_tail(__frame);' in interrupt
 
 
 def test_sigreturn_forces_user_constraints() -> None:
     sig = read_source('kernel/core/signal/signal.cc')
+    boundary = read_source('kernel/core/proc/arch_vm_user_boundary.cc')
 
     sigreturn = sig[sig.index('void sigreturn(') :]
     # Magic check, user-low-half rip/rsp constraint, forced user segments and IF.
     assert 'SIGFRAME_MAGIC' in sigreturn
     assert 'USER_LOW_HALF_LIMIT' in sigreturn
-    assert 'USER_CODE_SELECTOR' in sigreturn
-    assert 'USER_DATA_SELECTOR' in sigreturn
+    assert 'force_user_return_frame(' in sigreturn
+    assert 'USER_CODE_SELECTOR' in boundary
+    assert 'USER_DATA_SELECTOR' in boundary
     assert 'RFLAGS_IF' in sigreturn
 
 
@@ -144,7 +186,9 @@ def test_sigreturn_dispatch_does_not_overwrite_restored_rax() -> None:
     rax_writeback_index = dispatch.index('__frame->rax = (uint64_t)result;')
     assert sigreturn_index < rax_writeback_index
     branch = dispatch[sigreturn_index:rax_writeback_index]
+    assert '__detail::load_user_stack_tail(__frame);' in branch
     assert 'bigos::signal::sigreturn(__frame);' in branch
+    assert '__detail::store_user_stack_tail(__frame);' in branch
     assert 'return;' in branch
 
 

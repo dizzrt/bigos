@@ -37,6 +37,8 @@ int main(int argc, char **argv, char **envp) {
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
         write_all(2, "pwd: getcwd failed errno=");
         write_errno(errno);
+        write_all(2, " ");
+        write_all(2, strerror(errno));
         write_all(2, "\n");
         return 1;
     }

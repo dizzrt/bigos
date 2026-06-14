@@ -1,6 +1,7 @@
 /* Smoke libc-subset probe: validates the documented bounded C library surface. */
 #include "../../libc/include/errno.h"
 #include "../../libc/include/fcntl.h"
+#include "../../libc/include/signal.h"
 #include "../../libc/include/stdio.h"
 #include "../../libc/include/stdlib.h"
 #include "../../libc/include/string.h"
@@ -87,6 +88,8 @@ int main(int argc, char **argv, char **envp) {
     if (argc < 1 || argv == NULL || argv[0] == NULL)
         return 1;
     if (WAIT_ANY == 0)
+        return 1;
+    if (SIGUSR1 != 10)
         return 1;
     if (!check_environment(envp))
         return 2;

@@ -1,9 +1,7 @@
 ## Purpose
 
 定义 BigOS 最小 POSIX 信号能力：固定的信号编号集合与每信号默认动作；每进程 pending 位图、阻塞掩码与处置表（定长内联、信号投递路径无动态分配）；`kill`/`sigaction`/`sigprocmask`/`sigreturn` 系统调用；IRQ-return 到用户态边界的信号投递（默认动作走 exit/fault-to-reaper 生命周期，用户 handler 构造信号帧 + `sigreturn` 恢复）；`SIGKILL` 不可捕获/不可阻塞；基于 `bigos::cred::may_signal` 的「谁能 kill 谁」强制点；以及非法输入/越界用户栈的确定性失败语义与默认关闭验证开关。该能力以单核、同步、`int 0x80` 为前提，不引入实时信号、`siginfo` 完整负载、`SIGSTOP`/`SIGCONT` 作业控制、完整 `sigaction` 标志、进程组/会话、core dump、用户态 libc 信号包装或 SMP 跨核投递。
-
 ## Requirements
-
 ### Requirement: 信号编号集合与默认动作
 
 BigOS SHALL 定义一组固定的最小 POSIX 信号编号（非实时、信号号合并语义），并为每个信号定义确定性的默认动作（Terminate 或 Ignore）。信号集合宽度 MUST 适配每进程定长位图（不超过 64 个），实时信号 MUST NOT 在本阶段引入。
@@ -116,3 +114,26 @@ BigOS SHALL 通过默认关闭的 `signal_smoke`（`BIGOS_SIGNAL_SMOKE`）与源
 - **WHEN** 启用 `signal_smoke` 构建并在模拟器中启动
 - **THEN** 验证 MUST 覆盖「kill 默认动作终止目标」「用户 handler 捕获 + sigreturn 恢复」「掩码阻塞 pending、解除后投递」「`SIGKILL` 不可捕获/不可阻塞」「越权 kill 被拒绝」并发射有界判定 marker（如 `BIGOS_SIGNAL_PASSED`/`BIGOS_SIGNAL_FAILED`）
 - **AND** 该开关 MUST 默认关闭，默认启动 marker 与既有 smoke 矩阵 MUST 保持不变
+
+### Requirement: User signal handler return path
+BigOS SHALL provide a bounded user signal handler return path that routes handler completion through a libc-owned trampoline and `SYS_SIGRETURN`, restoring the interrupted user context or failing through the existing diagnostic path when the signal frame is invalid.
+
+#### Scenario: Handler returns to interrupted context
+- **WHEN** a process installs a handler for a supported signal and the handler returns normally
+- **THEN** control transfers through the signal trampoline to `SYS_SIGRETURN` and resumes the interrupted user context with the expected signal mask state
+
+#### Scenario: Invalid signal frame fails safely
+- **WHEN** `SYS_SIGRETURN` observes an invalid or unmapped user signal frame
+- **THEN** the kernel rejects the return through the existing bounded process-failure behavior instead of continuing with corrupted register state
+
+### Requirement: Signal wrapper and kernel contract alignment
+BigOS SHALL keep the user `sigaction` and `sigprocmask` data layout aligned with the kernel signal dispatch contract, including supported signal numbers, handler disposition, mask updates, and old-action or old-mask outputs.
+
+#### Scenario: sigaction reports old disposition
+- **WHEN** a user program installs a new disposition and requests the previous one
+- **THEN** the old disposition returned to user space reflects the process state before the update
+
+#### Scenario: sigprocmask reports old mask
+- **WHEN** a user program updates the signal mask and requests the previous mask
+- **THEN** the old mask returned to user space reflects the process state before the update
+

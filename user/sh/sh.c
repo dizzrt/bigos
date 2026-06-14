@@ -50,6 +50,15 @@ static void sh_error(const char *prefix, const char *detail) {
     write_all(2, "\n");
 }
 
+static void sh_errno_error(const char *prefix, const char *detail, int err) {
+    write_all(2, prefix);
+    if (detail != NULL)
+        write_all(2, detail);
+    write_all(2, ": ");
+    write_all(2, strerror(err));
+    write_all(2, "\n");
+}
+
 static void write_int(int fd, int value) {
     char digits[12];
     int n = 0;
@@ -300,7 +309,7 @@ static int run_builtin(int argc, char **argv, int out_fd, int last_status, int *
             return 1;
         }
         if (chdir(argv[1]) != 0) {
-            sh_error("sh: cd failed: ", argv[1]);
+            sh_errno_error("sh: cd failed: ", argv[1], errno);
             *status = 1;
         }
         return 1;
@@ -357,7 +366,7 @@ static int apply_redirects(char **argv, int *argc, int *in_fd, int *out_fd) {
             }
             int fd = open(argv[r + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) {
-                sh_error("sh: cannot open ", argv[r + 1]);
+                sh_errno_error("sh: cannot open ", argv[r + 1], errno);
                 close_redirects(*in_fd, *out_fd);
                 return -1;
             }
@@ -382,7 +391,7 @@ static int apply_redirects(char **argv, int *argc, int *in_fd, int *out_fd) {
             }
             int fd = open(argv[r + 1], O_RDONLY, 0);
             if (fd < 0) {
-                sh_error("sh: cannot open ", argv[r + 1]);
+                sh_errno_error("sh: cannot open ", argv[r + 1], errno);
                 close_redirects(*in_fd, *out_fd);
                 return -1;
             }
@@ -541,7 +550,7 @@ static int run_pipe(char **left, char **right) {
         close(fds[0]);
         close(fds[1]);
         if (lpid > 0)
-            wait(lpid);
+            wait_status(lpid, NULL);
         sh_error("sh: fork failed", NULL);
         return 126;
     }

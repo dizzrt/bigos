@@ -56,6 +56,8 @@ static int show_path(const char *path) {
             if (write(2, &ch, 1) != 1)
                 exit(1);
         }
+        write_all(2, " ");
+        write_all(2, strerror(errno));
         write_all(2, "\n");
         return 1;
     }

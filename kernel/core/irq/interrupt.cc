@@ -24,6 +24,28 @@ namespace irq {
         INTRDescriptor kernel_idt[IRQ_COUNT];
         IRQHandler isr_list[IRQ_COUNT];
 
+#ifdef BIGOS_USER_PROCESS
+        static uint64_t *iret_tail(InterruptFrame *__frame) noexcept {
+            return (uint64_t *)((uint8_t *)__frame + sizeof(InterruptFrame));
+        }
+
+        static void load_user_stack_tail(InterruptFrame *__frame) noexcept {
+            if (__frame == nullptr || !bigos::arch::vm_user::is_user_return_frame(__frame))
+                return;
+            uint64_t *tail = iret_tail(__frame);
+            __frame->rsp = tail[0];
+            __frame->ss = tail[1];
+        }
+
+        static void store_user_stack_tail(InterruptFrame *__frame) noexcept {
+            if (__frame == nullptr || !bigos::arch::vm_user::is_user_return_frame(__frame))
+                return;
+            uint64_t *tail = iret_tail(__frame);
+            tail[0] = __frame->rsp;
+            tail[1] = __frame->ss;
+        }
+#endif
+
         [[noreturn]] static void halt_cpu() noexcept {
             bigos::khalt();
         }
@@ -184,8 +206,11 @@ namespace irq {
             // not return here.
             if (bigos::arch::vm_user::is_user_return_frame(__frame)) {
                 bigos::proc::Process *current = bigos::proc::current_process();
-                if (current != nullptr && bigos::signal::has_deliverable_signal(current))
+                if (current != nullptr && bigos::signal::has_deliverable_signal(current)) {
+                    __detail::load_user_stack_tail(__frame);
                     bigos::signal::deliver_pending_to_user(__frame, current);
+                    __detail::store_user_stack_tail(__frame);
+                }
             }
 #endif
             return;

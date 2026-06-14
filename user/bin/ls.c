@@ -35,6 +35,8 @@ static void report_error(const char *path, const char *op) {
     write_all(2, op);
     write_all(2, " errno=");
     write_errno_value(errno);
+    write_all(2, " ");
+    write_all(2, strerror(errno));
     write_all(2, "\n");
 }
 

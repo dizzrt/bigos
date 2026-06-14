@@ -32,5 +32,6 @@ int putchar(int c);
 int puts(const char *s);
 int printf(const char *fmt, ...);
 int fprintf(FILE *stream, const char *fmt, ...);
+void perror(const char *s);
 
 #endif /* _BIGOS_USER_STDIO_H */

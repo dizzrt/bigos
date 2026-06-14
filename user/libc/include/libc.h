@@ -12,12 +12,14 @@
 #include "errno.h"        /* IWYU pragma: export */
 #include "bigos_dirent.h" /* IWYU pragma: export */
 #include "fcntl.h"        /* IWYU pragma: export */
+#include "signal.h"       /* IWYU pragma: export */
 #include "stdio.h"        /* IWYU pragma: export */
 #include "stdlib.h"       /* IWYU pragma: export */
 #include "string.h"       /* IWYU pragma: export */
 #include "sys/stat.h"     /* IWYU pragma: export */
 #include "sys/types.h"    /* IWYU pragma: export */
 #include "sys/wait.h"     /* IWYU pragma: export */
+#include "time.h"         /* IWYU pragma: export */
 #include "unistd.h"       /* IWYU pragma: export */
 
 /* --- BigOS-specific raw syscall primitives ---

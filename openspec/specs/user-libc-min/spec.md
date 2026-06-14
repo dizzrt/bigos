@@ -1,9 +1,7 @@
 ## Purpose
 
 定义 BigOS 最小用户态 libc 能力：为已暴露 syscall 提供 ABI wrapper 与 errno 翻译，提供 freestanding 字符串/内存函数、最小堆分配、标准输入输出、只读环境变量访问和细粒度标准头文件边界，支撑早期用户程序、shell 和简单静态 C 程序运行。
-
 ## Requirements
-
 ### Requirement: 系统调用 wrapper 与 errno 翻译
 
 BigOS 用户态 libc SHALL 为内核 `int 0x80` ABI（见 `bigos::sys::SyscallNumber`）的每个已暴露 syscall 提供 C 函数 wrapper，按固定寄存器约定（number -> rax，参数 -> rdi/rsi/rdx/r10/r8/r9，返回值 <- rax）发起 syscall。wrapper MUST 把内核返回的负 errno 值翻译为 POSIX 风格约定：把 `errno` 置为对应正值并返回 `-1`（或对应失败哨兵值），成功时直接返回内核结果。errno 码 MUST 复用单一来源 `include/bigos/errno.h`，不得在用户态另立一套数值。
@@ -74,7 +72,6 @@ BigOS 用户态 libc SHALL expose cwd-related declarations only in freestanding-
 - **WHEN** 文档或 headers 描述 cwd/path support
 - **THEN** they MUST describe it as a bounded BigOS subset with POSIX-style `.`/`..` component handling
 - **AND** MUST NOT claim full POSIX `realpath`, `fchdir`, `openat`, symlink, mount namespace, or thread-local cwd semantics unless a later spec adds them
-
 
 ### Requirement: 最小字符串与内存函数
 
@@ -411,3 +408,37 @@ BigOS SHALL keep userland libc documentation, public headers, and wrapper behavi
 #### Scenario: 英中镜像保持同一 ABI 事实
 - **WHEN** userland libc ABI documentation is updated under `docs/en`
 - **THEN** the corresponding `docs/zh` mirror MUST be updated with the same syscall wrapper, errno, and bounded subset facts
+
+### Requirement: Minimal signal header and wrappers
+The BigOS user libc SHALL expose a bounded `signal.h` surface for installed user programs, including supported signal constants, `sigset_t`, `struct sigaction`, `sigaction`, and `sigprocmask`, backed by the existing signal syscalls.
+
+#### Scenario: User program installs a signal handler
+- **WHEN** a static user program includes `signal.h` and calls `sigaction` for a supported signal
+- **THEN** the wrapper invokes the BigOS syscall ABI, returns zero on success, and preserves errno translation on failure
+
+#### Scenario: User program changes signal mask
+- **WHEN** a static user program calls `sigprocmask` with a supported mask operation
+- **THEN** the wrapper updates the process signal mask through the existing syscall and optionally writes the previous mask
+
+### Requirement: Bounded wait wrappers
+The BigOS user libc SHALL expose bounded `wait(int *status)` and `waitpid(pid_t pid, int *status, int options)` wrappers while preserving a BigOS-specific compatibility wrapper for callers that need the raw existing wait shape.
+
+#### Scenario: wait waits for any child
+- **WHEN** a user program calls `wait` with a status pointer
+- **THEN** libc waits for any child, returns the reaped child pid, and writes the raw bounded child status
+
+#### Scenario: waitpid rejects unsupported options
+- **WHEN** a user program calls `waitpid` with unsupported options
+- **THEN** libc returns `-1`, sets errno to a deterministic error, and does not request a child reap from the kernel
+
+### Requirement: Bounded time and error text interfaces
+The BigOS user libc SHALL expose `time`, `strerror`, and `perror` or equivalent bounded C/POSIX-like interfaces without requiring hosted libc, locale, dynamic allocation, or complete stdio semantics.
+
+#### Scenario: time returns kernel seconds
+- **WHEN** a user program calls `time` with a non-null output pointer
+- **THEN** libc returns the current BigOS wall-clock seconds and stores the same value through the pointer
+
+#### Scenario: perror writes deterministic stderr text
+- **WHEN** a user program calls `perror` after a wrapper sets errno
+- **THEN** libc writes the optional prefix, separator, stable error text, and newline to fd 2 using the bounded userland output path
+
