@@ -6,9 +6,9 @@ BigOS 当前使用 legacy BIOS 路径：
 BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel
 ```
 
-该路径仍是当前可运行的启动后端，也是现有内核所用 kernel handoff 数据的生产者。
-`docs/zh/arch/uefi-boot-blueprint.md` 中的 UEFI 计划会把该路径视为未来统一
-handoff 模型中的 Legacy 后端；它不会替换 MBR/DBR/exDBR/`boot.bin` 流程；当前 active Legacy 调试入口是
+该路径仍是默认可运行的启动后端，也是 Legacy BIOS kernel handoff 数据的生产者。
+`docs/zh/arch/uefi-boot-blueprint.md` 中的 x86_64 UEFI spike 是并行 backend；
+它不会替换 MBR/DBR/exDBR/`boot.bin` 流程；当前 active Legacy 调试入口是
 `xmake run qemu`、`xmake run qemu -- --display none`、`xmake run qemu-gdb` 和带 `--display sdl2|none` 的 `xmake run bochs`。
 
 早期启动路径依赖以下固定物理地址和虚拟地址：
@@ -86,6 +86,13 @@ v2 blob 当前包含两个必需 section：
 - `core`：Legacy BIOS 协议元数据、启动驱动器、exFAT 数据区 LBA、内核加载虚拟地址、内核入口虚拟地址、内核文件大小和内核内存大小。
 - `memory_map`：从 BIOS E820 ARDS 规范化得到的 `BootMemoryRegion[]` 条目。
 
+UEFI spike 也会生产 `BootInfo` v2 blob，但其 blob 地址由 loader 分配，而不是 Legacy 固定
+`0x9000..0x9fff` 区域。它的 required `core` section 标识 UEFI boot protocol，并将
+`exfat_data_area_lba` 写为零，因此不会把 ESP/root storage provenance 复用到 Legacy
+exFAT 字段。UEFI storage provenance 与 loader diagnostics 位于 optional
+`storage_metadata` 和 `loader_metadata` sections；kernel 启动校验仍只依赖有效的 required
+`core` 与 `memory_map` sections，未知 optional sections 仍可跳过。
+
 v2 magic 独立于 v1 magic，因此消费者不会只依赖 `version` 来区分固定的 v1
 结构体与 header/section blob。Section table 与 payload 偏移都相对于
 `BootInfoHeader`，消费者会检查 header 大小、总大小、section table 边界、
@@ -111,6 +118,11 @@ Reserved、runtime、MMIO、ACPI reclaim、ACPI NVS、bad memory 和未知内存
 早期 buddy 初始化期间都不会被释放。`acpi_reclaim` 会保持 reserved，直到未来的
 ACPI 表生命周期阶段能够证明其可安全回收。
 
+UEFI spike 将 `EfiConventionalMemory` 映射为 `usable`，保留 UEFI source type/value/attributes，
+将 runtime descriptor 映射为 `runtime`，将 MMIO descriptor 映射为 `mmio`，将 ACPI
+descriptor 映射为 `acpi_reclaim` 或 `acpi_nvs`，并保守地让 loader-owned、boot-services-owned、
+bad、unknown 或 reserved descriptor 不进入初始 free page pool。
+
 内核 direct map 在 `init_buddy()` 和 `init_vmem()` 之后、`BIGOS_MM_SELF_TEST` 之前建立。它使用
 `KDIRECT_BASE = 0xffff900000000000`、`KDIRECT_LEN = 0x400000000000`，只从
 BootInfo memory map 中选择 page-aligned ordinary RAM 范围，并映射为
@@ -131,3 +143,10 @@ VGA 文本内存中显示可见的 `U` 代码。
 （`-drive file=<image>,format=raw,if=ide`）使用同一个 Legacy BIOS/MBR/exFAT raw image。
 `xmake run bochs` 保持现有 Bochs 调试入口，并通过 `--display sdl2|none` target arguments 选择 SDL2 或 no-GUI display。
 这些入口不会切换为 `BOOTX64.EFI`、ESP/FAT 镜像、QEMU/OVMF、virtio、AHCI/SATA、NVMe 或新存储驱动。
+
+UEFI 调试路径是显式入口：`xmake run qemu-uefi` 或
+`uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu` 会构建/使用
+`build/bin/x86/uefi/BOOTX64.EFI`，生成 `build/test/uefi-esp.img`，复制 OVMF vars template 到
+`build/test/OVMF_VARS.uefi.fd`，并默认将 UEFI 串口输出写入 `build/test/qemu-uefi.serial.log`。
+该路径使用 QEMU/OVMF 和 ESP/FAT image，并与 Legacy raw image、Bochs config、BIOS boot sectors
+和 `boot.bin` 保持隔离。

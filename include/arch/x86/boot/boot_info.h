@@ -21,10 +21,19 @@
 
 #define BIGOS_BOOT_SECTION_TYPE_CORE       1u
 #define BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP 2u
+#define BIGOS_BOOT_SECTION_TYPE_STORAGE_METADATA 3u
+#define BIGOS_BOOT_SECTION_TYPE_LOADER_METADATA  4u
 
 #define BIGOS_BOOT_SECTION_FLAG_REQUIRED 0x00000001u
 
 #define BIGOS_BOOT_CORE_FLAG_LEGACY_BIOS 0x00000001u
+#define BIGOS_BOOT_CORE_FLAG_UEFI        0x00000002u
+
+#define BIGOS_BOOT_STORAGE_KIND_UNKNOWN 0u
+#define BIGOS_BOOT_STORAGE_KIND_UEFI_ESP 1u
+
+#define BIGOS_BOOT_LOADER_BACKEND_UNKNOWN     0u
+#define BIGOS_BOOT_LOADER_BACKEND_X86_64_UEFI 1u
 
 #define BIGOS_BOOT_MEMORY_TYPE_UNKNOWN      0u
 #define BIGOS_BOOT_MEMORY_TYPE_USABLE       1u
@@ -140,6 +149,24 @@ struct BootMemoryRegion {
     uint32_t source_type;
     uint64_t attributes;
     uint64_t source_value;
+};
+
+struct BootStorageMetadata {
+    uint32_t kind;
+    uint32_t flags;
+    uint64_t source_id;
+    char boot_path[64];
+    char root_path[64];
+};
+
+struct BootLoaderMetadata {
+    uint32_t backend;
+    uint32_t flags;
+    uint32_t loader_version;
+    uint32_t firmware_revision;
+    char build_id[32];
+    char firmware_vendor[64];
+    char boot_file_path[64];
 };
 
 #ifdef __cplusplus
@@ -258,6 +285,10 @@ static_assert(sizeof(BootInfoCore) == 48);
 static_assert(alignof(BootInfoCore) == 8);
 static_assert(sizeof(BootMemoryRegion) == 40);
 static_assert(alignof(BootMemoryRegion) == 8);
+static_assert(sizeof(BootStorageMetadata) == 144);
+static_assert(alignof(BootStorageMetadata) == 8);
+static_assert(sizeof(BootLoaderMetadata) == 176);
+static_assert(alignof(BootLoaderMetadata) == 4);
 static_assert(__builtin_offsetof(BootMemoryRegion, physical_base) == BIGOS_BOOT_MEMORY_REGION_OFF_PHYSICAL_BASE);
 static_assert(__builtin_offsetof(BootMemoryRegion, length) == BIGOS_BOOT_MEMORY_REGION_OFF_LENGTH);
 static_assert(__builtin_offsetof(BootMemoryRegion, normalized_type) == BIGOS_BOOT_MEMORY_REGION_OFF_NORMALIZED_TYPE);

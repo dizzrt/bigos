@@ -41,6 +41,21 @@ def make_artifacts(tmp_path: Path):
     )
 
 
+def make_uefi_artifacts(tmp_path: Path):
+    artifacts = make_artifacts(tmp_path)
+    bin_dir = tmp_path / 'bin'
+    return boot_debug.PreparedArtifacts(
+        kernel=artifacts.kernel,
+        mbr=artifacts.mbr,
+        dbr=artifacts.dbr,
+        exdbr=artifacts.exdbr,
+        boot=artifacts.boot,
+        uefi_loader=write_bytes(tmp_path / 'BOOTX64.EFI', b'MZ' + bytes(128)),
+        user_init_elf=write_bytes(tmp_path / 'init.elf', b'\x7fELF' + bytes(128)),
+        bin_programs=(('sh', write_bytes(bin_dir / 'sh', b'\x7fELFsh')),),
+    )
+
+
 def test_parse_size_suffixes() -> None:
     assert boot_debug.parse_size('64M') == 64 * 1024 * 1024
     assert boot_debug.parse_size('2kb') == 2 * 1024
@@ -161,6 +176,42 @@ def test_qemu_command_uses_legacy_bios_ide_disk_and_headless_serial(tmp_path: Pa
     assert '-no-reboot' in command
     assert '-no-shutdown' in command
     assert not any('virtio' in part or 'ahci' in part or 'ovmf' in part.lower() for part in command)
+
+
+def test_qemu_uefi_command_uses_ovmf_pflash_and_esp_serial(tmp_path: Path) -> None:
+    image = tmp_path / 'uefi-esp.img'
+    serial_log = tmp_path / 'qemu-uefi.serial.log'
+    code = tmp_path / 'edk2-x86_64-code.fd'
+    vars_copy = tmp_path / 'OVMF_VARS.uefi.fd'
+
+    command = boot_debug.qemu_uefi_command(image, serial_log, 'none', code, vars_copy)
+
+    assert command[0] == 'qemu-system-x86_64'
+    assert f'if=pflash,format=raw,readonly=on,file={code}' in command
+    assert f'if=pflash,format=raw,file={vars_copy}' in command
+    assert f'file={image},format=raw,if=ide' in command
+    assert command[command.index('-serial') + 1] == f'file:{serial_log}'
+    assert command[command.index('-display') + 1] == 'none'
+    assert '-boot' not in command
+
+
+def test_create_uefi_image_uses_mtools_without_touching_legacy_layout(tmp_path: Path, monkeypatch) -> None:
+    image = tmp_path / 'uefi-esp.img'
+    commands: list[list[str]] = []
+
+    def fake_run_command(stage, command, cwd, **kwargs):
+        commands.append(list(command))
+
+    monkeypatch.setattr(boot_debug, 'run_command', fake_run_command)
+
+    boot_debug.create_uefi_image(image, boot_debug.DEFAULT_IMAGE_SIZE, make_uefi_artifacts(tmp_path))
+
+    assert image.stat().st_size == boot_debug.DEFAULT_IMAGE_SIZE
+    assert commands[0][:3] == ['mformat', '-i', str(image)]
+    assert ['mcopy', '-o', '-i', str(image), str(tmp_path / 'BOOTX64.EFI'), '::/EFI/BOOT/BOOTX64.EFI'] in commands
+    assert ['mcopy', '-o', '-i', str(image), str(tmp_path / 'kernel'), '::/boot/kernel'] in commands
+    assert ['mcopy', '-o', '-i', str(image), str(tmp_path / 'init.elf'), '::/boot/user/init.elf'] in commands
+    assert not any('mbr.bin' in part or 'boot.bin' in part for command in commands for part in command)
 
 
 def test_qemu_gdb_command_pauses_before_boot_and_keeps_graphical_default(tmp_path: Path) -> None:
@@ -547,6 +598,7 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
         PROJECT_ROOT / 'xmake/options.lua',
         PROJECT_ROOT / 'xmake/common.lua',
         PROJECT_ROOT / 'xmake/boot_artifacts.lua',
+        PROJECT_ROOT / 'xmake/uefi_artifacts.lua',
         PROJECT_ROOT / 'xmake/user_package.lua',
         PROJECT_ROOT / 'xmake/runtime.lua',
         PROJECT_ROOT / 'xmake/kernel.lua',
@@ -558,6 +610,7 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     assert 'target("bochs")' in xmake
     assert 'target("qemu")' in xmake
     assert 'target("qemu-gdb")' in xmake
+    assert 'target("qemu-uefi")' in xmake
     assert 'target("qemu-headless")' not in xmake
     assert 'target("boot-artifacts")' in xmake
     assert 'build/bin/x86/boot' not in xmake
@@ -569,6 +622,9 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     assert 'process.openv("python3", args)' in xmake
     assert 'option.get("arguments")' in xmake
     assert 'add_deps("kernel", "boot-artifacts", "user-init-elf")' in xmake
+    assert 'add_deps("kernel", "uefi-artifacts", "user-init-elf")' in xmake
+    assert 'path.join(uefi_bindir, "BOOTX64.EFI")' in xmake
+    assert '"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img"' in xmake
     assert 'run_boot_debug("bochs", "build/test/bochs.serial.log",' in xmake
     assert 'run_boot_debug("qemu", "build/test/qemu.serial.log",' in xmake
     assert 'run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log",' in xmake

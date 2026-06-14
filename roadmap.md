@@ -13,11 +13,12 @@ implementation, validation, or change-tracking documents.
 Project goal: grow BigOS from the current x86_64 research kernel toward a more
 general-purpose, multi-architecture kernel with explicitly bounded POSIX-like
 compatibility subsets. The current runnable implementation remains x86_64-only
-and tied to the existing legacy boot/storage path.
+with the existing legacy boot/storage path as the default baseline and a
+runnable x86_64 UEFI boot backend spike available as a non-parity backend.
 
 项目目标：将 BigOS 从当前 x86_64 研究内核逐步推进为更通用、支持多架构，并具备明确有界
-POSIX-like 兼容子集的内核。当前可运行实现仍是 x86_64-only，并绑定在现有 legacy
-boot/storage 路径上。
+POSIX-like 兼容子集的内核。当前可运行实现仍是 x86_64-only，现有 legacy boot/storage
+路径仍是默认基线，同时已有一个不具备运行时等价能力的 x86_64 UEFI boot backend spike。
 
 ## Current Implementation Summary / 当前实现概述
 
@@ -65,10 +66,11 @@ changes them:
 BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改变前，后续规划和文档都应保持
 以下边界：
 
-- Current runnable backend: x86_64 with the existing Legacy BIOS style boot
-  flow; UEFI and additional architectures are not yet runtime-parity backends.
-- 当前可运行 backend：x86_64 与现有 Legacy BIOS 风格启动流程；UEFI 和其他架构尚不具备
-  运行时等价能力。
+- Current runnable backends: x86_64 with the existing Legacy BIOS style boot
+  flow as the default baseline, plus an x86_64 UEFI boot backend spike; UEFI and
+  additional architectures are not yet runtime-parity backends.
+- 当前可运行 backend：x86_64 与现有 Legacy BIOS 风格启动流程仍是默认基线，另有
+  x86_64 UEFI boot backend spike；UEFI 和其他架构尚不具备运行时等价能力。
 - Execution model: single-core, mostly synchronous, bounded userland, no SMP.
 - 执行模型：单核、以同步为主、有界用户态、无 SMP。
 - Userland: minimal static user programs and a bounded interactive console path,
@@ -84,10 +86,11 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
   filesystem, no async I/O, and no broad storage/device support.
 - 内存/文件模型：bounded anonymous demand paging/COW 与有界可写运行时存储，但无广泛
   file-backed `mmap`、无持久完整可写文件系统、无 async I/O、无广泛存储/设备支持。
-- Boot/backends: additional boot, storage, device, and ISA backends are planning
-  or parallel-track items, not current runtime parity.
-- 启动/backend：额外 boot、storage、device 和 ISA backend 是规划或并行轨道事项，
-  不具备当前运行时等价能力。
+- Boot/backends: the UEFI backend is a completed x86_64 boot spike, while
+  storage, device, ISA backends, and UEFI runtime parity remain future or
+  parallel-track items.
+- 启动/backend：UEFI backend 已完成 x86_64 boot spike；storage、device、ISA
+  backend 以及 UEFI 运行时等价能力仍是后续或并行轨道事项。
 
 The roadmap should stay at this boundary level. Detailed boot order, concrete
 entry points, validation markers, build commands, and change-tracking history
@@ -165,13 +168,15 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 35 are complete and now form a compressed minimal usable system
-baseline. Keep the detailed implementation and validation history in dedicated
-architecture docs and OpenSpec records; this roadmap tracks only project-level
-capabilities and boundaries.
+Stages 20 through 36 are complete and now form a compressed minimal usable system
+baseline plus a completed backend-expansion spike. Keep the detailed
+implementation and validation history in dedicated architecture docs and
+OpenSpec records; this roadmap tracks only project-level capabilities and
+boundaries.
 
-阶段 20 到阶段 35 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
-专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
+阶段 20 到阶段 36 已完成，并共同形成压缩后的最小可用系统基线及已完成的 backend
+扩展试探。详细实现与验证历史应保留在专门架构文档和 OpenSpec 记录中；本 roadmap
+只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
   through the runtime text console. Preserved boundaries: no full POSIX terminal,
@@ -374,12 +379,10 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 36: Backend Expansion Spike / Backend 扩展试探
 
-- Choose one real backend-expansion spike only after the preceding architecture
-  boundaries have enough real consumers. A modern x86_64 boot backend is the
-  lower-risk path; a second ISA spike is the stronger test of multi-architecture
-  assumptions.
-- 只有在前序架构边界已有足够真实消费点之后，才选择一个真实 backend 扩展试探。现代 x86_64
-  boot backend 风险较低；第二 ISA 试探更能检验多架构假设。
+- Status: complete; the selected backend-expansion spike is the runnable x86_64
+  UEFI boot backend, not a second ISA or runtime-parity backend.
+- 状态：已完成；本阶段选择的 backend 扩展试探是可运行的 x86_64 UEFI boot backend，
+  不是第二 ISA，也不是运行时等价 backend。
 - Preserve the current runnable backend until any new backend reaches explicit
   runtime parity.
 - 在任何新 backend 明确达到运行时等价前，保留当前可运行 backend。

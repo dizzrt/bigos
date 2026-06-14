@@ -128,6 +128,24 @@ uv run python tools/boot_debug.py run \
 
 缺少 `uv`、`xmake`、cross-binutils、QEMU、Bochs、ROM/display 配置或其他必要本地依赖时，必须记录为 skipped 或 blocked。未运行的 smoke 不得标记为 passed。
 
+## UEFI Spike Smoke
+
+x86_64 UEFI boot backend spike 使用独立 smoke 入口，不改变 Legacy runtime matrix。可运行
+`xmake run qemu-uefi -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`，
+或直接使用 helper：
+`uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`。
+
+UEFI smoke 会构建/使用 `BOOTX64.EFI`，创建包含 kernel、PID-1 init、`/bin/sh` 和有界
+`/bin/*` 的 ESP/FAT image，使用 x86_64 OVMF 启动 QEMU，并默认使用
+`build/test/qemu-uefi.serial.log`。它要求 QEMU/OVMF、Homebrew LLVM/LLD、`mtools`、
+现有 x86_64 cross toolchain，以及用于 Python helper validation 的 `uv`。缺少 OVMF、
+mtools、LLVM/LLD、QEMU、cross toolchain 或 `uv` 时，必须记录为 skipped 或 blocked，
+并写明替代检查和剩余 UEFI bootability 风险。
+
+UEFI 默认 runtime marker 与 Legacy BIOS 默认 headless 路径相同，当前为 `BIGOS_USER_EXEC`。
+缺失该 marker 是 failed 或 blocked UEFI runtime-parity check，不是通过。Apple Silicon
+主机可能通过 TCG 运行 x86_64 QEMU，因此 validation notes 应记录 timeout 和性能相关剩余风险。
+
 ## 交叉验证
 
 QEMU headless 是矩阵首选自动化 serial-marker 路径。涉及 boot、real-mode/protected-mode/long-mode transition、interrupt dispatch、timer IRQ、keyboard IRQ、ATA PIO、port IO 或低层 driver 行为的变更，仍应按场景在可用时执行 Bochs 或 QEMU+Bochs 交叉验证。
@@ -136,4 +154,4 @@ QEMU headless 是矩阵首选自动化 serial-marker 路径。涉及 boot、real
 
 ## 保持不变的契约
 
-runtime smoke 产品化不得改变 kernel link address、BootInfo 或 handoff ABI、page-table 假设、IDT vector、IRQ EOI 规则、syscall vector `0x80`、CR3 切换规则、smoke marker 字符串或默认关闭的 smoke entry 边界。镜像路径仍是现有 Legacy BIOS raw image，包含 MBR/exFAT、`/boot/boot.bin`、根目录 `kernel` 和 IDE-compatible disk exposure；不要求 UEFI、OVMF、ESP/FAT、virtio、AHCI/SATA、NVMe 或新 storage driver。
+runtime smoke 产品化不得改变 kernel link address、BootInfo 或 handoff ABI、page-table 假设、IDT vector、IRQ EOI 规则、syscall vector `0x80`、CR3 切换规则、smoke marker 字符串或默认关闭的 smoke entry 边界。Legacy matrix 的镜像路径仍是现有 Legacy BIOS raw image，包含 MBR/exFAT、`/boot/boot.bin`、根目录 `kernel` 和 IDE-compatible disk exposure；不要求 UEFI、OVMF、ESP/FAT、virtio、AHCI/SATA、NVMe 或新 storage driver。UEFI spike 使用显式独立的 ESP/QEMU/OVMF 路径，不能被视为替代 Legacy matrix。

@@ -1,0 +1,153 @@
+## ADDED Requirements
+
+### Requirement: x86_64 UEFI loader artifact
+
+BigOS SHALL provide an x86_64 UEFI boot backend spike that builds a PE/COFF UEFI application suitable for the removable media path `EFI/BOOT/BOOTX64.EFI`.
+
+#### Scenario: UEFI loader is built
+
+- **WHEN** the UEFI boot target is built on a host with the required LLVM/LLD tools
+- **THEN** the build MUST produce a `BOOTX64.EFI` artifact under the build output tree
+- **AND** the artifact MUST be isolated from the existing Legacy BIOS MBR/DBR/extended-DBR/`boot.bin` artifacts
+
+#### Scenario: Missing UEFI build tool is reported
+
+- **WHEN** `clang`, `lld-link`, or required LLVM inspection/copy tools are unavailable
+- **THEN** the UEFI build MUST fail before producing a stale `BOOTX64.EFI`
+- **AND** the failure MUST identify the missing tool and the UEFI build stage
+
+### Requirement: UEFI ESP image generation
+
+BigOS SHALL generate an independent FAT ESP image for UEFI boot testing, without reusing or overwriting the existing Legacy BIOS raw image.
+
+#### Scenario: ESP contains removable media boot path
+
+- **WHEN** UEFI image generation completes successfully
+- **THEN** the ESP image MUST contain `EFI/BOOT/BOOTX64.EFI`
+- **AND** the image MUST contain the kernel ELF and the bounded userland payload needed by the selected boot configuration
+
+#### Scenario: ESP generation uses user-space tools
+
+- **WHEN** the host provides `mformat`, `mmd`, `mcopy`, and `mdir`
+- **THEN** ESP generation MUST use those user-space tools or an equivalent no-mount implementation
+- **AND** it MUST NOT require host disk mounting, loop devices, `diskutil` attach, or privileged filesystem mutation
+
+#### Scenario: ESP artifacts are isolated
+
+- **WHEN** UEFI image generation runs repeatedly
+- **THEN** it MUST overwrite only documented UEFI-generated outputs under the build/test output area or an explicitly requested output path
+- **AND** it MUST NOT overwrite the Legacy BIOS raw image, Bochs configuration, BIOS boot sectors, or hand-written source files
+
+### Requirement: UEFI loader loads the existing kernel ELF
+
+The UEFI loader SHALL load the existing x86_64 kernel ELF artifact and transfer control to its validated entry point without changing the kernel link address or kernel binary format.
+
+#### Scenario: Kernel ELF is valid
+
+- **WHEN** the UEFI loader reads a valid x86_64 ELF64 kernel with supported loadable segments
+- **THEN** it MUST load the kernel segments according to the shared BigOS ELF64 loading constraints
+- **AND** it MUST jump to the validated kernel entry using the existing x86_64 kernel handoff convention
+
+#### Scenario: Kernel ELF is invalid
+
+- **WHEN** the UEFI loader observes an unsupported ELF class, machine type, segment layout, entry point, file bounds, or memory bounds
+- **THEN** it MUST stop before entering the kernel
+- **AND** it MUST report an explicit UEFI loader failure through available firmware console or serial diagnostics
+
+### Requirement: UEFI memory map normalization
+
+The UEFI loader SHALL convert UEFI memory descriptors into the existing `BootMemoryRegion` view before entering the kernel.
+
+#### Scenario: UEFI memory descriptors are normalized
+
+- **WHEN** the UEFI loader obtains the final UEFI memory map before `ExitBootServices`
+- **THEN** it MUST produce a `BootMemoryRegion` array in the `BootInfo v2` memory map section
+- **AND** each entry MUST preserve physical base, length, normalized type, source type, source value, and attributes needed by early memory initialization
+
+#### Scenario: Unknown UEFI memory type is conservative
+
+- **WHEN** a UEFI memory descriptor has a type not explicitly mapped by BigOS
+- **THEN** the loader MUST map it to a conservative non-usable normalized type
+- **AND** early memory initialization MUST NOT add that region to the free page pool
+
+#### Scenario: ExitBootServices map key changes
+
+- **WHEN** `ExitBootServices` fails because the memory map key is stale
+- **THEN** the loader MUST refresh the memory map and retry in a bounded way or fail explicitly before kernel entry
+
+### Requirement: UEFI handoff uses BootInfo v2
+
+The UEFI loader SHALL enter the kernel with a valid `BootInfo v2` handoff blob as the primary startup metadata contract.
+
+#### Scenario: UEFI core section is present
+
+- **WHEN** the UEFI loader enters the kernel
+- **THEN** the `BootInfo v2` blob MUST include a required core section whose boot protocol identifies UEFI
+- **AND** the core section MUST include kernel load address, kernel entry address, kernel file size, and kernel memory size metadata consistent with the loaded ELF
+
+#### Scenario: Kernel receives register-passed handoff
+
+- **WHEN** the UEFI loader transfers control to the kernel entry
+- **THEN** it MUST pass the `BootInfoHeader*` using the documented x86_64 first-argument register convention
+- **AND** it MUST NOT require the kernel to read UEFI Boot Services, UEFI raw descriptors, or fixed BIOS-only handoff addresses
+
+#### Scenario: UEFI core does not overload Legacy exFAT metadata
+
+- **WHEN** the UEFI loader fills the `BootInfoCore` section
+- **THEN** `exfat_data_area_lba` MUST be zero for the UEFI backend
+- **AND** ESP, root-device, or storage-origin details MUST be represented through a dedicated optional storage metadata section rather than overloading the Legacy exFAT field
+
+### Requirement: UEFI metadata sections
+
+The UEFI loader SHALL provide optional `BootInfo v2` metadata sections for storage provenance and loader diagnostics without making kernel startup depend on those sections.
+
+#### Scenario: Storage metadata section describes ESP source
+
+- **WHEN** the UEFI loader can identify the ESP or boot file source used to load the kernel and userland payload
+- **THEN** it MUST write an optional storage metadata section with normalized storage/source details
+- **AND** the kernel MUST still be able to boot if that optional section is absent but the required core and memory map sections are valid
+
+#### Scenario: Loader metadata section describes firmware and build source
+
+- **WHEN** the UEFI loader constructs the `BootInfo v2` blob
+- **THEN** it MUST include an optional loader metadata section with auditable loader information such as backend, loader build id/version, UEFI firmware vendor/revision, or ESP path information when available
+- **AND** validation MUST record whether the section was present and well-formed
+
+### Requirement: UEFI backend preserves Legacy BIOS baseline
+
+The UEFI spike SHALL remain a parallel backend until explicit runtime parity is reached.
+
+#### Scenario: Legacy backend remains runnable
+
+- **WHEN** the UEFI backend is added
+- **THEN** the existing Legacy BIOS/MBR/exFAT QEMU and Bochs boot paths MUST remain available
+- **AND** their boot protocol, disk layout, kernel entry ABI, smoke marker strings, and default runtime behavior MUST remain unchanged
+
+#### Scenario: UEFI backend is not default
+
+- **WHEN** a developer runs existing Legacy BIOS boot/debug commands
+- **THEN** BigOS MUST continue to boot through the existing Legacy BIOS backend
+- **AND** it MUST NOT silently switch to UEFI, OVMF, ESP/FAT images, Secure Boot, or a different storage device model
+
+### Requirement: UEFI smoke validation
+
+BigOS SHALL provide a bounded UEFI smoke validation path that uses QEMU + OVMF and serial output as the primary observable signal.
+
+#### Scenario: UEFI smoke observes kernel progress
+
+- **WHEN** the UEFI QEMU/OVMF smoke path runs on a host with required firmware, QEMU, and build tools
+- **THEN** it MUST launch the generated ESP through x86_64 OVMF
+- **AND** it MUST record serial output under a documented UEFI-specific build/test log path
+- **AND** it MUST report whether the expected default init/user exec marker was observed before timeout
+
+#### Scenario: UEFI smoke reaches default init and shell path
+
+- **WHEN** the UEFI QEMU/OVMF smoke path runs the default boot configuration
+- **THEN** it MUST package default PID-1 init and `/bin/sh`
+- **AND** it MUST reach the same default init/user exec marker expected from the Legacy BIOS default headless path, including the current `BIGOS_USER_EXEC` baseline marker
+
+#### Scenario: UEFI smoke dependency is missing
+
+- **WHEN** QEMU, OVMF code firmware, a writable vars copy, mtools, LLVM/LLD, or the cross-toolchain is unavailable
+- **THEN** validation MUST mark the UEFI smoke as skipped or blocked rather than passed
+- **AND** it MUST record the missing dependency, substitute checks, and residual boot-backend risk

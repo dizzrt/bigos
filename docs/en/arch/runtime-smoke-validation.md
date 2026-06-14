@@ -143,6 +143,14 @@ The runner writes a Markdown-first validation artifact to `build/test/runtime-sm
 
 Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, or other required local dependencies must be recorded as skipped or blocked. A smoke that did not run must not be marked as passed.
 
+## UEFI Spike Smoke
+
+The x86_64 UEFI boot backend spike has a separate smoke entry and does not change the Legacy runtime matrix. Use `xmake run qemu-uefi -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` or the direct helper form `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`.
+
+The UEFI smoke builds/uses `BOOTX64.EFI`, creates an ESP/FAT image with the kernel, PID-1 init, `/bin/sh`, and bounded `/bin/*`, launches QEMU with x86_64 OVMF, and uses `build/test/qemu-uefi.serial.log` by default. It requires QEMU/OVMF, Homebrew LLVM/LLD, `mtools`, the existing x86_64 cross toolchain, and `uv` for Python helper validation. Missing OVMF, mtools, LLVM/LLD, QEMU, the cross toolchain, or `uv` must be recorded as skipped or blocked with substitute checks and residual UEFI bootability risk.
+
+The expected default UEFI runtime marker is the same default init/user exec marker as the Legacy BIOS default headless path, currently `BIGOS_USER_EXEC`. Missing that marker is a failed or blocked UEFI runtime-parity check, not a pass. Apple Silicon hosts may run x86_64 QEMU through TCG, so validation notes should record timeout values and performance-related residual risk when applicable.
+
 ## Cross-Validation
 
 QEMU headless is the preferred automated serial-marker path for the matrix. Bochs or QEMU+Bochs cross-validation remains scenario-specific for changes that affect boot, real-mode/protected-mode/long-mode transition, interrupt dispatch, timer IRQ, keyboard IRQ, ATA PIO, port IO, or low-level driver behavior.
@@ -151,4 +159,4 @@ When Bochs cross-validation is unavailable, record why it was skipped, which QEM
 
 ## Preserved Contracts
 
-Runtime smoke productization must not change kernel link addresses, BootInfo or handoff ABI, page-table assumptions, IDT vectors, IRQ EOI rules, syscall vector `0x80`, CR3 switching rules, smoke marker strings, or default-off smoke entry boundaries. The image path remains the existing Legacy BIOS raw image with MBR/exFAT, `/boot/boot.bin`, root `kernel`, and IDE-compatible disk exposure; it does not require UEFI, OVMF, ESP/FAT, virtio, AHCI/SATA, NVMe, or a new storage driver.
+Runtime smoke productization must not change kernel link addresses, BootInfo or handoff ABI, page-table assumptions, IDT vectors, IRQ EOI rules, syscall vector `0x80`, CR3 switching rules, smoke marker strings, or default-off smoke entry boundaries. The Legacy matrix image path remains the existing Legacy BIOS raw image with MBR/exFAT, `/boot/boot.bin`, root `kernel`, and IDE-compatible disk exposure; it does not require UEFI, OVMF, ESP/FAT, virtio, AHCI/SATA, NVMe, or a new storage driver. The UEFI spike uses its own explicit ESP/QEMU/OVMF path and must not be counted as replacing the Legacy matrix.
