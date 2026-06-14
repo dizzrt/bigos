@@ -18,6 +18,11 @@ x86_64 机制。本工作不新增可运行 UEFI backend、non-x86 backend、SMP
   进入或恢复 user context，并消费窄 `bigos::arch_context` 语义边界，但 AMD64
   callee-saved switch frame、`iretq` entry frame、GDT selector 和 TSS `rsp0`
   细节留在 x86_64 实现内。
+- VM/user-entry consumer 可以通过窄
+  `include/bigos/arch_vm_user_boundary.h` 边界查询 active root、请求地址空间
+  activation、分类 user-return frame、捕获 user resume frame 并进入 ring3。
+  CR3 mask/write、TLB effect、user selector、TSS state 和 `iretq` frame 细节
+  留在 architecture-owned code 内。
 - Memory management 可以暴露按页数分配 kernel page、user-root 操作和地址空间激活，
   但 4-level PML4 布局、recursive self-mapping、direct-map 常量、PTE bit position、
   `invlpg` 和 CR3 指令属于 x86_64 paging 细节。
@@ -38,9 +43,13 @@ x86_64 机制。本工作不新增可运行 UEFI backend、non-x86 backend、SMP
   边界消费 IRQ-return context eligibility 和 kernel context switch，而不是
   open-code raw frame offset 或 assembly symbol。
 - `kernel/mm` 拥有当前 x86_64 page-table 操作和 CR3 activation，因为尚不存在
-  alternate paging backend。
-- `kernel/core/proc` 和 `include/bigos/user_mode.h` 消费 user-mode entry、TSS `rsp0`、
-  syscall frame、signal frame 和 fork frame clone，用于当前 x86_64 user ABI。
+  alternate paging backend。核心 process policy 仍必须把 VMA/process metadata
+  作为授权来源，把 page table 作为已经 materialized 的状态。
+- `kernel/core/proc` 拥有 process lifecycle、VMA policy、safe teardown 和有界
+  user-fault lifecycle。它通过 `include/bigos/arch_vm_user_boundary.h` 消费
+  address-space activation、TSS `rsp0`、user entry、user-return classification
+  和 fork resume-frame capture；更低层的 `include/bigos/user_mode.h` 与 entry
+  assembly 仍是 x86_64 implementation detail。
 - `kernel/drivers` 以及 driver-facing core 路径拥有 VGA、serial、PIC、PIT、CMOS RTC、
   keyboard 和 ATA PIO 的 legacy PC device access。
 
@@ -61,6 +70,8 @@ x86_64 机制。本工作不新增可运行 UEFI backend、non-x86 backend、SMP
   parity、APIC/IOAPIC 支持或 HPET 支持。
 - x86_64 page-table layout、recursive self-mapping window、direct map window、
   CR3 root 语义和 TLB invalidation 行为。
+- 共享到 user root 的现有 higher-half kernel mapping、user low-half 隔离、
+  KVMEM/direct-map 可用性、user stack 假设和当前 CR3 switching 语义。
 - 默认可运行 backend 使用的 raw disk image layout、Legacy BIOS/MBR/exFAT boot
   packaging 和 ATA PIO storage path。
 - 最小 syscall ABI：syscall number 与参数仍使用现有 x86_64 寄存器，结果返回
@@ -83,6 +94,10 @@ x86_64 机制。本工作不新增可运行 UEFI backend、non-x86 backend、SMP
   hardware access ordering 和确定性 failure behavior。
 - 对 allocator、page-table 或 early-memory 改动，评审 initialization phase、
   allocation context、object lifetime、alignment、rollback 和 failure behavior。
+- 对 VM/user-entry/fault 改动，确认 VMA/process metadata 先授权 user access，
+  再进行 page-table materialization；可恢复 CPL3 fault 只覆盖已实现的 VMA-backed
+  demand-zero/COW/stack-growth case；fault/exit/reaper 路径不得在 unsafe return
+  path 上释放 active user root、当前 kernel stack 或 process object。
 
 ## Validation
 

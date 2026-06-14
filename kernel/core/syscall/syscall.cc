@@ -10,6 +10,7 @@
 #include <irq/interrupt.h>
 #include <string.h>
 #ifdef BIGOS_USER_PROCESS
+#include <bigos/arch_vm_user_boundary.h>
 #include <bigos/cred.h>
 #include <bigos/ipc/pipe.h>
 #include <bigos/proc.h>
@@ -23,7 +24,6 @@ namespace sys {
         // syscall path observable to the source-level checks and the optional
         // emulator smoke without depending on any user-mode buffer.
         constexpr const char *SYSCALL_WRITE_MARKER = "BIGOS_SYSCALL_WRITE\n";
-        constexpr uint64_t CR3_ROOT_MASK = 0x000ffffffffff000ull;
 
         // sys_debug_write: emit a kernel-internal bounded buffer through the
         // existing serial/console path. This stage does NOT validate any pointer
@@ -96,14 +96,14 @@ namespace sys {
                 bounded[__len] = 0;
                 serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
                 serial_puts(bounded);
-                const uint64_t active_root = bigos::mm::read_cr3();
+                const uint64_t active_root = bigos::arch::vm_user::active_address_space_root();
                 const bigos::proc::Process *process = bigos::proc::current_process();
                 if (process != nullptr && process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
-                    (active_root & CR3_ROOT_MASK) != (process->kernel_address_space_root & CR3_ROOT_MASK))
-                    bigos::mm::activate_address_space_root(process->kernel_address_space_root);
+                    !bigos::arch::vm_user::is_active_address_space(process->kernel_address_space_root))
+                    bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
                 bigos::terminal::console_write(bounded);
-                if ((bigos::mm::read_cr3() & CR3_ROOT_MASK) != (active_root & CR3_ROOT_MASK))
-                    bigos::mm::activate_address_space_root(active_root);
+                if (!bigos::arch::vm_user::is_active_address_space(active_root))
+                    bigos::arch::vm_user::activate_address_space(active_root);
                 return (int64_t)__len;
             }
 

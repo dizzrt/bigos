@@ -1,9 +1,9 @@
 #include <bigos/signal.h>
 
 #include <string.h>
+#include <bigos/arch_vm_user_boundary.h>
 #include <bigos/errno.h>
 #include <bigos/proc.h>
-#include <bigos/user_mode.h>
 #include <irq/interrupt.h>
 
 namespace bigos::signal {
@@ -287,11 +287,10 @@ namespace bigos::signal {
         __frame->rip = sf.rip;
         __frame->rsp = sf.rsp;
 
-        // Force user-mode segment selectors and a sanitized rflags (IF on, no
-        // privileged bits) so a forged frame cannot return to a kernel context.
-        __frame->cs = bigos::arch::x86::USER_CODE_SELECTOR;
-        __frame->ss = bigos::arch::x86::USER_DATA_SELECTOR;
-        __frame->rflags = (sf.rflags & RFLAGS_USER_SAFE) | RFLAGS_IF | RFLAGS_RESERVED_ONE;
+        // Force user-mode return state and sanitized rflags so a forged frame
+        // cannot return to a kernel context.
+        bigos::arch::vm_user::force_user_return_frame(
+            __frame, (sf.rflags & RFLAGS_USER_SAFE) | RFLAGS_IF | RFLAGS_RESERVED_ONE);
 
         // Restore the pre-handler blocked mask (unblockable bits never persist).
         process->sig_mask = sf.saved_mask & ~signo_bit(SIGKILL);

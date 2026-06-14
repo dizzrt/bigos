@@ -23,6 +23,11 @@ code should own the mechanism that implements it.
   `bigos::arch_context` semantic boundary, but AMD64 callee-saved switch frames,
   `iretq` entry frames, GDT selectors, and TSS `rsp0` details stay in the
   x86_64 implementation.
+- VM/user-entry consumers may use the narrow
+  `include/bigos/arch_vm_user_boundary.h` boundary for active-root queries,
+  address-space activation, user-return classification, user resume-frame
+  capture, and ring3 entry. CR3 masking/writes, TLB effects, user selectors,
+  TSS state, and `iretq` frame details stay in architecture-owned code.
 - Memory-management code may expose page-count kernel allocation, user-root
   operations, and address-space activation, but 4-level PML4 layout, recursive
   self-mapping, direct-map constants, PTE bit positions, `invlpg`, and CR3
@@ -46,10 +51,15 @@ runtime seams:
   `include/bigos/arch_context.h` boundary rather than open-coding raw frame
   offsets or the assembly symbol.
 - `kernel/mm` owns current x86_64 page-table manipulation and CR3 activation
-  because no alternate paging backend exists yet.
-- `kernel/core/proc` and `include/bigos/user_mode.h` consume user-mode entry,
-  TSS `rsp0`, syscall frames, signal frames, and fork frame cloning for the
-  current x86_64 user ABI.
+  because no alternate paging backend exists yet. Core process policy must still
+  treat VMA/process metadata as authorization and page tables as materialized
+  state.
+- `kernel/core/proc` owns process lifecycle, VMA policy, safe teardown, and the
+  bounded user-fault lifecycle. It consumes address-space activation, TSS
+  `rsp0`, user entry, user-return classification, and fork resume-frame capture
+  through `include/bigos/arch_vm_user_boundary.h`; the lower-level
+  `include/bigos/user_mode.h` and entry assembly remain x86_64 implementation
+  details.
 - `kernel/drivers` and driver-facing core paths own the legacy PC device access
   for VGA, serial, PIC, PIT, CMOS RTC, keyboard, and ATA PIO.
 
@@ -72,6 +82,9 @@ separate change declares and validates the behavior change:
   runtime parity, non-x86 runtime parity, APIC/IOAPIC support, or HPET support.
 - x86_64 page-table layout, recursive self-mapping window, direct map window,
   CR3 root semantics, and TLB invalidation behavior.
+- Existing higher-half kernel mappings shared into user roots, user low-half
+  isolation, KVMEM/direct-map availability, user stack assumptions, and current
+  CR3 switching semantics.
 - Raw disk image layout, Legacy BIOS/MBR/exFAT boot packaging, and ATA PIO
   storage path used by the default runnable backend.
 - Minimal syscall ABI: syscall number and arguments in the existing x86_64
@@ -96,6 +109,11 @@ kernel headers, or x86_64 backend/device paths:
 - For allocator, page-table, or early-memory changes, review initialization
   phase, allocation context, object lifetime, alignment, rollback, and failure
   behavior.
+- For VM/user-entry/fault changes, verify that VMA/process metadata authorizes
+  user access before page-table materialization, recoverable CPL3 faults stay
+  limited to implemented VMA-backed demand-zero/COW/stack-growth cases, and
+  fault/exit/reaper paths never free the active user root, current kernel stack,
+  or process object on an unsafe return path.
 
 ## Validation
 

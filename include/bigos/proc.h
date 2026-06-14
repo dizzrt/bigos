@@ -2,11 +2,11 @@
 #define _BIG_PROC_H
 
 #include <bigos/types.h>
+#include <bigos/arch_vm_user_boundary.h>
 #include <bigos/errno.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/memory.h>
 #include <bigos/signal.h>
-#include <irq/interrupt.h>
 
 namespace bigos::proc {
     constexpr uint64_t USER_CODE_BASE = 0x0000000000400000ull;
@@ -174,13 +174,13 @@ namespace bigos::proc {
         // allocation). Only valid while table_published is true.
         Process *reg_next;
         Process *reg_prev;
-        // Set for a process created by fork(): holds the saved user InterruptFrame
-        // (a verbatim copy of the parent's syscall frame with rax rewritten to 0)
-        // that the child's first scheduling restores through enter_user_mode_frame.
-        // fork_entry_valid gates that path; non-fork processes keep it false and
-        // enter ring3 through the ordinary entry/initial-stack path.
+        // Set for a process created by fork(): holds the architecture-owned user
+        // resume token captured from the parent's syscall return context, with
+        // the child return value already staged. fork_entry_valid gates that path;
+        // non-fork processes keep it false and enter ring3 through the ordinary
+        // entry/initial-stack path.
         bool fork_entry_valid;
-        bigos::irq::InterruptFrame fork_entry_frame;
+        bigos::arch::vm_user::UserResumeFrame fork_entry_frame;
         // Minimal signal state (appended fields; do not reorder the earlier
         // layout). All inline and fixed-size, so signal delivery and query paths
         // never allocate. sig_pending is the per-signal pending bitmap, sig_mask

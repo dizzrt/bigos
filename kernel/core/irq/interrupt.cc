@@ -3,6 +3,7 @@
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
 #ifdef BIGOS_USER_PROCESS
+#include <bigos/arch_vm_user_boundary.h>
 #include <bigos/proc.h>
 #include <bigos/signal.h>
 #endif
@@ -48,7 +49,7 @@ namespace irq {
             const uint64_t fault_address = read_cr2();
             const uint64_t error = __frame->error_code;
 #ifdef BIGOS_USER_PROCESS
-            const bool user_mode = (__frame->cs & 0x3) == 0x3;
+            const bool user_mode = bigos::arch::vm_user::is_user_return_frame(__frame);
 
             if (user_mode) {
                 if (bigos::proc::try_handle_user_page_fault(fault_address, error))
@@ -181,7 +182,7 @@ namespace irq {
             // signals, and this path sends no i8259 EOI of its own. A default
             // Terminate disposition routes through fault_current_and_exit and does
             // not return here.
-            if ((__frame->cs & 0x3) == 0x3) {
+            if (bigos::arch::vm_user::is_user_return_frame(__frame)) {
                 bigos::proc::Process *current = bigos::proc::current_process();
                 if (current != nullptr && bigos::signal::has_deliverable_signal(current))
                     bigos::signal::deliver_pending_to_user(__frame, current);

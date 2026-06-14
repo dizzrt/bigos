@@ -1,6 +1,7 @@
 #include <bigos/proc.h>
 
 #include <string.h>
+#include <bigos/arch_vm_user_boundary.h>
 #include <bigos/cred.h>
 #include <bigos/io.h>
 #include <bigos/memory.h>
@@ -8,7 +9,7 @@
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
 #include <bigos/time.h>
-#include <bigos/user_mode.h>
+#include <irq/interrupt.h>
 
 #include "../../mm/buddy.h"
 #include "../../mm/memdef.h"
@@ -356,7 +357,7 @@ namespace {
         if (!bigos::mm::map_page_in_root(__process->address_space_root, __vaddr, __phys, __attr))
             return false;
         if (__also_map_active_root &&
-            (bigos::mm::read_cr3() & 0x000ffffffffff000ull) != __process->address_space_root &&
+            !bigos::arch::vm_user::is_active_address_space(__process->address_space_root) &&
             !bigos::mm::map_page(__vaddr, __phys, __attr))
             return false;
         return true;
@@ -1069,7 +1070,7 @@ namespace {
             halt_failed("BIGOS_FORK_CHILD_FAILED invalid-child\n");
 
         if (!g_user_mode_initialized) {
-            bigos::arch::x86::init_user_mode();
+            bigos::arch::vm_user::init_user_entry();
             g_user_mode_initialized = true;
         }
 
@@ -1080,11 +1081,11 @@ namespace {
         // this thread is switched back in.
         bigos::sched::set_current_user_process(child);
         if (child->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
-            bigos::mm::activate_address_space_root(child->kernel_address_space_root);
-        bigos::arch::x86::set_tss_rsp0(child->kernel_stack_top);
+            bigos::arch::vm_user::activate_kernel_address_space(child->kernel_address_space_root);
+        bigos::arch::vm_user::set_kernel_stack_top(child->kernel_stack_top);
         bigos::serial_puts("BIGOS_FORK_CHILD_ENTER\n");
-        bigos::mm::activate_address_space_root(child->address_space_root);
-        bigos::arch::x86::enter_user_mode_frame(&child->fork_entry_frame);
+        bigos::arch::vm_user::activate_user_address_space(child->address_space_root);
+        bigos::arch::vm_user::resume_user(&child->fork_entry_frame);
     }
 }   // namespace
 
@@ -1472,7 +1473,7 @@ namespace bigos::proc {
         Process *process = g_current_process;
         if (process == nullptr || process->state != ProcessState::Running)
             return UserElfLoadError::InvalidArgument;
-        if (process->address_space_root == (bigos::mm::read_cr3() & 0x000ffffffffff000ull))
+        if (bigos::arch::vm_user::is_active_address_space(process->address_space_root))
             return UserElfLoadError::MapFailed;
 
         Process *prepared = alloc_process_object();
@@ -1616,7 +1617,7 @@ namespace bigos::proc {
 
         const uint64_t user_root = process->address_space_root;
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
-            bigos::mm::activate_address_space_root(process->kernel_address_space_root);
+            bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
         const UserElfLoadError error = exec_current_from_elf_image(image, file_size, __args);
         if (error != UserElfLoadError::Success) {
             // exec_current_from_elf_image only tears down the old image on the rare
@@ -1627,16 +1628,16 @@ namespace bigos::proc {
                 g_current_process = nullptr;
                 bigos::sched::thread_exit();
             }
-            bigos::mm::activate_address_space_root(user_root);
+            bigos::arch::vm_user::activate_user_address_space(user_root);
             return execve_load_errno(error);
         }
 
         // Success: the current process now owns the new image. Enter ring3 at the
         // new entry on the freshly prepared initial stack; this does not return.
-        bigos::arch::x86::set_tss_rsp0(process->kernel_stack_top);
-        bigos::mm::activate_address_space_root(process->address_space_root);
+        bigos::arch::vm_user::set_kernel_stack_top(process->kernel_stack_top);
+        bigos::arch::vm_user::activate_user_address_space(process->address_space_root);
         bigos::serial_puts("BIGOS_USER_EXEC\n");
-        bigos::arch::x86::enter_user_mode(process->entry, process->initial_stack);
+        bigos::arch::vm_user::enter_user(process->entry, process->initial_stack);
     }
 
     [[noreturn]] void run_user_process(Process *__process) noexcept {
@@ -1644,7 +1645,7 @@ namespace bigos::proc {
             halt_failed("BIGOS_USER_LOAD_FAILED invalid-process\n");
 
         if (!g_user_mode_initialized) {
-            bigos::arch::x86::init_user_mode();
+            bigos::arch::vm_user::init_user_entry();
             g_user_mode_initialized = true;
         }
 
@@ -1653,13 +1654,13 @@ namespace bigos::proc {
         // Bind this kernel thread to the process so the scheduler restores the
         // correct ring3 context (current process / user CR3 / rsp0) on resume.
         bigos::sched::set_current_user_process(__process);
-        __process->kernel_address_space_root = bigos::mm::read_cr3();
-        bigos::arch::x86::set_tss_rsp0(__process->kernel_stack_top);
+        __process->kernel_address_space_root = bigos::arch::vm_user::active_address_space_root();
+        bigos::arch::vm_user::set_kernel_stack_top(__process->kernel_stack_top);
         bigos::serial_puts("BIGOS_USER_ENTER\n");
         const uint64_t stack =
             __process->initial_stack != 0 ? __process->initial_stack : __process->stack.base + __process->stack.len;
-        bigos::mm::activate_address_space_root(__process->address_space_root);
-        bigos::arch::x86::enter_user_mode(__process->entry, stack);
+        bigos::arch::vm_user::activate_user_address_space(__process->address_space_root);
+        bigos::arch::vm_user::enter_user(__process->entry, stack);
     }
 
     Process *current_process() noexcept {
@@ -1736,9 +1737,9 @@ namespace bigos::proc {
             return;
         }
         g_current_process = __process;
-        bigos::arch::x86::set_tss_rsp0(__process->kernel_stack_top);
+        bigos::arch::vm_user::set_kernel_stack_top(__process->kernel_stack_top);
         if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
-            bigos::mm::activate_address_space_root(__process->address_space_root);
+            bigos::arch::vm_user::activate_user_address_space(__process->address_space_root);
     }
 
     void prepare_context_switch_to(Process *__next_process) noexcept {
@@ -1749,7 +1750,7 @@ namespace bigos::proc {
 
         Process *current = g_current_process;
         if (current != nullptr && current->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
-            bigos::mm::activate_address_space_root(current->kernel_address_space_root);
+            bigos::arch::vm_user::activate_kernel_address_space(current->kernel_address_space_root);
         g_current_process = nullptr;
     }
 
@@ -2104,19 +2105,15 @@ namespace bigos::proc {
         // allocation, no failure path.
         bigos::signal::inherit_on_fork(child, parent);
 
-        // Child resumes from the parent's syscall frame with rax (return value) 0.
-        child->fork_entry_frame = *__parent_frame;
-        child->fork_entry_frame.rax = 0;
-        // The InterruptFrame.rsp/.ss slots are synthetic in isr_common (rsp holds
-        // a kernel pointer into the CPU iret frame and ss is 0); the real ring3
-        // rsp/ss the child must iretq to live in the CPU-pushed iret frame just
-        // beyond the struct (offsets 176/184). Capture them so the child resumes
-        // on the user stack with a valid user SS rather than a kernel rsp + null ss.
-        {
-            const uint64_t *iret_tail =
-                (const uint64_t *)((const uint8_t *)__parent_frame + sizeof(bigos::irq::InterruptFrame));
-            child->fork_entry_frame.rsp = iret_tail[0];
-            child->fork_entry_frame.ss = iret_tail[1];
+        // Child resumes from the parent's syscall return context with rax 0. The
+        // architecture boundary owns the raw frame/tail interpretation.
+        if (!bigos::arch::vm_user::capture_user_resume_frame(__parent_frame, 0, &child->fork_entry_frame)) {
+            close_all_fds(child);
+            free_fd_table(child);
+            (void)bigos::mm::teardown_user_address_space(child->address_space_root);
+            bigos::free_pages(child->kernel_stack_base);
+            free_process_object(child);
+            return -bigos::EINVAL;
         }
         child->fork_entry_valid = true;
 
@@ -2355,7 +2352,7 @@ namespace bigos::proc {
         mark_zombie_or_reap_pending(process);
         bigos::serial_puts("BIGOS_USER_PAGE_FAULT\n");
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
-            bigos::mm::activate_address_space_root(process->kernel_address_space_root);
+            bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
     }
 
     [[noreturn]] void fault_current_and_exit(int64_t __reason) noexcept {
@@ -2397,7 +2394,7 @@ namespace bigos::proc {
         if (process == g_init_process)
             bigos::serial_puts("BIGOS_INIT_EXIT\n");
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
-            bigos::mm::activate_address_space_root(process->kernel_address_space_root);
+            bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
         g_current_process = nullptr;
         bigos::sched::set_current_user_process(nullptr);
         bigos::sched::thread_exit();
@@ -2469,7 +2466,7 @@ namespace bigos::proc {
                 link = &process->next_reap_pid;
                 continue;
             }
-            if (process->address_space_root == (bigos::mm::read_cr3() & 0x000ffffffffff000ull)) {
+            if (bigos::arch::vm_user::is_active_address_space(process->address_space_root)) {
                 bigos::serial_puts("BIGOS_USER_REAP_DEFERRED active-root\n");
                 link = &process->next_reap_pid;
                 continue;
@@ -3107,9 +3104,8 @@ namespace bigos::proc {
 
                 bigos::irq::InterruptFrame frame;
                 memset(&frame, 0, sizeof(frame));
-                frame.cs = bigos::arch::x86::USER_CODE_SELECTOR;
-                frame.ss = bigos::arch::x86::USER_DATA_SELECTOR;
-                frame.rflags = (1ull << 9) | (1ull << 1);   // IF + reserved
+                bigos::arch::vm_user::force_user_return_frame(
+                    &frame, (1ull << 9) | (1ull << 1));   // IF + reserved
                 frame.rip = USER_CODE_BASE + 0x40;
                 frame.rsp = USER_STACK_TOP;
                 frame.rax = 0x1111;
@@ -3129,8 +3125,7 @@ namespace bigos::proc {
                 sig::sigreturn(&frame);
                 if (frame.rip != pre_rip || frame.rsp != pre_rsp || frame.rax != 0x1111 || frame.rbx != 0x2222)
                     ok = false;
-                if (frame.cs != bigos::arch::x86::USER_CODE_SELECTOR ||
-                    frame.ss != bigos::arch::x86::USER_DATA_SELECTOR)
+                if (!bigos::arch::vm_user::is_user_return_frame(&frame))
                     ok = false;
                 if ((frame.rflags & (1ull << 9)) == 0)   // IF preserved
                     ok = false;
