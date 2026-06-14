@@ -313,8 +313,10 @@ namespace sys {
         static int64_t sys_readdir(uint64_t __fd, uint64_t __entries, uint64_t __max_entries) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
-            if (__max_entries == 0 || __max_entries > SYS_DIRENT_MAX_ENTRIES)
+            if (__max_entries == 0)
                 return -bigos::EINVAL;
+            if (__max_entries > SYS_DIRENT_MAX_ENTRIES)
+                return -bigos::ERANGE;
             const uint64_t bytes = __max_entries * sizeof(bigos::vfs::DirectoryEntry);
             if (__max_entries > UINT64_MAX / sizeof(bigos::vfs::DirectoryEntry) ||
                 !bigos::proc::validate_user_io_buffer(__entries, bytes))

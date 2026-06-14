@@ -65,8 +65,10 @@ namespace bigos::sys {
                                // user pointer arrays copied through VMA-backed validation
                                // and bounded by EXEC_MAX_ARGC/EXEC_MAX_ENVC/
                                // EXEC_MAX_STRING_BYTES.
-        SYS_READDIR = 28,      // (fd, struct bigos_dirent *entries, max_entries) -> entry count
-                               // or negative errno; minimal bounded /rw directory enumeration.
+        SYS_READDIR = 28,      // (fd, struct bigos_dirent *entries, max_entries) -> entry count,
+                               // -EINVAL for illegal arguments, -ERANGE when the
+                               // caller asks beyond the bounded batch capacity,
+                               // or another negative fd/VFS errno.
         SYS_STAT = 29,         // (path, struct bigos_metadata *out) -> 0 or negative errno.
         SYS_FSTAT = 30,        // (fd, struct bigos_metadata *out) -> 0 or negative errno.
         SYS_CHDIR = 31,        // (path) -> 0 or negative errno; cwd changes only after directory validation.

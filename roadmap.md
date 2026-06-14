@@ -165,12 +165,12 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 30 are complete and now form a compressed minimal usable system
+Stages 20 through 31 are complete and now form a compressed minimal usable system
 baseline. Keep the detailed implementation and validation history in dedicated
 architecture docs and OpenSpec records; this roadmap tracks only project-level
 capabilities and boundaries.
 
-阶段 20 到阶段 30 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
+阶段 20 到阶段 31 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
 专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
@@ -199,11 +199,13 @@ capabilities and boundaries.
   POSIX 进程模型。
 - Bounded runtime filesystem usability: runtime file behavior is part of the
   minimal usable system baseline for simple programs, including constrained
-  rename inside the writable runtime area. Preserved boundaries: no persistent
-  full writable filesystem, broad file-backed mapping, async I/O, or broad
-  storage/device support.
+  rename inside the writable runtime area, stable observable errno behavior,
+  permission and capacity failure boundaries, and consistent runtime metadata
+  visibility. Preserved boundaries: no persistent full writable filesystem,
+  broad file-backed mapping, async I/O, or broad storage/device support.
 - 有界运行时文件系统可用性：运行时文件行为已成为简单程序最小可用系统基线的一部分。
-  其中包括可写运行时区域内的受限 rename。保持边界：不引入持久完整可写文件系统、广泛
+  其中包括可写运行时区域内的受限 rename、稳定可观察 errno 行为、权限与容量失败边界，
+  以及一致的运行时 metadata 可见性。保持边界：不引入持久完整可写文件系统、广泛
   file-backed mapping、async I/O 或广泛存储/设备支持。
 - Minimal metadata contract: simple programs can observe bounded file and
   directory metadata through kernel, libc, user-tool, and behavior-validation
@@ -302,15 +304,19 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 31: Runtime Filesystem Semantics / 运行时文件系统语义
 
-- Harden observable filesystem errors, metadata consistency, permissions edges,
-  directory behavior, and read-only versus writable backend differences.
-- 硬化可观察的文件系统错误、元数据一致性、权限边界、目录行为，以及只读 backend 与可写
-  backend 的差异。
-- Continue to defer journaling, cross-reboot persistence, ACLs, extended
-  attributes, broad file-backed mappings, async I/O, and broad storage or device
+- Status: complete; this capability is now part of the completed baseline rather
+  than future mainline scope.
+- 状态：已完成；该能力现在属于已完成基线，不再属于后续主线范围。
+- The current baseline includes hardened observable filesystem errors, metadata
+  consistency, permissions edges, directory behavior, and read-only versus
+  writable backend differences.
+- 当前基线包括已硬化的可观察文件系统错误、元数据一致性、权限边界、目录行为，以及只读
+  backend 与可写 backend 的差异。
+- Preserved boundaries: no journaling, cross-reboot persistence, ACLs, extended
+  attributes, broad file-backed mappings, async I/O, or broad storage or device
   support.
-- 继续推迟 journaling、跨重启持久化、ACL、扩展属性、广泛 file-backed mapping、async I/O
-  以及广泛存储或设备支持。
+- 保持边界：不引入 journaling、跨重启持久化、ACL、扩展属性、广泛 file-backed mapping、
+  async I/O 或广泛存储/设备支持。
 
 ### Stage 32: Shell Usability Hardening / Shell 可用性硬化
 

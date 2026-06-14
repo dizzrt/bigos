@@ -38,8 +38,9 @@ namespace {
             case bigos::fs::FsStatus::Success:
                 return bigos::vfs::Status::Success;
             case bigos::fs::FsStatus::InvalidArgument:
-            case bigos::fs::FsStatus::BufferTooSmall:
                 return bigos::vfs::Status::InvalidArgument;
+            case bigos::fs::FsStatus::BufferTooSmall:
+                return bigos::vfs::Status::Range;
             case bigos::fs::FsStatus::Overflow:
                 return bigos::vfs::Status::Overflow;
             case bigos::fs::FsStatus::OutOfMemory:
@@ -144,7 +145,7 @@ namespace {
         if (__file->vnode == nullptr || !__file->vnode->is_directory)
             return bigos::vfs::Status::NotDirectory;
         if (__max_entries > VFS_DIRENT_BATCH_MAX)
-            return bigos::vfs::Status::InvalidArgument;
+            return bigos::vfs::Status::Range;
 
         ExfatFileState *state = (ExfatFileState *)__file->private_data;
         bigos::fs::DirectoryEntry local_entries[VFS_DIRENT_BATCH_MAX];
@@ -306,7 +307,7 @@ namespace {
             return bigos::vfs::Status::NotDirectory;
         BigfsFileState *state = (BigfsFileState *)__file->private_data;
         if (__max_entries > VFS_DIRENT_BATCH_MAX)
-            return bigos::vfs::Status::InvalidArgument;
+            return bigos::vfs::Status::Range;
         bigos::bigfs::DirectoryEntry local_entries[VFS_DIRENT_BATCH_MAX];
         size_t count = 0;
         uint64_t next_offset = __file->offset;
@@ -367,6 +368,8 @@ namespace vfs {
                 return "exists";
             case Status::BrokenPipe:
                 return "broken-pipe";
+            case Status::Range:
+                return "range";
         }
         return "unknown";
     }

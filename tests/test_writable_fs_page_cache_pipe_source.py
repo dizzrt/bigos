@@ -50,12 +50,14 @@ def test_errno_single_source_adds_new_codes() -> None:
         ('EIO', 5),
         ('EACCES', 13),
         ('EEXIST', 17),
+        ('ENODEV', 19),
         ('EISDIR', 21),
         ('ENOSPC', 28),
         ('ESPIPE', 29),
         ('EROFS', 30),
         ('EPIPE', 32),
         ('ERANGE', 34),
+        ('EOPNOTSUPP', 95),
     ):
         assert f'{name} = {value};' in header
 
@@ -107,6 +109,19 @@ def test_writable_fs_uses_cache_and_may_access_enforcement() -> None:
     # Deterministic failure codes.
     for status in ('Status::NoSpace', 'Status::Exists', 'Status::NotFound', 'Status::IsDirectory'):
         assert status in source
+    # Failed create/mkdir publication clears newly allocated inode metadata.
+    assert 'void discard_new_inode(uint32_t __inode) noexcept' in source
+    assert 'DiskInode empty = {};' in source
+    assert 'discard_new_inode(new_inode);' in source
+    # Writes preflight capacity before copying data, so ENOSPC is not a partial success.
+    assert 'Status bitmap_count_free(uint32_t __bitmap_block' in source
+    assert 'Status reserve_data_block(uint32_t *__out_block) noexcept' in source
+    assert 'if (__offset >= MAX_FILE_SIZE || (uint64_t)__len > MAX_FILE_SIZE - __offset)' in source
+    assert 'if (free_blocks < missing_blocks)' in source
+    assert 'rollback_allocated_blocks(allocated, allocated_count);' in source
+    assert 'uint8_t g_write_staged[DIRECT_BLOCKS][BLOCK_SIZE] = {};' in source
+    assert 'put_pinned_blocks(pinned, block_count);' in source
+    assert 'memcpy(pinned[i]->data, g_write_staged[i], BLOCK_SIZE);' in source
 
 
 def test_vfs_file_operations_gain_write_and_lseek() -> None:
@@ -160,6 +175,7 @@ def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:
     assert 'struct DirectoryEntry' in bigfs_h
     assert 'Status readdir(' in bigfs_h
     assert 'Status rename(' in bigfs_h
+    assert 'Status::Range' in vfs
     assert 'uint32_t g_open_refs[INODE_COUNT]' in bigfs
     assert 'void close_inode(uint32_t __inode)' in bigfs
     assert 'maybe_free_unlinked_inode' in bigfs
@@ -180,6 +196,12 @@ def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:
     assert 'test_current_directory(envp)' in smoke
     assert 'getcwd(small, sizeof(small)) != NULL || errno != ERANGE' in smoke
     assert 'open("/boot/user/init.elf", O_WRONLY, 0)' in smoke
+    assert 'write(fd, "x", 1) != -1 || errno != ENOSPC' in smoke
+    assert 'runtime-full-offset' in smoke
+    assert 'test_fd_inheritance_and_offsets();' in smoke
+    assert 'read(fd, child_buf, 3)' in smoke
+    assert 'strcmp(parent_buf, "def") != 0' in smoke
+    assert 'read(fd2, &ch2, 1) != 1 || ch2 !=' in smoke
 
 
 def test_pipe_eof_epipe_and_dup_share_offset() -> None:
@@ -198,6 +220,8 @@ def test_pipe_eof_epipe_and_dup_share_offset() -> None:
     assert 'int64_t dup_fd_current(' in proc
     assert 'int64_t dup2_fd_current(' in proc
     assert 'bigos::vfs::retain(file);' in proc
+    assert 'clone_fd_table(parent, child)' in proc
+    assert 'close_all_fds(process);' in proc
 
 
 def test_smoke_switches_default_off_and_emit_markers() -> None:

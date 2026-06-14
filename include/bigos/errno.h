@@ -31,6 +31,7 @@ constexpr int ENOMEM = 12;        // out of kernel memory
 constexpr int EACCES = 13;        // permission denied
 constexpr int EFAULT = 14;        // bad address
 constexpr int EEXIST = 17;        // file exists
+constexpr int ENODEV = 19;        // no such device / runtime backend not initialized
 constexpr int ENOTDIR = 20;       // not a directory
 constexpr int EISDIR = 21;        // is a directory
 constexpr int EINVAL = 22;        // invalid argument
@@ -41,6 +42,7 @@ constexpr int EROFS = 30;         // read-only file system
 constexpr int EPIPE = 32;         // broken pipe (all read ends closed)
 constexpr int ERANGE = 34;        // result too large for caller buffer
 constexpr int ENOSYS = 38;        // function not implemented
+constexpr int EOPNOTSUPP = 95;    // operation not supported on this object/backend
 NAMESPACE_BIGOS_END
 
 #endif   // _BIG_ERRNO_H

@@ -29,6 +29,7 @@ def test_vfs_shell_defines_read_only_root_file_and_error_contracts() -> None:
     assert 'struct FileOperations' in header
     assert 'OPEN_RDONLY = 0' in header
     assert 'OPEN_CREAT' in header and 'OPEN_TRUNC' in header
+    assert 'Range = -34' in header
     assert 'Status::BadFileDescriptor' in source
     assert 'fs_to_vfs' in source
     assert 'g_root' in source
@@ -139,6 +140,7 @@ def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
     assert 'user_range_writable(process->address_space_root, __addr, __len)' in proc
     assert 'copy_to_user_root' in vmem
     assert '(*pte & page_attr::WRITABLE) == 0' in vmem
+    assert 'return -bigos::ERANGE;' in syscall
 
 
 def test_bounded_metadata_contract_is_vfs_backed() -> None:
@@ -234,3 +236,172 @@ def test_shell_errors_and_builtin_redirection_use_fd_paths() -> None:
     assert 'if (run_builtin(n, args, out_fd))' in shell
     assert 'sh: line too long' in shell
     assert 'sh: command not found: ' in shell
+
+
+def test_runtime_filesystem_error_mapping_and_user_visible_boundary() -> None:
+    notes = read_source('openspec/changes/harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    libc = read_source('user/libc/syscall.c')
+    user_errno = read_source('user/libc/include/errno.h')
+    shell = read_source('user/sh/sh.c')
+    tools = '\n'.join(
+        read_source(path)
+        for path in (
+            'user/bin/cat.c',
+            'user/bin/ls.c',
+            'user/bin/mkdir.c',
+            'user/bin/rm.c',
+            'user/bin/rename.c',
+            'user/bin/stat.c',
+        )
+    )
+
+    for errno_name in (
+        'ENOENT',
+        'EEXIST',
+        'EBADF',
+        'EACCES',
+        'EROFS',
+        'ENOSPC',
+        'ENOMEM',
+        'ERANGE',
+        'EINVAL',
+        'EFAULT',
+        'ESPIPE',
+        'ENOTDIR',
+        'EISDIR',
+        'EIO',
+        'ENODEV',
+        'EOPNOTSUPP',
+        'EWOULDBLOCK',
+    ):
+        assert f'-{errno_name}' in notes
+        assert errno_name in user_errno
+
+    assert 'static int64_t vfs_status_to_syscall(bigos::vfs::Status __status) noexcept' in syscall
+    assert 'return (int64_t)__status;' in syscall
+    assert 'static long errno_translate(long ret)' in libc
+    assert 'errno = (int)(-ret);' in libc
+    assert 'status_name(' not in libc
+    assert 'status_name(' not in shell
+    assert 'status_name(' not in tools
+    assert 'errno=' in tools
+    assert 'sh: cannot open ' in shell
+    assert 'sh: cd failed: ' in shell
+
+
+def test_runtime_filesystem_blocking_guard_review_is_documented() -> None:
+    notes = read_source('openspec/changes/harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+
+    for syscall_name in (
+        'SYS_OPEN',
+        'SYS_READ',
+        'SYS_WRITE',
+        'SYS_PIPE',
+        'SYS_FSYNC',
+        'SYS_MKDIR',
+        'SYS_UNLINK',
+        'SYS_RENAME',
+        'SYS_READDIR',
+        'SYS_STAT',
+        'SYS_FSTAT',
+        'SYS_CHDIR',
+        'SYS_EXECVE',
+    ):
+        assert syscall_name in notes
+
+    for function_name in (
+        'static int64_t sys_open',
+        'static int64_t sys_read',
+        'static int64_t sys_write',
+        'static int64_t sys_pipe',
+        'static int64_t sys_fsync',
+        'static int64_t sys_mkdir',
+        'static int64_t sys_unlink',
+        'static int64_t sys_rename',
+        'static int64_t sys_readdir',
+        'static int64_t sys_stat',
+        'static int64_t sys_fstat',
+        'static int64_t sys_chdir',
+        'static int64_t sys_execve',
+    ):
+        start = syscall.index(function_name)
+        next_function = syscall.find('static int64_t', start + len(function_name))
+        if next_function < 0:
+            next_function = len(syscall)
+        body = syscall[start:next_function]
+        assert 'if (!bigos::sched::can_block())' in body
+        assert 'return -bigos::EWOULDBLOCK;' in body
+
+
+def test_runtime_filesystem_backend_dispatch_and_open_ref_review_is_documented() -> None:
+    notes = read_source('openspec/changes/harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    vfs = read_source('kernel/core/fs/vfs.cc')
+    proc = read_source('kernel/core/proc/proc.cc')
+    bigfs = read_source('kernel/core/fs/bigfs.cc')
+    smoke = read_source('user/smoke/userland_smoke.c')
+
+    assert 'Backend Dispatch And Open References' in notes
+    for phrase in (
+        'vfs::resolve_path(path, cwd, ...)',
+        'bigfs::owns_path()',
+        'Status::ReadOnlyFs',
+        'vfs::retain()',
+        'close_all_fds()',
+        '-EEXIST',
+    ):
+        assert phrase in notes
+
+    assert 'return open_absolute(resolved, __flags, __mode, __uid, __gid, __out_file);' in vfs
+    assert 'return stat_absolute(resolved, __out);' in vfs
+    assert 'return mkdir(resolved, __mode, __uid, __gid);' in vfs
+    assert 'return unlink(resolved, __uid, __gid);' in vfs
+    assert 'return rename(old_resolved, new_resolved, __uid, __gid);' in vfs
+    assert 'if (!bigos::bigfs::owns_path(__old_path) || !bigos::bigfs::owns_path(__new_path))' in vfs
+    assert 'return Status::ReadOnlyFs;' in vfs
+    assert 'bigos::vfs::retain(entries[i].file);' in proc
+    assert 'close_on_exec_fds(process);' in proc
+    assert 'close_all_fds(process);' in proc
+    assert 'maybe_free_unlinked_inode(target, &tnode);' in bigfs
+    assert 'return Status::Exists;' in bigfs
+    assert 'rename("/rw/runtime_rename_dst.txt", "/rw/runtime_rename_existing.txt") != -1 || errno != EEXIST' in smoke
+    assert 'rename("/boot/user/init.elf", "/rw/runtime_rename_ro.txt") != -1 || errno != EROFS' in smoke
+    assert 'rename("/rw/runtime_rename_dst.txt", "/boot/runtime_rename_dst.txt") != -1 || errno != EROFS' in smoke
+    assert 'open("/rw/runtime_unlink.txt", O_RDONLY, 0) != -1 || errno != ENOENT' in smoke
+    assert 'fstat(fd, &st) != 0 || st.st_size != 4' in smoke
+    assert 'rename("rel_old.txt", "rel_new.txt") != 0' in smoke
+
+
+def test_runtime_filesystem_metadata_contract_review_is_documented() -> None:
+    notes = read_source('openspec/changes/harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    vfs = read_source('kernel/core/fs/vfs.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    smoke = read_source('user/smoke/userland_smoke.c')
+    stat_tool = read_source('user/bin/stat.c')
+
+    assert 'Metadata Contract Review' in notes
+    for phrase in (
+        'path metadata',
+        'fd metadata',
+        'object_id',
+        'stable inode identity',
+        'Metadata metadata = {}',
+        'partial/uninitialized metadata',
+    ):
+        assert phrase in notes
+
+    assert 'fill_metadata_defaults(__out)' in vfs
+    assert '__out->object_id = 0;' in vfs
+    assert '__out->mode = (__metadata->is_directory ? (bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444));' not in vfs
+    assert '__out->mode = __metadata->is_directory ? (bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444);' in vfs
+    assert 'return fill_bigfs_metadata(state->inode, __out);' in vfs
+    assert 'if (!bigos::proc::validate_user_io_buffer(__out, sizeof(bigos::Metadata)))' in syscall
+    assert 'bigos::Metadata metadata = {};' in syscall
+    assert 'copy_to_current_user_buffer(__out, &metadata, sizeof(metadata))' in syscall
+    assert 'stat("/rw/runtime_rename_src.txt", &st) != -1 || errno != ENOENT' in smoke
+    assert 'stat("/rw/runtime_rename_dst.txt", &st) != 0 || st.st_size != 11' in smoke
+    assert 'stat("/rw/runtime_unlink.txt", &st) != -1 || errno != ENOENT' in smoke
+    assert 'fstat(fd, &st) != 0 || st.st_size != 4' in smoke
+    assert 'st.st_object_id != 0' in smoke
+    assert 'object=' in stat_tool

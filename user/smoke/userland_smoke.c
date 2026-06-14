@@ -288,6 +288,54 @@ static void test_redirect_and_dup(void) {
         fail("redir-content");
 }
 
+static void test_fd_inheritance_and_offsets(void) {
+    const char *path = "/rw/fd_inherit.txt";
+    unlink(path);
+    int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        fail("fd-inherit-open");
+    if (write(fd, "abcdef", 6) != 6)
+        fail("fd-inherit-write");
+    if (lseek(fd, 0, SEEK_SET) != 0)
+        fail("fd-inherit-seek");
+
+    pid_t pid = fork();
+    if (pid < 0)
+        fail("fd-inherit-fork");
+    if (pid == 0) {
+        char child_buf[4];
+        ssize_t n = read(fd, child_buf, 3);
+        if (n != 3)
+            exit(41);
+        child_buf[3] = 0;
+        exit(strcmp(child_buf, "abc") == 0 ? 0 : 42);
+    }
+    int status = -1;
+    if (wait_status(pid, &status) != pid || status != 0)
+        fail("fd-inherit-wait");
+    char parent_buf[4];
+    ssize_t n = read(fd, parent_buf, 3);
+    if (n != 3)
+        fail("fd-inherit-parent-read");
+    parent_buf[3] = 0;
+    if (strcmp(parent_buf, "def") != 0)
+        fail("fd-inherit-parent-content");
+
+    int fd2 = open(path, O_RDONLY, 0);
+    if (fd2 < 0)
+        fail("fd-independent-open");
+    char ch1 = 0;
+    char ch2 = 0;
+    if (lseek(fd, 0, SEEK_SET) != 0)
+        fail("fd-independent-seek");
+    if (read(fd, &ch1, 1) != 1 || ch1 != 'a')
+        fail("fd-independent-read1");
+    if (read(fd2, &ch2, 1) != 1 || ch2 != 'a')
+        fail("fd-independent-read2");
+    close(fd2);
+    close(fd);
+}
+
 static int dirents_contain(struct bigos_dirent *entries, ssize_t n, const char *name, unsigned int type) {
     for (ssize_t i = 0; i < n; i++) {
         if (entries[i].type == type && strcmp(entries[i].name, name) == 0)
@@ -303,6 +351,7 @@ static void test_runtime_filesystem(void) {
     unlink("/rw/runtime_rename_dst.txt");
     unlink("/rw/runtime_rename_existing.txt");
     unlink("/rw/runtime_rename_ro.txt");
+    unlink("/rw/runtime_full.txt");
     if (mkdir("/rw/runtime_rename_dir", 0755) < 0 && errno != EEXIST)
         fail("runtime-rename-dir-setup");
     if (mkdir("/rw/runtime_dir", 0755) < 0 && errno != EEXIST)
@@ -346,6 +395,9 @@ static void test_runtime_filesystem(void) {
     if (fstat(dirfd, &st) != 0 || st.type != BIGOS_METADATA_TYPE_DIRECTORY)
         fail("runtime-fstat-dir");
     struct bigos_dirent entries[BIGOS_DIRENT_MAX_BATCH];
+    errno = 0;
+    if (bigos_readdir(dirfd, entries, BIGOS_DIRENT_MAX_BATCH + 1) != -1 || errno != ERANGE)
+        fail("runtime-readdir-erange");
     ssize_t count = bigos_readdir(dirfd, entries, BIGOS_DIRENT_MAX_BATCH);
     close(dirfd);
     if (count < 0)
@@ -433,6 +485,22 @@ static void test_runtime_filesystem(void) {
     errno = 0;
     if (fstat(250, &st) != -1 || errno != EBADF)
         fail("runtime-fstat-badfd");
+
+    fd = open("/rw/runtime_full.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        fail("runtime-full-open");
+    if (lseek(fd, 4095, SEEK_SET) != 4095)
+        fail("runtime-full-seek");
+    if (write(fd, "z", 1) != 1)
+        fail("runtime-full-write");
+    errno = 0;
+    if (write(fd, "x", 1) != -1 || errno != ENOSPC)
+        fail("runtime-full-enospc");
+    if (fstat(fd, &st) != 0 || st.st_size != 4096)
+        fail("runtime-full-size");
+    if (lseek(fd, 0, SEEK_CUR) != 4096)
+        fail("runtime-full-offset");
+    close(fd);
 }
 
 static void test_current_directory(char **envp) {
@@ -677,6 +745,7 @@ int main(int argc, char **argv, char **envp) {
     test_fork_exec(envp);
     test_pipe();
     test_redirect_and_dup();
+    test_fd_inheritance_and_offsets();
     test_runtime_filesystem();
     test_current_directory(envp);
     test_time_identity();

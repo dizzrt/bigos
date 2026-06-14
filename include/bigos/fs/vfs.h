@@ -34,6 +34,7 @@ namespace vfs {
         IsDirectory = -21,
         Exists = -17,
         BrokenPipe = -32,
+        Range = -34,
     };
 
     // Seek whence values for lseek (POSIX numeric layout).

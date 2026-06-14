@@ -50,6 +50,7 @@ namespace {
     uint8_t *g_ram = nullptr;
     driver::block::BlockDevice g_device = {};
     uint32_t g_open_refs[INODE_COUNT] = {};
+    uint8_t g_write_staged[DIRECT_BLOCKS][BLOCK_SIZE] = {};
     bool g_initialized = false;
 
     driver::block::BlockStatus ram_read_impl(
@@ -161,6 +162,33 @@ namespace {
         return bitmap_alloc(INODE_BITMAP_BLOCK, INODE_COUNT, __out_inode);
     }
 
+    Status bitmap_count_free(uint32_t __bitmap_block, uint32_t __count, uint32_t *__out_free) noexcept {
+        if (__out_free == nullptr)
+            return Status::Invalid;
+        *__out_free = 0;
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, __bitmap_block);
+        if (block == nullptr)
+            return Status::IoError;
+        uint32_t free_count = 0;
+        for (uint32_t i = 0; i < __count; i++) {
+            const uint32_t byte = i / 8;
+            const uint8_t mask = (uint8_t)(1u << (i % 8));
+            if ((block->data[byte] & mask) == 0)
+                free_count++;
+        }
+        bigos::bcache::put(block);
+        *__out_free = free_count;
+        return Status::Success;
+    }
+
+    void discard_new_inode(uint32_t __inode) noexcept {
+        if (__inode >= INODE_COUNT)
+            return;
+        DiskInode empty = {};
+        (void)store_inode(__inode, &empty);
+        bitmap_free(INODE_BITMAP_BLOCK, __inode);
+    }
+
     // Allocates a data block, zeroes it, and returns its absolute block number.
     Status alloc_data_block(uint32_t *__out_block) noexcept {
         uint32_t index = 0;
@@ -180,10 +208,41 @@ namespace {
         return Status::Success;
     }
 
+    Status reserve_data_block(uint32_t *__out_block) noexcept {
+        uint32_t index = 0;
+        const Status status = bitmap_alloc(DATA_BITMAP_BLOCK, bigos::bigfs::DATA_BLOCK_COUNT, &index);
+        if (status != Status::Success)
+            return status;
+        *__out_block = DATA_START + index;
+        return Status::Success;
+    }
+
     void free_data_block(uint32_t __block_no) noexcept {
         if (__block_no < DATA_START)
             return;
         bitmap_free(DATA_BITMAP_BLOCK, __block_no - DATA_START);
+    }
+
+    void rollback_allocated_blocks(uint32_t *__blocks, uint32_t __count) noexcept {
+        if (__blocks == nullptr)
+            return;
+        for (uint32_t i = 0; i < __count; i++) {
+            if (__blocks[i] != 0) {
+                free_data_block(__blocks[i]);
+                __blocks[i] = 0;
+            }
+        }
+    }
+
+    void put_pinned_blocks(bigos::bcache::BufferBlock **__blocks, uint32_t __count) noexcept {
+        if (__blocks == nullptr)
+            return;
+        for (uint32_t i = 0; i < __count; i++) {
+            if (__blocks[i] != nullptr) {
+                bigos::bcache::put(__blocks[i]);
+                __blocks[i] = nullptr;
+            }
+        }
     }
 
     void release_inode_blocks(DiskInode *__inode) noexcept {
@@ -487,7 +546,8 @@ namespace {
         }
     }
 
-    Status check_access(uint32_t __uid, uint32_t __gid, const DiskInode *__inode, bigos::cred::Access __access) noexcept {
+    Status check_access(
+        uint32_t __uid, uint32_t __gid, const DiskInode *__inode, bigos::cred::Access __access) noexcept {
         if (bigos::cred::permits(__inode->uid, __inode->gid, __inode->mode, __uid, __gid, __access))
             return Status::Success;
         return Status::AccessDenied;
@@ -633,7 +693,7 @@ namespace bigfs {
             }
             const Status add = dir_add_entry(parent, &dir, leaf, new_inode);
             if (add != Status::Success) {
-                bitmap_free(INODE_BITMAP_BLOCK, new_inode);
+                discard_new_inode(new_inode);
                 return add;
             }
             g_open_refs[new_inode]++;
@@ -739,11 +799,13 @@ namespace bigfs {
         size_t *__out_written) noexcept {
         if (__out_written != nullptr)
             *__out_written = 0;
-        if (!g_initialized || __src == nullptr)
+        if (!g_initialized)
             return Status::Invalid;
         if (__len == 0)
             return Status::Success;
-        if (__offset >= MAX_FILE_SIZE)
+        if (__src == nullptr)
+            return Status::Invalid;
+        if (__offset >= MAX_FILE_SIZE || (uint64_t)__len > MAX_FILE_SIZE - __offset)
             return Status::NoSpace;
 
         DiskInode file;
@@ -755,52 +817,95 @@ namespace bigfs {
         if (acc != Status::Success)
             return acc;
 
-        uint64_t end = __offset + __len;
-        if (end > MAX_FILE_SIZE)
-            end = MAX_FILE_SIZE;
+        const uint64_t end = __offset + __len;
         const uint64_t writable = end - __offset;
+        const uint32_t first_block = (uint32_t)(__offset / BLOCK_SIZE);
+        const uint32_t last_block = (uint32_t)((end - 1) / BLOCK_SIZE);
+        uint32_t missing_blocks = 0;
+        for (uint32_t i = first_block; i <= last_block; i++) {
+            if (i >= DIRECT_BLOCKS)
+                return Status::NoSpace;
+            if (file.direct[i] == 0)
+                missing_blocks++;
+        }
+        if (missing_blocks != 0) {
+            uint32_t free_blocks = 0;
+            const Status count_status =
+                bitmap_count_free(DATA_BITMAP_BLOCK, bigos::bigfs::DATA_BLOCK_COUNT, &free_blocks);
+            if (count_status != Status::Success)
+                return count_status;
+            if (free_blocks < missing_blocks)
+                return Status::NoSpace;
+        }
+
+        DiskInode committed = file;
+        uint32_t allocated[DIRECT_BLOCKS] = {};
+        uint32_t allocated_count = 0;
+        for (uint32_t i = first_block; i <= last_block; i++) {
+            if (file.direct[i] != 0)
+                continue;
+            uint32_t new_block = 0;
+            const Status ab = reserve_data_block(&new_block);
+            if (ab != Status::Success) {
+                rollback_allocated_blocks(allocated, allocated_count);
+                return ab;
+            }
+            committed.direct[i] = new_block;
+            allocated[allocated_count++] = new_block;
+        }
+        if (end > committed.size)
+            committed.size = end;
+
+        uint32_t block_indices[DIRECT_BLOCKS] = {};
+        bigos::bcache::BufferBlock *pinned[DIRECT_BLOCKS] = {};
+        uint32_t block_count = 0;
+        for (uint32_t i = first_block; i <= last_block; i++) {
+            block_indices[block_count] = i;
+            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, committed.direct[i]);
+            if (block == nullptr) {
+                put_pinned_blocks(pinned, block_count);
+                rollback_allocated_blocks(allocated, allocated_count);
+                return Status::IoError;
+            }
+            pinned[block_count] = block;
+            if (file.direct[i] != 0)
+                memcpy(g_write_staged[block_count], block->data, BLOCK_SIZE);
+            else
+                memset(g_write_staged[block_count], 0, BLOCK_SIZE);
+            block_count++;
+        }
 
         size_t done = 0;
         const uint8_t *in = (const uint8_t *)__src;
         while ((uint64_t)done < writable) {
             const uint32_t block_index = (uint32_t)((__offset + done) / BLOCK_SIZE);
             const uint32_t block_off = (uint32_t)((__offset + done) % BLOCK_SIZE);
-            if (block_index >= DIRECT_BLOCKS)
-                break;
             uint32_t chunk = BLOCK_SIZE - block_off;
             if ((uint64_t)chunk > writable - done)
                 chunk = (uint32_t)(writable - done);
 
-            if (file.direct[block_index] == 0) {
-                uint32_t new_block = 0;
-                const Status ab = alloc_data_block(&new_block);
-                if (ab != Status::Success) {
-                    // Persist whatever we have written so far; deterministic NoSpace.
-                    if (done > 0) {
-                        if (__offset + done > file.size)
-                            file.size = __offset + done;
-                        (void)store_inode(__inode, &file);
-                        if (__out_written != nullptr)
-                            *__out_written = done;
-                        return Status::Success;
-                    }
-                    return ab;
-                }
-                file.direct[block_index] = new_block;
+            uint32_t slot = 0;
+            while (slot < block_count && block_indices[slot] != block_index)
+                slot++;
+            if (slot >= block_count) {
+                put_pinned_blocks(pinned, block_count);
+                rollback_allocated_blocks(allocated, allocated_count);
+                return Status::IoError;
             }
-            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, file.direct[block_index]);
-            if (block == nullptr)
-                return done > 0 ? Status::Success : Status::IoError;
-            memcpy(block->data + block_off, in + done, chunk);
-            bigos::bcache::mark_dirty(block);
-            bigos::bcache::put(block);
+            memcpy(g_write_staged[slot] + block_off, in + done, chunk);
             done += chunk;
         }
 
-        if (__offset + done > file.size)
-            file.size = __offset + done;
-        if (!store_inode(__inode, &file))
-            return done > 0 ? Status::Success : Status::IoError;
+        if (!store_inode(__inode, &committed)) {
+            put_pinned_blocks(pinned, block_count);
+            rollback_allocated_blocks(allocated, allocated_count);
+            return Status::IoError;
+        }
+        for (uint32_t i = 0; i < block_count; i++) {
+            memcpy(pinned[i]->data, g_write_staged[i], BLOCK_SIZE);
+            bigos::bcache::mark_dirty(pinned[i]);
+        }
+        put_pinned_blocks(pinned, block_count);
         if (__out_written != nullptr)
             *__out_written = done;
         return Status::Success;
@@ -845,7 +950,7 @@ namespace bigfs {
         }
         const Status add = dir_add_entry(parent, &dir, leaf, new_inode);
         if (add != Status::Success) {
-            bitmap_free(INODE_BITMAP_BLOCK, new_inode);
+            discard_new_inode(new_inode);
             return add;
         }
         return Status::Success;
@@ -1005,8 +1110,8 @@ namespace bigfs {
                 DiskInode child;
                 const uint32_t child_inode = ent->inode_plus_one - 1;
                 if (load_inode(child_inode, &child) && child.type != INODE_FREE) {
-                    __entries[produced].type =
-                        child.type == INODE_DIRECTORY ? bigos::vfs::DIRENT_TYPE_DIRECTORY : bigos::vfs::DIRENT_TYPE_FILE;
+                    __entries[produced].type = child.type == INODE_DIRECTORY ? bigos::vfs::DIRENT_TYPE_DIRECTORY
+                                                                             : bigos::vfs::DIRENT_TYPE_FILE;
                     memcpy(__entries[produced].name, ent->name, sizeof(__entries[produced].name));
                     __entries[produced].name[DIRENT_NAME_MAX] = 0;
                     produced++;

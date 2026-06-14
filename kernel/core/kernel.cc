@@ -25,6 +25,7 @@
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/bigfs.h>
 #include <bigos/cred.h>
+#include <string.h>
 #endif
 #ifdef BIGOS_PIPE_SMOKE
 #include <bigos/ipc/pipe.h>
@@ -318,8 +319,10 @@ namespace {
         const size_t plen = strlen(payload);
         uint32_t inode = 0;
         uint64_t size = 0;
+        bool is_dir = false;
         bigos::bigfs::Status s =
-            bigos::bigfs::open(path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid, &inode, &size);
+            bigos::bigfs::open(
+                path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid, &inode, &size, &is_dir);
         if (s != bigos::bigfs::Status::Success) {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED create\n");
             return;
@@ -357,8 +360,8 @@ namespace {
         // from a non-owner whose other bits grant no write access.
         const char *priv_path = "/rw/priv.txt";
         uint32_t priv_inode = 0;
-        s = bigos::bigfs::open(
-            priv_path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0600, uid, gid, &priv_inode, &size);
+        s = bigos::bigfs::open(priv_path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0600, uid, gid, &priv_inode,
+            &size, &is_dir);
         if (s != bigos::bigfs::Status::Success) {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED priv-create\n");
             return;
