@@ -2,7 +2,7 @@
  *
  * Read-parse-execute loop linked against crt0 and the user libc. Supports:
  *   - whitespace tokenization into a bounded argv,
- *   - builtins: exit, echo, cd,
+ *   - builtins: exit, echo, cd, status,
  *   - external commands via PATH lookup + fork + execve + wait,
  *   - a single-stage pipe a | b,
  *   - basic > / < redirection.
@@ -45,6 +45,29 @@ static void sh_error(const char *prefix, const char *detail) {
     if (detail != NULL)
         write_all(2, detail);
     write_all(2, "\n");
+}
+
+static void write_int(int fd, int value) {
+    char digits[12];
+    int n = 0;
+    unsigned int v;
+    if (value < 0) {
+        write_all(fd, "-");
+        v = (unsigned int)(-value);
+    } else {
+        v = (unsigned int)value;
+    }
+    if (v == 0)
+        digits[n++] = '0';
+    while (v != 0) {
+        digits[n++] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+    while (n > 0) {
+        char ch = digits[--n];
+        if (write(fd, &ch, 1) != 1)
+            return;
+    }
 }
 
 static int should_echo_input(char ch) {
@@ -130,19 +153,22 @@ static int build_direct_path(const char *cmd, char *out) {
 
 /* Performs execve over PATH candidates for a non-slash command. Only retries on
  * ENOENT; any other error stops. Returns only on failure (execve replaces the
- * image on success). */
-static void exec_with_path(const char *cmd, char **argv) {
+ * image on success); -1 means no candidate fit within SH_PATH_MAX. */
+static int exec_with_path(const char *cmd, char **argv) {
     const char *path = getenv("PATH");
     if (path == NULL || *path == 0)
         path = SH_DEFAULT_PATH;
 
     char candidate[SH_PATH_MAX];
     const char *dir = path;
+    int attempted = 0;
+    int too_long = 0;
     while (dir != NULL) {
         const char *end = strchr(dir, ':');
         size_t dir_len = end != NULL ? (size_t)(end - dir) : strlen(dir);
         size_t cmd_len = strlen(cmd);
         if (dir_len + 1 + cmd_len < SH_PATH_MAX) {
+            attempted = 1;
             size_t i = 0;
             for (; i < dir_len; i++)
                 candidate[i] = dir[i];
@@ -152,27 +178,32 @@ static void exec_with_path(const char *cmd, char **argv) {
             execve(candidate, argv, environ);
             if (errno != ENOENT)
                 break; /* a real error, not "try next dir" */
+        } else {
+            too_long = 1;
         }
         dir = end != NULL ? end + 1 : NULL;
     }
+    return too_long && !attempted ? -1 : 0;
 }
 
 /* Runs an external command (already tokenized argv). Forks; the child execve's
  * the resolved path; the parent waits. On execve failure the child reports and
  * exits non-zero, leaving the parent shell intact. */
-static void run_external(char **argv, int in_fd, int out_fd) {
+static int run_external(char **argv, int in_fd, int out_fd) {
     pid_t pid = fork();
     if (pid < 0) {
         sh_error("sh: fork failed", NULL);
-        return;
+        return 126;
     }
     if (pid == 0) {
         if (in_fd >= 0) {
-            dup2(in_fd, 0);
+            if (dup2(in_fd, 0) < 0)
+                exit(126);
             close(in_fd);
         }
         if (out_fd >= 0) {
-            dup2(out_fd, 1);
+            if (dup2(out_fd, 1) < 0)
+                exit(126);
             close(out_fd);
         }
         char direct[SH_PATH_MAX];
@@ -180,18 +211,32 @@ static void run_external(char **argv, int in_fd, int out_fd) {
         if (rc == 1)
             execve(direct, argv, environ);
         else if (rc == 0)
-            exec_with_path(argv[0], argv);
-        sh_error("sh: command not found: ", argv[0]);
-        exit(127);
+            rc = exec_with_path(argv[0], argv);
+        if (rc < 0)
+            sh_error("sh: path too long: ", argv[0]);
+        else if (errno == ENOEXEC || errno == EACCES)
+            sh_error("sh: exec failed: ", argv[0]);
+        else
+            sh_error("sh: command not found: ", argv[0]);
+        exit(rc < 0 ? 126 : 127);
     }
-    wait(pid);
+    int status = 126;
+    if (wait_status(pid, &status) != pid) {
+        sh_error("sh: wait failed", NULL);
+        return 126;
+    }
+    if (status != 0)
+        sh_error("sh: command failed: ", argv[0]);
+    return status;
 }
 
 /* Handles builtins. Returns 1 if handled, 0 otherwise. */
-static int run_builtin(int argc, char **argv, int out_fd) {
+static int run_builtin(int argc, char **argv, int out_fd, int last_status, int *status) {
+    *status = 0;
     if (strcmp(argv[0], "exit") == 0) {
-        int code = 0;
+        int code = last_status;
         if (argc > 1) {
+            code = 0;
             const char *p = argv[1];
             int neg = 0;
             if (*p == '-') {
@@ -205,14 +250,21 @@ static int run_builtin(int argc, char **argv, int out_fd) {
         }
         exit(code);
     }
+    if (strcmp(argv[0], "status") == 0) {
+        int fd = out_fd >= 0 ? out_fd : 1;
+        write_all(fd, "status ");
+        write_int(fd, last_status);
+        write_all(fd, "\n");
+        return 1;
+    }
     if (strcmp(argv[0], "echo") == 0) {
         int fd = out_fd >= 0 ? out_fd : 1;
         for (int i = 1; i < argc; i++) {
             if (i > 1)
                 write_all(fd, " ");
             size_t len = strlen(argv[i]);
-            if (len != 0)
-                write(fd, argv[i], len);
+            if (len != 0 && write(fd, argv[i], len) != (ssize_t)len)
+                *status = 1;
         }
         write_all(fd, "\n");
         return 1;
@@ -220,16 +272,47 @@ static int run_builtin(int argc, char **argv, int out_fd) {
     if (strcmp(argv[0], "cd") == 0) {
         if (out_fd >= 0) {
             sh_error("sh: cd does not write output", NULL);
+            *status = 1;
             return 1;
         }
         if (argc != 2) {
             sh_error("sh: cd: usage: cd PATH", NULL);
+            *status = 1;
             return 1;
         }
-        if (chdir(argv[1]) != 0)
+        if (chdir(argv[1]) != 0) {
             sh_error("sh: cd failed: ", argv[1]);
+            *status = 1;
+        }
         return 1;
     }
+    return 0;
+}
+
+static int close_redirects(int in_fd, int out_fd) {
+    int rc = 0;
+    if (in_fd >= 0 && close(in_fd) != 0)
+        rc = -1;
+    if (out_fd >= 0 && close(out_fd) != 0)
+        rc = -1;
+    return rc;
+}
+
+static int contains_unsupported_token(int argc, char **argv) {
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], ">>") == 0 || strcmp(argv[i], "2>") == 0 || strcmp(argv[i], "||") == 0 ||
+            strcmp(argv[i], "&&") == 0 || strcmp(argv[i], ";") == 0 || strcmp(argv[i], "&") == 0) {
+            sh_error("sh: unsupported syntax: ", argv[i]);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int contains_redirection_token(int argc, char **argv) {
+    for (int i = 0; i < argc; i++)
+        if (strcmp(argv[i], ">") == 0 || strcmp(argv[i], "<") == 0)
+            return 1;
     return 0;
 }
 
@@ -246,36 +329,52 @@ static int apply_redirects(char **argv, int *argc, int *in_fd, int *out_fd) {
         if (strcmp(argv[r], ">") == 0) {
             if (r + 1 >= *argc) {
                 sh_error("sh: syntax error near >", NULL);
+                close_redirects(*in_fd, *out_fd);
                 return -1;
+            }
+            if (*out_fd >= 0) {
+                close(*out_fd);
+                *out_fd = -1;
             }
             int fd = open(argv[r + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) {
                 sh_error("sh: cannot open ", argv[r + 1]);
+                close_redirects(*in_fd, *out_fd);
                 return -1;
             }
-            fd = move_fd_from_stdio(fd);
-            if (fd < 0) {
+            int moved = move_fd_from_stdio(fd);
+            if (moved < 0) {
                 sh_error("sh: cannot move output fd", NULL);
+                close(fd);
+                close_redirects(*in_fd, *out_fd);
                 return -1;
             }
-            *out_fd = fd;
+            *out_fd = moved;
             r++;
         } else if (strcmp(argv[r], "<") == 0) {
             if (r + 1 >= *argc) {
                 sh_error("sh: syntax error near <", NULL);
+                close_redirects(*in_fd, *out_fd);
                 return -1;
+            }
+            if (*in_fd >= 0) {
+                close(*in_fd);
+                *in_fd = -1;
             }
             int fd = open(argv[r + 1], O_RDONLY, 0);
             if (fd < 0) {
                 sh_error("sh: cannot open ", argv[r + 1]);
+                close_redirects(*in_fd, *out_fd);
                 return -1;
             }
-            fd = move_fd_from_stdio(fd);
-            if (fd < 0) {
+            int moved = move_fd_from_stdio(fd);
+            if (moved < 0) {
                 sh_error("sh: cannot move input fd", NULL);
+                close(fd);
+                close_redirects(*in_fd, *out_fd);
                 return -1;
             }
-            *in_fd = fd;
+            *in_fd = moved;
             r++;
         } else {
             argv[w++] = argv[r];
@@ -374,17 +473,17 @@ static int write_echo_to_fd(int fd, char **argv) {
 }
 
 /* Runs a single-stage pipe: left | right. */
-static void run_pipe(char **left, char **right) {
+static int run_pipe(char **left, char **right) {
     int fds[2];
     if (pipe(fds) < 0) {
         sh_error("sh: pipe failed", NULL);
-        return;
+        return 126;
     }
     if (move_pipe_fds_from_stdio(fds) < 0) {
         close(fds[0]);
         close(fds[1]);
         sh_error("sh: pipe fd setup failed", NULL);
-        return;
+        return 126;
     }
 
     pid_t lpid = -1;
@@ -394,23 +493,27 @@ static void run_pipe(char **left, char **right) {
             close(fds[0]);
             close(fds[1]);
             sh_error("sh: fork failed", NULL);
-            return;
+            return 126;
         }
         if (lpid == 0) {
             if (dup2(fds[1], 1) < 0)
                 exit(126);
             close(fds[0]);
             close(fds[1]);
-            if (run_builtin(argv_count(left), left, -1))
-                exit(0);
+            int status = 0;
+            if (run_builtin(argv_count(left), left, -1, 0, &status))
+                exit(status);
             char direct[SH_PATH_MAX];
             int rc = build_direct_path(left[0], direct);
             if (rc == 1)
                 execve(direct, left, environ);
             else if (rc == 0)
-                exec_with_path(left[0], left);
-            sh_error("sh: command not found: ", left[0]);
-            exit(127);
+                rc = exec_with_path(left[0], left);
+            if (rc < 0)
+                sh_error("sh: path too long: ", left[0]);
+            else
+                sh_error("sh: command not found: ", left[0]);
+            exit(rc < 0 ? 126 : 127);
         }
     }
 
@@ -421,37 +524,47 @@ static void run_pipe(char **left, char **right) {
         if (lpid > 0)
             wait(lpid);
         sh_error("sh: fork failed", NULL);
-        return;
+        return 126;
     }
     if (rpid == 0) {
         if (dup2(fds[0], 0) < 0)
             exit(126);
         close(fds[0]);
         close(fds[1]);
-        if (run_builtin(argv_count(right), right, -1))
-            exit(0);
+        int status = 0;
+        if (run_builtin(argv_count(right), right, -1, 0, &status))
+            exit(status);
         char direct[SH_PATH_MAX];
         int rc = build_direct_path(right[0], direct);
         if (rc == 1)
             execve(direct, right, environ);
         else if (rc == 0)
-            exec_with_path(right[0], right);
-        sh_error("sh: command not found: ", right[0]);
-        exit(127);
+            rc = exec_with_path(right[0], right);
+        if (rc < 0)
+            sh_error("sh: path too long: ", right[0]);
+        else
+            sh_error("sh: command not found: ", right[0]);
+        exit(rc < 0 ? 126 : 127);
     }
 
     if (is_echo_builtin(left)) {
         close(fds[0]);
         (void)write_echo_to_fd(fds[1], left);
         close(fds[1]);
-        wait(rpid);
-        return;
+        int right_status = 126;
+        if (wait_status(rpid, &right_status) != rpid)
+            return 126;
+        return right_status;
     }
 
     close(fds[0]);
     close(fds[1]);
-    wait(lpid);
-    wait(rpid);
+    int ignored_status = 0;
+    int right_status = 126;
+    wait_status(lpid, &ignored_status);
+    if (wait_status(rpid, &right_status) != rpid)
+        return 126;
+    return right_status;
 }
 
 int main(int argc, char **argv, char **envp) {
@@ -460,6 +573,7 @@ int main(int argc, char **argv, char **envp) {
     (void)envp;
     char line[SH_MAX_LINE];
     char *args[SH_MAX_ARGC + 1];
+    int last_status = 0;
 
     for (;;) {
         int interactive = is_interactive_session();
@@ -469,6 +583,7 @@ int main(int argc, char **argv, char **envp) {
         int len = read_line(line, sizeof(line), interactive);
         if (len < 0) {
             sh_error("sh: line too long", NULL);
+            last_status = 2;
             continue;
         }
         if (len == 0)
@@ -477,10 +592,15 @@ int main(int argc, char **argv, char **envp) {
         int n = tokenize(line, args);
         if (n < 0) {
             sh_error("sh: too many arguments", NULL);
+            last_status = 2;
             continue;
         }
         if (n == 0)
             continue;
+        if (contains_unsupported_token(n, args)) {
+            last_status = 2;
+            continue;
+        }
 
         int pipe_idx = find_pipe(n, args);
         if (pipe_idx >= 0) {
@@ -488,34 +608,42 @@ int main(int argc, char **argv, char **envp) {
             char **right = &args[pipe_idx + 1];
             if (args[0] == NULL || right[0] == NULL) {
                 sh_error("sh: syntax error near |", NULL);
+                last_status = 2;
                 continue;
             }
-            run_pipe(args, right);
+            if (find_pipe(argv_count(right), right) >= 0) {
+                sh_error("sh: unsupported syntax: multiple pipes", NULL);
+                last_status = 2;
+                continue;
+            }
+            if (contains_redirection_token(argv_count(args), args) ||
+                contains_redirection_token(argv_count(right), right)) {
+                sh_error("sh: unsupported syntax: redirection with pipe", NULL);
+                last_status = 2;
+                continue;
+            }
+            last_status = run_pipe(args, right);
             continue;
         }
 
         int in_fd, out_fd;
-        if (apply_redirects(args, &n, &in_fd, &out_fd) != 0)
+        if (apply_redirects(args, &n, &in_fd, &out_fd) != 0) {
+            last_status = 2;
             continue;
+        }
         if (n == 0) {
-            if (in_fd >= 0)
-                close(in_fd);
-            if (out_fd >= 0)
-                close(out_fd);
+            close_redirects(in_fd, out_fd);
+            last_status = 0;
             continue;
         }
-        if (run_builtin(n, args, out_fd)) {
-            if (in_fd >= 0)
-                close(in_fd);
-            if (out_fd >= 0)
-                close(out_fd);
+        int status = 0;
+        if (run_builtin(n, args, out_fd, last_status, &status)) {
+            close_redirects(in_fd, out_fd);
+            last_status = status;
             continue;
         }
-        run_external(args, in_fd, out_fd);
-        if (in_fd >= 0)
-            close(in_fd);
-        if (out_fd >= 0)
-            close(out_fd);
+        last_status = run_external(args, in_fd, out_fd);
+        close_redirects(in_fd, out_fd);
     }
     return 0;
 }

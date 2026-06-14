@@ -692,8 +692,11 @@ static void test_smoke_shell(char **envp) {
     close(input[0]);
     close(transcript);
     write_all_or_exit(input[1], "/bin/smoke/exit 7\n");
+    write_all_or_exit(input[1], "status\n");
     write_all_or_exit(input[1], "/bin/smoke/args alpha beta\n");
     write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\n");
+    write_all_or_exit(input[1], "echo pipe-status | /bin/smoke/exit 7\n");
+    write_all_or_exit(input[1], "status\n");
     write_all_or_exit(input[1], "cd /rw\n");
     write_all_or_exit(input[1], "/bin/pwd\n");
     write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\n");
@@ -709,6 +712,10 @@ static void test_smoke_shell(char **envp) {
     write_all_or_exit(input[1], "ls . > smoke_shell_ls_rw.txt\n");
     write_all_or_exit(input[1], "cat smoke_shell_renamed.txt | /bin/cat\n");
     write_all_or_exit(input[1], "/bin/cat /rw/no_such_path_tool\n");
+    write_all_or_exit(input[1], "missing-command\n");
+    write_all_or_exit(input[1], "status\n");
+    write_all_or_exit(input[1], "echo unsupported ;\n");
+    write_all_or_exit(input[1], "status\n");
     write_all_or_exit(input[1], "/bin/rm /boot/user/init.elf\n");
     write_all_or_exit(input[1], "/bin/rm smoke_shell_cat_redir.txt\n");
     write_all_or_exit(input[1], "/bin/stat smoke_shell_cat_redir.txt\n");
@@ -722,9 +729,14 @@ static void test_smoke_shell(char **envp) {
     require_file_contains("/rw/smoke_args.txt", "smoke_args argc=3 argv[2]=beta");
     require_file_contains("/rw/smoke_shell_redir.txt", "redir-ok");
     require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok");
+    require_file_contains("/rw/smoke_shell_io.txt", "status 7");
     require_file_contains("/rw/smoke_shell_io.txt", "/rw");
     require_file_contains("/rw/smoke_shell_io.txt", "shell-path-content");
     require_file_contains("/rw/smoke_shell_io.txt", "cat: /rw/no_such_path_tool: open errno=2");
+    require_file_contains("/rw/smoke_shell_io.txt", "sh: command not found: missing-command");
+    require_file_contains("/rw/smoke_shell_io.txt", "status 127");
+    require_file_contains("/rw/smoke_shell_io.txt", "sh: unsupported syntax: ;");
+    require_file_contains("/rw/smoke_shell_io.txt", "status 2");
     require_file_contains("/rw/smoke_shell_io.txt", "rm: /boot/user/init.elf: errno=30");
     require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_cat_redir.txt: errno=2");
     require_file_contains("/rw/smoke_shell_renamed.txt", "shell-path-content");

@@ -165,12 +165,12 @@ runtime behavior checks, and environment-dependent checks.
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 31 are complete and now form a compressed minimal usable system
+Stages 20 through 32 are complete and now form a compressed minimal usable system
 baseline. Keep the detailed implementation and validation history in dedicated
 architecture docs and OpenSpec records; this roadmap tracks only project-level
 capabilities and boundaries.
 
-阶段 20 到阶段 31 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
+阶段 20 到阶段 32 已完成，并共同形成压缩后的最小可用系统基线。详细实现与验证历史应保留在
 专门架构文档和 OpenSpec 记录中；本 roadmap 只跟踪项目级能力与边界。
 
 - Interactive console usability: the default bounded userland shell is usable
@@ -320,6 +320,9 @@ OpenSpec change、架构文档或贴近源码的说明中，而不是放在本 r
 
 ### Stage 32: Shell Usability Hardening / Shell 可用性硬化
 
+- Status: complete; this capability is now part of the completed baseline rather
+  than future mainline scope.
+- 状态：已完成；该能力现在属于已完成基线，不再属于后续主线范围。
 - Improve the bounded interactive shell experience around path handling, error
   reporting, exit-status propagation, pipes, redirection, and small utility
   composition.
