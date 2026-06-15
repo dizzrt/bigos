@@ -343,16 +343,20 @@ namespace {
             const Status status = alloc_data_block(&new_block);
             if (status != Status::Success)
                 return status;
-            __dir->direct[i] = new_block;
-            __dir->size += BLOCK_SIZE;
-            if (!store_inode(__dir_inode, __dir)) {
+            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, new_block);
+            if (block == nullptr) {
                 free_data_block(new_block);
-                __dir->direct[i] = 0;
                 return Status::IoError;
             }
-            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, new_block);
-            if (block == nullptr)
+            DiskInode committed = *__dir;
+            committed.direct[i] = new_block;
+            committed.size += BLOCK_SIZE;
+            if (!store_inode(__dir_inode, &committed)) {
+                bigos::bcache::put(block);
+                free_data_block(new_block);
                 return Status::IoError;
+            }
+            *__dir = committed;
             __out->block = block;
             __out->entry = (DiskDirent *)block->data;
             return Status::Success;
@@ -404,16 +408,11 @@ namespace {
             const Status status = alloc_data_block(&new_block);
             if (status != Status::Success)
                 return status;
-            __dir->direct[i] = new_block;
-            __dir->size += BLOCK_SIZE;
-            if (!store_inode(__dir_inode, __dir)) {
+            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, new_block);
+            if (block == nullptr) {
                 free_data_block(new_block);
-                __dir->direct[i] = 0;
                 return Status::IoError;
             }
-            bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, new_block);
-            if (block == nullptr)
-                return Status::IoError;
             DiskDirent *ent = (DiskDirent *)block->data;
             ent->inode_plus_one = __child + 1;
             memset(ent->name, 0, sizeof(ent->name));
@@ -422,6 +421,15 @@ namespace {
                 ent->name[n] = __name[n];
                 n++;
             }
+            DiskInode committed = *__dir;
+            committed.direct[i] = new_block;
+            committed.size += BLOCK_SIZE;
+            if (!store_inode(__dir_inode, &committed)) {
+                bigos::bcache::put(block);
+                free_data_block(new_block);
+                return Status::IoError;
+            }
+            *__dir = committed;
             bigos::bcache::mark_dirty(block);
             bigos::bcache::put(block);
             return Status::Success;
@@ -729,9 +737,17 @@ namespace bigfs {
                 return acc;
         }
         if ((__flags & bigos::vfs::OPEN_TRUNC) != 0) {
-            release_inode_blocks(&file);
-            if (!store_inode(inode_num, &file))
+            DiskInode truncated = file;
+            for (uint32_t i = 0; i < DIRECT_BLOCKS; i++)
+                truncated.direct[i] = 0;
+            truncated.size = 0;
+            if (!store_inode(inode_num, &truncated))
                 return Status::IoError;
+            for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
+                if (file.direct[i] != 0)
+                    free_data_block(file.direct[i]);
+            }
+            file = truncated;
         }
         g_open_refs[inode_num]++;
         *__out_inode = inode_num;
@@ -754,7 +770,11 @@ namespace bigfs {
     Status read(uint32_t __inode, uint64_t __offset, void *__dst, size_t __len, size_t *__out_read) noexcept {
         if (__out_read != nullptr)
             *__out_read = 0;
-        if (!g_initialized || __dst == nullptr)
+        if (!g_initialized)
+            return Status::Invalid;
+        if (__len == 0)
+            return Status::Success;
+        if (__dst == nullptr)
             return Status::Invalid;
         DiskInode file;
         if (!load_inode(__inode, &file))
@@ -1055,15 +1075,15 @@ namespace bigfs {
             return Status::Success;
         }
 
+        DirSlot src = {};
+        if (!dir_find_slot(&old_dir, old_leaf, &src))
+            return Status::NotFound;
+
         DirSlot dst = {};
         status = dir_reserve_slot(new_parent, &new_dir, &dst);
-        if (status != Status::Success)
+        if (status != Status::Success) {
+            bigos::bcache::put(src.block);
             return status;
-
-        DirSlot src = {};
-        if (!dir_find_slot(&old_dir, old_leaf, &src)) {
-            bigos::bcache::put(dst.block);
-            return Status::NotFound;
         }
 
         dirent_set(dst.entry, new_leaf, target);

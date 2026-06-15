@@ -44,14 +44,15 @@ inode 数、仅直接块的文件（有界 `MAX_FILE_SIZE`）、定长目录项�
 
 每个 inode 携带 `owner`（uid/gid）与 `mode`。支持：可写 `open`
 （`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`）、文件 `write`、`lseek`、`O_TRUNC`
-截断、`mkdir`、最小目录枚举与 `unlink`。`unlink` 会先移除目录项；仍打开的 fd 会让
-inode 与数据块保留到最后一个引用关闭。失败语义确定性
-（`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-ENOTDIR`/`-EISDIR`/`-EINVAL`/`-EIO`/`-EACCES`/
-`-EROFS`），失败路径绝不发布半成品元数据。
+截断、`mkdir`、最小目录枚举、`unlink` 与可写 backend 内受限的 regular-file
+`rename`。`unlink` 会先移除目录项；仍打开的 fd 会让 inode 与数据块保留到最后一个
+引用关闭，rename 前已打开的 fd 在成功 rename 后仍指向同一个运行期文件。失败语义确定性
+（`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-ENOTDIR`/`-EISDIR`/`-EINVAL`/`-ENOTEMPTY`/`-EIO`/
+`-EACCES`/`-EROFS`），失败路径绝不发布半成品元数据。
 
-由于介质为 RAM-backed，重启不持久；本阶段只保证运行期一致性（写后读回，以及
-`fsync` 加缓存淘汰后再读一致）。无 journaling，崩溃一致性不在范围内，作为已知限
-制明确记录。
+由于介质为 RAM-backed，重启不持久；本阶段只保证当前运行期一致性（写后读回、
+metadata 与目录枚举可见性，以及 `fsync` 加缓存淘汰后再读一致）。不提供 journaling、
+stable inode identity、完整 POSIX `DIR*` 或崩溃一致性保证。
 
 ## 权限强制
 

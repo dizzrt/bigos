@@ -225,7 +225,7 @@ namespace {
             case bigos::bigfs::Status::IsDirectory:
                 return bigos::vfs::Status::IsDirectory;
             case bigos::bigfs::Status::NotEmpty:
-                return bigos::vfs::Status::InvalidArgument;
+                return bigos::vfs::Status::NotEmpty;
             case bigos::bigfs::Status::AccessDenied:
                 return bigos::vfs::Status::AccessDenied;
             case bigos::bigfs::Status::IoError:
@@ -370,6 +370,8 @@ namespace vfs {
                 return "broken-pipe";
             case Status::Range:
                 return "range";
+            case Status::NotEmpty:
+                return "not-empty";
         }
         return "unknown";
     }

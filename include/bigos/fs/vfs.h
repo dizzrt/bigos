@@ -35,6 +35,7 @@ namespace vfs {
         Exists = -17,
         BrokenPipe = -32,
         Range = -34,
+        NotEmpty = -39,
     };
 
     // Seek whence values for lseek (POSIX numeric layout).

@@ -57,6 +57,7 @@ def test_errno_single_source_adds_new_codes() -> None:
         ('EROFS', 30),
         ('EPIPE', 32),
         ('ERANGE', 34),
+        ('ENOTEMPTY', 39),
         ('EOPNOTSUPP', 95),
     ):
         assert f'{name} = {value};' in header

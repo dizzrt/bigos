@@ -33,6 +33,7 @@
 #define EPIPE       32
 #define ERANGE      34
 #define ENOSYS      38
+#define ENOTEMPTY   39
 #define EOPNOTSUPP  95
 
 /* Global errno set by the syscall wrappers on a negative kernel return. */

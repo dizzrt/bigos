@@ -17,7 +17,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 行为导向验证区分三类入口：
 
 - 默认路径：`default-init` case 使用所有 smoke 开关关闭的 normal build，打包 PID-1 init、`/bin/sh` 和有界 `/bin/*`，并通过 QEMU headless 日志观察确定性的 init/shell 串口 marker。
-- 默认关闭 smoke：`userland-runtime`、`writable-fs`、`pipe`、`filesystem-read`、`filesystem-user-elf` 等 case 每次只启用一个显式 smoke 开关，用于验证 userland、process/fd、pipe/redirection 和 filesystem 行为，且不改变 normal boot 默认值。
+- 默认关闭 smoke：`userland-runtime`、`filesystem-maturity`、`writable-fs`、`pipe`、`filesystem-read`、`filesystem-user-elf` 等 case 每次只启用一个显式 smoke 开关，用于验证 userland、process/fd、pipe/redirection 和 filesystem 行为，且不改变 normal boot 默认值。
 - 场景化证据：graphical QEMU、Bochs、手工键盘输入、emulator input injection 或硬件相邻检查只在为 console usability 或底层 boot/IRQ/timer/ATA/port-IO 风险补充证据时记录。
 
 ## 矩阵 Case
@@ -39,6 +39,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `signals` | `--signal_smoke=y` | `BIGOS_SIGNAL_PASSED` | 30s | 最小 signal queue、mask、handler 和投递路径。 |
 | `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`、page/buffer cache、写后读回、fsync 和权限。 |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
+| `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | Stage 41 当前运行期文件系统语义，覆盖只读 exFAT、RAM-backed `/rw`、fd/VFS、metadata、cwd-relative path、libc errno 与 shell-visible tools；不声明重启持久化。 |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno、`snprintf`/formatter、`strtol`/`atoi`、`calloc`/`realloc`、有界 `DIR*` wrapper、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和有界 `/rw` 运行时文件操作。 |
 | `default-init` | _(无)_ | `BIGOS_USER_EXEC` | 40s | 不加任何 smoke 开关的默认构建；normal boot 打包 PID-1 init、`/bin/sh` 和 bounded `/bin/*`。 |
 
@@ -57,7 +58,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `exec`/`wait` 与 fd 继承 | userland smoke fork、exec packaged program、wait，并保持 stdio 或 redirected descriptor | child output 或 `/rw` 记录可见，parent wait 返回预期 child/status，继承 descriptor 仍可用 | wait 失败、status 错误、缺失输出、descriptor 失败或 failure marker | 默认关闭 userland runtime 断言 | xmake、cross-binutils、QEMU、串口日志 |
 | `dup`、redirection 与无关 fd 状态 | userland smoke 复制 fd、关闭原 fd、将 shell 输出重定向到 `/rw` 并读回 | duplicate fd 在原 fd 关闭后仍可写；重定向文件包含预期数据；shell transcript 仍可用 | 文件内容错误、dup/readback 失败、shell fd 损坏或 failure marker | 默认关闭 userland runtime 断言 | QEMU headless、串口日志、RAM-backed `/rw` |
 | Pipe 端点行为 | userland smoke 传输 `pipe-data`；shell 运行 `echo pipe-ok | /bin/cat`；`pipe` smoke 检查端点计数 | downstream reader 看到字节，writer 全关后出现 EOF，无关 fd 仍可用 | 数据错误、缺失 EOF、`EPIPE`/端点状态不匹配、缺失 pass marker 或 panic | 默认关闭 userland runtime 断言加窄 pipe smoke | QEMU headless、串口日志 |
-| 运行时 `/rw` 文件系统操作 | userland smoke 创建文件/目录、write、fsync、seek、读回、枚举 `/rw`、unlink，并检查只读 backend 拒写 | 文件内容、目录项、unlink 行为和 `EROFS`/`ENOENT` 错误符合有界 VFS 契约 | 内容错误、缺失 dirent、意外持久化要求、`errno` 错误或 failure marker | 默认关闭 userland runtime 断言加 writable-fs smoke | QEMU headless、串口日志、RAM-backed `/rw` |
+| 运行时 `/rw` 文件系统操作 | userland/filesystem maturity smoke 创建文件/目录、write、fsync、seek、读回、枚举 `/rw`、rename、unlink，并检查只读 backend 拒写 | 文件内容、metadata、目录项、稳定后端顺序、open-fd 生命周期和 `EROFS`/`ENOENT`/`EEXIST`/`ENOSPC`/`ERANGE` 错误符合有界 VFS 契约 | 内容错误、缺失 dirent、意外持久化要求、`errno` 错误或 failure marker | 默认关闭 filesystem maturity/userland 断言加 writable-fs smoke | QEMU headless、串口日志、RAM-backed `/rw` |
 | 底层 boot/IRQ/timer/storage 行为 | 窄 memory/timer/scheduler/blocking/filesystem case；相关时使用 Bochs 或 QEMU+Bochs | 预期 marker 与可选中间 marker 出现；可用时记录跨 emulator 结果 | 缺失 marker、panic、timeout，或跳过 cross-validation 但无风险记录 | source/spec、build、QEMU headless、可选 Bochs/graphical 证据 | toolchain 加所选 emulator；Bochs/display/ROM 仅在场景需要时要求 |
 
 `default-init` 是不依赖任何 smoke 开关的行为断言 case：它以默认配置（所有 smoke 选项设为 `=n`）构建，并断言 normal boot 到达常驻 PID-1 init 和 `/bin/sh`，以 `BIGOS_USER_EXEC` 作为 QEMU headless marker。缺失该 marker 即判定为失败，不会被重新解读为通过。
@@ -80,7 +81,7 @@ parent/child 链接、zombie-to-reap、wait wakeup、exec rollback、bounded `ar
 active-root teardown rejection 和 current-stack release deferral。
 
 fd/VFS 壳层通过 source-level checks 加 `filesystem-read`、`filesystem-user-elf`、
-`writable-fs`、`pipe` 和 `userland-runtime` runtime case 验证。只读 exFAT 路径仍是
+`writable-fs`、`pipe`、`filesystem-maturity` 和 `userland-runtime` runtime case 验证。只读 exFAT 路径仍是
 boot/image 的 source of truth，而 `/rw` 与 pipe 语义是 bounded runtime 能力。`/rw`
 只保证当前运行期一致性，不跨重启持久化，也不改变 Legacy BIOS/MBR/exFAT 磁盘镜像。
 fd/VFS syscall 使用 DPL=3 `int 0x80` trap gate，并且必须在同步 storage I/O 或阻塞 pipe 操作前通过 `sched::can_block()`。

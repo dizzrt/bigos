@@ -139,6 +139,11 @@ if has_config("userland_smoke") then
     add_defines("BIGOS_USERLAND_SMOKE")
 end
 
+if has_config("filesystem_maturity_smoke") then
+    add_defines("BIGOS_USERLAND_SMOKE")
+    add_defines("BIGOS_FILESYSTEM_MATURITY_SMOKE")
+end
+
 if is_mode("debug") then
     set_symbols("debug")
 elseif is_mode("release") then

@@ -42,6 +42,7 @@ constexpr int EROFS = 30;         // read-only file system
 constexpr int EPIPE = 32;         // broken pipe (all read ends closed)
 constexpr int ERANGE = 34;        // result too large for caller buffer
 constexpr int ENOSYS = 38;        // function not implemented
+constexpr int ENOTEMPTY = 39;    // directory not empty
 constexpr int EOPNOTSUPP = 95;    // operation not supported on this object/backend
 NAMESPACE_BIGOS_END
 

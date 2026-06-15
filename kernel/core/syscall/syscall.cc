@@ -211,7 +211,7 @@ namespace sys {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
             // Two 32-bit fds written back to the user array.
-            if (!bigos::proc::validate_user_buffer(__out_fds, sizeof(uint32_t) * 2))
+            if (!bigos::proc::validate_user_io_buffer(__out_fds, sizeof(uint32_t) * 2))
                 return -bigos::EFAULT;
 
             bigos::vfs::File *read_file = nullptr;

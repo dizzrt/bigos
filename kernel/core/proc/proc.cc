@@ -1805,7 +1805,7 @@ namespace bigos::proc {
 
     bool validate_user_buffer(uint64_t __addr, uint64_t __len) noexcept {
         Process *process = current_process_slot();
-        if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_WRITE_MAX_LEN)
+        if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_IO_MAX_LEN)
             return false;
         return internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Read) &&
                bigos::mm::user_range_mapped(process->address_space_root, __addr, __len);
@@ -1821,7 +1821,7 @@ namespace bigos::proc {
 
     bool copy_current_user_buffer(uint64_t __addr, void *__dst, uint64_t __len) noexcept {
         Process *process = current_process_slot();
-        if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_WRITE_MAX_LEN)
+        if (process == nullptr || process->state != ProcessState::Running || __len > bigos::sys::SYS_IO_MAX_LEN)
             return false;
         if (!internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Read))
             return false;

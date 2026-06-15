@@ -17,7 +17,7 @@ The runner explicitly configures each case through `xmake f`, builds through the
 Behavior-oriented validation distinguishes three entry classes:
 
 - Default path: the `default-init` case uses the normal build with all smoke switches disabled, packages PID-1 init, `/bin/sh`, and bounded `/bin/*`, then observes the deterministic init/shell serial markers through QEMU headless logs.
-- Default-off smoke: `userland-runtime`, `writable-fs`, `pipe`, `filesystem-read`, `filesystem-user-elf`, and related cases enable one explicit smoke switch at a time to validate userland, process/fd, pipe/redirection, and filesystem behavior without changing normal boot defaults.
+- Default-off smoke: `userland-runtime`, `filesystem-maturity`, `writable-fs`, `pipe`, `filesystem-read`, `filesystem-user-elf`, and related cases enable one explicit smoke switch at a time to validate userland, process/fd, pipe/redirection, and filesystem behavior without changing normal boot defaults.
 - Scenario evidence: graphical QEMU, Bochs, manual keyboard input, emulator input injection, or hardware-adjacent checks are recorded only when they add evidence for console usability or low-level boot/IRQ/timer/ATA/port-IO risks.
 
 ## Matrix Cases
@@ -39,6 +39,7 @@ Behavior-oriented validation distinguishes three entry classes:
 | `signals` | `--signal_smoke=y` | `BIGOS_SIGNAL_PASSED` | 30s | Minimal signal queue, masks, handlers, and delivery path. |
 | `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`, page/buffer cache, write/readback, fsync, and permissions. |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup endpoint accounting, blocking wakeup, EOF, and `EPIPE`. |
+| `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | Stage 41 current-runtime filesystem semantics across read-only exFAT, RAM-backed `/rw`, fd/VFS, metadata, cwd-relative paths, libc errno, and shell-visible tools; no reboot persistence. |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, arg/env handoff, stdout/stderr, errno, `snprintf`/formatter, `strtol`/`atoi`, `calloc`/`realloc`, bounded `DIR*` wrappers, simple C program baseline probes, shell execution, fork/exec/wait, pipe, redirection, and bounded `/rw` runtime file operations. |
 | `default-init` | _(none)_ | `BIGOS_USER_EXEC` | 40s | Default build with no smoke switch; normal boot packages PID-1 init, `/bin/sh`, and bounded `/bin/*`. |
 
@@ -57,7 +58,7 @@ Stage 26 promotes the runtime matrix from marker-only smoke coverage to behavior
 | `exec`/`wait` and fd inheritance | Userland smoke forks, execs packaged programs, waits, and preserves stdio or redirected descriptors | Child output or `/rw` records are visible, parent wait returns the expected child/status, inherited descriptors remain usable | Failed wait, wrong status, missing output, descriptor failure, or failure marker | Default-off userland runtime assertion | xmake, cross-binutils, QEMU, serial log |
 | `dup`, redirection, and unrelated fd state | Userland smoke duplicates an fd, closes the original, redirects shell output to `/rw`, and reads it back | Duplicate fd writes survive original close; redirected file contains expected data; shell transcript remains usable | Wrong file content, failed dup/readback, shell fd corruption, or failure marker | Default-off userland runtime assertion | QEMU headless, serial log, RAM-backed `/rw` |
 | Pipe endpoint behavior | Userland smoke transfers `pipe-data`; shell runs `echo pipe-ok | /bin/cat`; `pipe` smoke checks endpoint accounting | Downstream reader sees the bytes, EOF appears after writers close, unrelated fds remain usable | Wrong data, missing EOF, `EPIPE`/endpoint mismatch, missing pass marker, or panic | Default-off userland runtime assertion plus narrow pipe smoke | QEMU headless, serial log |
-| Runtime `/rw` filesystem operations | Userland smoke creates files/dirs, writes, fsyncs, seeks, reads back, enumerates `/rw`, unlinks, and checks read-only backend rejection | File contents, directory entries, unlink behavior, and `EROFS`/`ENOENT` errors match the bounded VFS contract | Wrong content, missing dirent, unexpected persistence requirement, wrong `errno`, or failure marker | Default-off userland runtime assertion plus writable-fs smoke | QEMU headless, serial log, RAM-backed `/rw` |
+| Runtime `/rw` filesystem operations | Userland/filesystem maturity smoke creates files/dirs, writes, fsyncs, seeks, reads back, enumerates `/rw`, renames, unlinks, and checks read-only backend rejection | File contents, metadata, directory entries, stable backend order, open-fd lifetime, and `EROFS`/`ENOENT`/`EEXIST`/`ENOSPC`/`ERANGE` errors match the bounded VFS contract | Wrong content, missing dirent, unexpected persistence requirement, wrong `errno`, or failure marker | Default-off filesystem maturity/userland assertion plus writable-fs smoke | QEMU headless, serial log, RAM-backed `/rw` |
 | Low-level boot/IRQ/timer/storage behavior | Narrow memory/timer/scheduler/blocking/filesystem cases; Bochs or QEMU+Bochs when relevant | Expected markers and optional intermediate markers appear; cross-emulator notes record result when available | Missing marker, panic, timeout, skipped cross-validation without risk note | Source/spec, build, QEMU headless, optional Bochs/graphical evidence | Toolchain plus selected emulator; Bochs/display/ROM only when scenario requires |
 
 The `default-init` case is the behavior-assertion case driven by no smoke switch:
@@ -88,7 +89,7 @@ zombie-to-reap, wait wakeups, exec rollback, bounded `argv`/`envp`, active-root
 teardown rejection, and current-stack release deferral.
 
 The fd/VFS shell is validated by source-level checks plus `filesystem-read`,
-`filesystem-user-elf`, `writable-fs`, `pipe`, and `userland-runtime` runtime
+`filesystem-user-elf`, `writable-fs`, `pipe`, `filesystem-maturity`, and `userland-runtime` runtime
 cases. The read-only exFAT path remains the boot/image source of truth, while
 `/rw` and pipe semantics are bounded runtime capabilities. `/rw` guarantees
 current-runtime consistency only and does not persist data across reboot or alter

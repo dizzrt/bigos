@@ -1,9 +1,7 @@
 ## Purpose
 
 定义 BigOS 有界 current directory 与相对路径能力：为每个用户进程维护 cwd，在 VFS 路径解析层统一处理绝对路径和相对路径，暴露 `chdir`/`getcwd`，并让 libc、shell 和小型用户工具可观察该行为。该能力支持当前目录树内的 POSIX-style `.`/`..` 组件语义，但不引入 mount namespace、`chroot`、符号链接遍历、稳定 inode 身份或完整 POSIX pathname canonicalization。
-
 ## Requirements
-
 ### Requirement: 每进程 current directory 状态
 BigOS SHALL 为每个用户进程维护一个有界 current directory 状态。该状态 MUST 表示为当前 VFS 可解析的绝对目录路径，默认进程 cwd MUST 为 root，路径长度 MUST 受系统路径上限约束，且 cwd 状态 MUST 随进程对象生命周期初始化、复制和释放。该能力 MUST NOT 引入 mount namespace、`chroot`、符号链接遍历、稳定 inode 身份或完整 POSIX pathname canonicalization。
 
@@ -103,3 +101,30 @@ BigOS SHALL 提供分层验证路径覆盖 cwd 与相对路径行为。验证 MU
 - **WHEN** 本地缺少 emulator、交叉工具链、显示/ROM 依赖、raw image 或超时 oracle
 - **THEN** 对应 runtime 验证 MAY 被跳过
 - **AND** 跳过记录 MUST 明确缺失条件、替代检查和剩余风险
+
+### Requirement: Stage 41 文件系统操作共享 cwd 解析
+BigOS SHALL route Stage 41 path-taking filesystem operations through the shared bounded cwd-relative path resolution contract. Operations including open, stat, mkdir, unlink, restricted regular-file rename, and directory enumeration setup MUST treat absolute paths as root-relative and relative paths as current-directory-relative with supported `.` and `..` components. This requirement MUST NOT introduce symlink traversal, mount namespaces, `chroot`, stable inode identity, or complete POSIX pathname canonicalization.
+
+#### Scenario: 相对路径写入命中 `/rw` 后端
+- **WHEN** a process has cwd `/rw/work` and creates, opens, writes, stats, lists, unlinks, or restricted-renames a relative path under that directory
+- **THEN** BigOS MUST resolve the target to the equivalent bounded absolute `/rw` path before backend dispatch
+- **AND** the operation MUST observe the same writable backend semantics as the equivalent absolute path
+
+#### Scenario: 相对路径只读写失败保持一致
+- **WHEN** a process has cwd under a read-only exFAT path and attempts create, write, unlink, mkdir, or restricted rename through a relative path
+- **THEN** BigOS MUST resolve the target through the same bounded cwd contract
+- **AND** it MUST return the same deterministic read-only or unsupported error as the equivalent absolute target without mutating filesystem state
+
+### Requirement: cwd 状态不被文件系统失败污染
+BigOS SHALL preserve each process current-directory state across failed Stage 41 filesystem operations. Failed open, stat, mkdir, unlink, restricted rename, directory enumeration setup, or backend dispatch MUST NOT modify cwd, even when the failure is caused by path length, unsupported path form, missing path, permission denial, capacity exhaustion, invalid user buffer, or read-only backend mutation attempts.
+
+#### Scenario: 失败路径不改变 cwd
+- **WHEN** a process with cwd `/rw/work` performs a failing filesystem operation using a relative path
+- **THEN** BigOS MUST leave the process cwd unchanged
+- **AND** later relative path operations MUST continue to resolve from the original cwd
+
+#### Scenario: rename 双路径解析失败不改变 cwd
+- **WHEN** a process invokes restricted rename with one or both paths relative to cwd and either source or target resolution fails
+- **THEN** BigOS MUST return a deterministic error
+- **AND** it MUST NOT change cwd, fd table state, source directory state, or target directory state
+

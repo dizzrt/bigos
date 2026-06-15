@@ -135,6 +135,8 @@ const char *strerror(int errnum) {
             return "Result too large";
         case ENOSYS:
             return "Function not implemented";
+        case ENOTEMPTY:
+            return "Directory not empty";
         case EOPNOTSUPP:
             return "Operation not supported";
         default:

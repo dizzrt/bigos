@@ -388,13 +388,26 @@ static void test_runtime_filesystem(void) {
         fail("runtime-content");
     if (stat("/rw/runtime_file.txt", &st) != 0 || st.st_size != strlen(payload) || !S_ISREG(st.st_mode))
         fail("runtime-stat-file");
+    struct bigos_dirent entries[BIGOS_DIRENT_MAX_BATCH];
+    fd = open("/rw/runtime_file.txt", O_RDONLY, 0);
+    if (fd < 0)
+        fail("runtime-reopen-file");
+    errno = 0;
+    if (bigos_readdir(fd, entries, 1) != -1 || errno != ENOTDIR)
+        fail("runtime-readdir-file-enotdir");
+    errno = 0;
+    if (read(fd, (void *)1, 1) != -1 || errno != EFAULT)
+        fail("runtime-read-efault");
+    close(fd);
+    errno = 0;
+    if (stat("/rw/runtime_file.txt", (struct stat *)1) != -1 || errno != EFAULT)
+        fail("runtime-stat-efault");
 
     int dirfd = open("/rw", O_RDONLY, 0);
     if (dirfd < 0)
         fail("runtime-dir-open");
     if (fstat(dirfd, &st) != 0 || st.type != BIGOS_METADATA_TYPE_DIRECTORY)
         fail("runtime-fstat-dir");
-    struct bigos_dirent entries[BIGOS_DIRENT_MAX_BATCH];
     errno = 0;
     if (bigos_readdir(dirfd, entries, BIGOS_DIRENT_MAX_BATCH + 1) != -1 || errno != ERANGE)
         fail("runtime-readdir-erange");
@@ -852,6 +865,7 @@ int main(int argc, char **argv, char **envp) {
     test_smoke_programs(envp);
     test_smoke_shell(envp);
     test_signal_default_terminate();
+    emit("BIGOS_FILESYSTEM_MATURITY_PASSED\n");
     emit("BIGOS_USERLAND_PASSED\n");
     /* Idle: as PID-1 this must not exit; reap any further children. */
     for (;;) {

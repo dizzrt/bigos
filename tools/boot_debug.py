@@ -208,7 +208,10 @@ SMOKE_OPTIONS = (
     'user_program_smoke',
     'fs_smoke',
     'user_elf_smoke',
+    'writable_fs_smoke',
+    'pipe_smoke',
     'userland_smoke',
+    'filesystem_maturity_smoke',
 )
 RUNTIME_SMOKE_MATRIX = (
     RuntimeSmokeCase(
@@ -283,6 +286,15 @@ RUNTIME_SMOKE_MATRIX = (
         risk_area='Legacy BIOS raw image, IDE disk, ATA PIO, and read-only exFAT path',
     ),
     RuntimeSmokeCase(
+        case_id='filesystem-writable',
+        title='Writable filesystem',
+        switches=('writable_fs_smoke',),
+        expected_marker='BIGOS_WRITABLE_FS_PASSED',
+        timeout_seconds=20.0,
+        risk_area='RAM-backed /rw create/write/read/fsync/cache eviction and read-only backend rejection',
+        proc_boundary='default-off kernel-thread writable filesystem smoke; does not claim cross-reboot persistence',
+    ),
+    RuntimeSmokeCase(
         case_id='first-user-program',
         title='First user program',
         switches=('user_program_smoke',),
@@ -314,6 +326,22 @@ RUNTIME_SMOKE_MATRIX = (
         proc_boundary=(
             'default build (no smoke switch); packages /boot/user/init.elf and /bin/sh, enters ring3 on normal '
             'boot, and the resident C init forks + execve /bin/sh (BIGOS_USER_EXEC); PID-1 does not exit'
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='filesystem-maturity',
+        title='Filesystem maturity',
+        switches=('filesystem_maturity_smoke',),
+        expected_marker='BIGOS_FILESYSTEM_MATURITY_PASSED',
+        timeout_seconds=40.0,
+        risk_area='Stage 41 current-runtime filesystem semantics across exFAT, /rw, fd/VFS, metadata, cwd, errno, tools',
+        validation_markers=(
+            'BIGOS_FILESYSTEM_MATURITY_PASSED',
+            'BIGOS_USERLAND_PASSED',
+        ),
+        proc_boundary=(
+            'default-off filesystem_maturity_smoke build; packages the userland validation program as '
+            '/boot/user/init.elf and treats /rw state as current-session RAM-backed only'
         ),
     ),
     RuntimeSmokeCase(
@@ -1459,6 +1487,7 @@ def runtime_smoke_run_args(
     return argparse.Namespace(
         image=str(image_path),
         image_size=image_size,
+        boot_mode='legacy',
         emulator='qemu',
         display='none',
         keep_image=True,

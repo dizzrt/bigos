@@ -79,8 +79,8 @@ on_build(function()
         build_user_program(program[2], path.join(user_bin_subdir, program[1]))
     end
 
-    -- Build /bin/smoke probes only for the default-off userland smoke image.
-    if has_config("userland_smoke") then
+    -- Build /bin/smoke probes only for default-off userland validation images.
+    if has_config("userland_smoke") or has_config("filesystem_maturity_smoke") then
         os.mkdir(user_smoke_bin_subdir)
         local smoke_bin_programs = {
             { "args", path.join(projectdir, "user", "smoke", "bin", "args.c") },
@@ -98,12 +98,12 @@ on_build(function()
     end
 
     -- Select the PID-1 init image:
-    --   userland_smoke           -> userland validation program,
+    --   userland_smoke/filesystem_maturity_smoke -> userland validation program,
     --   user_elf_smoke/user_program_smoke -> minimal print+exit smoke ELF
     --                               (preserves BIGOS_USER_ENTER/EXIT),
     --   otherwise                -> resident C init that launches /bin/sh.
     local init_output = path.join(user_bindir, "init.elf")
-    if has_config("userland_smoke") then
+    if has_config("userland_smoke") or has_config("filesystem_maturity_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "userland_smoke.c"), init_output)
     elseif has_config("user_elf_smoke") or has_config("user_program_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "elf_smoke.c"), init_output)

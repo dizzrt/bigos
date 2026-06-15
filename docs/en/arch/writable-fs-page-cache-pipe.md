@@ -54,16 +54,19 @@ metadata and data go through the block buffer cache.
 
 Each inode carries `owner` (uid/gid) and `mode`. Supported operations: writable
 `open` (`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`), file `write`, `lseek`,
-`O_TRUNC` truncation, `mkdir`, minimal directory enumeration, and `unlink`.
+`O_TRUNC` truncation, `mkdir`, minimal directory enumeration, `unlink`, and
+restricted regular-file `rename` within the writable backend.
 `unlink` removes the directory entry first; open file descriptors keep the inode
-and data blocks alive until the last reference closes. Failure semantics are
+and data blocks alive until the last reference closes, and a pre-rename fd
+continues to reference the same runtime file after a successful rename. Failure semantics are
 deterministic (`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-ENOTDIR`/`-EISDIR`/`-EINVAL`/
-`-EIO`/`-EACCES`/`-EROFS`) and never publish half-written metadata.
+`-ENOTEMPTY`/`-EIO`/`-EACCES`/`-EROFS`) and never publish half-written metadata.
 
 Because the medium is RAM-backed it is not persistent across reboots; this stage
-only guarantees runtime consistency (write-then-read-back, and read-back after
-`fsync` plus cache eviction). There is no journaling, so crash consistency is out
-of scope and explicitly documented as a known limitation.
+only guarantees current-runtime consistency (write-then-read-back, metadata and
+directory enumeration visibility, and read-back after `fsync` plus cache
+eviction). There is no journaling, stable inode identity, full POSIX `DIR*`, or
+crash consistency guarantee.
 
 ## Permission Enforcement
 
