@@ -181,6 +181,10 @@ int rename(const char *oldpath, const char *newpath) {
     return (int)errno_translate(syscall2(SYS_RENAME, (long)oldpath, (long)newpath));
 }
 
+int bigos_mkfs_bigfs(void) {
+    return (int)errno_translate(syscall0(SYS_MKFS_BIGFS));
+}
+
 int stat(const char *path, struct stat *st) {
     return (int)errno_translate(syscall2(SYS_STAT, (long)path, (long)st));
 }

@@ -131,6 +131,14 @@ if has_config("writable_fs_smoke") then
     add_defines("BIGOS_WRITABLE_FS_SMOKE")
 end
 
+if has_config("persistent_writable_fs") or has_config("persistent_writable_fs_smoke") then
+    add_defines("BIGOS_PERSISTENT_WRITABLE_FS")
+end
+
+if has_config("persistent_writable_fs_smoke") then
+    add_defines("BIGOS_PERSISTENT_WRITABLE_FS_SMOKE")
+end
+
 if has_config("pipe_smoke") then
     add_defines("BIGOS_PIPE_SMOKE")
 end

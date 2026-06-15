@@ -114,6 +114,18 @@ option("writable_fs_smoke")
     set_description("enable validation-only writable filesystem (bigfs) smoke marker")
 option_end()
 
+option("persistent_writable_fs")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable persistent /rw backend on the independent ATA primary-slave test disk")
+option_end()
+
+option("persistent_writable_fs_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only persistent /rw two-boot smoke markers")
+option_end()
+
 option("pipe_smoke")
     set_default(false)
     set_showmenu(true)

@@ -74,6 +74,7 @@ namespace bigos::sys {
         SYS_CHDIR = 31,        // (path) -> 0 or negative errno; cwd changes only after directory validation.
         SYS_GETCWD = 32,       // (user buffer, len) -> 0 or -ERANGE/-EFAULT/-EINVAL.
         SYS_RENAME = 33,       // (oldpath, newpath) -> 0 or negative errno; bounded /rw regular-file rename.
+        SYS_MKFS_BIGFS = 34,   // explicit bounded format of the configured persistent /rw test disk.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

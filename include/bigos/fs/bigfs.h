@@ -6,15 +6,15 @@
 
 NAMESPACE_BIGOS_BEG
 namespace bigfs {
-    // Minimal writable filesystem on a RAM-backed block device. Layout (in
-    // BLOCK_SIZE blocks): superblock, inode bitmap, data bitmap, inode table,
-    // then the data region. Everything is read/written through the block buffer
-    // cache so writes are write-back and fsync/eviction stay consistent. Bounded
-    // throughout (fixed inode count, direct-block-only files, fixed directory
-    // entry size). It coexists with the read-only exFAT mount and never touches
-    // the on-disk image / MBR / exFAT discovery contract.
+    // Minimal writable filesystem for /rw. By default it is RAM-backed and
+    // current-session-only; BIGOS_PERSISTENT_WRITABLE_FS can instead mount a
+    // compatible independent persistent test disk. Layout (in BLOCK_SIZE blocks):
+    // superblock, inode bitmap, data bitmap, inode table, then the data region.
+    // Everything is read/written through the block buffer cache so writes are
+    // write-back and fsync/eviction stay consistent.
     constexpr const char *MOUNT_PREFIX = "/rw";
     constexpr uint32_t MAGIC = 0x42494746;   // "BIGF"
+    constexpr uint32_t FORMAT_VERSION = 1;
     constexpr uint32_t BLOCK_SIZE = driver::block::DEFAULT_SECTOR_SIZE;   // 512
     constexpr uint32_t TOTAL_BLOCKS = 256;                                // 128 KiB RAM disk
     constexpr uint32_t INODE_COUNT = 32;
@@ -49,6 +49,7 @@ namespace bigfs {
         NotEmpty,
         AccessDenied,
         IoError,
+        Unsupported,
     };
 
     // Allocates the RAM-backed device, formats a fresh filesystem and prepares
@@ -56,7 +57,13 @@ namespace bigfs {
     // false on allocation failure (no writable mount is published). Blockable /
     // non-IRQ context only.
     bool init() noexcept;
+    // Explicitly formats the configured persistent test disk and publishes it as
+    // /rw only after initial metadata writes and verification succeed. This is a
+    // bounded BigOS-specific mkfs hook, not POSIX device management.
+    Status format_persistent() noexcept;
     bool initialized() noexcept;
+    bool persistent() noexcept;
+    const char *backend_name() noexcept;
 
     // The backing block device (for smoke-driven cache eviction). Null before init.
     driver::block::BlockDevice *device() noexcept;

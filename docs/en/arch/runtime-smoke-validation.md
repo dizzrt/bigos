@@ -38,6 +38,8 @@ Behavior-oriented validation distinguishes three entry classes:
 | `time-identity` | `--time_identity_smoke=y` | `BIGOS_TIME_IDENTITY_PASSED` | 20s | Wall-clock and pid/ppid/uid/gid syscall path. |
 | `signals` | `--signal_smoke=y` | `BIGOS_SIGNAL_PASSED` | 30s | Minimal signal queue, masks, handlers, and delivery path. |
 | `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`, page/buffer cache, write/readback, fsync, and permissions. |
+| `persistent-writable-fs-write` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` | 40s | First boot with `--persistent-image`: explicit format of the independent test disk, bounded write, `fsync`, and cache-eviction readback. |
+| `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | Second boot with the same `--persistent-image`: mount-existing and read synchronized `/rw` state after clean reboot. |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup endpoint accounting, blocking wakeup, EOF, and `EPIPE`. |
 | `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | Stage 41 current-runtime filesystem semantics across read-only exFAT, RAM-backed `/rw`, fd/VFS, metadata, cwd-relative paths, libc errno, and shell-visible tools; no reboot persistence. |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, arg/env handoff, stdout/stderr, errno, `snprintf`/formatter, `strtol`/`atoi`, `calloc`/`realloc`, bounded `DIR*` wrappers, simple C program baseline probes, shell execution, fork/exec/wait, pipe, redirection, and bounded `/rw` runtime file operations. |
@@ -91,11 +93,14 @@ teardown rejection, and current-stack release deferral.
 The fd/VFS shell is validated by source-level checks plus `filesystem-read`,
 `filesystem-user-elf`, `writable-fs`, `pipe`, `filesystem-maturity`, and `userland-runtime` runtime
 cases. The read-only exFAT path remains the boot/image source of truth, while
-`/rw` and pipe semantics are bounded runtime capabilities. `/rw` guarantees
-current-runtime consistency only and does not persist data across reboot or alter
-the Legacy BIOS/MBR/exFAT disk image. fd/VFS syscalls use the DPL=3 `int 0x80`
-trap gate and must pass `sched::can_block()` before synchronous storage I/O or
-blocking pipe operations.
+`/rw` and pipe semantics are bounded runtime capabilities. RAM-backed `/rw`
+guarantees current-runtime consistency only and does not persist data across
+reboot or alter the Legacy BIOS/MBR/exFAT disk image. Persistent `/rw` validation
+uses an independent test disk and only claims clean-sync plus clean-reboot
+visibility; missing QEMU/Bochs support for the extra disk must be recorded as
+skipped or blocked with residual storage-risk notes. fd/VFS syscalls use the
+DPL=3 `int 0x80` trap gate and must pass `sched::can_block()` before synchronous
+storage I/O or blocking pipe operations.
 
 Simple C program validation is layered into the default-off
 `userland-runtime` case. When `userland_smoke` is enabled, the build packages

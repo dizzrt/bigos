@@ -46,11 +46,13 @@ BigOS 当前提供一个经过 smoke 验证、单核、以同步为主、具备�
   paging、`fork`/COW、signals、time/identity 原语、进程镜像替换和每进程 current
   directory 状态。
 - A minimal storage and filesystem layer with synchronous block I/O, read-only
-  boot assets, a bounded writable runtime area, constrained rename, page/buffer
+  boot assets, bounded writable `/rw` backends including RAM-backed runtime
+  storage and persistent clean-sync storage, constrained rename, page/buffer
   cache, pipes, fd duplication, relative path resolution, and bounded
   file/directory metadata queries.
-- 最小存储与文件系统层，包括同步块 I/O、只读启动资产、有界可写运行时区域、
-  受限 rename、page/buffer cache、pipe、fd duplication、相对路径解析和有界文件/目录元数据查询。
+- 最小存储与文件系统层，包括同步块 I/O、只读启动资产、包含 RAM-backed 运行期存储与
+  persistent clean-sync 存储的有界可写 `/rw` 后端、受限 rename、page/buffer cache、pipe、
+  fd duplication、相对路径解析和有界文件/目录元数据查询。
 - A minimal freestanding userland with resident init behavior, an interactive
   text-console shell, basic libc-style support, current-directory and rename
   wrappers, and small packaged path/user programs.
@@ -81,11 +83,13 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
 - Source organization: kernel implementation and freestanding userland are
   separate top-level domains; future planning should preserve that boundary.
 - 源码组织：内核实现与 freestanding 用户态是分离的顶层域；后续规划应保持这一边界。
-- Memory/file model: bounded anonymous demand paging/COW and bounded writable
-  runtime storage, but no broad file-backed `mmap`, no persistent full writable
-  filesystem, no async I/O, and no broad storage/device support.
-- 内存/文件模型：bounded anonymous demand paging/COW 与有界可写运行时存储，但无广泛
-  file-backed `mmap`、无持久完整可写文件系统、无 async I/O、无广泛存储/设备支持。
+- Memory/file model: bounded anonymous demand paging/COW, bounded writable
+  runtime storage, and bounded persistent clean-sync `/rw` storage, but no broad
+  file-backed `mmap`, no complete POSIX filesystem, no journaling or crash
+  recovery, no async I/O, and no broad storage/device support.
+- 内存/文件模型：bounded anonymous demand paging/COW、有界可写运行期存储，以及有界
+  persistent clean-sync `/rw` 存储，但无广泛 file-backed `mmap`、无完整 POSIX filesystem、
+  无 journaling 或 crash recovery、无 async I/O、无广泛存储/设备支持。
 - Boot/backends: the UEFI backend is a completed x86_64 boot spike, while
   storage, device, ISA backends, and UEFI runtime parity remain future or
   parallel-track items.
@@ -94,11 +98,11 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 42 are complete and now form a compressed minimal usable
+Stages 20 through 44 are complete and now form a compressed minimal usable
 system baseline. The completed work can be treated as the foundation for future
 planning rather than as individual future-stage items.
 
-阶段 20 到阶段 42 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
+阶段 20 到阶段 44 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
 基础能力，而不是继续把它们作为未来阶段逐项展开。
 
 - Kernel foundation: x86_64 legacy boot, text/serial output,
@@ -115,11 +119,12 @@ planning rather than as individual future-stage items.
   `exec`/`fork`/COW、wait/exit 行为、signals、time 与 identity 原语、基于 fd 的 I/O、
   pipe、duplication 和重定向。
 - Filesystem and path baseline: read-only boot assets, bounded writable runtime
-  storage, constrained rename, page/buffer cache, file and directory metadata,
-  per-process current directories, relative path resolution, and small packaged
-  path tools.
-- 文件系统与路径基线：只读启动资产、有界可写运行时存储、受限 rename、page/buffer cache、
-  文件与目录 metadata、每进程 current directory、相对路径解析和小型打包路径工具。
+  storage, bounded persistent clean-sync `/rw` storage, constrained rename,
+  page/buffer cache, file and directory metadata, per-process current
+  directories, relative path resolution, and small packaged path tools.
+- 文件系统与路径基线：只读启动资产、有界可写运行时存储、有界 persistent clean-sync `/rw`
+  存储、受限 rename、page/buffer cache、文件与目录 metadata、每进程 current directory、
+  相对路径解析和小型打包路径工具。
 - Expansion foundations: the runnable x86_64 UEFI boot backend spike, initial
   x86_64/core decoupling, terminal preparation, and SMP preparation contracts
   for locking, per-CPU state, interrupt routing, TLB invalidation, and memory
@@ -211,18 +216,19 @@ user-visible capability goal.
   dynamic loader are separate maturity decisions.
 - 保持边界：广泛 file-backed `mmap`、共享库和动态加载器属于独立的成熟度决策。
 
-### Stage 44: Persistent Storage Or Dynamic Linking / 持久存储或动态链接
+### Stage 44 (Complete): Persistent Storage / 持久存储（已完成）
 
-- Choose one large user-visible expansion as the next mainline milestone once the
-  preceding maturity work has stabilized enough common contracts.
-- 当前置成熟化工作已经稳定足够多公共契约后，选择一个大型用户可见扩展作为下一主线里程碑。
-- A persistent writable filesystem should be favored if the project needs better
-  practical usability, development workflow, and long-running system behavior.
-- 如果项目更需要实际可用性、开发工作流和长时间运行系统行为，应优先选择持久可写文件系统。
-- Dynamic linking should be favored if libc, loader, VM, ABI, and filesystem
-  contracts are stable enough to support a reusable user-program ecosystem.
-- 如果 libc、loader、VM、ABI 和文件系统契约已经足够稳定，可以支撑可复用用户程序生态，则优先选择
-  动态链接。
+- Complete the persistent writable filesystem direction as the selected large
+  user-visible expansion after the preceding maturity work stabilized common
+  contracts.
+- 在前置成熟化工作稳定公共契约后，完成持久可写文件系统方向，作为已选择的大型用户可见扩展。
+- Provide bounded persistent `/rw` behavior for clean-sync and clean-reboot use
+  while preserving the explicit boundaries around journaling, crash recovery,
+  async I/O, broad storage drivers, complete POSIX filesystem behavior, dynamic
+  linking, and broad file-backed mappings.
+- 提供有界 persistent `/rw` 行为，覆盖 clean-sync 与 clean-reboot 使用场景，同时继续保持
+  journaling、crash recovery、async I/O、广泛存储驱动、完整 POSIX filesystem、dynamic
+  linking 和广泛 file-backed mapping 的明确边界。
 
 ### Parallel Foundations / 并行基础方向
 

@@ -28,6 +28,7 @@ int fsync(int fd);
 int mkdir(const char *path, mode_t mode);
 int unlink(const char *path);
 int rename(const char *oldpath, const char *newpath);
+int bigos_mkfs_bigfs(void);
 int chdir(const char *path);
 char *getcwd(char *buf, size_t size);
 void *brk_raw(void *addr); /* returns committed break, or (void*)-errno */

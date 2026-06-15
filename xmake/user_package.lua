@@ -74,6 +74,7 @@ on_build(function()
         { "rename", path.join(projectdir, "user", "bin", "rename.c") },
         { "stat", path.join(projectdir, "user", "bin", "stat.c") },
         { "pwd", path.join(projectdir, "user", "bin", "pwd.c") },
+        { "mkfs_bigfs", path.join(projectdir, "user", "bin", "mkfs_bigfs.c") },
     }
     for _, program in ipairs(user_bin_programs) do
         build_user_program(program[2], path.join(user_bin_subdir, program[1]))

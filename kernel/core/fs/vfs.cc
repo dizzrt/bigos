@@ -230,6 +230,8 @@ namespace {
                 return bigos::vfs::Status::AccessDenied;
             case bigos::bigfs::Status::IoError:
                 return bigos::vfs::Status::BlockError;
+            case bigos::bigfs::Status::Unsupported:
+                return bigos::vfs::Status::Unsupported;
         }
         return bigos::vfs::Status::InvalidArgument;
     }

@@ -4,6 +4,7 @@
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/memory.h>
+#include <drivers/block/ata_pio.h>
 #include <string.h>
 
 // Internal allocator flag: alloc_kernel_pages() only returns mapped, accessible
@@ -25,6 +26,22 @@ namespace {
     constexpr uint32_t INODE_BITMAP_BLOCK = 1;
     constexpr uint32_t DATA_BITMAP_BLOCK = 2;
     constexpr uint32_t DIRENTS_PER_BLOCK = BLOCK_SIZE / bigos::bigfs::DIRENT_SIZE;   // 16
+    constexpr uint32_t SUPERBLOCK_CHECKSUM_SEED = 0x9e3779b9u;
+
+    struct DiskSuperblock {
+        uint32_t magic;
+        uint32_t version;
+        uint32_t block_size;
+        uint32_t total_blocks;
+        uint32_t inode_count;
+        uint32_t inode_size;
+        uint32_t inode_table_start;
+        uint32_t inode_table_blocks;
+        uint32_t data_start;
+        uint32_t data_block_count;
+        uint32_t root_inode;
+        uint32_t checksum;
+    };
 
     // 60 bytes packed into the 64-byte on-disk inode slot.
     struct DiskInode {
@@ -47,11 +64,15 @@ namespace {
         DiskDirent *entry;
     };
 
+    bool load_inode(uint32_t __inode, DiskInode *__out) noexcept;
+
     uint8_t *g_ram = nullptr;
     driver::block::BlockDevice g_device = {};
+    driver::block::AtaPioDevice g_persistent_ata = {};
     uint32_t g_open_refs[INODE_COUNT] = {};
     uint8_t g_write_staged[DIRECT_BLOCKS][BLOCK_SIZE] = {};
     bool g_initialized = false;
+    bool g_persistent = false;
 
     driver::block::BlockStatus ram_read_impl(
         driver::block::BlockDevice *, uint64_t __lba, uint32_t __count, void *__dst, size_t __dst_len) noexcept {
@@ -73,6 +94,56 @@ namespace {
             return driver::block::BlockStatus::BufferTooSmall;
         memcpy(g_ram + __lba * BLOCK_SIZE, __src, bytes);
         return driver::block::BlockStatus::Success;
+    }
+
+    uint32_t superblock_checksum(const DiskSuperblock *__sb) noexcept {
+        if (__sb == nullptr)
+            return 0;
+        const uint32_t *words = (const uint32_t *)__sb;
+        uint32_t value = SUPERBLOCK_CHECKSUM_SEED;
+        for (size_t i = 0; i < sizeof(DiskSuperblock) / sizeof(uint32_t) - 1; i++)
+            value = (value << 5) ^ (value >> 2) ^ words[i];
+        return value;
+    }
+
+    DiskSuperblock make_superblock() noexcept {
+        DiskSuperblock sb = {};
+        sb.magic = bigos::bigfs::MAGIC;
+        sb.version = bigos::bigfs::FORMAT_VERSION;
+        sb.block_size = BLOCK_SIZE;
+        sb.total_blocks = bigos::bigfs::TOTAL_BLOCKS;
+        sb.inode_count = INODE_COUNT;
+        sb.inode_size = INODE_SIZE;
+        sb.inode_table_start = INODE_TABLE_START;
+        sb.inode_table_blocks = bigos::bigfs::INODE_TABLE_BLOCKS;
+        sb.data_start = DATA_START;
+        sb.data_block_count = bigos::bigfs::DATA_BLOCK_COUNT;
+        sb.root_inode = ROOT_INODE;
+        sb.checksum = superblock_checksum(&sb);
+        return sb;
+    }
+
+    Status validate_superblock() noexcept {
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, 0);
+        if (block == nullptr)
+            return Status::IoError;
+        DiskSuperblock sb = {};
+        memcpy(&sb, block->data, sizeof(sb));
+        bigos::bcache::put(block);
+        if (sb.magic != bigos::bigfs::MAGIC || sb.version != bigos::bigfs::FORMAT_VERSION ||
+            sb.block_size != BLOCK_SIZE || sb.total_blocks != bigos::bigfs::TOTAL_BLOCKS ||
+            sb.inode_count != INODE_COUNT || sb.inode_size != INODE_SIZE ||
+            sb.inode_table_start != INODE_TABLE_START ||
+            sb.inode_table_blocks != bigos::bigfs::INODE_TABLE_BLOCKS || sb.data_start != DATA_START ||
+            sb.data_block_count != bigos::bigfs::DATA_BLOCK_COUNT || sb.root_inode != ROOT_INODE ||
+            sb.checksum != superblock_checksum(&sb))
+            return Status::Invalid;
+
+        DiskInode root = {};
+        if (!load_inode(ROOT_INODE, &root) || root.type != bigos::bigfs::INODE_DIRECTORY ||
+            root.link_count == 0 || root.size > bigos::bigfs::MAX_FILE_SIZE)
+            return Status::Invalid;
+        return Status::Success;
     }
 
     bool str_eq(const char *__a, const char *__b) noexcept {
@@ -560,14 +631,70 @@ namespace {
             return Status::Success;
         return Status::AccessDenied;
     }
-}   // namespace
 
-NAMESPACE_BIGOS_BEG
-namespace bigfs {
-    bool init() noexcept {
-        if (g_initialized)
-            return true;
-        const uint64_t total_bytes = (uint64_t)TOTAL_BLOCKS * BLOCK_SIZE;
+    Status format_current_device() noexcept {
+        uint8_t zero[BLOCK_SIZE] = {};
+        for (uint32_t block = 0; block < bigos::bigfs::TOTAL_BLOCKS; block++) {
+            const driver::block::BlockStatus write_status =
+                driver::block::write_sectors(&g_device, block, 1, zero, sizeof(zero));
+            if (write_status != driver::block::BlockStatus::Success)
+                return Status::IoError;
+        }
+
+        bigos::bcache::BufferBlock *sb_block = bigos::bcache::get(&g_device, 0);
+        if (sb_block == nullptr)
+            return Status::IoError;
+        memset(sb_block->data, 0, BLOCK_SIZE);
+        const DiskSuperblock sb = make_superblock();
+        memcpy(sb_block->data, &sb, sizeof(sb));
+        bigos::bcache::mark_dirty(sb_block);
+        bigos::bcache::put(sb_block);
+
+        bitmap_set(INODE_BITMAP_BLOCK, ROOT_INODE);
+
+        DiskInode root = {};
+        root.type = bigos::bigfs::INODE_DIRECTORY;
+        root.mode = 0755;
+        root.uid = bigos::cred::ROOT_UID;
+        root.gid = 0;
+        root.size = 0;
+        root.link_count = 2;
+        if (!store_inode(ROOT_INODE, &root))
+            return Status::IoError;
+        if (bigos::bcache::sync_all() != bigos::bcache::Status::Success)
+            return Status::IoError;
+        bigos::bcache::invalidate_device(&g_device);
+        return validate_superblock();
+    }
+
+    bool any_open_refs() noexcept {
+        for (uint32_t i = 0; i < INODE_COUNT; i++)
+            if (g_open_refs[i] != 0)
+                return true;
+        return false;
+    }
+
+    bool publish_persistent_if_valid() noexcept {
+#ifdef BIGOS_PERSISTENT_WRITABLE_FS
+        driver::block::ata_pio_persistent_test_init(&g_persistent_ata);
+        g_device = g_persistent_ata.block;
+        g_device.context = &g_persistent_ata;
+        g_device.total_sectors = bigos::bigfs::TOTAL_BLOCKS;
+        if (!bigos::bcache::init())
+            return false;
+        if (validate_superblock() != Status::Success)
+            return false;
+        memset(g_open_refs, 0, sizeof(g_open_refs));
+        g_persistent = true;
+        g_initialized = true;
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    bool publish_ram_formatted() noexcept {
+        const uint64_t total_bytes = (uint64_t)bigos::bigfs::TOTAL_BLOCKS * BLOCK_SIZE;
         const uint32_t pages = (uint32_t)((total_bytes + 0xfff) / 0x1000);
         uint8_t *ram = (uint8_t *)bigos::alloc_kernel_pages(pages, _GFM_PRE_PAGING);
         if (ram == nullptr)
@@ -576,7 +703,7 @@ namespace bigfs {
         g_ram = ram;
 
         g_device.sector_size = BLOCK_SIZE;
-        g_device.total_sectors = TOTAL_BLOCKS;
+        g_device.total_sectors = bigos::bigfs::TOTAL_BLOCKS;
         g_device.context = nullptr;
         g_device.read_impl = ram_read_impl;
         g_device.write_impl = ram_write_impl;
@@ -586,45 +713,67 @@ namespace bigfs {
             g_ram = nullptr;
             return false;
         }
-
-        // Format: superblock magic, root inode bitmap bit, root directory inode.
-        bigos::bcache::BufferBlock *sb = bigos::bcache::get(&g_device, 0);
-        if (sb == nullptr) {
+        if (format_current_device() != Status::Success) {
             bigos::free(ram);
             g_ram = nullptr;
             return false;
         }
-        memset(sb->data, 0, BLOCK_SIZE);
-        *(uint32_t *)sb->data = MAGIC;
-        bigos::bcache::mark_dirty(sb);
-        bigos::bcache::put(sb);
-
-        bitmap_set(INODE_BITMAP_BLOCK, ROOT_INODE);
-
-        DiskInode root = {};
-        root.type = INODE_DIRECTORY;
-        root.mode = 0755;
-        root.uid = bigos::cred::ROOT_UID;
-        root.gid = 0;
-        root.size = 0;
-        root.link_count = 2;
-        if (!store_inode(ROOT_INODE, &root)) {
-            bigos::free(ram);
-            g_ram = nullptr;
-            return false;
-        }
-        if (bigos::bcache::sync_all() != bigos::bcache::Status::Success) {
-            bigos::free(ram);
-            g_ram = nullptr;
-            return false;
-        }
-
+        memset(g_open_refs, 0, sizeof(g_open_refs));
+        g_persistent = false;
         g_initialized = true;
         return true;
+    }
+}   // namespace
+
+NAMESPACE_BIGOS_BEG
+namespace bigfs {
+    bool init() noexcept {
+        if (g_initialized)
+            return true;
+        if (publish_persistent_if_valid())
+            return true;
+        return publish_ram_formatted();
+    }
+
+    Status format_persistent() noexcept {
+#ifndef BIGOS_PERSISTENT_WRITABLE_FS
+        return Status::Unsupported;
+#else
+        if (g_initialized && any_open_refs())
+            return Status::AccessDenied;
+        if (g_initialized)
+            bigos::bcache::invalidate_device(&g_device);
+        driver::block::ata_pio_persistent_test_init(&g_persistent_ata);
+        g_device = g_persistent_ata.block;
+        g_device.context = &g_persistent_ata;
+        g_device.total_sectors = TOTAL_BLOCKS;
+        if (!bigos::bcache::init())
+            return Status::IoError;
+        const Status status = format_current_device();
+        if (status != Status::Success) {
+            g_initialized = false;
+            g_persistent = false;
+            return status;
+        }
+        memset(g_open_refs, 0, sizeof(g_open_refs));
+        g_initialized = true;
+        g_persistent = true;
+        return Status::Success;
+#endif
     }
 
     bool initialized() noexcept {
         return g_initialized;
+    }
+
+    bool persistent() noexcept {
+        return g_initialized && g_persistent;
+    }
+
+    const char *backend_name() noexcept {
+        if (!g_initialized)
+            return "unpublished";
+        return g_persistent ? "persistent clean-sync /rw" : "RAM-backed current-session /rw";
     }
 
     driver::block::BlockDevice *device() noexcept {

@@ -50,9 +50,18 @@ inode 数、仅直接块的文件（有界 `MAX_FILE_SIZE`）、定长目录项�
 （`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-ENOTDIR`/`-EISDIR`/`-EINVAL`/`-ENOTEMPTY`/`-EIO`/
 `-EACCES`/`-EROFS`），失败路径绝不发布半成品元数据。
 
-由于介质为 RAM-backed，重启不持久；本阶段只保证当前运行期一致性（写后读回、
-metadata 与目录枚举可见性，以及 `fsync` 加缓存淘汰后再读一致）。不提供 journaling、
-stable inode identity、完整 POSIX `DIR*` 或崩溃一致性保证。
+默认介质为 RAM-backed，重启不持久；该模式只保证当前运行期一致性（写后读回、
+metadata 与目录枚举可见性，以及 `fsync` 加缓存淘汰后再读一致）。
+
+`BIGOS_PERSISTENT_WRITABLE_FS` 会选择独立测试磁盘上的可选 persistent `/rw`
+backend。持久布局复用同一组有界 BigFS 限制，并增加显式 superblock
+magic/version/block-size/capacity/root metadata checksum。Normal boot 只在识别既有
+兼容卷成功后挂载；invalid magic、unsupported version、非法容量或 metadata 不匹配会降
+级到 RAM-backed `/rw`，不会自动格式化。受限 `/bin/mkfs_bigfs` 工具调用 BigOS 专用的
+显式格式化 hook，只面向配置好的 persistent test disk；它不是 POSIX `mkfs`、`mount`
+或设备管理工具。Persistent 模式只承诺成功 `fsync`/write-back 后经 clean reboot 可见。
+不提供 journaling、crash recovery、async I/O、广泛存储驱动、stable inode identity、
+完整 POSIX `DIR*` 或掉电一致性保证。
 
 ## 权限强制
 
@@ -102,6 +111,11 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
 - `xmake f --pipe_smoke=y` 启用 `BIGOS_PIPE_SMOKE`，覆盖跨线程 FIFO 写读、读空阻
   塞 + 写入唤醒、写端全关读 EOF、读端全关写 `-EPIPE`，发射
   `BIGOS_PIPE_PASSED`/`BIGOS_PIPE_FAILED`。
+- `xmake f --persistent_writable_fs_smoke=y` 启用
+  `BIGOS_PERSISTENT_WRITABLE_FS_SMOKE` 和 persistent backend。helper 可通过
+  `--persistent-image` 挂载独立测试磁盘；第一次 boot 格式化/写入/`fsync` 并等待
+  `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`，第二次 boot 复用同一 persistent image
+  并等待 `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`。
 
 无界 QEMU 串口 marker smoke 示例：
 
@@ -121,6 +135,8 @@ uv run python tools/boot_debug.py run --emulator qemu --display none \
 - 无 file-backed mmap 与页缓存共享映射、多挂载命名空间、`mount`/`umount`、
   journaling、`fsck`、配额、ACL/xattr。
 - 无命名管道（FIFO）/`mknod`/socket，除可选 `SIGPIPE` 外无其他管道信号语义。
+- persistent `/rw` 不提供 journaling、crash recovery、async I/O、广泛存储驱动、通用
+  block-device 管理或完整 POSIX filesystem 兼容性。
 - 无 SMP 缓存一致性与写性能优化（仅保证正确性与有界性）。
 - 不改 `int 0x80` 寄存器 ABI、既有 syscall 号、IDT/向量布局、DPL、页表/CR3/地址
   布局、外部 IRQ/异常 EOI 语义，以及 MBR/分区/exFAT 只读发现与磁盘镜像布局。

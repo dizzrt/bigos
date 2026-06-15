@@ -340,16 +340,30 @@ no_remainder:
     push %eax
 
     # prepare disk to load boot.bin
-    # The protected-mode loader uses ATA primary-master PIO, so only BIOS
-    # drive 0x80 currently satisfies the boot-drive contract.
+    # The protected-mode loader below uses ATA primary-master PIO. With an
+    # additional persistent test disk attached, some BIOSes may number the
+    # booted hard disk above 0x80 even though the QEMU/Bochs topology still keeps
+    # the boot image on primary master. Accept hard-disk BIOS numbers here; the
+    # loader continues to read from primary master and rejects floppies.
     cmpb $0x80, (0x802)
-    jne unsupported_boot_drive
+    jb unsupported_boot_drive
 
     # prepare disk to load boot.bin
     # select master disk
     mov $0x40, %al
     mov $0x01f6, %dx
     outb %al, %dx
+    mov $ATA_POLL_LIMIT, %esi
+wait_drive_select:
+    call wait_nops
+    mov $0x01f7, %dx
+    inb %dx, %al
+    test $ATA_STATUS_BSY, %al
+    jz drive_selected
+    decl %esi
+    jnz wait_drive_select
+    jmp ata_timeout
+drive_selected:
 
     # the lower byte of nr of sectors
     mov %ch, %al

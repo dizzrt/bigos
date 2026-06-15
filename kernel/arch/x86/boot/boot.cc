@@ -35,7 +35,7 @@
 #define PHDR_BUFFER_SIZE     0x4000
 #define EM_X86_64            62
 #define EV_CURRENT           1
-#define SUPPORTED_BOOT_DRIVE 0x80
+#define MIN_SUPPORTED_HARD_DISK_BOOT_DRIVE 0x80
 
 #define ARDS_USABLE   1u
 #define ARDS_RESERVED 2u
@@ -266,6 +266,17 @@ int wait_for_ata_data() {
     return -1;
 }
 
+int wait_for_ata_not_busy() {
+    for (uint32_t retry = 0; retry < ATA_POLL_LIMIT; retry++) {
+        wait_nops();
+        uint8_t status = inb(0x01f7);
+        if ((status & ATA_STATUS_BSY) == 0) {
+            return 0;
+        }
+    }
+    return -1;
+}
+
 int read_disk(uint8_t disk, uint16_t nr_sector, uint64_t lba48, uint16_t *buffer) {
     uint8_t LBA_1 = lba48 & 0xff;
     uint8_t LBA_2 = (lba48 & 0xff00) >> 0x08;
@@ -275,6 +286,10 @@ int read_disk(uint8_t disk, uint16_t nr_sector, uint64_t lba48, uint16_t *buffer
     uint8_t LBA_6 = (lba48 & 0xff0000000000) >> 0x28;
 
     outb(0x01f6, disk);
+    int select_status = wait_for_ata_not_busy();
+    if (select_status != 0) {
+        return select_status;
+    }
     outb(0x01f2, (uint8_t)(nr_sector >> 8));
     outb(0x01f3, LBA_4);
     outb(0x01f4, LBA_5);
@@ -436,7 +451,7 @@ void read_file_bytes(uint64_t file_lba, uint64_t file_offset, uint64_t size, uin
 }
 
 uint64_t load_kernel() {
-    if (*(uint8_t *)BOOT_DRIVE_ADDR != SUPPORTED_BOOT_DRIVE) {
+    if (*(uint8_t *)BOOT_DRIVE_ADDR < MIN_SUPPORTED_HARD_DISK_BOOT_DRIVE) {
         error("unsupported boot drive");
     }
 

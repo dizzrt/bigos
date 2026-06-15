@@ -2,6 +2,7 @@
 
 #include <bigos/io.h>
 #include <bigos/console.h>
+#include <bigos/fs/bigfs.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/sched.h>
 #include <bigos/time.h>
@@ -332,6 +333,30 @@ namespace sys {
             const uint32_t gid = process != nullptr ? process->gid : 0;
             return vfs_status_to_syscall(
                 bigos::vfs::rename(old_path, new_path, bigos::proc::current_cwd(), uid, gid));
+        }
+
+        static int64_t bigfs_status_to_syscall(bigos::bigfs::Status __status) noexcept {
+            switch (__status) {
+                case bigos::bigfs::Status::Success:
+                    return 0;
+                case bigos::bigfs::Status::AccessDenied:
+                    return -bigos::EACCES;
+                case bigos::bigfs::Status::Unsupported:
+                    return -bigos::EOPNOTSUPP;
+                case bigos::bigfs::Status::IoError:
+                    return -bigos::EIO;
+                case bigos::bigfs::Status::NoSpace:
+                    return -bigos::ENOSPC;
+                case bigos::bigfs::Status::Invalid:
+                default:
+                    return -bigos::EINVAL;
+            }
+        }
+
+        static int64_t sys_mkfs_bigfs() noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            return bigfs_status_to_syscall(bigos::bigfs::format_persistent());
         }
 
         static int64_t sys_readdir(uint64_t __fd, uint64_t __entries, uint64_t __max_entries) noexcept {
@@ -672,6 +697,9 @@ namespace sys {
                 break;
             case SYS_RENAME:
                 result = __detail::sys_rename(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_MKFS_BIGFS:
+                result = __detail::sys_mkfs_bigfs();
                 break;
             case SYS_EXECVE:
                 // execve replaces the current process image and enters the new

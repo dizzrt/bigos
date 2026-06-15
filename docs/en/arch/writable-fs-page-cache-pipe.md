@@ -62,11 +62,23 @@ continues to reference the same runtime file after a successful rename. Failure 
 deterministic (`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-ENOTDIR`/`-EISDIR`/`-EINVAL`/
 `-ENOTEMPTY`/`-EIO`/`-EACCES`/`-EROFS`) and never publish half-written metadata.
 
-Because the medium is RAM-backed it is not persistent across reboots; this stage
-only guarantees current-runtime consistency (write-then-read-back, metadata and
-directory enumeration visibility, and read-back after `fsync` plus cache
-eviction). There is no journaling, stable inode identity, full POSIX `DIR*`, or
-crash consistency guarantee.
+By default the medium is RAM-backed and is not persistent across reboots; that
+mode only guarantees current-runtime consistency (write-then-read-back, metadata
+and directory enumeration visibility, and read-back after `fsync` plus cache
+eviction).
+
+`BIGOS_PERSISTENT_WRITABLE_FS` selects an optional persistent `/rw` backend over
+an independent test disk. The persistent layout keeps the same bounded BigFS
+limits and adds an explicit superblock magic/version/block-size/capacity/root
+metadata checksum. Normal boot mounts an existing compatible volume only after
+recognition succeeds; invalid magic, unsupported version, invalid capacity, or
+metadata mismatch falls back to RAM-backed `/rw` without auto-formatting. The
+bounded `/bin/mkfs_bigfs` tool invokes the BigOS-specific explicit format hook
+for the configured persistent test disk; it is not a POSIX `mkfs`, `mount`, or
+device-management tool. Persistent mode only promises clean-sync plus clean
+reboot visibility for successful `fsync`/write-back state. There is no
+journaling, crash recovery, async I/O, broad storage driver support, stable inode
+identity, full POSIX `DIR*`, or power-loss consistency guarantee.
 
 ## Permission Enforcement
 
@@ -130,6 +142,12 @@ unchanged.
 - `xmake f --pipe_smoke=y` enables `BIGOS_PIPE_SMOKE`, covering cross-thread FIFO
   write/read, blocking-read then write wakeup, write-end-closed EOF, and
   read-end-closed `-EPIPE`, emitting `BIGOS_PIPE_PASSED`/`BIGOS_PIPE_FAILED`.
+- `xmake f --persistent_writable_fs_smoke=y` enables
+  `BIGOS_PERSISTENT_WRITABLE_FS_SMOKE` and the persistent backend. The helper can
+  attach an independent test disk with `--persistent-image`; the first boot
+  formats/writes/fsyncs and expects `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`,
+  while a second boot with the same persistent image expects
+  `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`.
 
 Run the headless QEMU serial-marker smoke with, for example:
 
@@ -151,6 +169,9 @@ instead of claiming a runtime run.
   `mount`/`umount`, journaling, `fsck`, quotas, or ACL/xattr.
 - No named pipes (FIFO)/`mknod`/socket, and no pipe signal semantics beyond the
   optional `SIGPIPE`.
+- No persistent `/rw` journaling, crash recovery, async I/O, broad storage
+  drivers, general block-device management, or complete POSIX filesystem
+  compatibility.
 - No SMP cache coherency or write performance optimization (correctness and
   boundedness only).
 - No changes to the `int 0x80` register ABI, existing syscall numbers, IDT/vector

@@ -21,7 +21,7 @@
 #include <bigos/fs/vfs.h>
 #include <bigos/io.h>
 #include <ktl/buffer.h>
-#ifdef BIGOS_WRITABLE_FS_SMOKE
+#if defined(BIGOS_WRITABLE_FS_SMOKE) || defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE)
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/bigfs.h>
 #include <bigos/cred.h>
@@ -392,6 +392,185 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_PERSISTENT_WRITABLE_FS_SMOKE
+namespace {
+    bool pfs_bytes_equal(const char *__a, const char *__b, size_t __len) noexcept {
+        for (size_t i = 0; i < __len; i++)
+            if (__a[i] != __b[i])
+                return false;
+        return true;
+    }
+
+    bool pfs_write_file(const char *__path, const char *__payload) noexcept {
+        const uint32_t uid = bigos::cred::ROOT_UID;
+        const uint32_t gid = 0;
+        const size_t len = strlen(__payload);
+        uint32_t inode = 0;
+        uint64_t size = 0;
+        bool is_dir = false;
+        bigos::bigfs::Status status = bigos::bigfs::open(
+            __path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT | bigos::vfs::OPEN_TRUNC, 0644, uid, gid, &inode,
+            &size, &is_dir);
+        if (status != bigos::bigfs::Status::Success || is_dir)
+            return false;
+        size_t written = 0;
+        status = bigos::bigfs::write(inode, 0, __payload, len, uid, gid, &written);
+        bigos::bigfs::close_inode(inode);
+        return status == bigos::bigfs::Status::Success && written == len;
+    }
+
+    bool pfs_read_file(const char *__path, const char *__payload) noexcept {
+        const uint32_t uid = bigos::cred::ROOT_UID;
+        const uint32_t gid = 0;
+        const size_t len = strlen(__payload);
+        uint32_t inode = 0;
+        uint64_t size = 0;
+        bool is_dir = false;
+        bigos::bigfs::Status status =
+            bigos::bigfs::open(__path, bigos::vfs::OPEN_RDONLY, 0644, uid, gid, &inode, &size, &is_dir);
+        if (status != bigos::bigfs::Status::Success || is_dir || size != len)
+            return false;
+        char buf[80] = {};
+        size_t read = 0;
+        status = bigos::bigfs::read(inode, 0, buf, len, &read);
+        bigos::bigfs::close_inode(inode);
+        return status == bigos::bigfs::Status::Success && read == len && pfs_bytes_equal(buf, __payload, len);
+    }
+
+    bool pfs_check_directory_and_metadata(const char *__path, const char *__payload) noexcept {
+        const uint32_t uid = bigos::cred::ROOT_UID;
+        const uint32_t gid = 0;
+        const char *dir_path = "/rw/persistdir";
+        const char *nested_path = "/rw/persistdir/nested.txt";
+        const char *renamed_path = "/rw/persistdir/renamed.txt";
+        const char *nested_payload = "BIGOS_PERSISTENT_DIR_PAYLOAD";
+
+        bigos::bigfs::Status status = bigos::bigfs::mkdir(dir_path, 0755, uid, gid);
+        if (status != bigos::bigfs::Status::Success && status != bigos::bigfs::Status::Exists)
+            return false;
+        if (!pfs_write_file(nested_path, nested_payload))
+            return false;
+        status = bigos::bigfs::rename(nested_path, renamed_path, uid, gid);
+        if (status != bigos::bigfs::Status::Success && status != bigos::bigfs::Status::Exists)
+            return false;
+        if (!pfs_read_file(renamed_path, nested_payload))
+            return false;
+
+        uint32_t dir_inode = 0;
+        uint64_t dir_size = 0;
+        bool is_dir = false;
+        status = bigos::bigfs::open(dir_path, bigos::vfs::OPEN_RDONLY, 0644, uid, gid, &dir_inode, &dir_size, &is_dir);
+        if (status != bigos::bigfs::Status::Success || !is_dir)
+            return false;
+        bigos::bigfs::DirectoryEntry entries[4] = {};
+        size_t entries_read = 0;
+        uint64_t next_offset = 0;
+        status = bigos::bigfs::readdir(dir_inode, 0, entries, 4, &entries_read, &next_offset);
+        bigos::bigfs::close_inode(dir_inode);
+        if (status != bigos::bigfs::Status::Success || entries_read == 0)
+            return false;
+        bool found_renamed = false;
+        for (size_t i = 0; i < entries_read; i++)
+            if (entries[i].type == bigos::bigfs::INODE_REGULAR && pfs_bytes_equal(entries[i].name, "renamed.txt", 11))
+                found_renamed = true;
+        if (!found_renamed)
+            return false;
+
+        uint32_t file_inode = 0;
+        uint64_t file_size = 0;
+        status = bigos::bigfs::open(__path, bigos::vfs::OPEN_RDONLY, 0644, uid, gid, &file_inode, &file_size, &is_dir);
+        if (status != bigos::bigfs::Status::Success || is_dir || file_size != strlen(__payload))
+            return false;
+        uint32_t mode = 0;
+        uint32_t owner = 0;
+        uint32_t group = 0;
+        uint64_t stat_size = 0;
+        bool stat_is_dir = false;
+        const bool stat_ok = bigos::bigfs::stat(file_inode, &mode, &owner, &group, &stat_size, &stat_is_dir);
+        bigos::bigfs::close_inode(file_inode);
+        if (!stat_ok || stat_is_dir || stat_size != strlen(__payload) || owner != uid || group != gid)
+            return false;
+
+        const char *delete_path = "/rw/persistdir/delete-me.txt";
+        if (!pfs_write_file(delete_path, "delete"))
+            return false;
+        status = bigos::bigfs::unlink(delete_path, uid, gid);
+        return status == bigos::bigfs::Status::Success;
+    }
+
+    bool pfs_check_exfat_read_only_asset() noexcept {
+        if (bigos::vfs::init() != bigos::vfs::Status::Success)
+            return false;
+        bigos::vfs::File *boot_file = nullptr;
+        const bigos::vfs::Status open_status = bigos::vfs::open_absolute(
+            "/boot/fs_smoke.txt", bigos::vfs::OPEN_RDONLY, 0644, bigos::cred::ROOT_UID, 0, &boot_file);
+        if (open_status != bigos::vfs::Status::Success || boot_file == nullptr)
+            return false;
+        char buf[32] = {};
+        size_t read = 0;
+        const bigos::vfs::Status read_status = bigos::vfs::read(boot_file, buf, sizeof(buf), &read);
+        bigos::vfs::release(boot_file);
+        const char *payload = "BIGOS_FS_SMOKE_PAYLOAD\n";
+        return read_status == bigos::vfs::Status::Success && read == strlen(payload) &&
+               pfs_bytes_equal(buf, payload, read);
+    }
+
+    void persistent_writable_fs_smoke_entry(void *) noexcept {
+        const char *path = "/rw/persist.txt";
+        const char *payload = "BIGOS_PERSISTENT_WRITABLE_FS_PAYLOAD";
+
+        if (!bigos::bigfs::init()) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_FAILED init\n");
+            return;
+        }
+
+        if (bigos::bigfs::persistent()) {
+            if (!pfs_read_file(path, payload)) {
+                bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_FAILED readback\n");
+                return;
+            }
+            if (!pfs_check_directory_and_metadata(path, payload)) {
+                bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_FAILED metadata\n");
+                return;
+            }
+            if (!pfs_check_exfat_read_only_asset()) {
+                bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_FAILED exfat\n");
+                return;
+            }
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED\n");
+            return;
+        }
+
+        if (bigos::bigfs::format_persistent() != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED mkfs\n");
+            return;
+        }
+        if (!pfs_write_file(path, payload)) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED write\n");
+            return;
+        }
+        if (!pfs_check_directory_and_metadata(path, payload)) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED metadata\n");
+            return;
+        }
+        if (!pfs_check_exfat_read_only_asset()) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED exfat\n");
+            return;
+        }
+        if (bigos::bigfs::fsync() != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED fsync\n");
+            return;
+        }
+        bigos::bcache::invalidate_device(bigos::bigfs::device());
+        if (!pfs_read_file(path, payload)) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED evict-readback\n");
+            return;
+        }
+        bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED\n");
+    }
+}   // namespace
+#endif
+
 #ifdef BIGOS_PIPE_SMOKE
 namespace {
     bigos::vfs::File *g_pipe_read = nullptr;
@@ -547,6 +726,12 @@ void kernel(const BootInfoHeader *boot_info) {
         bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED thread\n");
 #endif
 
+#ifdef BIGOS_PERSISTENT_WRITABLE_FS_SMOKE
+    if (bigos::sched::create_kernel_thread(&persistent_writable_fs_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_FAILED thread\n");
+#endif
+
 #ifdef BIGOS_PIPE_SMOKE
     if (bigos::sched::create_kernel_thread(&pipe_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_PIPE_FAILED thread\n");
@@ -593,8 +778,10 @@ void kernel(const BootInfoHeader *boot_info) {
     // kernel thread so run_user_process can enter ring3 and the deferred reaper
     // owns teardown after init exits. Missing/invalid init halts via the unified
     // panic path inside launch_init.
+#ifndef BIGOS_PERSISTENT_WRITABLE_FS_SMOKE
     if (bigos::sched::create_kernel_thread(&bigos::proc::launch_init, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_INIT_LOAD_FAILED thread\n");
+#endif
 
     // The post-initialization halt behavior is now owned by the scheduler idle
     // thread instead of a naked hlt loop in kernel(). Enter after IRQs are on so

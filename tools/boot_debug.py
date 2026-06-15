@@ -22,6 +22,7 @@ BUILD_DIR = PROJECT_ROOT / 'build'
 BOOT_ARTIFACT_DIR = BUILD_DIR / 'bin' / 'x86' / 'boot'
 UEFI_ARTIFACT_DIR = BUILD_DIR / 'bin' / 'x86' / 'uefi'
 DEFAULT_IMAGE = BUILD_DIR / 'test' / 'os.raw'
+DEFAULT_PERSISTENT_IMAGE = BUILD_DIR / 'test' / 'persistent-rw.raw'
 DEFAULT_UEFI_IMAGE = BUILD_DIR / 'test' / 'uefi-esp.img'
 DEFAULT_BOCHSRC = BUILD_DIR / 'test' / 'bochsrc.bxrc'
 DEFAULT_KERNEL = BUILD_DIR / 'kernel'
@@ -57,6 +58,8 @@ EXFAT_STREAM_NO_FAT_CHAIN = 0x02
 BOOT_MAX_LOAD_BYTES = 0x80000
 
 DEFAULT_IMAGE_SIZE = 64 * 1024 * 1024
+MIN_PERSISTENT_IMAGE_SIZE = 128 * 1024
+DEFAULT_PERSISTENT_IMAGE_SIZE = 1 * 1024 * 1024
 PARTITION_LBA = 2048
 SECTORS_PER_CLUSTER = 8
 CLUSTER_SIZE = SECTOR_SIZE * SECTORS_PER_CLUSTER
@@ -75,7 +78,8 @@ USER_INIT_ELF_PATH = '/boot/user/init.elf'
 # them by absolute path; the shell PATH lookup defaults to /bin. The same
 # USER_ELF_MAX_FILE_BYTES limit is enforced for both init and execve targets.
 USER_BIN_DIR = BUILD_DIR / 'bin' / 'user' / 'bin'
-USER_BIN_PROGRAMS = ('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rename', 'stat', 'pwd')
+USER_BASE_BIN_PROGRAMS = ('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rename', 'stat', 'pwd')
+USER_BIN_PROGRAMS = (*USER_BASE_BIN_PROGRAMS, 'mkfs_bigfs')
 USER_SMOKE_BIN_DIR = USER_BIN_DIR / 'smoke'
 USER_SMOKE_BIN_PROGRAMS = ('args', 'env', 'out', 'errno', 'exit', 'libc_subset')
 USER_BIN_MAX_BYTES = USER_INIT_ELF_MAX_BYTES
@@ -334,7 +338,9 @@ RUNTIME_SMOKE_MATRIX = (
         switches=('filesystem_maturity_smoke',),
         expected_marker='BIGOS_FILESYSTEM_MATURITY_PASSED',
         timeout_seconds=40.0,
-        risk_area='Stage 41 current-runtime filesystem semantics across exFAT, /rw, fd/VFS, metadata, cwd, errno, tools',
+        risk_area=(
+            'Stage 41 current-runtime filesystem semantics across exFAT, /rw, fd/VFS, metadata, cwd, errno, tools'
+        ),
         validation_markers=(
             'BIGOS_FILESYSTEM_MATURITY_PASSED',
             'BIGOS_USERLAND_PASSED',
@@ -832,6 +838,20 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
     return layout
 
 
+def ensure_persistent_image(image_path: Path, image_size: int = DEFAULT_PERSISTENT_IMAGE_SIZE) -> None:
+    """Create the independent persistent /rw test disk without touching the boot image."""
+    image_size = align_up(image_size, SECTOR_SIZE)
+    if image_size < MIN_PERSISTENT_IMAGE_SIZE:
+        raise StageError('persistent image', 'persistent image is too small for BigFS metadata bounds')
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    if image_path.exists():
+        if image_path.stat().st_size < MIN_PERSISTENT_IMAGE_SIZE:
+            raise StageError('persistent image', f'existing persistent image is too small: {image_path}')
+        return
+    with image_path.open('wb') as image:
+        image.truncate(image_size)
+
+
 def mtools_path(path: str) -> str:
     return '::' + path
 
@@ -1033,6 +1053,7 @@ def render_bochsrc(
     serial_log: Path | None,
     display: str,
     extra_lines: Sequence[str],
+    persistent_image: Path | None = None,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     serial_line = 'com1: enabled=1, mode=null'
@@ -1056,6 +1077,14 @@ def render_bochsrc(
         'info: action=report',
         'debug: action=ignore',
     ]
+    if persistent_image is not None:
+        p_cylinders, p_heads, p_spt = disk_geometry(persistent_image.stat().st_size)
+        lines.insert(7, 'ata1: enabled=1, ioaddr1=0x168, ioaddr2=0x36e, irq=10')
+        lines.insert(
+            8,
+            f'ata1-master: type=disk, path="{persistent_image}", mode=flat, '
+            f'cylinders={p_cylinders}, heads={p_heads}, spt={p_spt}, sect_size=512',
+        )
     if romimage:
         lines.insert(0, f'romimage: file="{romimage}"')
     if vgaromimage:
@@ -1108,7 +1137,7 @@ def stop_process_group(process: subprocess.Popen[str]) -> None:
 def launch_bochs(bochsrc: Path) -> None:
     run_command(
         'bochs launch',
-        ['bochs', '-f', str(bochsrc), '-q'],
+        ['bochs', '-unlock', '-f', str(bochsrc), '-q'],
         PROJECT_ROOT,
         capture_output=True,
         allow_result=is_bochs_user_shutdown,
@@ -1119,10 +1148,10 @@ def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: st
     if serial_log.exists():
         serial_log.unlink()
 
-    printable = f'bochs -f {bochsrc} -q'
+    printable = f'bochs -unlock -f {bochsrc} -q'
     log_stage(f'bochs smoke: {printable}')
     process = subprocess.Popen(
-        ['bochs', '-f', str(bochsrc), '-q'],
+        ['bochs', '-unlock', '-f', str(bochsrc), '-q'],
         cwd=PROJECT_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -1163,11 +1192,12 @@ def qemu_command(
     *,
     gdb: bool = False,
     extra_args: Sequence[str] = (),
+    persistent_image: Path | None = None,
 ) -> list[str]:
     command = [
         'qemu-system-x86_64',
         '-drive',
-        f'file={image_path},format=raw,if=ide',
+        f'file={image_path},format=raw,if=ide,index=0',
         '-boot',
         'c',
         '-serial',
@@ -1175,6 +1205,17 @@ def qemu_command(
         '-no-reboot',
         '-no-shutdown',
     ]
+    if persistent_image is not None:
+        command.extend(
+            [
+                '-device',
+                'isa-ide,id=persistide,iobase=0x168,iobase2=0x36e,irq=10',
+                '-drive',
+                f'if=none,id=persist,file={persistent_image},format=raw',
+                '-device',
+                'ide-hd,drive=persist,bus=persistide.0,unit=0',
+            ]
+        )
     if display == 'none':
         command.extend(['-display', 'none'])
     if gdb:
@@ -1330,6 +1371,7 @@ def run(args: argparse.Namespace) -> int:
     boot_mode = args.boot_mode
     image_arg = DEFAULT_UEFI_IMAGE if boot_mode == 'uefi' and args.image == str(DEFAULT_IMAGE) else Path(args.image)
     image_path = Path(image_arg).resolve()
+    persistent_image = Path(args.persistent_image).resolve() if args.persistent_image else None
     bochsrc_path = Path(args.bochsrc).resolve() if args.bochsrc else DEFAULT_BOCHSRC
     image_size = parse_size(args.image_size)
     should_launch = not args.no_launch
@@ -1360,13 +1402,24 @@ def run(args: argparse.Namespace) -> int:
     else:
         layout = create_image(image_path, image_size, artifacts)
         validate_image(image_path)
+    if persistent_image is not None:
+        ensure_persistent_image(persistent_image)
 
     if is_bochs_backend(emulator):
         bochs_extra = list(args.bochs_extra)
         if args.bochsrc:
             log_stage(f'using custom Bochs config: {bochsrc_path}')
         else:
-            render_bochsrc(image_path, bochsrc_path, args.romimage, args.vgaromimage, serial_log, display, bochs_extra)
+            render_bochsrc(
+                image_path,
+                bochsrc_path,
+                args.romimage,
+                args.vgaromimage,
+                serial_log,
+                display,
+                bochs_extra,
+                persistent_image=persistent_image,
+            )
 
     print(f'image: {image_path}')
     print(f'boot_mode: {boot_mode}')
@@ -1375,6 +1428,8 @@ def run(args: argparse.Namespace) -> int:
         print(f'bochsrc: {bochsrc_path}')
     if serial_log:
         print(f'serial_log: {serial_log}')
+    if persistent_image is not None:
+        print(f'persistent_image: {persistent_image}')
     if is_qemu_backend(emulator) and serial_log:
         if boot_mode == 'uefi':
             command_preview = (
@@ -1396,6 +1451,7 @@ def run(args: argparse.Namespace) -> int:
                 display,
                 gdb=emulator == 'qemu-gdb',
                 extra_args=args.qemu_extra,
+                persistent_image=persistent_image,
             )
         if command_preview:
             print('qemu_command: ' + ' '.join(command_preview))
@@ -1430,6 +1486,7 @@ def run(args: argparse.Namespace) -> int:
                     display,
                     gdb=emulator == 'qemu-gdb',
                     extra_args=args.qemu_extra,
+                    persistent_image=persistent_image,
                 )
             if marker:
                 launch_qemu_until_serial_marker(command, serial_log, marker, args.smoke_timeout)
@@ -1788,6 +1845,10 @@ def make_parser() -> argparse.ArgumentParser:
         help='raw disk image path under build/test by default',
     )
     run_parser.add_argument('--image-size', default='64M', help='raw image size, e.g. 64M, 128M, or bytes')
+    run_parser.add_argument(
+        '--persistent-image',
+        help='attach/create an independent persistent /rw test disk as ATA primary slave',
+    )
     run_parser.add_argument(
         '--boot-mode',
         choices=BOOT_MODES,
