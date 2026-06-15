@@ -197,7 +197,7 @@ user-visible capability goal.
 - 在后续明确选择前，继续把 session、terminal process group、作业控制、完整终端控制和完整
   POSIX shell 行为作为非目标。
 
-### Stage 43: VM And Program Runtime Expansion / VM 与程序运行时扩展
+### Stage 43 (Complete): VM And Program Runtime Expansion / VM 与程序运行时扩展（已完成）
 
 - Expand the program runtime foundation after libc, filesystem, and process
   contracts are stable enough to support more complex user programs.

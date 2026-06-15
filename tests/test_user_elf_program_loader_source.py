@@ -121,7 +121,9 @@ def test_user_elf_exec_prepare_commit_and_argv_envp_bounds_are_source_checked() 
     assert 'args->argc > bigos::proc::EXEC_MAX_ARGC' in proc
     assert 'args->envc > bigos::proc::EXEC_MAX_ENVC' in proc
     assert 'bounded_strlen(args->argv[i], bigos::proc::EXEC_MAX_STRING_BYTES)' in proc
-    assert 'create_elf_user_process(&prepared, __image, __image_len, __args)' in proc
-    assert 'unpublish_process(&prepared)' in proc
+    assert 'create_elf_user_process(prepared, __image, __image_len, __args)' in proc
+    assert 'unpublish_process(prepared)' in proc
+    assert 'init_runtime_layout(__process' in proc
+    assert 'process->runtime_layout = prepared->runtime_layout;' in proc
     assert 'process->exit_code = EXEC_FAILURE_STATUS;' in proc
     assert 'bigos::proc::ExecArgs args = {argv, 1, nullptr, 0};' in kernel

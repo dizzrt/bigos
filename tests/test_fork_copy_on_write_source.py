@@ -75,7 +75,7 @@ def test_remap_and_leaf_accessor_present() -> None:
 
     remap_body = vmem[vmem.index('bool remap_user_page_in_root(') : vmem.index('uint64_t read_cr3() noexcept')]
     # Overwrites the present leaf PTE and invalidates the TLB on the active root.
-    assert 'flush_kernel_tlb_page(__vaddr);' in remap_body
+    assert 'invalidate_active_tlb_page(__root_phys, __vaddr);' in remap_body
     assert 'read_cr3()' in remap_body
 
 
@@ -106,6 +106,7 @@ def test_fork_clone_and_cow_split_implemented() -> None:
     clone_body = proc[proc.index('bool clone_user_address_space_cow(') : proc.index('bool clone_fd_table(')]
     assert 'derive_user_address_space_root()' in clone_body
     assert 'clone_process_kernel_stack_mapping(__child)' in clone_body
+    assert '__child->runtime_layout = __parent->runtime_layout;' in clone_body
     assert '__child->vmas = __parent->vmas;' in clone_body
 
     # Per-page split: ELF segments copied, writable anon shared COW, read-only
@@ -125,7 +126,7 @@ def test_fork_clone_and_cow_split_implemented() -> None:
     assert 'child->kernel_address_space_root = parent->kernel_address_space_root;' in fork_body
 
     child_entry = proc[proc.index('void fork_child_entry(') : proc.index('}   // namespace', proc.index('void fork_child_entry('))]
-    assert 'activate_address_space_root(child->kernel_address_space_root)' in child_entry
+    assert 'activate_kernel_address_space(child->kernel_address_space_root)' in child_entry
     assert 'child->kernel_address_space_root = bigos::mm::read_cr3()' not in child_entry
 
     # COW write-split branch in the unified page-fault handler.

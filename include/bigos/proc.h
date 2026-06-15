@@ -18,6 +18,8 @@ namespace bigos::proc {
     constexpr uint64_t USER_HEAP_MAX_PAGES = 16;
     constexpr uint64_t USER_ANON_BASE = 0x0000000001000000ull;
     constexpr uint64_t USER_ANON_MAX_PAGES = 32;
+    constexpr uint64_t USER_RUNTIME_RESERVED_BASE = USER_STACK_TOP;
+    constexpr uint64_t USER_RUNTIME_RESERVED_END = USER_ANON_BASE;
     constexpr const char *USER_ELF_SMOKE_PATH = "/boot/user/init.elf";
     // Default-on init image path. Semantically neutral name for the normal-boot
     // launch_init path; intentionally the same value as USER_ELF_SMOKE_PATH so
@@ -115,6 +117,18 @@ namespace bigos::proc {
         uint64_t anon_next;
     };
 
+    struct UserRuntimeLayout {
+        UserRange elf_load;
+        UserRange heap;
+        UserRange anonymous;
+        UserRange stack_guard;
+        UserRange stack_growth;
+        UserRange stack;
+        UserRange arguments;
+        UserRange future_runtime;
+        bool committed;
+    };
+
     struct Process {
         uint32_t pid;
         uint32_t parent_pid;
@@ -127,6 +141,7 @@ namespace bigos::proc {
         UserRange code;
         UserRange data;
         UserRange stack;
+        UserRuntimeLayout runtime_layout;
         VmaCollection vmas;
         uint64_t initial_stack;
         uint64_t code_phys;

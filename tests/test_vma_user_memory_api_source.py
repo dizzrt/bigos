@@ -28,6 +28,9 @@ def test_process_header_declares_bounded_vma_model() -> None:
         'USER_STACK_GROWTH_PAGES',
         'USER_HEAP_MAX_PAGES',
         'USER_ANON_BASE',
+        'USER_RUNTIME_RESERVED_BASE',
+        'struct UserRuntimeLayout',
+        'UserRuntimeLayout runtime_layout;',
         'enum class VmaPermission',
         'enum class VmaPurpose',
         'enum class VmaBacking',
@@ -61,6 +64,7 @@ def test_user_mapping_is_vma_first_and_pte_attr_cannot_exceed_vma() -> None:
     assert 'internal_find_vma(&__process->vmas, __vaddr)' in map_body
     assert 'internal_vma_range_allowed(&__process->vmas, __vaddr, PAGE_SIZE' in map_body
     assert 'internal_vma_attr_allowed(vma, __attr)' in map_body
+    assert 'runtime_vma_allowed(__process, *vma)' in map_body
     assert 'map_page_in_root(__process->address_space_root, __vaddr, __phys, __attr)' in map_body
     assert '(__attr & bigos::mm::page_attr::WRITABLE) != 0' in proc
     assert '(__attr & bigos::mm::page_attr::NO_EXECUTE) == 0' in proc
@@ -75,8 +79,28 @@ def test_exec_and_first_process_publish_code_data_heap_stack_and_guard_vmas() ->
     assert 'VmaPurpose::Heap' in proc
     assert 'VmaPurpose::StackGuard' in proc
     assert 'VmaPurpose::Stack' in proc
-    assert 'process->vmas = prepared.vmas;' in proc
+    assert 'init_runtime_layout(__process' in proc
+    assert 'internal_add_process_vma(__process' in proc
+    assert 'process->runtime_layout = prepared->runtime_layout;' in proc
+    assert 'process->vmas = prepared->vmas;' in proc
+    assert 'const UserRuntimeLayout old_runtime_layout = process->runtime_layout;' in proc
     assert 'const VmaCollection old_vmas = process->vmas;' in proc
+
+
+def test_runtime_layout_rejects_reserved_gaps_and_mismatched_vma_purposes() -> None:
+    proc = read_source('kernel/core/proc/proc.cc')
+
+    layout_body = proc[proc.index('bool runtime_vma_allowed') : proc.index('void internal_init_vmas')]
+    assert '!__process->runtime_layout.committed' in layout_body
+    assert 'layout.future_runtime' in proc
+    assert 'USER_RUNTIME_RESERVED_BASE' in proc
+    assert 'USER_RUNTIME_RESERVED_END' in proc
+    assert 'range_inside(__entry.start, __entry.end, layout.elf_load)' in layout_body
+    assert 'range_inside(__entry.start, __entry.end, layout.heap)' in layout_body
+    assert 'range_inside(__entry.start, __entry.end, layout.anonymous)' in layout_body
+    assert 'range_inside_pair(__entry.start, __entry.end, layout.stack_growth, layout.stack)' in layout_body
+    assert 'range_inside(__entry.start, __entry.end, layout.stack_guard)' in layout_body
+    assert 'VmaBacking::Guard' in layout_body
 
 
 def test_user_copy_validation_checks_vma_and_page_table_state() -> None:
@@ -85,9 +109,9 @@ def test_user_copy_validation_checks_vma_and_page_table_state() -> None:
     validate_start = proc.index('bool validate_user_buffer')
     validate_body = proc[validate_start : proc.index('int64_t install_fd_current', validate_start)]
 
-    assert 'internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Read)' in validate_body
+    assert 'runtime_range_allowed(process, __addr, __len, VmaPermission::Read)' in validate_body
     assert 'bigos::mm::user_range_mapped(process->address_space_root, __addr, __len)' in validate_body
-    assert 'internal_vma_range_allowed(&process->vmas, __addr, __len, VmaPermission::Write)' in validate_body
+    assert 'runtime_range_allowed(process, __addr, __len, VmaPermission::Write)' in validate_body
     assert 'bigos::mm::__detail::user_range_writable(process->address_space_root, __addr, __len)' in validate_body
     assert 'copy_from_user_root(process->address_space_root' in validate_body
     assert 'copy_to_user_root(process->address_space_root' in validate_body
@@ -119,6 +143,7 @@ def test_brk_and_anonymous_mapping_are_restricted_and_lazy() -> None:
     assert '__flags != 0' in anon_body
     assert '__len > USER_ANON_MAX_PAGES * PAGE_SIZE' in anon_body
     assert 'permissions_wx(permissions)' in anon_body
+    assert 'const uint64_t anon_limit = process->runtime_layout.anonymous.base + process->runtime_layout.anonymous.len' in anon_body
     assert 'VmaPurpose::Anonymous' in anon_body
     # Lazy backing: registration only, no eager allocation/mapping loop.
     assert 'alloc_user_frame()' not in anon_body
@@ -141,6 +166,8 @@ def test_unified_page_fault_entry_decides_by_vma_metadata() -> None:
     # Locate the covering VMA and require anonymous backing.
     assert 'internal_find_vma_mut(&process->vmas, page)' in entry_body
     assert 'vma->backing != VmaBacking::Anonymous' in entry_body
+    assert 'runtime_vma_allowed(process, *vma)' in entry_body
+    assert 'runtime_vma_allowed(process, *cow_vma)' in entry_body
     # Permission and NX instruction-fetch gates.
     assert '(__error_code & 0x2) != 0 && !permissions_include(vma->permissions, VmaPermission::Write)' in entry_body
     assert (
