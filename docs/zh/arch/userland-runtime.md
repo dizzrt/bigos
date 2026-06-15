@@ -97,28 +97,35 @@ FILE API、动态链接或完整 POSIX libc。
 
 - 头文件：`stdio.h`、`stdlib.h`、`string.h`、`errno.h`、`unistd.h`、
   `fcntl.h`、`sys/types.h`、`sys/wait.h`、`sys/stat.h`、`bigos_dirent.h`，
-  以及兼容用 umbrella 头 `libc.h`。
+  以及兼容用 umbrella 头 `libc.h`。Raw syscall primitive 需要显式包含
+  `bigos_syscall.h`，不会从普通 umbrella 头导出。
 - 类型与常量：`size_t`、`ssize_t`、`off_t`、`pid_t`、`NULL`、已实现的
   open flags、seek 常量、`WAIT_ANY`，以及与 `include/bigos/errno.h` 保持一致
   的 errno 数值，包括用于 `getcwd` 小缓冲区的 `ERANGE`。
 - 文件元数据与目录 helper：`struct stat`、`S_ISDIR`、`S_ISREG` 和
   `struct bigos_dirent` 只描述当前有界文件/目录子集。`bigos_readdir` 读取有界批次；
-  它不是完整 POSIX `readdir` API，也不暴露持久完整文件系统语义。
+  它仍是 BigOS-specific 批量 helper；`DIR`、`struct dirent`、`opendir`、`readdir`
+  和 `closedir` 提供有界 `DIR*` 风格 wrapper。这些接口不是完整 POSIX 目录遍历，
+  不承诺排序、跨调用快照、`telldir`、`seekdir`、`rewinddir`、symlink、目录 fd 语义或
+  持久完整文件系统语义。
 - Syscall wrapper：内核负 errno 返回会翻译为用户态正 `errno`，并返回 `-1` 或
   接口文档化的失败哨兵；成功 wrapper 不会清零或改写既有 `errno`。
 - BigOS-specific helper：`wait_status`、`bigos_readdir`、`brk_raw`、
   `mmap_anon`、`time_now` 和 `get_tick` 是 public bounded ABI helper，因为当前
   shell、smoke、libc 或打包用户程序路径会使用它们。Raw `syscall0` 到 `syscall6`
-  仍是兼容 umbrella export 与低层 ABI helper，不是 POSIX `syscall(2)` 兼容。
+  只作为 libc 内部或显式包含 `bigos_syscall.h` 的低层 BigOS ABI helper 保留；
+  它们不翻译 `errno`，也不是 POSIX `syscall(2)` 兼容。
 - 字符串与内存：子集包含已实现的有界例程，例如 `strlen`、`strcmp`、
   `strncmp`、`memcpy`、`memset` 和 overlap-safe `memmove`，以及当前用户程序解析路径使用的
   `strchr`。NULL 指针输入仍遵循普通 C 前置条件，BigOS 不额外承诺 hosted 安全检查。
-- 堆：`malloc` 返回 16 字节对齐的可写内存；有界失败时返回 `NULL`，且不破坏
-  既有块。`free(NULL)` 无副作用。分配器不承诺线程安全、完整 coalescing、
-  `realloc` 或 hosted allocator 行为。
+- Stdlib 与堆：`strtol` 支持有界整数解析、base 处理、`endptr` 和 `ERANGE`；
+  `atoi` 是十进制便利 wrapper。`malloc`、`calloc` 和 `realloc` 使用有界 brk allocator；
+  `calloc` 检查乘法溢出并清零内存，`realloc` 失败时保留原块，`free(NULL)` 无副作用。
+  分配器不承诺线程安全、完整 coalescing 或 hosted allocator 行为。
 - Stdio：`stdin`、`stdout`、`stderr` 只是 fd `0`、`1`、`2` 的 opaque handle。
-  `putchar`、`puts`、`printf` 和 `fprintf(stderr, ...)` 基于 fd/write，支持
-  `%s`、`%d`、`%x`、`%c` 与 `%%`；不提供 `fopen`、`fclose`、完整 buffering、
+  `putchar`、`puts`、`printf` 和 `fprintf(stderr, ...)` 基于 fd/write，`snprintf`
+  复用同一有界 formatter。formatter 支持既有最小格式、简单宽度、`%u`、`%p`、
+  `%ld`、`%lu` 和 `%zu`；不提供 `fopen`、`fclose`、完整 buffering、precision、
   locale、浮点格式化、宽字符或 hosted `FILE` 语义。
 - 环境：`envp`、`environ` 与 `getenv` 只读。本阶段不实现 `setenv`、`putenv`
   或 `unsetenv`。
@@ -132,14 +139,15 @@ runtime 边界内：
   `main` 返回值传给 `SYS_EXIT`。
 - Wrapper：libc syscall wrapper 将内核负返回值翻译为正的 `errno`，并返回
   `-1` 或接口文档化的失败哨兵。
-- 输出：程序使用 fd-based `write`、`putchar`、`puts` 或极简 `printf`；stdout
-  是 fd `1`，确定性错误可以写到 fd `2`。
+- 输出：程序使用 fd-based `write`、`putchar`、`puts`、有界 `printf`/`fprintf`
+  或 `snprintf`；stdout 是 fd `1`，确定性错误可以写到 fd `2`。
 - 环境：`envp`、`environ` 和 `getenv` 只读。若没有提供环境变量，程序必须确定性报告空边界。
 - Smoke-only 探针：`/bin/smoke/args`、`/bin/smoke/env`、`/bin/smoke/out`、
   `/bin/smoke/errno`、`/bin/smoke/exit` 和 `/bin/smoke/libc_subset` 在启用
   `userland_smoke` 时分别覆盖参数传递、环境报告、stdout/stderr、wrapper 失败加
   `errno`、请求的退出状态、细粒度 libc 头文件、`fprintf(stderr, ...)`、
-  字符串/内存边界和有界堆行为。
+  `snprintf`/formatter 行为、字符串/内存边界、`strtol`/`atoi`、`calloc`/`realloc`、
+  `DIR*` wrapper 和有界堆行为。
 
 该基线不新增 kernel syscall、不修改 `int 0x80` 寄存器 ABI、不改变 boot 或磁盘布局、
 不引入动态链接，也不声称提供 hosted libc 或完整 POSIX shell 行为。

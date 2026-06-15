@@ -1,11 +1,14 @@
 /* BigOS minimal stdio declarations.
  *
  * Standard streams are opaque handles for fd 0/1/2 only. This header exposes
- * fd-backed putchar/puts/printf/fprintf with %s, %d, %x, %c, and %% support. It
- * intentionally omits fopen/fclose, buffering, locale, floating point formats,
- * wide characters, and full hosted FILE semantics. */
+ * fd-backed putchar/puts/printf/fprintf and bounded snprintf with common
+ * integer/string/pointer formats. It intentionally omits fopen/fclose,
+ * buffering, locale, floating point formats, wide characters, precision, and
+ * full hosted FILE semantics. */
 #ifndef _BIGOS_USER_STDIO_H
 #define _BIGOS_USER_STDIO_H
+
+#include <sys/types.h>
 
 /* If an editor accidentally pre-includes a host stdio.h, keep this header
  * parseable by reusing that opaque FILE typedef. The real BigOS build sees only
@@ -32,6 +35,7 @@ int putchar(int c);
 int puts(const char *s);
 int printf(const char *fmt, ...);
 int fprintf(FILE *stream, const char *fmt, ...);
+int snprintf(char *buf, size_t size, const char *fmt, ...);
 void perror(const char *s);
 
 #endif /* _BIGOS_USER_STDIO_H */

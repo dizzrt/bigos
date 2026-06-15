@@ -5,6 +5,7 @@
  * kernel return into errno = -ret and a -1/sentinel result (POSIX convention).
  */
 #include "libc.h"
+#include "bigos_syscall.h"
 #include "sys_nr.h"
 
 int errno = 0;
@@ -203,6 +204,68 @@ char *getcwd(char *buf, size_t size) {
 
 ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries) {
     return (ssize_t)errno_translate(syscall3(SYS_READDIR, (long)fd, (long)entries, (long)max_entries));
+}
+
+struct __bigos_DIR {
+    int fd;
+    size_t index;
+    size_t count;
+    struct bigos_dirent entries[BIGOS_DIRENT_MAX_BATCH];
+    struct dirent current;
+};
+
+DIR *opendir(const char *path) {
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return NULL;
+    if (!S_ISDIR(st.st_mode) && st.type != BIGOS_METADATA_TYPE_DIRECTORY) {
+        errno = ENOTDIR;
+        return NULL;
+    }
+    int fd = open(path, O_RDONLY, 0);
+    if (fd < 0)
+        return NULL;
+    DIR *dir = (DIR *)malloc(sizeof(DIR));
+    if (dir == NULL) {
+        int saved = errno;
+        close(fd);
+        errno = saved != 0 ? saved : ENOMEM;
+        return NULL;
+    }
+    dir->fd = fd;
+    dir->index = 0;
+    dir->count = 0;
+    memset(&dir->current, 0, sizeof(dir->current));
+    return dir;
+}
+
+struct dirent *readdir(DIR *dir) {
+    if (dir == NULL) {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (dir->index >= dir->count) {
+        ssize_t count = bigos_readdir(dir->fd, dir->entries, BIGOS_DIRENT_MAX_BATCH);
+        if (count <= 0)
+            return NULL;
+        dir->count = (size_t)count;
+        dir->index = 0;
+    }
+    struct bigos_dirent *entry = &dir->entries[dir->index++];
+    dir->current.d_type = entry->type;
+    strncpy(dir->current.d_name, entry->name, BIGOS_DIRENT_NAME_MAX);
+    dir->current.d_name[BIGOS_DIRENT_NAME_MAX] = 0;
+    return &dir->current;
+}
+
+int closedir(DIR *dir) {
+    if (dir == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    int fd = dir->fd;
+    free(dir);
+    return close(fd);
 }
 
 void *brk_raw(void *addr) {

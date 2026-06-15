@@ -116,36 +116,45 @@ The user libc exposes a documented bounded subset for simple static C programs:
 
 - Headers: `stdio.h`, `stdlib.h`, `string.h`, `errno.h`, `unistd.h`,
   `fcntl.h`, `sys/types.h`, `sys/wait.h`, `sys/stat.h`, `bigos_dirent.h`, plus
-  the compatibility umbrella `libc.h`.
+  the compatibility umbrella `libc.h`. Raw syscall primitives are opt-in through
+  `bigos_syscall.h`, not exported by the ordinary umbrella header.
 - Types and constants: `size_t`, `ssize_t`, `off_t`, `pid_t`, `NULL`, the
   implemented open flags, seek constants, `WAIT_ANY`, and errno values mirrored
   from `include/bigos/errno.h`, including `ERANGE` for small `getcwd` buffers.
 - File metadata and directory helpers: `struct stat`, `S_ISDIR`, `S_ISREG`, and
   `struct bigos_dirent` describe only the current bounded file/directory subset.
-  `bigos_readdir` reads bounded batches; it is not a complete POSIX `readdir`
-  API and does not expose persistent full-filesystem semantics.
+  `bigos_readdir` remains a BigOS-specific batched helper, while `DIR`,
+  `struct dirent`, `opendir`, `readdir`, and `closedir` provide a bounded
+  `DIR*`-style wrapper. These interfaces are not complete POSIX directory
+  traversal and do not promise ordering, snapshots, `telldir`, `seekdir`,
+  `rewinddir`, symlinks, directory fd semantics, or persistent full-filesystem
+  semantics.
 - Syscall wrappers: negative kernel errno returns become positive user `errno`
   and `-1` or the documented failure sentinel; successful wrappers do not clear
   or rewrite an existing `errno` value.
 - BigOS-specific helpers: `wait_status`, `bigos_readdir`, `brk_raw`,
   `mmap_anon`, `time_now`, and `get_tick` are public bounded ABI helpers because
   current shell, smoke, libc, or packaged user-program paths use them. Raw
-  `syscall0` through `syscall6` remain compatibility umbrella exports and
-  low-level ABI helpers, not POSIX `syscall(2)` compatibility.
+  `syscall0` through `syscall6` remain low-level BigOS ABI helpers only for
+  libc internals or callers that explicitly include `bigos_syscall.h`; they do
+  not translate `errno` and are not POSIX `syscall(2)` compatibility.
 - Strings and memory: the subset includes the implemented bounded routines such
   as `strlen`, `strcmp`, `strncmp`, `memcpy`, `memset`, and overlap-safe
   `memmove`, plus `strchr` for current user-program parsing paths. Null pointer
   inputs keep ordinary C preconditions and are not given extra BigOS-specific
   safety promises.
-- Heap: `malloc` returns 16-byte-aligned writable memory or `NULL` on bounded
-  failure without corrupting existing blocks. `free(NULL)` is a no-op. The
-  allocator does not promise thread safety, complete coalescing, `realloc`, or
-  hosted allocator behavior.
+- Stdlib and heap: `strtol` supports bounded integer parsing with base handling,
+  `endptr`, and `ERANGE`; `atoi` is the decimal convenience wrapper. `malloc`,
+  `calloc`, and `realloc` are backed by the bounded brk allocator: `calloc`
+  checks multiplication overflow and zeroes memory, `realloc` preserves the old
+  allocation on failure, and `free(NULL)` is a no-op. The allocator does not
+  promise thread safety, complete coalescing, or hosted allocator behavior.
 - Stdio: `stdin`, `stdout`, and `stderr` are opaque handles for fd `0`, `1`, and
   `2` only. `putchar`, `puts`, `printf`, and `fprintf(stderr, ...)` are fd/write
-  based and support `%s`, `%d`, `%x`, `%c`, and `%%`; there is no `fopen`,
-  `fclose`, full buffering, locale, floating-point formatting, wide-character
-  support, or hosted `FILE` semantics.
+  based; `snprintf` uses the same bounded formatter. The formatter supports the
+  existing minimal forms plus simple width, `%u`, `%p`, `%ld`, `%lu`, and `%zu`.
+  There is no `fopen`, `fclose`, full buffering, precision, locale,
+  floating-point formatting, wide-character support, or hosted `FILE` semantics.
 - Environment: `envp`, `environ`, and `getenv` are read-only. This stage does
   not implement `setenv`, `putenv`, or `unsetenv`.
 
@@ -158,15 +167,18 @@ baseline, still within the existing freestanding runtime boundary:
   layout, and `main`'s return value is passed to `SYS_EXIT`.
 - Wrappers: libc syscall wrappers translate negative kernel returns into
   positive `errno` values and return `-1` or the documented failure sentinel.
-- Output: programs use fd-based `write`, `putchar`, `puts`, or the tiny `printf`;
-  stdout is fd `1` and deterministic errors can be written to fd `2`.
+- Output: programs use fd-based `write`, `putchar`, `puts`, bounded
+  `printf`/`fprintf`, or `snprintf`; stdout is fd `1` and deterministic errors
+  can be written to fd `2`.
 - Environment: `envp`, `environ`, and `getenv` are read-only. If no environment
   is supplied, programs must report that empty boundary deterministically.
 - Smoke-only probes: `/bin/smoke/args`, `/bin/smoke/env`, `/bin/smoke/out`,
   `/bin/smoke/errno`, `/bin/smoke/exit`, and `/bin/smoke/libc_subset` cover
   argument handoff, environment reporting, stdout/stderr, wrapper failure plus
   `errno`, requested exit status, fine-grained libc headers,
-  `fprintf(stderr, ...)`, string/memory boundaries, and bounded heap behavior
+  `fprintf(stderr, ...)`, `snprintf`/formatter behavior, string/memory
+  boundaries, `strtol`/`atoi`, `calloc`/`realloc`, `DIR*` wrappers, and bounded
+  heap behavior
   when `userland_smoke` is enabled.
 
 This baseline does not add kernel syscalls, change the `int 0x80` register ABI,

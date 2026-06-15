@@ -94,11 +94,11 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 39 are complete and now form a compressed minimal usable
+Stages 20 through 40 are complete and now form a compressed minimal usable
 system baseline. The completed work can be treated as the foundation for future
 planning rather than as individual future-stage items.
 
-阶段 20 到阶段 39 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
+阶段 20 到阶段 40 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
 基础能力，而不是继续把它们作为未来阶段逐项展开。
 
 - Kernel foundation: x86_64 legacy boot, text/serial output,
@@ -154,7 +154,7 @@ user-visible capability goal.
   maturity work does not block future ISA backends.
 - x86_64 开发必须保持架构边界纪律，避免短期成熟化工作阻碍未来 ISA backend。
 
-### Stage 40: Standard C Library Foundation / 标准 C 库基础
+### Stage 40 (Complete): Standard C Library Foundation / 标准 C 库基础（已完成）
 
 - Turn the current bounded libc-style support into a clearer standard C library
   foundation for static user programs.

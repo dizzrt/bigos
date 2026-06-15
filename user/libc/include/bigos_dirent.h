@@ -13,6 +13,16 @@ struct bigos_dirent {
     char name[BIGOS_DIRENT_NAME_MAX + 1];
 };
 
+typedef struct __bigos_DIR DIR;
+
+struct dirent {
+    unsigned int d_type;
+    char d_name[BIGOS_DIRENT_NAME_MAX + 1];
+};
+
 ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries);
+DIR *opendir(const char *path);
+struct dirent *readdir(DIR *dir);
+int closedir(DIR *dir);
 
 #endif /* _BIGOS_USER_BIGOS_DIRENT_H */
