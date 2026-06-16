@@ -4,14 +4,17 @@ Language: English | [简体中文](README-zh.md)
 
 BigOS is an early-stage x86_64 operating system kernel written mainly in
 freestanding C++17, C17, and assembly. It has grown from a boot/kernel skeleton
-into a smoke-tested, single-core, mostly synchronous research kernel on the
-current x86_64 Legacy BIOS/MBR/exFAT path. Its bounded userland loop includes
-bootstrapping, text/serial output, interrupt/exception/syscall handling, a PIT
-timer tick, keyboard-driven TTY input, a bounded timer-aware kernel-thread
-scheduler, wait queues and timeout sleep, an `int 0x80` syscall entry, process
-lifecycle core, fd/VFS services, writable `/rw` files, pipes/dup, default-on
-PID-1 init, a minimal user crt0/libc, `/bin/sh`, bounded ELF64 user-program
-loading, VMA-backed user-memory validation, and a fairly complete early kernel
+into a smoke-tested, single-core, mostly synchronous research kernel. The
+current default runnable baseline remains the x86_64 Legacy BIOS/MBR/exFAT
+path, with a runnable x86_64 UEFI boot backend spike available as a non-parity
+backend. Its bounded userland loop includes bootstrapping, text/serial output,
+interrupt/exception/syscall handling, a PIT timer tick, keyboard-driven TTY
+input, a bounded timer-aware kernel-thread scheduler, wait queues and timeout
+sleep, an `int 0x80` syscall entry, process lifecycle core, fd/VFS services,
+bounded writable `/rw` storage, persistent clean-sync `/rw`, cwd/relative path
+handling, constrained rename, metadata queries, pipes/dup, default-on PID-1
+init, a minimal user crt0/libc, `/bin/sh`, bounded ELF64 user-program loading,
+VMA-backed user-memory validation, and a fairly complete early kernel
 memory-management stack.
 
 This repository is a research/toy OS kernel project, not a hosted application or
@@ -19,12 +22,14 @@ service.
 
 ## Status
 
-The project has iterated past kernel infrastructure bring-up into the current
-Stage 26-era minimal usable system baseline: a single-core, mostly synchronous
-kernel with timer, input, scheduling, syscall, a bounded POSIX-like process/I/O
-subset, read/write VFS primitives, bounded user ELF loading, a resident PID-1
-init, and a minimal userland runtime on top of the boot path, interrupt
-foundation, and early memory management.
+Stages 20 through 44 are complete and compressed into the current bounded
+minimal usable system baseline: a single-core, mostly synchronous kernel with
+timer, input, scheduling, syscall, a bounded POSIX-like process/I/O subset,
+read/write VFS primitives, bounded user ELF loading, a resident PID-1 init,
+minimal static user programs, bounded `/rw` runtime and persistent clean-sync
+storage, cwd/relative path handling, constrained rename, metadata, pipe/dup,
+and a minimal userland runtime on top of the boot path, interrupt foundation,
+and early memory management.
 
 Implemented or partially implemented:
 
@@ -64,9 +69,11 @@ Implemented or partially implemented:
   process-local fd table, bounded exec image replacement, and safe teardown on
   exit or user fault.
 - Kernel block/filesystem path and VFS shell: synchronous ATA PIO sector reads,
-  MBR exFAT partition discovery, read-only exFAT boot assets, writable `/rw`
-  files, absolute path lookup, fd-backed `open`/`read`/`write`/`close`, and
-  bounded file reads/writes for controlled raw images.
+  MBR exFAT partition discovery, read-only exFAT boot assets, bounded writable
+  `/rw` files, persistent clean-sync storage, cwd/relative path lookup,
+  constrained rename, metadata queries, fd-backed
+  `open`/`read`/`write`/`close`/`lseek`/`fsync`, and bounded file reads/writes
+  for controlled raw images.
 - Buddy physical page allocator with an early metadata arena for bootstrap.
 - Slab/kmalloc allocator with size classes, dynamic slab reclaim, page-backed
   large allocations, optional debug guards, and validation statistics.
@@ -86,7 +93,8 @@ Implemented or partially implemented:
 
 Not implemented or still skeletal:
 
-- UEFI bootloader, ESP image generation, and OVMF/QEMU UEFI smoke tests.
+- UEFI runtime parity, storage/device backend parity, backend cleanup, and broad
+  UEFI validation beyond the current runnable x86_64 boot backend spike.
 - SMP, per-CPU run queues, cross-CPU migration, full priority/realtime
   scheduling, and POSIX scheduling policy.
 - A full POSIX multi-process model: broad process policy, `fork` semantics such
@@ -94,9 +102,10 @@ Not implemented or still skeletal:
   terminal process groups.
 - File-backed `mmap`, broad mapping policy, dynamic linking, shared libraries,
   and a complete POSIX libc.
-- Full writable filesystems, async I/O, relative paths/cwd, broad directory
-  mutation semantics, and broad storage-device support beyond the current
-  controlled ATA PIO plus exFAT/VFS subset.
+- Complete POSIX filesystems, journaling, crash recovery, async I/O, broad
+  directory mutation semantics beyond the constrained current subset, and broad
+  storage-device support beyond the current controlled ATA PIO plus exFAT/VFS
+  subset.
 - Broad device-driver support.
 - Complete build/install automation and CI.
 
@@ -170,8 +179,8 @@ Key files:
 - `kernel/core/kernel.cc`: main kernel entry.
 - `link.lds`: higher-half kernel layout.
 - `docs/en/arch/x86-boot-layout.md`: current Legacy BIOS address and handoff layout.
-- `docs/en/arch/uefi-boot-blueprint.md`: future UEFI compatibility blueprint; this is
-  project planning only and is not a currently runnable boot path.
+- `docs/en/arch/uefi-boot-blueprint.md`: x86_64 UEFI boot backend spike notes
+  and future runtime-parity/backend-cleanup boundaries.
 
 ## Build And Run
 
@@ -293,8 +302,8 @@ Current scope:
   `xmake run bochs -- --display sdl2` for explicit SDL2 or `xmake run bochs --
   --display none` for Bochs no-GUI mode. Bochs remains useful for early boot,
   BIOS, ATA PIO, interrupt, and hardware-behavior investigations.
-- A future UEFI workflow is planned as a separate path with isolated ESP/FAT
-  image artifacts and QEMU + OVMF as the preferred smoke-test path.
+- UEFI remains a separate, non-parity backend spike path; storage/device parity
+  and broader runtime validation remain future backend work.
 - The workflow does not change `boot.s`, `boot.cc`, `BootInfo`, `link.lds`, the
   higher-half kernel address, or kernel runtime initialization.
 
@@ -370,8 +379,9 @@ Notes:
 
 The bootloader is specific to x86/x86_64 and assumes a disk image layout that can
 provide an exFAT partition containing a file named `kernel`.
-The current runnable backend is Legacy BIOS; UEFI is documented as a future
-parallel backend in `docs/en/arch/uefi-boot-blueprint.md`.
+The default runnable backend is Legacy BIOS. A runnable x86_64 UEFI boot backend
+spike exists, but it is not a runtime-parity replacement for the Legacy
+BIOS/MBR/exFAT path.
 
 - `kernel/arch/x86/boot/mbr.s`: first-stage boot code.
 - `kernel/arch/x86/boot/dbr_exfat.s`: exFAT boot-sector code.
@@ -537,9 +547,10 @@ The project provides a small amount of freestanding C++ infrastructure.
 - Treat boot addresses, linker addresses, page-table layout, interrupt vectors,
   and disk offsets as design-critical.
 - Keep fd/VFS, process lifecycle, and VMA/user-memory descriptions bounded:
-  synchronous I/O, RAM-backed writable `/rw`, restricted anonymous/file mapping,
-  bounded demand paging/COW, no broad POSIX process model, no dynamic linking,
-  no job control, and no broad file-backed `mmap`.
+  synchronous I/O, RAM-backed and persistent clean-sync `/rw`, constrained
+  rename/metadata/cwd-relative paths, restricted anonymous/file mapping, bounded
+  demand paging/COW, no broad POSIX process model, no dynamic linking, no job
+  control, no journaling/crash recovery, and no broad file-backed `mmap`.
 - Prefer small, explicit hardware-facing code.
 - Validate initialization order carefully; many subsystems depend on memory,
   paging, or descriptor tables being available first.

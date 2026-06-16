@@ -143,92 +143,13 @@ user-visible capability goal.
 后续工作应推动 BigOS 走向更成熟、可用的系统，同时保持当前 x86_64-only 的交付目标。
 多个扩展方向可以并行推进，但每个主线阶段仍应有清晰的用户可见能力目标。
 
-### Stage 39 (Complete): Usability And POSIX Surface Hardening / 可用性与 POSIX 表层能力硬化（已完成）
+Completed stages are intentionally compressed into the completed capability
+baseline above. Stages 39 through 44 should no longer be treated as separate
+future-planning items; their outcomes are now part of the current bounded
+userland, filesystem, process, VM, and persistent storage baseline.
 
-- Mature the existing shell, process, file, fd, pipe, redirection, signal, time,
-  identity, and error-reporting behavior into a more coherent bounded Unix-like
-  environment.
-- 将已有 shell、进程、文件、fd、pipe、重定向、signal、time、identity 和错误展示行为
-  打磨为更一致的有界 Unix-like 环境。
-- Expand POSIX-like compatibility only as explicit bounded subsets, prioritizing
-  observable behavior and predictable error contracts over broad compatibility
-  claims.
-- 仅以明确有界子集的形式扩展 POSIX-like 兼容能力，优先完善可观察行为和可预测错误契约，
-  不提前声明广泛兼容。
-- Keep x86_64 development disciplined around architecture boundaries so short-term
-  maturity work does not block future ISA backends.
-- x86_64 开发必须保持架构边界纪律，避免短期成熟化工作阻碍未来 ISA backend。
-
-### Stage 40 (Complete): Standard C Library Foundation / 标准 C 库基础（已完成）
-
-- Turn the current bounded libc-style support into a clearer standard C library
-  foundation for static user programs.
-- 将当前有界 libc 风格支持整理为更清晰的标准 C 库基础，服务静态用户程序。
-- Prioritize common C library surfaces that directly improve program portability,
-  shell tools, diagnostics, file I/O, memory routines, string routines, and
-  process interaction.
-- 优先补齐能直接提升程序可移植性、shell 工具、诊断、文件 I/O、内存例程、字符串例程和进程交互的
-  常见 C 库接口。
-- Preserve boundaries around dynamic linking, threads, locale, full hosted stdio,
-  and complete POSIX libc until later stages intentionally expand them.
-- 在后续阶段明确扩展前，继续保持动态链接、线程、locale、完整 hosted stdio 和完整 POSIX libc
-  的边界。
-
-### Stage 41 (Complete): Filesystem Maturity / 文件系统成熟化（已完成）
-
-- Improve runtime filesystem semantics for ordinary programs, including stronger
-  directory behavior, metadata consistency, permissions edges, capacity errors,
-  and file-update behavior.
-- 面向普通程序改善运行时文件系统语义，包括更强的目录行为、metadata 一致性、权限边界、容量错误
-  和文件更新行为。
-- Use this stage to prepare for persistent writable storage without prematurely
-  promising journaling, cross-reboot durability, broad storage drivers, or broad
-  file-backed mappings.
-- 通过本阶段为持久可写存储做准备，但不提前承诺 journaling、跨重启持久化、广泛存储驱动或广泛
-  file-backed mapping。
-
-### Stage 42 (Complete): Process, Terminal, And Shell Compatibility / 进程、终端与 Shell 兼容性（已完成）
-
-- Broaden the bounded process and terminal model where it directly improves
-  interactive use and small program composition.
-- 在能直接改善交互使用和小程序组合的范围内，扩展有界进程与终端模型。
-- Candidate areas include clearer wait behavior, richer signal interaction,
-  improved terminal input semantics, shell error handling, utility composition,
-  and a more useful command environment.
-- 候选方向包括更清晰的 wait 行为、更丰富的 signal 交互、更完善的终端输入语义、shell 错误处理、
-  工具组合和更实用的命令环境。
-- Keep sessions, terminal process groups, job control, complete terminal control,
-  and full POSIX shell behavior as explicit non-goals until selected later.
-- 在后续明确选择前，继续把 session、terminal process group、作业控制、完整终端控制和完整
-  POSIX shell 行为作为非目标。
-
-### Stage 43 (Complete): VM And Program Runtime Expansion / VM 与程序运行时扩展（已完成）
-
-- Expand the program runtime foundation after libc, filesystem, and process
-  contracts are stable enough to support more complex user programs.
-- 在 libc、文件系统和进程契约足够稳定后，扩展程序运行时基础以支持更复杂的用户程序。
-- Candidate areas include richer user address-space layout, more complete memory
-  mapping policy, better loader boundaries, and preparation for future dynamic
-  linking.
-- 候选方向包括更丰富的用户地址空间布局、更完整的 memory mapping 策略、更清晰的 loader 边界，
-  以及为未来动态链接做准备。
-- Preserve the boundary that broad file-backed `mmap`, shared libraries, and a
-  dynamic loader are separate maturity decisions.
-- 保持边界：广泛 file-backed `mmap`、共享库和动态加载器属于独立的成熟度决策。
-
-### Stage 44 (Complete): Persistent Storage / 持久存储（已完成）
-
-- Complete the persistent writable filesystem direction as the selected large
-  user-visible expansion after the preceding maturity work stabilized common
-  contracts.
-- 在前置成熟化工作稳定公共契约后，完成持久可写文件系统方向，作为已选择的大型用户可见扩展。
-- Provide bounded persistent `/rw` behavior for clean-sync and clean-reboot use
-  while preserving the explicit boundaries around journaling, crash recovery,
-  async I/O, broad storage drivers, complete POSIX filesystem behavior, dynamic
-  linking, and broad file-backed mappings.
-- 提供有界 persistent `/rw` 行为，覆盖 clean-sync 与 clean-reboot 使用场景，同时继续保持
-  journaling、crash recovery、async I/O、广泛存储驱动、完整 POSIX filesystem、dynamic
-  linking 和广泛 file-backed mapping 的明确边界。
+已完成阶段已在上方“已完成能力基线”中压缩归纳。阶段 39 到阶段 44 不应再作为独立的
+未来规划项展开；其结果现在属于当前有界用户态、文件系统、进程、VM 与持久存储基线的一部分。
 
 ### Parallel Foundations / 并行基础方向
 

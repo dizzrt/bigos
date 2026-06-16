@@ -1,10 +1,12 @@
 # Architecture Core Boundaries
 
-BigOS currently has one runnable architecture/backend path: x86_64 through the
-Legacy BIOS/MBR/exFAT boot flow. Architecture boundary work keeps that path
-runnable and makes the split between kernel core concepts and x86_64 mechanisms
-explicit. It does not add a runnable UEFI backend, a non-x86 backend, SMP, a
-broad device model, dynamic linking, or complete POSIX coverage.
+BigOS currently has one default runtime-parity architecture/backend path:
+x86_64 through the Legacy BIOS/MBR/exFAT boot flow. A runnable x86_64 UEFI boot
+backend spike exists, but it is not the default runtime-parity backend.
+Architecture boundary work keeps the Legacy BIOS path runnable and makes the
+split between kernel core concepts and x86_64 mechanisms explicit. It does not
+add UEFI runtime parity, a non-x86 backend, SMP, a broad device model, dynamic
+linking, or complete POSIX coverage.
 
 ## Boundary Rule
 

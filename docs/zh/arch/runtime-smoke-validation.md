@@ -1,6 +1,6 @@
 # 运行时 Smoke 验证
 
-BigOS 阶段 9 将现有默认关闭的 runtime smoke 产品化为一组窄验证矩阵。该矩阵只属于 tooling 和文档层：不新增内核运行时能力、不接入 CI、不实现 UEFI、不新增存储驱动，也不改变 smoke marker ABI。
+BigOS 将现有默认关闭的 runtime smoke 产品化为一组面向当前有界基线的窄验证矩阵。该矩阵只属于 tooling 和文档层：不新增内核运行时能力、不接入 CI、不补齐 UEFI runtime parity、不新增存储驱动，也不改变 smoke marker ABI。
 
 ## 矩阵 Runner
 
@@ -49,7 +49,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 
 ## 行为导向矩阵
 
-阶段 26 将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查仍保持在当前 x86_64 Legacy BIOS/MBR/exFAT backend 边界内，不要求 UEFI、OVMF、ESP/FAT image、virtio、AHCI/SATA、NVMe、SMP、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
+当前压缩后的阶段 20 到阶段 44 基线将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为有界最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查仍保持在默认 x86_64 Legacy BIOS/MBR/exFAT backend 边界内，不要求 UEFI runtime parity、OVMF parity、ESP/FAT runtime storage parity、virtio、AHCI/SATA、NVMe、SMP、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
 
 | Capability | 输入或路径 | 预期可观察结果 | 失败信号 | 验证层 | 环境依赖 |
 | --- | --- | --- | --- | --- | --- |

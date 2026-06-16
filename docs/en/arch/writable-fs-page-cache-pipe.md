@@ -163,8 +163,8 @@ instead of claiming a runtime run.
 
 ## Non-Goals
 
-- No hard/soft links, `rename`, full `stat`/`fstat`, full `fcntl`, or full
-  `readdir`/`getdents` traversal.
+- No hard/soft links, broad cross-backend or directory `rename`, full
+  `stat`/`fstat`, full `fcntl`, or full `readdir`/`getdents` traversal.
 - No file-backed mmap or shared page-cache mappings, multi-mount namespaces,
   `mount`/`umount`, journaling, `fsck`, quotas, or ACL/xattr.
 - No named pipes (FIFO)/`mknod`/socket, and no pipe signal semantics beyond the

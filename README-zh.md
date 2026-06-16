@@ -3,22 +3,25 @@
 语言：[English](README.md) | 简体中文
 
 BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
-C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为具备有界用户态闭环的单核内核：
-这是运行在当前 x86_64 Legacy BIOS/MBR/exFAT 路径上的、经过 smoke 验证、单核且以同步为主的
-研究内核。它的有界用户态闭环包括引导流程、文本/串口输出、中断/异常/syscall 处理、PIT
-timer tick、键盘驱动的 TTY 输入路径、具备 bounded timer semantics 的内核线程调度器、
-`int 0x80` syscall 入口、进程生命周期、fd/VFS 服务、可写 `/rw` 文件、pipe/dup、
-默认开启的 PID-1 init、最小用户态 crt0/libc、`/bin/sh`、bounded ELF64 用户程序加载器、
-VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管理。
+C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为经过 smoke 验证、单核且以同步为主的
+研究内核：当前默认可运行基线仍是 x86_64 Legacy BIOS/MBR/exFAT 路径，同时已有一个
+不具备运行时等价能力的 x86_64 UEFI boot backend spike。它的有界用户态闭环包括引导流程、
+文本/串口输出、中断/异常/syscall 处理、PIT timer tick、键盘驱动的 TTY 输入路径、
+具备 bounded timer semantics 的内核线程调度器、`int 0x80` syscall 入口、进程生命周期、
+fd/VFS 服务、有界可写 `/rw` 存储、persistent clean-sync `/rw`、cwd/relative path、
+受限 rename、metadata 查询、pipe/dup、默认开启的 PID-1 init、最小用户态 crt0/libc、
+`/bin/sh`、bounded ELF64 用户程序加载器、VMA-backed 用户内存校验，以及一套相对完整的
+早期内核内存管理。
 
 本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
 
 ## 状态
 
-项目已从内核基础设施引导阶段，迭代为当前 Stage 26 后的最小可用系统基线：在 boot 路径、
+阶段 20 到阶段 44 已完成，并压缩为当前有界最小可用系统基线：在 boot 路径、
 中断基础设施和早期内存管理之上，具备 timer、输入、调度、syscall、有界 POSIX-like
-进程/I/O 子集、读写 VFS 原语、bounded 用户 ELF 加载、常驻 PID-1 init 和最小用户态运行时的
-单核、以同步为主的内核。
+进程/I/O 子集、读写 VFS 原语、bounded 用户 ELF 加载、常驻 PID-1 init、最小静态用户程序、
+有界 `/rw` 运行期与 persistent clean-sync 存储、cwd/relative path、受限 rename、
+metadata、pipe/dup 和最小用户态运行时的单核、以同步为主的内核。
 
 已经实现或部分实现：
 
@@ -51,8 +54,9 @@ VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管
 - 进程生命周期核心：PID/parent-child 状态、wait/exit/reap 语义、process-local
   fd table、bounded exec image replacement，以及 exit 或 user fault 后的 safe teardown。
 - 内核 block/filesystem 路径和 VFS 壳层：同步 ATA PIO sector 读取、MBR exFAT
-  分区发现、只读 exFAT boot assets、可写 `/rw` 文件、绝对路径 lookup、
-  fd-backed `open`/`read`/`write`/`close`，以及面向受控 raw image 的 bounded
+  分区发现、只读 exFAT boot assets、有界可写 `/rw` 文件、persistent clean-sync
+  存储、cwd/relative path lookup、受限 rename、metadata 查询、fd-backed
+  `open`/`read`/`write`/`close`/`lseek`/`fsync`，以及面向受控 raw image 的 bounded
   file read/write。
 - 基于 buddy 的物理页分配器，并使用 early metadata arena 完成 bootstrap。
 - Slab/kmalloc 分配器：size class、动态 slab 回收、page-backed 大对象分配、
@@ -71,14 +75,15 @@ VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管
 
 尚未实现或仍处于骨架状态：
 
-- UEFI bootloader、ESP 镜像生成和 OVMF/QEMU UEFI smoke test。
+- UEFI runtime parity、storage/device backend parity、backend cleanup，以及超出当前
+  可运行 x86_64 boot backend spike 的广泛 UEFI 验证。
 - SMP、per-CPU run queue、跨 CPU migration、完整 priority/realtime scheduling
   和 POSIX scheduling policy。
 - 完整 POSIX 多进程模型：广泛进程策略、超出当前 bounded 子集的 `fork` 语义、
   `exec*` 全族、作业控制和终端进程组。
 - file-backed `mmap`、广泛 mapping policy、动态链接、共享库和完整 POSIX libc。
-- 完整可写文件系统、async I/O、相对路径/cwd、广泛目录变更语义，以及超出当前受控
-  ATA PIO + exFAT/VFS 子集的广泛存储设备支持。
+- 完整 POSIX filesystem、journaling、crash recovery、async I/O、超出当前受限子集的
+  广泛目录变更语义，以及超出当前受控 ATA PIO + exFAT/VFS 子集的广泛存储设备支持。
 - 更广泛的设备驱动支持。
 - 完整的构建/安装自动化与 CI。
 
@@ -150,8 +155,8 @@ kernel()
 - `kernel/core/kernel.cc`：主内核入口。
 - `link.lds`：高半区内核布局。
 - `docs/zh/arch/x86-boot-layout.md`：当前 Legacy BIOS 地址和 handoff 布局。
-- `docs/zh/arch/uefi-boot-blueprint.md`：未来 UEFI 兼容蓝图；这是项目规划，
-  不是当前可运行的启动路径。
+- `docs/zh/arch/uefi-boot-blueprint.md`：x86_64 UEFI boot backend spike 说明，
+  以及未来 runtime parity/backend cleanup 边界。
 
 ## 构建与运行
 
@@ -263,8 +268,8 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
 - `xmake run bochs` 是默认 SDL2 的 Legacy BIOS 调试入口；使用 `xmake run
   bochs -- --display sdl2` 可显式选择 SDL2，使用 `xmake run bochs -- --display
   none` 可选择 Bochs no-GUI 模式。Bochs 仍适合早期 boot、BIOS、ATA PIO、中断和硬件行为差异排查。
-- 未来 UEFI workflow 会作为独立路径引入，使用隔离的 ESP/FAT 镜像产物，并以
-  QEMU + OVMF 作为首选 smoke test 路径。
+- UEFI 仍是独立的非等价 backend spike 路径；storage/device parity 和更广泛的
+  runtime validation 仍是未来 backend 工作。
 - 该流程不修改 `boot.s`、`boot.cc`、`BootInfo`、`link.lds`、高半区内核地址或
   内核运行时初始化顺序。
 
@@ -337,8 +342,8 @@ xmake run bochs -- --display none
 
 引导加载器专用于 x86/x86_64，并假设磁盘镜像布局中存在一个 exFAT 分区，
 该分区包含名为 `kernel` 的文件。
-当前可运行 backend 是 Legacy BIOS；UEFI 作为未来并行 backend 记录在
-`docs/zh/arch/uefi-boot-blueprint.md` 中。
+默认可运行 backend 是 Legacy BIOS。当前已有可运行的 x86_64 UEFI boot backend
+spike，但它不是 Legacy BIOS/MBR/exFAT 路径的 runtime-parity 替代。
 
 - `kernel/arch/x86/boot/mbr.s`：第一阶段引导代码。
 - `kernel/arch/x86/boot/dbr_exfat.s`：exFAT 引导扇区代码。
@@ -490,8 +495,9 @@ VGA 文本模式和 COM1 串口是当前输出后端。
   或尚未初始化的动态分配路径。
 - 将引导地址、链接地址、页表布局、中断向量和磁盘偏移视为关键设计约束。
 - 描述 fd/VFS、process lifecycle 和 VMA/user-memory 时保持 bounded 边界：同步 I/O、
-  RAM-backed 可写 `/rw`、restricted anonymous/file mapping、bounded demand paging/COW、
-  无广泛 POSIX 进程模型、无动态链接、无作业控制、无广泛 file-backed `mmap`。
+  RAM-backed 与 persistent clean-sync `/rw`、受限 rename/metadata/cwd-relative path、
+  restricted anonymous/file mapping、bounded demand paging/COW、无广泛 POSIX 进程模型、
+  无动态链接、无作业控制、无 journaling/crash recovery、无广泛 file-backed `mmap`。
 - 优先使用小而显式的硬件相关代码。
 - 仔细验证初始化顺序；许多子系统依赖内存、分页或描述符表先就绪。
 - 修改 Bochs 或磁盘镜像设置时，请记录本地路径假设。

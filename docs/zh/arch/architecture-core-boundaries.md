@@ -1,9 +1,10 @@
 # 架构与核心边界
 
-BigOS 当前只有一个可运行架构/backend 路径：通过 Legacy BIOS/MBR/exFAT 启动的
-x86_64。架构边界整理需要保持该路径可运行，并明确区分 kernel core 概念与
-x86_64 机制。本工作不新增可运行 UEFI backend、non-x86 backend、SMP、宽泛设备
-模型、动态链接或完整 POSIX 覆盖。
+BigOS 当前只有一个默认具备 runtime parity 的架构/backend 路径：通过
+Legacy BIOS/MBR/exFAT 启动的 x86_64。当前已有可运行的 x86_64 UEFI boot
+backend spike，但它不是默认 runtime-parity backend。架构边界整理需要保持 Legacy
+BIOS 路径可运行，并明确区分 kernel core 概念与 x86_64 机制。本工作不新增 UEFI
+runtime parity、non-x86 backend、SMP、宽泛设备模型、动态链接或完整 POSIX 覆盖。
 
 ## 边界规则
 

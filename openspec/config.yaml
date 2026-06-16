@@ -5,8 +5,10 @@ context: |
 
   Domain:
   - The repository is a toy/research OS kernel, not an application service.
-  - The current runnable backend is x86_64 Legacy BIOS/MBR/exFAT. UEFI,
-    multi-architecture backends, and SMP remain future or parallel tracks.
+  - The current default runnable backend is x86_64 Legacy BIOS/MBR/exFAT. A
+    runnable x86_64 UEFI boot backend spike exists, but UEFI runtime parity,
+    storage/device backend parity, multi-architecture backends, and SMP remain
+    future or parallel tracks.
   - The kernel boots from an x86 disk image, enters long mode, loads an ELF64
     kernel named "kernel", and jumps to the higher-half kernel address
     0xffffffff80000000.
@@ -16,9 +18,11 @@ context: |
     virtual memory, direct map, owned empty page-table reclamation, a single-core
     scheduler, `int 0x80` syscall dispatch, process lifecycle, demand paging,
     bounded `fork`/COW, signals, time/identity, fd/VFS, pipe/dup, RAM-backed
-    writable `/rw`, page/buffer cache, `execve`, default PID-1 init, minimal user
-    crt0/libc, `/bin/sh`, packaged `/bin/*`, bounded POSIX-like process/I/O
-    behavior, and behavior-oriented default-off runtime smokes.
+    writable `/rw`, persistent clean-sync `/rw`, cwd/relative path handling,
+    constrained rename, bounded metadata, page/buffer cache, `execve`, default
+    PID-1 init, minimal user crt0/libc, `/bin/sh`, packaged `/bin/*`, bounded
+    POSIX-like process/I/O behavior, and behavior-oriented default-off runtime
+    smokes.
 
   Tech stack:
   - C++17 and C17 in freestanding mode.
@@ -39,8 +43,10 @@ context: |
   - kernel/core/proc: process model, growable fd table, VMA/heap metadata,
     demand-zero/COW handling, `fork`, signals integration, ring3 entry, `execve`,
     PID-1 init launch, safe teardown/reaping, and bounded ELF64 loader.
-  - kernel/core/fs: exFAT read path, RAM-backed `bigfs` mounted at `/rw`, VFS
-    open/read/write/close/lseek/fsync, page/buffer cache, and bounded file IO.
+  - kernel/core/fs: exFAT read path, RAM-backed and persistent clean-sync `bigfs`
+    mounted at `/rw`, cwd/relative path handling, constrained rename, bounded
+    metadata, VFS open/read/write/close/lseek/fsync, page/buffer cache, and
+    bounded file IO.
   - kernel/mm: buddy physical page allocator with an early metadata arena,
     slab/kmalloc allocator, kernel virtual memory, kernel direct map, public
     memory API, and switchable memory runtime self-test.
@@ -78,8 +84,9 @@ context: |
     time/identity, signals, writable FS, pipe, and userland runtime markers.
   - Not yet implemented: SMP, a complete POSIX process/job-control model, broad
     file-backed `mmap`, dynamic linking/shared libraries, a complete POSIX libc,
-    persistent full writable filesystems, async I/O, broad storage/device
-    drivers, a runnable UEFI backend, and release-grade CI automation.
+    persistent full writable filesystems beyond the bounded clean-sync `/rw`
+    backend, async I/O, broad storage/device drivers, UEFI runtime parity/backend
+    parity, and release-grade CI automation.
   - Some paths are scaffolding or TODOs. Inspect call sites before assuming a
     subsystem is wired into normal boot; optional smoke entry threads and runtime
     validation markers remain gated even when shared subsystems compile normally.

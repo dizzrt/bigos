@@ -13,7 +13,7 @@ BIOS bootloader 的 exFAT 辅助逻辑分离：bootloader 仍使用固定低地�
   master、LBA48、同步 polling 与 bounded timeout。
 - 文件系统层自动发现第一个有效 MBR exFAT 分区，校验 exFAT boot region，并
   挂载单个只读 volume。
-- exFAT 支持绝对路径查找、普通文件元数据、bounded read、`NoFatChain` 连续
+- exFAT 支持 root path 查找、普通文件元数据、bounded read、`NoFatChain` 连续
   文件，以及 bounded FAT-chain 跟随。
 - API 仅支持普通内核上下文；不承诺 IRQ-handler-safe、异步、DMA、sleep 或
   SMP 语义。

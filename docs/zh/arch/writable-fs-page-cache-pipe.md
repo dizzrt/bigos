@@ -130,8 +130,8 @@ uv run python tools/boot_debug.py run --emulator qemu --display none \
 
 ## 非目标
 
-- 无硬/软链接、`rename`、完整 `stat`/`fstat`、完整 `fcntl`，或完整
-  `readdir`/`getdents` 遍历。
+- 无硬/软链接、广泛跨 backend 或目录 `rename`、完整 `stat`/`fstat`、完整 `fcntl`，
+  或完整 `readdir`/`getdents` 遍历。
 - 无 file-backed mmap 与页缓存共享映射、多挂载命名空间、`mount`/`umount`、
   journaling、`fsck`、配额、ACL/xattr。
 - 无命名管道（FIFO）/`mknod`/socket，除可选 `SIGPIPE` 外无其他管道信号语义。

@@ -103,7 +103,7 @@ payload 边界、必需 section 是否存在，以及 payload 对齐。未知的
 位于 `0x9000..0x9fff` 的 v2 blob 不会移动或重叠 E820 缓冲区、legacy 元数据别名、
 v1 `BootInfo`、启动阶段页表、内核 higher-half 页表后备区域、内核物理加载基址或
 higher-half 虚拟基址。未来如果新增固定低地址、页表保留区或 handoff 别名，必须
-更新该布局，并说明它们与未来 UEFI 后端的兼容性。
+更新该布局，并说明它们与 UEFI spike 及未来 parity backend 的兼容性。
 
 `BootMemoryRegion` 按如下方式映射 BIOS E820：
 

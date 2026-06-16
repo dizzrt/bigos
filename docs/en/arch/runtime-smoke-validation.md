@@ -1,6 +1,6 @@
 # Runtime Smoke Validation
 
-BigOS stage 9 productizes the existing default-off runtime smokes as a narrow validation matrix. The matrix is a tooling and documentation layer only: it does not add kernel runtime features, CI integration, UEFI support, storage drivers, or new smoke marker ABI.
+BigOS productizes the existing default-off runtime smokes as a narrow validation matrix for the current bounded baseline. The matrix is a tooling and documentation layer only: it does not add kernel runtime features, CI integration, UEFI runtime parity, storage drivers, or new smoke marker ABI.
 
 ## Matrix Runner
 
@@ -49,7 +49,7 @@ Each case enables only the listed smoke switch and explicitly disables the other
 
 ## Behavior-Oriented Matrix
 
-Stage 26 promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. These checks remain bounded to the current x86_64 Legacy BIOS/MBR/exFAT backend and do not require UEFI, OVMF, ESP/FAT images, virtio, AHCI/SATA, NVMe, SMP, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
+The current compressed stages 20-44 baseline promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the bounded minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. These checks remain bounded to the default x86_64 Legacy BIOS/MBR/exFAT backend and do not require UEFI runtime parity, OVMF parity, ESP/FAT runtime storage parity, virtio, AHCI/SATA, NVMe, SMP, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
 
 | Capability | Input or path | Expected observable result | Failure signal | Layer | Environment dependency |
 | --- | --- | --- | --- | --- | --- |

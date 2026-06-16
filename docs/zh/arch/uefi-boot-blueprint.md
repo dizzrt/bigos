@@ -42,7 +42,7 @@ MBR -> DBR -> exDBR -> boot.bin          BOOTX64.EFI
 
 ## Kernel Entry 假设
 
-BIOS backend 与未来 UEFI backend 进入 kernel 前都必须提供统一、可验证的入口环境：
+BIOS backend 与 UEFI spike/未来 parity backend 进入 kernel 前都必须提供统一、可验证的入口环境：
 
 - 架构目标是 x86_64。
 - kernel 保持 higher-half ELF64 executable。

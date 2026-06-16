@@ -39,7 +39,7 @@ Non-goals for this spike:
 
 ## Kernel Entry Assumptions
 
-Both the BIOS backend and future UEFI backend must provide one unified, verifiable entry environment before entering the kernel:
+Both the BIOS backend and the UEFI spike/future parity backend must provide one unified, verifiable entry environment before entering the kernel:
 
 - Architecture target is x86_64.
 - The kernel remains a higher-half ELF64 executable.

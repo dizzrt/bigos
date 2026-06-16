@@ -8,7 +8,9 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
 - BigOS is written primarily in C++17, C17, and x86/x86_64 assembly.
 - xmake is the primary build system.
 - `x86_64-elf-gcc` is the expected cross toolchain.
-- QEMU and Bochs are supported local emulators for the Legacy BIOS/MBR/exFAT path.
+- QEMU and Bochs are supported local emulators for the Legacy BIOS/MBR/exFAT path,
+  which remains the default runnable baseline; x86_64 UEFI exists as a runnable
+  non-parity boot backend spike.
 - Python files are helper scripts unless explicitly stated otherwise.
 - Run Python-related commands through `uv run` by default, including `pytest`,
   helper scripts, linting, formatting, and type checks.
@@ -30,7 +32,8 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
     teardown/reaping, and bounded ELF64 user-program loading. Flat
     first-user-program, filesystem-backed user ELF, and userland runtime entries
     remain default-off smoke consumers.
-  - `kernel/core/fs`: VFS shell over exFAT and RAM-backed `/rw`, path lookup,
+  - `kernel/core/fs`: VFS shell over exFAT, RAM-backed `/rw`, persistent
+    clean-sync `/rw`, cwd/relative path lookup, constrained rename, metadata,
     fd-backed open/read/write/close/lseek/fsync, writable `bigfs`, block buffer
     cache, and bounded file reads/writes.
   - `kernel/core/bigos`: low-level IO, panic, and utility helpers.
@@ -148,8 +151,9 @@ Notes:
 - Verify that `x86_64-elf-gcc`, `x86_64-elf-g++`, `x86_64-elf-ld`, and related
   binutils are installed before building.
 - Generated emulator outputs are written under `build/test/`. QEMU uses the
-  current Legacy BIOS/IDE raw image path; this does not implement UEFI, OVMF,
-  ESP/FAT images, virtio, AHCI/SATA, NVMe, or new storage drivers.
+  current Legacy BIOS/IDE raw image path by default; UEFI spike artifacts are
+  separate and do not provide runtime parity, storage/device parity, virtio,
+  AHCI/SATA, NVMe, or new storage drivers.
 - Prefer QEMU with `--display none` for automated smoke tests, serial marker
   checks, and CI-like local validation, using either the `xmake run qemu -- --display none`
   wrapper or the equivalent Python helper path. Prefer graphical QEMU for quick
@@ -243,16 +247,18 @@ Notes:
   minimal userland.
 - The process lifecycle core, growable process/fd tables, safe user-process
   teardown/reaping, demand-zero materialization, bounded `fork`/COW, signal
-  delivery, VMA-backed user-buffer validation, exFAT plus RAM-backed writable
-  `/rw` VFS path, page/buffer cache, default-on PID-1 init, minimal user
-  crt0/libc, `/bin/sh`, packaged `/bin/*`, flat first-user-program smoke,
-  filesystem-backed ELF64 user-program smoke, and `userland_smoke` are
-  implemented with explicit bounded/default-off smoke boundaries where
-  applicable.
+  delivery, VMA-backed user-buffer validation, exFAT plus RAM-backed and
+  persistent clean-sync writable `/rw` VFS paths, cwd/relative path resolution,
+  constrained rename, bounded metadata, page/buffer cache, default-on PID-1
+  init, minimal user crt0/libc, `/bin/sh`, packaged `/bin/*`, flat
+  first-user-program smoke, filesystem-backed ELF64 user-program smoke, and
+  `userland_smoke` are implemented with explicit bounded/default-off smoke
+  boundaries where applicable.
 - Not yet implemented: SMP, a complete POSIX process/job-control model, broad
   file-backed `mmap`, dynamic linking/shared libraries, a complete POSIX libc,
-  persistent full writable filesystems, async I/O, broad storage/device drivers,
-  a runnable UEFI backend, and release-grade CI automation.
+  persistent full writable filesystems beyond the bounded clean-sync `/rw`
+  backend, async I/O, broad storage/device drivers, UEFI runtime parity/backend
+  parity, and release-grade CI automation.
 - Some code paths are scaffolding or TODOs. Inspect call sites before assuming a
   subsystem is wired into the normal boot path; smoke entry threads and runtime
   validation markers remain gated by build switches even when their shared

@@ -14,7 +14,7 @@ that later stages can reuse after memory management is initialized.
   QEMU IDE: primary master, LBA48, synchronous polling, and bounded timeouts.
 - The filesystem layer discovers the first valid MBR exFAT partition, validates
   the exFAT boot region, and mounts a single read-only volume.
-- exFAT support covers absolute path lookup, regular file metadata, bounded
+- exFAT support covers root path lookup, regular file metadata, bounded
   reads, `NoFatChain` contiguous files, and bounded FAT-chain traversal.
 - The API is ordinary-kernel-context only. It is not IRQ-handler-safe, not
   asynchronous, not DMA based, and does not provide sleep or SMP semantics.

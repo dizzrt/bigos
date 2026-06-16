@@ -65,7 +65,7 @@ The UEFI spike also produces a `BootInfo` v2 blob, but its blob address is loade
 
 The v2 magic is independent from the v1 magic, so consumers do not distinguish the fixed v1 struct from the header/section blob using `version` alone. The section table and payload offsets are relative to `BootInfoHeader`. Consumers check header size, total size, section-table bounds, payload bounds, required sections, and payload alignment. Unknown optional sections are skipped; missing or malformed required sections reject v2 and allow explicit fallback to fixed-address v1.
 
-The v2 blob at `0x9000..0x9fff` does not move or overlap the E820 buffer, legacy metadata aliases, v1 `BootInfo`, boot-stage page tables, kernel higher-half page-table backing area, kernel physical load base, or higher-half virtual base. Future fixed low addresses, page-table reserved regions, or handoff aliases must update this layout and describe compatibility with the future UEFI backend.
+The v2 blob at `0x9000..0x9fff` does not move or overlap the E820 buffer, legacy metadata aliases, v1 `BootInfo`, boot-stage page tables, kernel higher-half page-table backing area, kernel physical load base, or higher-half virtual base. Future fixed low addresses, page-table reserved regions, or handoff aliases must update this layout and describe compatibility with the UEFI spike and future parity backend.
 
 `BootMemoryRegion` maps BIOS E820 as follows:
 
