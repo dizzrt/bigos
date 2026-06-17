@@ -78,4 +78,32 @@ On a CPL3 not-present read fault inside such a VMA, the unified page-fault handl
 
 This is a controlled exception to the rule that terminates CPL3 faults on non-anonymous backing lacking a recovery policy. Write access to a read-only file-backed page (present or not-present), access outside the mapped range, and any materialization that would require a blocking cache load from a non-blocking context all keep the existing deterministic kill semantics; file-backed pages never enter copy-on-write. `fork` duplicates the file-backed VMA metadata, retains its own backing-file reference, and shares already-materialized read-only pages by reference count rather than deep-copying; unmaterialized portions re-fault independently in whichever process touches them first. Process teardown and exec replacement release each file-backed VMA's retained file reference without disturbing shared read-only cache state still referenced by other processes.
 
-The default-off `file_backed_mapping_smoke` switch (`xmake f --file_backed_mapping_smoke=y`) drives mapping creation, first-access materialization observing correct file content, file-tail zero-fill, write-to-read-only deterministic kill, and out-of-range deterministic kill, emitting `BIGOS_FILE_BACKED_MAPPING_PASSED` / `BIGOS_FILE_BACKED_MAPPING_FAILED`. This is not a full POSIX `mmap`: there is no writable/write-back mapping, `MAP_SHARED`, `mprotect`, `MAP_FIXED`, swap, or `munmap`.
+The default-off `file_backed_mapping_smoke` switch (`xmake f --file_backed_mapping_smoke=y`) drives mapping creation, first-access materialization observing correct file content, file-tail zero-fill, write-to-read-only deterministic kill, and out-of-range deterministic kill, emitting `BIGOS_FILE_BACKED_MAPPING_PASSED` / `BIGOS_FILE_BACKED_MAPPING_FAILED`. This is not a full POSIX `mmap`: there is no writable/write-back mapping, `MAP_SHARED`, `MAP_FIXED`, or swap.
+
+## Bounded Anonymous Lifecycle
+
+Anonymous VMAs now support bounded active lifecycle operations through
+`SYS_UNMAP_ANON` and `SYS_PROTECT_ANON`. Both operations require page-aligned,
+non-empty user low-half ranges fully covered by compatible private anonymous
+VMAs. They stage the resulting VMA collection before publishing metadata, so
+prefix, suffix, middle split, and capacity-exhaustion cases are deterministic.
+
+`SYS_UNMAP_ANON` removes or splits the affected VMAs, clears any present user
+leaf PTEs in the range, releases owned frames or decrements COW/shared frame
+references, reclaims empty dynamically owned user page-table pages, and
+invalidates affected current-CPU translations. Lazy, not-present portions are
+metadata-only removals and are not materialized just to unmap them.
+
+`SYS_PROTECT_ANON` updates VMA permissions and remaps present PTEs so hardware
+access is no wider than VMA policy. It rejects W+X and unsupported backing. COW
+markers are preserved when a still-writable VMA keeps a shared page read-only;
+permission reduction leaves future demand-zero and COW fault handling governed
+by the new VMA permissions.
+
+The freestanding userland exposes BigOS-specific `mmap_anon`,
+`bigos_munmap_anon`, and `bigos_mprotect_anon` wrappers plus `PROT_*` constants
+in `user/libc/include/sys/mman.h`. These wrappers document bounded BigOS
+semantics rather than complete POSIX compatibility. The default-off
+`anonymous_lifecycle_smoke` image validates map, protect, unmap, illegal W+X
+rollback, access-after-unmap, and write-after-readonly behavior with
+`BIGOS_ANON_LIFECYCLE_PASSED` / `BIGOS_ANON_LIFECYCLE_FAILED`.

@@ -110,8 +110,24 @@ an EOI:
   request publishes no partial VMA on failure. Covered pages materialize on first
   read access through the page/buffer cache; writes to the read-only pages,
   out-of-range access, and cache load from a non-blocking context are
-  deterministic kills. It is not a full POSIX `mmap`: no writable/write-back
-  mapping, `MAP_SHARED`, `mprotect`, `MAP_FIXED`, or `munmap`.
+- `SYS_UNMAP_ANON` (number=36): takes `rdi` = page-aligned user address and
+  `rsi` = page-aligned non-zero length. It only accepts ranges fully covered by
+  compatible private anonymous VMAs in the user low half. On success it removes
+  or splits affected VMAs, clears present user PTEs, releases owned/COW-shared
+  frames through the frame-reference helper, reclaims empty dynamic user
+  page-table pages when ownership metadata permits, and invalidates affected
+  current-CPU translations.
+- `SYS_PROTECT_ANON` (number=37): takes `rdi` = page-aligned user address,
+  `rsi` = page-aligned non-zero length, and `rdx` = BigOS permission bits
+  (`Read=1`, `Write=2`, `Execute=4`). It only accepts compatible private
+  anonymous VMAs, rejects W+X and unsupported backing, stages required VMA
+  splits before publishing metadata, and updates present PTE permissions so page
+  tables are no wider than VMA policy.
+
+These lifecycle calls are bounded BigOS operations, not full POSIX `munmap` or
+`mprotect`. They do not support arbitrary byte granularity, `MAP_FIXED`
+overwrite, shared writable mappings, file-backed writable upgrades, write-back
+semantics, swap, or cross-CPU TLB shootdown.
 
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 
@@ -125,7 +141,7 @@ remain responsible for translating negative kernel returns into positive
 
 ## Validation: Default-Off Build Switches And Deterministic Markers
 
-The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. Additional default-off smokes cover the flat first user program, filesystem-backed user ELF, demand paging, the bounded read-only file-backed mapping (`xmake f --file_backed_mapping_smoke=y`, marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`), fork/COW, time/identity, signals, writable FS, pipes, and userland runtime. Normal boot now packages `/boot/user/init.elf`, enters resident PID-1 init, and starts `/bin/sh`; default headless validation observes `BIGOS_USER_EXEC`.
+The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. Additional default-off smokes cover the flat first user program, filesystem-backed user ELF, demand paging, the bounded read-only file-backed mapping (`xmake f --file_backed_mapping_smoke=y`, marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`), anonymous map/unmap/protect lifecycle (`xmake f --anonymous_lifecycle_smoke=y`, marker `BIGOS_ANON_LIFECYCLE_PASSED`/`FAILED`), fork/COW, time/identity, signals, writable FS, pipes, and userland runtime. Normal boot now packages `/boot/user/init.elf`, enters resident PID-1 init, and starts `/bin/sh`; default headless validation observes `BIGOS_USER_EXEC`.
 
 ## Non-Goals For This Stage
 

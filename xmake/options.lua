@@ -90,6 +90,12 @@ option("file_backed_mapping_smoke")
     set_description("enable validation-only bounded read-only file-backed mapping smoke marker")
 option_end()
 
+option("anonymous_lifecycle_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only anonymous mapping unmap/protect lifecycle smoke marker")
+option_end()
+
 option("growable_tables_smoke")
     set_default(false)
     set_showmenu(true)

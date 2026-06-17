@@ -153,6 +153,54 @@ def test_brk_and_anonymous_mapping_are_restricted_and_lazy() -> None:
     assert 'process->vmas.anon_next = end' in anon_body
 
 
+def test_anonymous_lifecycle_unmap_and_protect_are_bounded_and_staged() -> None:
+    proc = read_source('kernel/core/proc/proc.cc')
+    proc_h = read_source('include/bigos/proc.h')
+    memory_h = read_source('include/bigos/memory.h')
+    vmem = read_source('kernel/mm/vmem.cc')
+    syscall_h = read_source('include/bigos/syscall.h')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    user_sys = read_source('user/libc/syscall.c')
+    user_mman = read_source('user/libc/include/sys/mman.h')
+    smoke = read_source('user/smoke/anonymous_lifecycle_smoke.c')
+    xmake = read_source('xmake.lua')
+
+    assert 'int64_t unmap_anonymous_current(uint64_t __addr, uint64_t __len)' in proc_h
+    assert 'int64_t protect_anonymous_current(uint64_t __addr, uint64_t __len, uint64_t __permissions)' in proc_h
+    assert 'SYS_UNMAP_ANON = 36' in syscall_h
+    assert 'SYS_PROTECT_ANON = 37' in syscall_h
+    assert 'result = __detail::sys_unmap_anon(__frame->rdi, __frame->rsi)' in syscall
+    assert 'result = __detail::sys_protect_anon(__frame->rdi, __frame->rsi, __frame->rdx)' in syscall
+
+    assert 'lifecycle_range_bounds(__addr, __len, &end)' in proc
+    assert 'stage_anonymous_unmap(process, __addr, end, &staged)' in proc
+    assert 'stage_anonymous_protect(process, __addr, end, permissions, &staged)' in proc
+    assert 'anonymous_lifecycle_vma_compatible' in proc
+    assert '__entry->purpose == bigos::proc::VmaPurpose::Anonymous' in proc
+    assert 'internal_remove_vma(__staged, entry->start, entry->end)' in proc
+    assert 'clipped_vma(*entry, entry->start, cursor)' in proc
+    assert 'clipped_vma(*entry, cut_end, entry->end)' in proc
+    assert 'changed.permissions = __permissions' in proc
+    assert 'process->vmas = staged' in proc
+
+    assert 'unmap_user_page_in_root(uint64_t __root_phys, uint64_t __vaddr, uint64_t *__phys)' in memory_h
+    assert 'reclaim_empty_tables_in_root(root, __vaddr, PageTableOwner::UserAddressSpace, active)' in vmem
+    assert 'frame_ref_dec_and_maybe_free(phys)' in proc
+    assert 'remap_user_page_in_root(__process->address_space_root, page, phys, new_attr)' in proc
+    assert 'PTE_COW' in proc
+
+    assert 'int bigos_munmap_anon(void *addr, size_t len)' in user_mman
+    assert 'int bigos_mprotect_anon(void *addr, size_t len, long prot)' in user_mman
+    assert 'syscall2(SYS_UNMAP_ANON' in user_sys
+    assert 'syscall3(SYS_PROTECT_ANON' in user_sys
+    assert 'option("anonymous_lifecycle_smoke")' in xmake
+    assert 'set_default(false)' in xmake[xmake.index('option("anonymous_lifecycle_smoke")'):]
+    assert 'anonymous_lifecycle_smoke.c' in xmake
+    assert 'BIGOS_ANON_LIFECYCLE_PASSED' in smoke
+    assert 'access-after-unmap' in smoke
+    assert 'write-after-readonly' in smoke
+
+
 def test_unified_page_fault_entry_decides_by_vma_metadata() -> None:
     proc = read_source('kernel/core/proc/proc.cc')
     irq = read_source('kernel/core/irq/interrupt.cc')

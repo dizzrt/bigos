@@ -21,6 +21,7 @@
 #include "stdio.h"        /* IWYU pragma: export */
 #include "stdlib.h"       /* IWYU pragma: export */
 #include "string.h"       /* IWYU pragma: export */
+#include "sys/mman.h"     /* IWYU pragma: export */
 #include "sys/stat.h"     /* IWYU pragma: export */
 #include "sys/types.h"    /* IWYU pragma: export */
 #include "sys/wait.h"     /* IWYU pragma: export */

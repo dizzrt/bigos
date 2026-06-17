@@ -290,6 +290,11 @@ namespace bigos::proc {
     int64_t getcwd_current(char *__dst, size_t __dst_len) noexcept;
     int64_t brk_current(uint64_t __new_break) noexcept;
     int64_t map_anonymous_current(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept;
+    // Bounded BigOS anonymous lifecycle operations. They are page-granular,
+    // private-anonymous only, and deliberately do not claim complete POSIX
+    // munmap/mprotect semantics.
+    int64_t unmap_anonymous_current(uint64_t __addr, uint64_t __len) noexcept;
+    int64_t protect_anonymous_current(uint64_t __addr, uint64_t __len, uint64_t __permissions) noexcept;
     // Bounded read-only file-backed mapping request (SYS_MAP_FILE backing). Maps
     // a page-aligned [__offset, __offset + __len) extent of the readable regular
     // file behind __fd into a read-only, private, lazily backed user range in the

@@ -4,6 +4,7 @@ target("kernel")
 set_plat("cross")
 set_arch("x86_64")
 set_kind("binary")
+add_deps("user-init-elf")
 
 -- O2 optimize
 set_optimize("faster")
@@ -113,6 +114,10 @@ end
 
 if has_config("file_backed_mapping_smoke") then
     add_defines("BIGOS_FILE_BACKED_MAPPING_SMOKE")
+end
+
+if has_config("anonymous_lifecycle_smoke") then
+    add_defines("BIGOS_ANONYMOUS_LIFECYCLE_SMOKE")
 end
 
 if has_config("growable_tables_smoke") then

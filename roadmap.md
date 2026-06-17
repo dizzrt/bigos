@@ -183,9 +183,9 @@ enabling more capable programs.
   page/buffer cache, without implying broad POSIX `mmap` completeness.
 - [x] 任务 M1.1：在现有 demand paging 与 page/buffer cache 之上提供 file-backed 读映射，
   不暗示完整 POSIX `mmap` 语义。
-- [ ] Task M1.2: bounded anonymous mapping lifecycle completion covering map, unmap,
+- [x] Task M1.2: bounded anonymous mapping lifecycle completion covering map, unmap,
   and protection change over the current VMA model.
-- [ ] 任务 M1.2：在现有 VMA 模型上完善有界匿名映射生命周期，覆盖映射、解除映射与权限变更。
+- [x] 任务 M1.2：在现有 VMA 模型上完善有界匿名映射生命周期，覆盖映射、解除映射与权限变更。
 - [ ] Task M1.3: shared read-only mapping so multiple processes can share read-only
   text and data pages, with TLB invalidation expressed through the existing SMP
   preparation invalidation boundary.

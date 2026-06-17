@@ -556,9 +556,143 @@ namespace {
         if (__process == nullptr)
             return;
         uint64_t phys = bigos::mm::INVALID_PHYS_ADDR;
-        if (bigos::mm::__detail::unmap_user_page_in_root(__process->address_space_root, __vaddr, &phys) &&
+        if (bigos::mm::unmap_user_page_in_root(__process->address_space_root, __vaddr, &phys) &&
             phys != bigos::mm::INVALID_PHYS_ADDR)
             bigos::mm::frame_ref_dec_and_maybe_free(phys);
+    }
+
+    bool permissions_supported(bigos::proc::VmaPermission __permissions) noexcept {
+        return (permissions_value(__permissions) &
+                   ~(permissions_value(bigos::proc::VmaPermission::Read) |
+                       permissions_value(bigos::proc::VmaPermission::Write) |
+                       permissions_value(bigos::proc::VmaPermission::Execute))) == 0 &&
+               !permissions_wx(__permissions);
+    }
+
+    bool lifecycle_range_bounds(uint64_t __addr, uint64_t __len, uint64_t *__end) noexcept {
+        if (__end != nullptr)
+            *__end = 0;
+        uint64_t end = 0;
+        if (__len == 0 || !page_aligned(__addr) || !page_aligned(__len) || add_overflow(__addr, __len, &end) ||
+            end > bigos::proc::USER_LOW_HALF_LIMIT || end <= __addr)
+            return false;
+        if (__end != nullptr)
+            *__end = end;
+        return true;
+    }
+
+    bool anonymous_lifecycle_vma_compatible(const bigos::proc::Process *__process,
+        const bigos::proc::VmaEntry *__entry, bigos::proc::VmaPermission __permissions) noexcept {
+        return __entry != nullptr && __entry->backing == bigos::proc::VmaBacking::Anonymous &&
+               __entry->purpose == bigos::proc::VmaPurpose::Anonymous &&
+               __entry->growth == bigos::proc::VmaGrowth::None && runtime_vma_allowed(__process, *__entry) &&
+               permissions_supported(__permissions);
+    }
+
+    bigos::proc::VmaEntry clipped_vma(
+        const bigos::proc::VmaEntry &__entry, uint64_t __start, uint64_t __end) noexcept {
+        bigos::proc::VmaEntry clipped = __entry;
+        clipped.start = __start;
+        clipped.end = __end;
+        if (clipped.materialized_start < __start)
+            clipped.materialized_start = __start;
+        if (clipped.materialized_start > __end)
+            clipped.materialized_start = __end;
+        if (clipped.materialized_end < __start)
+            clipped.materialized_end = __start;
+        if (clipped.materialized_end > __end)
+            clipped.materialized_end = __end;
+        if (clipped.materialized_end < clipped.materialized_start)
+            clipped.materialized_end = clipped.materialized_start;
+        return clipped;
+    }
+
+    bool stage_anonymous_unmap(bigos::proc::Process *__process, uint64_t __addr, uint64_t __end,
+        bigos::proc::VmaCollection *__staged) noexcept {
+        if (__process == nullptr || __staged == nullptr)
+            return false;
+        *__staged = __process->vmas;
+        uint64_t cursor = __addr;
+        while (cursor < __end) {
+            const bigos::proc::VmaEntry *entry = internal_find_vma(&__process->vmas, cursor);
+            const bigos::proc::VmaPermission permissions =
+                entry != nullptr ? entry->permissions : bigos::proc::VmaPermission::None;
+            if (!anonymous_lifecycle_vma_compatible(__process, entry, permissions))
+                return false;
+            const uint64_t cut_end = entry->end < __end ? entry->end : __end;
+            if (!internal_remove_vma(__staged, entry->start, entry->end))
+                return false;
+            if (entry->start < cursor && !internal_add_vma(__staged, clipped_vma(*entry, entry->start, cursor)))
+                return false;
+            if (cut_end < entry->end && !internal_add_vma(__staged, clipped_vma(*entry, cut_end, entry->end)))
+                return false;
+            cursor = cut_end;
+        }
+        return true;
+    }
+
+    bool stage_anonymous_protect(bigos::proc::Process *__process, uint64_t __addr, uint64_t __end,
+        bigos::proc::VmaPermission __permissions, bigos::proc::VmaCollection *__staged) noexcept {
+        if (__process == nullptr || __staged == nullptr || !permissions_supported(__permissions))
+            return false;
+        *__staged = __process->vmas;
+        uint64_t cursor = __addr;
+        while (cursor < __end) {
+            const bigos::proc::VmaEntry *entry = internal_find_vma(&__process->vmas, cursor);
+            if (!anonymous_lifecycle_vma_compatible(__process, entry, __permissions))
+                return false;
+            const uint64_t cut_end = entry->end < __end ? entry->end : __end;
+            if (!internal_remove_vma(__staged, entry->start, entry->end))
+                return false;
+            if (entry->start < cursor && !internal_add_vma(__staged, clipped_vma(*entry, entry->start, cursor)))
+                return false;
+            bigos::proc::VmaEntry changed = clipped_vma(*entry, cursor, cut_end);
+            changed.permissions = __permissions;
+            if (!internal_add_vma(__staged, changed))
+                return false;
+            if (cut_end < entry->end && !internal_add_vma(__staged, clipped_vma(*entry, cut_end, entry->end)))
+                return false;
+            cursor = cut_end;
+        }
+        return true;
+    }
+
+    bool unmap_present_pages_in_range(bigos::proc::Process *__process, uint64_t __addr, uint64_t __end) noexcept {
+        if (__process == nullptr)
+            return false;
+        for (uint64_t page = __addr; page < __end; page += PAGE_SIZE) {
+            uint64_t phys = bigos::mm::INVALID_PHYS_ADDR;
+            bigos::mm::PageAttr attr = 0;
+            if (!bigos::mm::read_user_leaf_in_root(__process->address_space_root, page, &phys, &attr))
+                continue;
+            if ((attr & bigos::mm::page_attr::USER) == 0)
+                return false;
+            if (!bigos::mm::unmap_user_page_in_root(__process->address_space_root, page, &phys))
+                return false;
+            if (phys != bigos::mm::INVALID_PHYS_ADDR)
+                bigos::mm::frame_ref_dec_and_maybe_free(phys);
+        }
+        return true;
+    }
+
+    bool protect_present_pages_in_range(bigos::proc::Process *__process, uint64_t __addr, uint64_t __end,
+        bigos::proc::VmaPermission __permissions) noexcept {
+        if (__process == nullptr || !permissions_supported(__permissions))
+            return false;
+        const bigos::mm::PageAttr policy = anonymous_page_attr(__permissions);
+        for (uint64_t page = __addr; page < __end; page += PAGE_SIZE) {
+            uint64_t phys = bigos::mm::INVALID_PHYS_ADDR;
+            bigos::mm::PageAttr attr = 0;
+            if (!bigos::mm::read_user_leaf_in_root(__process->address_space_root, page, &phys, &attr))
+                continue;
+            bigos::mm::PageAttr new_attr = policy;
+            if ((attr & bigos::mm::page_attr::PTE_COW) != 0 &&
+                permissions_include(__permissions, bigos::proc::VmaPermission::Write))
+                new_attr = (new_attr & ~bigos::mm::page_attr::WRITABLE) | bigos::mm::page_attr::PTE_COW;
+            if (!bigos::mm::remap_user_page_in_root(__process->address_space_root, page, phys, new_attr))
+                return false;
+        }
+        return true;
     }
 
     bigos::proc::Process *lookup_process(uint32_t __pid) noexcept {
@@ -2144,6 +2278,43 @@ namespace bigos::proc {
         // starts at base and advances as pages are faulted in.
         process->vmas.anon_next = end;
         return (int64_t)base;
+    }
+
+    int64_t unmap_anonymous_current(uint64_t __addr, uint64_t __len) noexcept {
+        Process *process = current_process_slot();
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+            return -bigos::EWOULDBLOCK;
+        uint64_t end = 0;
+        if (!lifecycle_range_bounds(__addr, __len, &end))
+            return -bigos::EINVAL;
+
+        VmaCollection staged = {};
+        if (!stage_anonymous_unmap(process, __addr, end, &staged))
+            return -bigos::EINVAL;
+        if (!unmap_present_pages_in_range(process, __addr, end))
+            return -bigos::EFAULT;
+        process->vmas = staged;
+        return 0;
+    }
+
+    int64_t protect_anonymous_current(uint64_t __addr, uint64_t __len, uint64_t __permissions) noexcept {
+        Process *process = current_process_slot();
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+            return -bigos::EWOULDBLOCK;
+        uint64_t end = 0;
+        if (!lifecycle_range_bounds(__addr, __len, &end))
+            return -bigos::EINVAL;
+        const auto permissions = (VmaPermission)(uint8_t)__permissions;
+        if (!permissions_supported(permissions))
+            return -bigos::EINVAL;
+
+        VmaCollection staged = {};
+        if (!stage_anonymous_protect(process, __addr, end, permissions, &staged))
+            return -bigos::EINVAL;
+        if (!protect_present_pages_in_range(process, __addr, end, permissions))
+            return -bigos::EFAULT;
+        process->vmas = staged;
+        return 0;
     }
 
     int64_t map_file_current(uint64_t __fd, uint64_t __offset, uint64_t __len, uint64_t __permissions,

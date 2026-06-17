@@ -121,4 +121,25 @@ VMA 起始)`，经现有 page/buffer cache 读取覆盖该页的文件块（单�
 默认关闭的 `file_backed_mapping_smoke` 开关（`xmake f --file_backed_mapping_smoke=y`）驱动映射创建、
 首次访问物化命中正确文件内容、文件尾页零填充、对只读页写访问确定性 kill 以及越界访问确定性 kill，发射
 `BIGOS_FILE_BACKED_MAPPING_PASSED` / `BIGOS_FILE_BACKED_MAPPING_FAILED`。它不是完整 POSIX `mmap`：不支持
-可写/写回映射、`MAP_SHARED`、`mprotect`、`MAP_FIXED`、swap 或 `munmap`。
+可写/写回映射、`MAP_SHARED`、`MAP_FIXED` 或 swap。
+
+## 有界 anonymous lifecycle
+
+anonymous VMA 现在通过 `SYS_UNMAP_ANON` 与 `SYS_PROTECT_ANON` 支持有界主动 lifecycle 操作。两者都要求
+页对齐、非空、位于用户低半区，并且目标范围必须由兼容 private anonymous VMA 完整覆盖。操作会先
+staging 结果 VMA 集合，再发布 metadata，因此 prefix、suffix、middle split 与 capacity exhaustion
+场景都有确定性结果。
+
+`SYS_UNMAP_ANON` 会删除或拆分受影响 VMA，清除范围内 present user leaf PTE，释放 owned frame 或递减
+COW/shared frame 引用，回收空的动态 owned 用户页表页，并 invalidation 受影响的当前 CPU translation。
+lazy 且 not-present 的部分只删除 metadata，不会为了 unmap 而物化页面。
+
+`SYS_PROTECT_ANON` 会更新 VMA 权限并 remap present PTE，使硬件访问权限不宽于 VMA policy。它拒绝
+W+X 与 unsupported backing。当 VMA 仍允许写且页面仍为共享页时，COW marker 会被保留为 read-only
+共享状态；权限收紧后，后续 demand-zero 与 COW fault 都以新的 VMA 权限为准。
+
+freestanding userland 在 `user/libc/include/sys/mman.h` 暴露 BigOS-specific 的 `mmap_anon`、
+`bigos_munmap_anon`、`bigos_mprotect_anon` wrapper 与 `PROT_*` 常量。这些 wrapper 文档化 bounded
+BigOS 语义，不声明完整 POSIX 兼容。默认关闭的 `anonymous_lifecycle_smoke` 镜像覆盖 map、protect、
+unmap、非法 W+X rollback、access-after-unmap 与 write-after-readonly 行为，marker 为
+`BIGOS_ANON_LIFECYCLE_PASSED` / `BIGOS_ANON_LIFECYCLE_FAILED`。

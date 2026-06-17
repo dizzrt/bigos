@@ -33,6 +33,8 @@ int chdir(const char *path);
 char *getcwd(char *buf, size_t size);
 void *brk_raw(void *addr); /* returns committed break, or (void*)-errno */
 void *mmap_anon(size_t len, long prot, long flags);
+int bigos_munmap_anon(void *addr, size_t len);
+int bigos_mprotect_anon(void *addr, size_t len, long prot);
 pid_t getpid(void);
 pid_t getppid(void);
 int getuid(void);

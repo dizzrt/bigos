@@ -455,6 +455,14 @@ namespace sys {
             return bigos::proc::map_anonymous_current(__len, __permissions, __flags);
         }
 
+        static int64_t sys_unmap_anon(uint64_t __addr, uint64_t __len) noexcept {
+            return bigos::proc::unmap_anonymous_current(__addr, __len);
+        }
+
+        static int64_t sys_protect_anon(uint64_t __addr, uint64_t __len, uint64_t __permissions) noexcept {
+            return bigos::proc::protect_anonymous_current(__addr, __len, __permissions);
+        }
+
         static int64_t sys_map_file(
             uint64_t __fd, uint64_t __offset, uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept {
             return bigos::proc::map_file_current(__fd, __offset, __len, __permissions, __flags);
@@ -738,6 +746,12 @@ namespace sys {
             case SYS_MAP_FILE:
                 result = __detail::sys_map_file(
                     __frame->rdi, __frame->rsi, __frame->rdx, __frame->r10, __frame->r8);
+                break;
+            case SYS_UNMAP_ANON:
+                result = __detail::sys_unmap_anon(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_PROTECT_ANON:
+                result = __detail::sys_protect_anon(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
             case SYS_FORK:
                 // fork duplicates the current process. The dispatcher passes the

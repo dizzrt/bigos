@@ -643,6 +643,66 @@ static bool reclaim_active_empty_tables(uint64_t __root_phys, uint64_t __vaddr, 
     return true;
 }
 
+static bool reclaim_empty_tables_in_root(
+    uint64_t __root_phys, uint64_t __vaddr, PageTableOwner __owner, bool __invalidate_active) noexcept {
+    const uint64_t root = __root_phys & PAGING_DESCRIPTOR_ADDR_MASK;
+    uint64_t *pml4 = direct_table(root);
+    if (pml4 == nullptr)
+        return false;
+    uint64_t &pml4e = pml4[get_pml4_index(__vaddr)];
+    if (!paging_present(pml4e))
+        return true;
+    uint64_t *pdpt = direct_table(pml4e);
+    if (pdpt == nullptr)
+        return false;
+    uint64_t &pdpte = pdpt[get_pdpt_index(__vaddr)];
+    if (!paging_present(pdpte))
+        return true;
+    uint64_t *pd = direct_table(pdpte);
+    if (pd == nullptr)
+        return false;
+    uint64_t &pde = pd[get_pd_index(__vaddr)];
+    if (!paging_present(pde))
+        return true;
+
+    const uint64_t pdpt_phys = pml4e & PAGING_DESCRIPTOR_ADDR_MASK;
+    const uint64_t pd_phys = pdpte & PAGING_DESCRIPTOR_ADDR_MASK;
+    const uint64_t pt_phys = pde & PAGING_DESCRIPTOR_ADDR_MASK;
+
+    if (page_table_owned_by(pt_phys, root, __owner, PageTableLevel::Pt) && page_table_empty(pt_phys)) {
+        pde = 0;
+        if (__invalidate_active)
+            invalidate_active_tlb_page(root, __vaddr);
+        if (!decrement_present_entry(pd_phys))
+            return false;
+        unregister_page_table(pt_phys);
+        bigos::mm::__detail::free_physical_order((void *)pt_phys);
+    } else {
+        return true;
+    }
+
+    if (page_table_owned_by(pd_phys, root, __owner, PageTableLevel::Pd) && page_table_empty(pd_phys)) {
+        pdpte = 0;
+        if (__invalidate_active)
+            invalidate_active_tlb_page(root, __vaddr);
+        if (!decrement_present_entry(pdpt_phys))
+            return false;
+        unregister_page_table(pd_phys);
+        bigos::mm::__detail::free_physical_order((void *)pd_phys);
+    } else {
+        return true;
+    }
+
+    if (page_table_owned_by(pdpt_phys, root, __owner, PageTableLevel::Pdpt) && page_table_empty(pdpt_phys)) {
+        pml4e = 0;
+        if (__invalidate_active)
+            invalidate_active_tlb_page(root, __vaddr);
+        unregister_page_table(pdpt_phys);
+        bigos::mm::__detail::free_physical_order((void *)pdpt_phys);
+    }
+    return true;
+}
+
 static bool teardown_user_low_half(uint64_t __root_phys) noexcept {
     uint64_t *pml4 = direct_table(__root_phys);
     if (pml4 == nullptr)
@@ -1053,6 +1113,45 @@ namespace mm {
             return true;
         }
     }   // namespace __detail
+
+    bool unmap_user_page_in_root(uint64_t __root_phys, uint64_t __vaddr, uint64_t *__phys) noexcept {
+        if (__phys != nullptr)
+            *__phys = INVALID_PHYS_ADDR;
+        if (__root_phys == INVALID_PHYS_ADDR || (__vaddr & (PAGE_SIZE - 1)) != 0)
+            return false;
+
+        uint64_t *pte = root_pte(__root_phys, __vaddr);
+        if (pte == nullptr || !paging_present(*pte) || (*pte & page_attr::USER) == 0)
+            return false;
+
+        const uint64_t root = __root_phys & PAGING_DESCRIPTOR_ADDR_MASK;
+        const bool active = root == (read_cr3() & PAGING_DESCRIPTOR_ADDR_MASK);
+        const uint64_t phys = *pte & PAGING_DESCRIPTOR_ADDR_MASK;
+        uint64_t *pml4 = direct_table(root);
+        if (pml4 == nullptr)
+            return false;
+        uint64_t *pdpt = direct_table(pml4[get_pml4_index(__vaddr)]);
+        if (pdpt == nullptr)
+            return false;
+        uint64_t *pd = direct_table(pdpt[get_pdpt_index(__vaddr)]);
+        if (pd == nullptr)
+            return false;
+        const uint64_t pt_phys = pd[get_pd_index(__vaddr)] & PAGING_DESCRIPTOR_ADDR_MASK;
+
+        {
+            bigos::irq::InterruptGuard guard;
+            *pte = 0;
+            if (active)
+                invalidate_active_tlb_page(root, __vaddr);
+        }
+        if (!decrement_present_entry(pt_phys))
+            return false;
+        if (!reclaim_empty_tables_in_root(root, __vaddr, PageTableOwner::UserAddressSpace, active))
+            return false;
+        if (__phys != nullptr)
+            *__phys = phys;
+        return true;
+    }
 
     bool is_direct_mapped_phys(uint64_t __phys, uint64_t __len) noexcept {
         return direct_map_range_covered(__phys, __len);

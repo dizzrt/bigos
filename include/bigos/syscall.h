@@ -82,6 +82,10 @@ namespace bigos::sys {
                                 // len are page-aligned; permissions must be read-only and
                                 // non-W+X; flags are reserved (must be 0). No partial VMA is
                                 // published on failure.
+        SYS_UNMAP_ANON = 36,    // (rdi=addr, rsi=len) -> bounded anonymous/private unmap.
+                                // Page-aligned, fully covered anonymous ranges only; not full POSIX munmap.
+        SYS_PROTECT_ANON = 37,  // (rdi=addr, rsi=len, rdx=permissions) -> bounded anonymous/private
+                                // protection change. Rejects W+X and unsupported backing.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

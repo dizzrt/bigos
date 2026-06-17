@@ -156,6 +156,12 @@ namespace mm {
     _attr_nodiscard_ bool remap_user_page_in_root(
         uint64_t __root_phys, uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept;
 
+    // Clears one present user leaf in __root_phys, returns the former physical
+    // frame through __phys, invalidates the current CPU when the root is active,
+    // and reclaims empty dynamically owned user page-table pages. It does not
+    // release the returned frame; process code applies frame-ref accounting.
+    _attr_nodiscard_ bool unmap_user_page_in_root(uint64_t __root_phys, uint64_t __vaddr, uint64_t *__phys) noexcept;
+
     // Reads the leaf physical frame and PTE attributes for a present user
     // mapping in __root_phys. Returns false when the page is not a present user
     // leaf. __phys and __attr may be null when only presence matters.

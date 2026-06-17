@@ -81,7 +81,20 @@ on_build(function()
     end
 
     -- Build /bin/smoke probes only for default-off userland validation images.
-    if has_config("userland_smoke") or has_config("filesystem_maturity_smoke") then
+    if has_config("userland_smoke") then
+        os.mkdir(user_smoke_bin_subdir)
+        local smoke_bin_programs = {
+            { "args", path.join(projectdir, "user", "smoke", "bin", "args.c") },
+            { "env", path.join(projectdir, "user", "smoke", "bin", "env.c") },
+            { "out", path.join(projectdir, "user", "smoke", "bin", "out.c") },
+            { "errno", path.join(projectdir, "user", "smoke", "bin", "errno.c") },
+            { "exit", path.join(projectdir, "user", "smoke", "bin", "exit.c") },
+            { "libc_subset", path.join(projectdir, "user", "smoke", "bin", "libc_subset.c") },
+        }
+        for _, program in ipairs(smoke_bin_programs) do
+            build_user_program(program[2], path.join(user_smoke_bin_subdir, program[1]))
+        end
+    elseif has_config("filesystem_maturity_smoke") then
         os.mkdir(user_smoke_bin_subdir)
         local smoke_bin_programs = {
             { "args", path.join(projectdir, "user", "smoke", "bin", "args.c") },
@@ -104,7 +117,9 @@ on_build(function()
     --                               (preserves BIGOS_USER_ENTER/EXIT),
     --   otherwise                -> resident C init that launches /bin/sh.
     local init_output = path.join(user_bindir, "init.elf")
-    if has_config("userland_smoke") or has_config("filesystem_maturity_smoke") then
+    if has_config("anonymous_lifecycle_smoke") then
+        build_user_program(path.join(projectdir, "user", "smoke", "anonymous_lifecycle_smoke.c"), init_output)
+    elseif has_config("userland_smoke") or has_config("filesystem_maturity_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "userland_smoke.c"), init_output)
     elseif has_config("user_elf_smoke") or has_config("user_program_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "elf_smoke.c"), init_output)

@@ -280,9 +280,17 @@ void *mmap_anon(size_t len, long prot, long flags) {
     long ret = syscall3(SYS_MAP_ANON, (long)len, prot, flags);
     if (ret < 0) {
         errno = (int)(-ret);
-        return (void *)-1;
+        return MAP_FAILED;
     }
     return (void *)ret;
+}
+
+int bigos_munmap_anon(void *addr, size_t len) {
+    return (int)errno_translate(syscall2(SYS_UNMAP_ANON, (long)addr, (long)len));
+}
+
+int bigos_mprotect_anon(void *addr, size_t len, long prot) {
+    return (int)errno_translate(syscall3(SYS_PROTECT_ANON, (long)addr, (long)len, prot));
 }
 
 pid_t getpid(void) {

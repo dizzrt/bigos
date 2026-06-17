@@ -42,6 +42,7 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     stat = read_source('user/libc/include/sys/stat.h')
     types = read_source('user/libc/include/sys/types.h')
     wait = read_source('user/libc/include/sys/wait.h')
+    mman = read_source('user/libc/include/sys/mman.h')
 
     for include in (
         '"stdio.h"',
@@ -55,6 +56,7 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
         '"sys/stat.h"',
         '"sys/types.h"',
         '"sys/wait.h"',
+        '"sys/mman.h"',
         '"time.h"',
     ):
         assert include in libc
@@ -90,6 +92,10 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'pid_t wait(int *status);' in wait
     assert 'pid_t waitpid(pid_t pid, int *status, int options);' in wait
     assert 'pid_t wait_status(pid_t pid, int *status);' in wait
+    assert '#define PROT_READ  1' in mman
+    assert '#define MAP_FAILED ((void *)-1)' in mman
+    assert 'int bigos_munmap_anon(void *addr, size_t len);' in mman
+    assert 'int bigos_mprotect_anon(void *addr, size_t len, long prot);' in mman
     assert 'typedef long time_t;' in time_h
     assert 'time_t time(time_t *out);' in time_h
 
