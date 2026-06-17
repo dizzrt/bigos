@@ -1,6 +1,6 @@
 # File Descriptors And VFS Shell
 
-BigOS stage 13 introduced a minimal read-only fd/VFS boundary. Later stages keep
+BigOS introduced a minimal read-only fd/VFS boundary. Later capabilities keep
 that exFAT read path intact while adding bounded VMA metadata, `brk`, restricted
 anonymous mapping, demand paging, writable `/rw`, page/buffer cache, pipe/dup,
 and the minimal userland runtime.

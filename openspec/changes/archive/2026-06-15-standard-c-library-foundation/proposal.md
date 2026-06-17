@@ -1,6 +1,6 @@
 ## Why
 
-BigOS 已经具备可运行的有界用户态、静态用户程序、`crt0`、最小 libc、shell 与小型 `/bin/*` 工具，但当前 C 库表面仍以逐步补丁式能力为主，缺少面向 Stage 40 的清晰“标准 C 库基础”边界。现在需要把这些已有能力整理为可依赖、可验证、可继续扩展的 bounded C library subset，服务简单静态 C 程序、shell 工具、诊断输出、文件 I/O、内存/字符串例程和进程交互。
+BigOS 已经具备可运行的有界用户态、静态用户程序、`crt0`、最小 libc、shell 与小型 `/bin/*` 工具，但当前 C 库表面仍以逐步补丁式能力为主，缺少面向 bounded libc foundation 的清晰“标准 C 库基础”边界。现在需要把这些已有能力整理为可依赖、可验证、可继续扩展的 bounded C library subset，服务简单静态 C 程序、shell 工具、诊断输出、文件 I/O、内存/字符串例程和进程交互。
 
 ## What Changes
 
@@ -14,13 +14,13 @@ BigOS 已经具备可运行的有界用户态、静态用户程序、`crt0`、�
 
 ### New Capabilities
 
-- 无。Stage 40 建立在现有用户态 libc、crt0 和有界 POSIX-like 进程/I/O 子集之上，本 change 通过修改既有能力来收敛契约。
+- 无。bounded libc foundation 建立在现有用户态 libc、crt0 和有界 POSIX-like 进程/I/O 子集之上，本 change 通过修改既有能力来收敛契约。
 
 ### Modified Capabilities
 
-- `user-libc-min`: 将最小 libc 规格扩展为 Stage 40 标准 C 库基础子集，明确 public header、wrapper、stdlib/string/memory/stdio/error-reporting/validation 的可观察要求与非目标。
+- `user-libc-min`: 将最小 libc 规格扩展为 bounded libc foundation 标准 C 库基础子集，明确 public header、wrapper、stdlib/string/memory/stdio/error-reporting/validation 的可观察要求与非目标。
 - `user-crt0-runtime`: 明确 `crt0` 仍服务静态 C 程序入口，不引入动态 loader、共享库或 hosted runtime，并与 libc 基础子集保持启动/退出契约一致。
-- `posix-like-process-io-subset`: 明确 Stage 40 的 C 库扩展仍只是有界 POSIX-like 进程/I/O 子集的用户态消费层，不扩大为完整 POSIX 兼容。
+- `posix-like-process-io-subset`: 明确 bounded libc foundation 的 C 库扩展仍只是有界 POSIX-like 进程/I/O 子集的用户态消费层，不扩大为完整 POSIX 兼容。
 
 ## Impact
 

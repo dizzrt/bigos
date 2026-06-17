@@ -1,6 +1,6 @@
 ## Why
 
-Stage 39 要把 BigOS 已有 shell、进程、文件、fd、pipe、重定向、signal、time、identity 和错误展示行为打磨成更一致的有界 Unix-like 环境。现有实现已经覆盖大多数内核 syscall 和 libc wrapper，但 signal 表层、wait 命名/状态语义、time POSIX-like wrapper、错误文本展示和 shell/fd 组合行为仍需要规格化，避免用户态接口“能用但契约不清”。
+bounded POSIX-like surface 要把 BigOS 已有 shell、进程、文件、fd、pipe、重定向、signal、time、identity 和错误展示行为打磨成更一致的有界 Unix-like 环境。现有实现已经覆盖大多数内核 syscall 和 libc wrapper，但 signal 表层、wait 命名/状态语义、time POSIX-like wrapper、错误文本展示和 shell/fd 组合行为仍需要规格化，避免用户态接口“能用但契约不清”。
 
 ## What Changes
 
@@ -15,15 +15,15 @@ Stage 39 要把 BigOS 已有 shell、进程、文件、fd、pipe、重定向、s
 
 ### New Capabilities
 
-- 无。该 change 收敛和硬化 Stage 39 已覆盖的现有 bounded userland/POSIX-like 表层，不引入新的顶层能力域。
+- 无。该 change 收敛和硬化 bounded POSIX-like surface 已覆盖的现有 bounded userland/POSIX-like 表层，不引入新的顶层能力域。
 
 ### Modified Capabilities
 
-- `posix-like-process-io-subset`: 明确 Stage 39 的 bounded POSIX-like 接口清单、wait/signal/time/error/shell 行为契约和非目标。
+- `posix-like-process-io-subset`: 明确 bounded POSIX-like surface 的 bounded POSIX-like 接口清单、wait/signal/time/error/shell 行为契约和非目标。
 - `user-libc-min`: 增加或规范 signal、waitpid/time/error 文本相关 libc 表层声明与 wrapper 语义。
 - `signals`: 将内核已有 signal syscall 连接到用户态可用的 bounded signal handler/trampoline/sigreturn 契约。
 - `user-shell`: 硬化单级 pipe、基础重定向、PATH 查找、错误展示、退出状态和失败后 fd 恢复行为。
-- `runtime-smoke-validation`: 增加 Stage 39 表层硬化对应的可观察 smoke/source-contract 验证要求。
+- `runtime-smoke-validation`: 增加 bounded POSIX-like surface 表层硬化对应的可观察 smoke/source-contract 验证要求。
 
 ## Impact
 

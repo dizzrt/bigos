@@ -1,6 +1,6 @@
 ## Why
 
-BigOS 已完成早期诊断统一和 kernel direct map，阶段 0 的基线巩固已经收尾。当前中断/异常基础设施支持 kernel-owned static IDT、稳定 `InterruptFrame` dispatch ABI、i8259 PIC remap、CPU exception 与 external IRQ 分流、keyboard IRQ1 smoke，以及统一的 EOI 发送边界；但内核仍没有周期性时间源。
+BigOS 已完成早期诊断统一和 kernel direct map，对应能力边界 的基线巩固已经收尾。当前中断/异常基础设施支持 kernel-owned static IDT、稳定 `InterruptFrame` dispatch ABI、i8259 PIC remap、CPU exception 与 external IRQ 分流、keyboard IRQ1 smoke，以及统一的 EOI 发送边界；但内核仍没有周期性时间源。
 
 后续调度器、超时、驱动延时和更稳定的 boot smoke 都需要一个最小、可观测、可验证的 timer IRQ0 基础。`add-timer-irq-foundation` 先在 legacy i8259 + PIT 8253/8254 路径上建立周期性 tick，不引入 scheduler、抢占、APIC/HPET 或完整时间子系统。
 

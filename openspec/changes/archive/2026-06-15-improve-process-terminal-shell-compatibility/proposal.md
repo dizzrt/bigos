@@ -1,6 +1,6 @@
 ## Why
 
-Stage 42 需要在 Stage 39-41 的有界用户态基线之上，继续改善交互使用和小程序组合体验。当前 BigOS 已有进程生命周期、wait、signals、默认控制台终端、`/bin/sh`、pipe、fd 重定向和路径工具，但这些能力在组合场景下还需要更清晰的用户可见契约，避免交互路径可用但失败行为、控制输入和状态传播不稳定。
+process/terminal/shell composition hardening 需要在 bounded POSIX-like surface-41 的有界用户态基线之上，继续改善交互使用和小程序组合体验。当前 BigOS 已有进程生命周期、wait、signals、默认控制台终端、`/bin/sh`、pipe、fd 重定向和路径工具，但这些能力在组合场景下还需要更清晰的用户可见契约，避免交互路径可用但失败行为、控制输入和状态传播不稳定。
 
 ## What Changes
 
@@ -15,7 +15,7 @@ Stage 42 需要在 Stage 39-41 的有界用户态基线之上，继续改善交�
 
 ### New Capabilities
 
-- 无。该 change 面向 Stage 42 的兼容性整理，修改现有进程、终端、shell 和 bounded POSIX-like 子集能力，不新增独立顶层能力域。
+- 无。该 change 面向 process/terminal/shell composition hardening 的兼容性整理，修改现有进程、终端、shell 和 bounded POSIX-like 子集能力，不新增独立顶层能力域。
 
 ### Modified Capabilities
 
@@ -23,7 +23,7 @@ Stage 42 需要在 Stage 39-41 的有界用户态基线之上，继续改善交�
 - `signals`: 明确信号终止状态与等待/父进程观察之间的组合契约。
 - `minimal-terminal-abstraction`: 扩展默认控制台终端的控制输入、EOF-like/interrupt-like 事件和非 IRQ 消费边界。
 - `user-shell`: 硬化交互读行、错误恢复、退出状态保存、pipe/重定向组合和终端控制输入消费行为。
-- `posix-like-process-io-subset`: 将 Stage 42 的进程、终端、shell 组合语义纳入有界 POSIX-like 进程与 I/O 子集，同时继续声明非目标。
+- `posix-like-process-io-subset`: 将 process/terminal/shell composition hardening 的进程、终端、shell 组合语义纳入有界 POSIX-like 进程与 I/O 子集，同时继续声明非目标。
 
 ## Impact
 

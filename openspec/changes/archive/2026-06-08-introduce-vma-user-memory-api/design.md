@@ -2,7 +2,7 @@
 
 BigOS 当前已经具备用户地址空间派生、owned 页表回收、进程生命周期、bounded ELF64 `exec`、`wait`/`exit`、fd/VFS 壳层和 `int 0x80` syscall 分发。用户内存的策略仍分散在 ELF loader、用户栈布置、页表映射和 syscall user-buffer 校验中，缺少进程级 VMA 模型来回答“某个用户地址范围是否属于进程、具有什么权限、是否允许增长或映射”。
 
-阶段 14 位于 demand paging、COW、`fork` 和用户态 libc 之前。它应只引入用户虚拟内存策略和受控 API，而不是把 `#PF` handler 改造成通用缺页调度器。默认行为仍保持单核、同步、bounded、freestanding；页表地址布局、boot/linker 地址、syscall vector、IRQ/exception EOI 语义和 Legacy BIOS/raw image 路径不变化。
+userland runtime baseline 位于 demand paging、COW、`fork` 和用户态 libc 之前。它应只引入用户虚拟内存策略和受控 API，而不是把 `#PF` handler 改造成通用缺页调度器。默认行为仍保持单核、同步、bounded、freestanding；页表地址布局、boot/linker 地址、syscall vector、IRQ/exception EOI 语义和 Legacy BIOS/raw image 路径不变化。
 
 ## Goals / Non-Goals
 
@@ -40,13 +40,13 @@ VMA 先回答地址范围是否合法、权限是否允许、是否允许增长�
 
 进程创建或 exec commit 后建立一个可选 heap VMA，`brk` 只能在该 VMA 的 bounded 范围内扩展或收缩。扩展时按当前阶段选择 eager allocation/eager mapping；失败必须回滚到旧 break。收缩时 unmap 被移除的页，并保持页表 ownership 回收语义。
 
-替代方案是让 `brk` 只改元数据、等待 demand paging materialize。该方案会把阶段 14 绑定到通用缺页恢复，不符合路线图中“先策略、后 demand paging”的顺序。
+替代方案是让 `brk` 只改元数据、等待 demand paging materialize。该方案会把userland runtime baseline 绑定到通用缺页恢复，不符合路线图中“先策略、后 demand paging”的顺序。
 
 ### Decision: 匿名映射暴露为受限最小 syscall，而非完整 mmap
 
 匿名映射第一版同时提供内核 helper 和用户可见的最小 syscall，但 syscall 语义只覆盖 page-aligned、bounded、private、non-file-backed 用户页，权限来自 VMA flags，并拒绝与既有 VMA 重叠。不支持文件 fd、shared mapping、fixed overwrite、caller-provided fixed address 或权限升级到 W+X。
 
-替代方案是直接设计 POSIX-like `mmap`。该方案会牵涉 fd、page cache、文件写回、共享语义和权限模型，超出阶段 14。
+替代方案是直接设计 POSIX-like `mmap`。该方案会牵涉 fd、page cache、文件写回、共享语义和权限模型，超出userland runtime baseline。
 
 ### Decision: `brk` 与匿名映射使用内核选择的线性用户窗口
 
@@ -68,7 +68,7 @@ ELF exec 准备新镜像时在 staging image 上构建 VMA 集合，commit 前�
 
 ### Decision: 新增独立 `user_vma_smoke`
 
-阶段 14 新增独立默认关闭的 `user_vma_smoke` 开关，用于验证 VMA 插入/拒绝、`brk`、匿名映射、VMA-backed user-copy 和 stack-growth 的最小可观察路径。该 smoke MAY 与 `user_elf_smoke`、`syscall_smoke` 组合运行，但不依赖它们作为唯一验证入口。
+userland runtime baseline 新增独立默认关闭的 `user_vma_smoke` 开关，用于验证 VMA 插入/拒绝、`brk`、匿名映射、VMA-backed user-copy 和 stack-growth 的最小可观察路径。该 smoke MAY 与 `user_elf_smoke`、`syscall_smoke` 组合运行，但不依赖它们作为唯一验证入口。
 
 替代方案是只复用 `user_elf_smoke` 与 `syscall_smoke`。该方案会让 VMA 失败定位依赖更大的用户态闭环，难以区分 exec/syscall/VFS 问题与 VMA 策略问题。
 
@@ -91,4 +91,4 @@ ELF exec 准备新镜像时在 staging image 上构建 VMA 集合，commit 前�
 
 ## Open Questions
 
-- 暂无；第一版 anonymous mapping syscall、线性用户窗口和独立 `user_vma_smoke` 已作为阶段 14 决策固定。
+- 暂无；第一版 anonymous mapping syscall、线性用户窗口和独立 `user_vma_smoke` 已作为userland runtime baseline 决策固定。

@@ -24,5 +24,5 @@ BigOS SHALL keep timer IRQ0 handling bounded and IRQ-context safe while supporti
 #### Scenario: Timer IRQ does not preemptively switch
 - **WHEN** a timeout expires during timer IRQ0
 - **THEN** the IRQ path MAY mark or wake the expired thread through a bounded IRQ-safe path
-- **AND** it MUST NOT perform a full context switch on IRQ return in stage 10
+- **AND** it MUST NOT perform a full context switch on IRQ return in the documented capability
 - **AND** external IRQ EOI and `iretq` return semantics MUST remain unchanged

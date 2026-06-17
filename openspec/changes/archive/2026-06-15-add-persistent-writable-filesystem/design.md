@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前具备只读 exFAT boot assets、RAM-backed `/rw` 可写后端、VFS/fd I/O、块缓冲缓存、块设备读写抽象和默认关闭的文件系统 smoke。现有 `/rw` 语义只保证当前 boot session 内一致，不承诺跨重启持久化；Stage 41 已要求运行期语义避免阻碍未来持久化，但尚未定义磁盘布局、挂载既有卷、恢复或重启周期验证。
+BigOS 当前具备只读 exFAT boot assets、RAM-backed `/rw` 可写后端、VFS/fd I/O、块缓冲缓存、块设备读写抽象和默认关闭的文件系统 smoke。现有 `/rw` 语义只保证当前 boot session 内一致，不承诺跨重启持久化；runtime filesystem maturity 已要求运行期语义避免阻碍未来持久化，但尚未定义磁盘布局、挂载既有卷、恢复或重启周期验证。
 
 本 change 覆盖 `kernel/core/fs`、块缓冲缓存、块设备写路径、Legacy BIOS raw image 的持久化承载选择和用户可见 `/rw` 行为。它不改变 boot handoff ABI、linker/page-table 地址、IDT/syscall vector、用户态 syscall ABI 或 x86_64-only 交付目标。
 
@@ -29,7 +29,7 @@ BigOS 当前具备只读 exFAT boot assets、RAM-backed `/rw` 可写后端、VFS
 
 Alternatives considered:
 
-- 新增 `/persist` 挂载点：降低兼容风险，但会让现有 shell、用户工具和 smoke 需要同时处理两个写路径，不利于 Stage 44 的用户可见目标。
+- 新增 `/persist` 挂载点：降低兼容风险，但会让现有 shell、用户工具和 smoke 需要同时处理两个写路径，不利于 persistent clean-sync /rw storage 的用户可见目标。
 - 直接替换 RAM-backed 后端：语义更简单，但会移除已有非持久 smoke/fallback，增加早期实现和调试风险。
 
 ### Decision: 持久卷使用构建工具生成的独立测试磁盘
@@ -39,12 +39,12 @@ Alternatives considered:
 Alternatives considered:
 
 - 直接在现有 exFAT 分区内写隐藏文件：复用镜像空间较方便，但会破坏只读 boot assets 边界，并引入 exFAT 写语义。
-- 自动改写分区表：更像真实系统，但对 bootability 和验证风险过高，超出 Stage 44 的有界目标。
+- 自动改写分区表：更像真实系统，但对 bootability 和验证风险过高，超出 persistent clean-sync /rw storage 的有界目标。
 - 在 raw image 中使用固定保留区：比独立磁盘更接近单盘布局，但更容易因偏移、容量或构建脚本错误影响 bootability。
 
 ### Decision: 格式化与挂载既有卷分离
 
-初始化路径应区分“发现可挂载的既有持久卷”和“显式格式化新卷”。正常 boot 不得在识别失败时静默格式化，避免错误覆盖数据。Stage 44 提供最小用户态 mkfs 工具用于显式格式化独立持久测试磁盘；默认关闭 smoke 也可以调用同一受控格式化能力。格式化必须写入完整初始超级块、位图、根目录和 metadata 后才发布挂载。
+初始化路径应区分“发现可挂载的既有持久卷”和“显式格式化新卷”。正常 boot 不得在识别失败时静默格式化，避免错误覆盖数据。persistent clean-sync /rw storage 提供最小用户态 mkfs 工具用于显式格式化独立持久测试磁盘；默认关闭 smoke 也可以调用同一受控格式化能力。格式化必须写入完整初始超级块、位图、根目录和 metadata 后才发布挂载。
 
 Alternatives considered:
 
@@ -81,7 +81,7 @@ Alternatives considered:
 
 ### Decision: 持久卷只支持当前格式版本
 
-Stage 44 的持久卷只支持当前磁盘格式版本。旧版本、未知版本和未来版本必须拒绝挂载并返回确定性诊断，不做自动迁移、只读旧版挂载或自动格式化。
+persistent clean-sync /rw storage 的持久卷只支持当前磁盘格式版本。旧版本、未知版本和未来版本必须拒绝挂载并返回确定性诊断，不做自动迁移、只读旧版挂载或自动格式化。
 
 Alternatives considered:
 
@@ -107,4 +107,4 @@ Alternatives considered:
 
 ## Open Questions
 
-- 暂无。Stage 44 当前固定采用：构建工具生成独立持久测试磁盘、最小用户态 mkfs 工具、同一脚本连续两次启动同一持久磁盘镜像、仅支持当前持久卷格式版本。
+- 暂无。persistent clean-sync /rw storage 当前固定采用：构建工具生成独立持久测试磁盘、最小用户态 mkfs 工具、同一脚本连续两次启动同一持久磁盘镜像、仅支持当前持久卷格式版本。

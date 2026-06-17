@@ -45,7 +45,7 @@
 
 ## 8. 源码契约/行为断言测试
 
-- [x] 8.1 用 `uv run pytest` 增补源码契约/行为断言测试（沿用阶段 14.5 启动的行为断言轨道）：覆盖新增 syscall 号位固定、Process 身份字段、墙钟与判定函数存在性，以及 smoke marker 行为断言。
+- [x] 8.1 用 `uv run pytest` 增补源码契约/行为断言测试（沿用behavior assertion validation baseline 启动的行为断言轨道）：覆盖新增 syscall 号位固定、Process 身份字段、墙钟与判定函数存在性，以及 smoke marker 行为断言。
 - [x] 8.2 对新增/修改的 Python 文件运行 `uv run ruff check`、`uv run ruff format --check`、`uv run pyright`、`uv run pytest`，修复新引入的 lint/类型/格式/测试问题；若 `uv` 不可用则显式记录该阻塞。
 
 ## 9. 文档与验证记录

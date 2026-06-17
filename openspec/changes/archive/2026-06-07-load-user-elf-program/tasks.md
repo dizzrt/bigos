@@ -1,6 +1,6 @@
 ## 1. 规格与边界确认
 
-- [x] 1.1 对照 `tmp/roadmap.md` 阶段 8、`first-user-program`、`address-space-lifecycle`、`block-device-read`、`exfat-read-filesystem` 主规格，确认 ELF loader 的依赖、非目标和 smoke 边界没有冲突。
+- [x] 1.1 对照 `tmp/roadmap.md` user ELF loader capability、`first-user-program`、`address-space-lifecycle`、`block-device-read`、`exfat-read-filesystem` 主规格，确认 ELF loader 的依赖、非目标和 smoke 边界没有冲突。
 - [x] 1.2 确认用户 ELF 文件约定路径、最大文件大小、用户虚拟地址窗口、用户栈大小和 smoke marker 名称，并把决策记录到实现注释或验证记录。
 - [x] 1.3 审查 boot fixed addresses、higher-half base、direct map、`KVMEM_BASE`、recursive self-mapping、syscall vector、exception/IRQ gate privilege 和 EOI 语义，确保本 change 不移动或放宽这些 ABI/布局假设。
 
@@ -21,7 +21,7 @@
 
 ## 4. FS 到进程运行集成
 
-- [x] 4.1 在 `user_elf_smoke` 路径中通过阶段 7 block/FS API mount/lookup/read 约定用户 ELF 文件，并在文件缺失、过大或读取失败时输出 deterministic `BIGOS_USER_ELF_` failure marker。
+- [x] 4.1 在 `user_elf_smoke` 路径中通过kernel block and filesystem read capability block/FS API mount/lookup/read 约定用户 ELF 文件，并在文件缺失、过大或读取失败时输出 deterministic `BIGOS_USER_ELF_` failure marker。
 - [x] 4.2 创建 ELF-backed `Process`，绑定用户地址空间 root、entry、segment ranges、user stack、kernel stack、exit/fault 状态和 safe teardown 所需 ownership 元数据。
 - [x] 4.3 复用既有 TSS/RSP0、`iretq` ring3 entry、`SYS_WRITE`/`SYS_EXIT` 和用户 fault 终止路径，确保 syscall gate 初始化后才进入 CPL3。
 - [x] 4.4 保持 flat embedded `user_program_smoke` 与 ELF smoke 独立 selectable 或明确互斥，避免 embedded path 被 block/FS/ELF 依赖污染。

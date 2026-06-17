@@ -1,6 +1,6 @@
 ## Why
 
-阶段 1 和阶段 1.5 已把 PIT/i8259 IRQ0 与 timer/IRQ runtime path 收敛到可维护的基础上，下一步需要把当前仅用于 smoke 的 keyboard IRQ1 升级为最小可用输入路径，并为后续 scheduler、shell、系统调用和驱动调试提供统一 console/TTY 抽象。
+unified boot handoff capability 和unified boot handoff capability.5 已把 PIT/i8259 IRQ0 与 timer/IRQ runtime path 收敛到可维护的基础上，下一步需要把当前仅用于 smoke 的 keyboard IRQ1 升级为最小可用输入路径，并为后续 scheduler、shell、系统调用和驱动调试提供统一 console/TTY 抽象。
 
 当前主线只有 VGA/COM1 早期输出和 keyboard scancode smoke；`tmp/terminal-keyboard-wip/` 中的历史原型未接入活动源码，且存在 ISR 内直接输出、`terminal`/`pty` 命名漂移和默认启用 IRQ1 等问题，需要通过新的 OpenSpec change 明确安全边界后再合入。
 

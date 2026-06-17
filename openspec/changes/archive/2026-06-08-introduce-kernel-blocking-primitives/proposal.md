@@ -2,7 +2,7 @@
 
 BigOS 当前已经具备单核协作式调度、PIT tick、TTY 输入、syscall 和 smoke-only 用户态闭环，但内核仍缺少统一等待模型；继续扩展进程生命周期、文件描述符、文件系统或设备驱动前，需要先明确线程何时可以阻塞、如何被唤醒、超时如何表达，以及哪些上下文绝对不能睡眠。
 
-阶段 10 聚焦建立可验证的阻塞与睡眠原语，保持单核协作式语义，不把完整抢占、SMP、通用进程生命周期或 VFS 一起引入。
+blocking primitives and timer ownership capability 聚焦建立可验证的阻塞与睡眠原语，保持单核协作式语义，不把完整抢占、SMP、通用进程生命周期或 VFS 一起引入。
 
 ## What Changes
 
@@ -11,13 +11,13 @@ BigOS 当前已经具备单核协作式调度、PIT tick、TTY 输入、syscall 
 - 增加 timeout waits：基于现有 PIT monotonic tick 支持有界超时等待，作为 `mdelay()` 之外的可让出 CPU 的等待方式。
 - 扩展协作式调度器状态机：在 runnable/running/idle/terminated 之外识别 blocked/sleeping 类状态，并只调度 runnable 线程。
 - 为第一批消费者定义边界：TTY 输入可提供非中断上下文的 blocking read/wait，timer 提供 sleep/timeout wait，未来 process `wait`/`exit` 只保留接口预留和非目标说明。
-- 增加验证：在阶段 9 runtime smoke matrix 基础上加入 blocking primitives 的源码级检查、构建检查和 QEMU headless marker smoke；低层 IRQ/timer 行为仍建议 Bochs 或 QEMU+Bochs 交叉验证。
+- 增加验证：在runtime smoke validation matrix runtime smoke matrix 基础上加入 blocking primitives 的源码级检查、构建检查和 QEMU headless marker smoke；低层 IRQ/timer 行为仍建议 Bochs 或 QEMU+Bochs 交叉验证。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `kernel-blocking-primitives`: 定义单核协作式内核等待模型，包括线程等待状态、sleep queue、wakeup、timeout wait、禁止阻塞上下文和阶段 10 验证要求。
+- `kernel-blocking-primitives`: 定义单核协作式内核等待模型，包括线程等待状态、sleep queue、wakeup、timeout wait、禁止阻塞上下文和blocking primitives and timer ownership capability 验证要求。
 
 ### Modified Capabilities
 

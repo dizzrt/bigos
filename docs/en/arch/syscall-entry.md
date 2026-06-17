@@ -1,6 +1,6 @@
 # System Call Entry
 
-BigOS stage 6 uses a controlled software-triggered kernel entry path and a minimal syscall ABI. The stage 5 ring0 diagnostic syscall remains available. The default-off `user_program_smoke` path configures GDT/TSS and a user address space, then allows CPL3 to enter the same dispatcher through `int 0x80`.
+BigOS uses a controlled software-triggered kernel entry path and a minimal syscall ABI. The ring0 diagnostic syscall remains available. The default-off `user_program_smoke` path configures GDT/TSS and a user address space, then allows CPL3 to enter the same dispatcher through `int 0x80`.
 
 ## Entry Mechanism: `int 0x80` Software Interrupt Gate
 

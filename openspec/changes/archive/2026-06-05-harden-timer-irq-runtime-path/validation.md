@@ -28,7 +28,7 @@
 
 ## 剩余风险
 
-- Runtime IRQ0 周期触发、EOI、`iretq` 返回与 tick 单调递增的端到端 serial 观测仍未完成：`boot_debug.py` 的固定重配置会清掉 `timer_smoke`，需要在工具支持 timer-smoke 开关、或手工生成已开启 `BIGOS_TIMER_SMOKE` 的镜像并接入稳定 Bochs/ROM/serial oracle 后复跑。该 runtime 不确定性与阶段 1（`add-timer-irq-foundation`）记录的本地 Bochs/serial 不稳定一致。
+- Runtime IRQ0 周期触发、EOI、`iretq` 返回与 tick 单调递增的端到端 serial 观测仍未完成：`boot_debug.py` 的固定重配置会清掉 `timer_smoke`，需要在工具支持 timer-smoke 开关、或手工生成已开启 `BIGOS_TIMER_SMOKE` 的镜像并接入稳定 Bochs/ROM/serial oracle 后复跑。该 runtime 不确定性与unified boot handoff capability（`add-timer-irq-foundation`）记录的本地 Bochs/serial 不稳定一致。
 - 跨 TU 调用 `bigos::timer::on_tick()` 在高频 IRQ0 下的实际行为仅由源码级检查与构建覆盖，尚未经稳定 oracle runtime 复核。
 - 已通过源码级检查锁定：tick 状态归位 timer TU、handler 经 `on_tick()` 更新且不裸写 `g_ticks`、handler 不直接 EOI、`mdelay()`/tick 轮询不在 ISR body、timer smoke 默认关闭且 bounded、ISR ABI 寄存器保存顺序/error-code 占位/栈对齐/EOI 边界不变。
 - 本 change 未改变 `InterruptFrame` 布局、寄存器保存顺序、EOI 分离规则或任何地址布局/ABI 形状，仅做封装收敛与验证固化。

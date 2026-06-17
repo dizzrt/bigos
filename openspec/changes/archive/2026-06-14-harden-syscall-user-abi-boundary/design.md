@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前已经从早期 syscall 入口推进到默认用户态 baseline：内核通过 `int 0x80` 提供进程、fd/VFS、pipe、time/identity、signal、`brk`、受限匿名映射和 `execve` 等能力，用户侧已有 crt0、最小 libc、`/bin/sh` 与若干静态用户程序。stage 33 的核心问题不是新增用户态功能，而是在现有 x86_64-only baseline 上把 kernel/user ABI 事实收束到可审查、可文档化、可复用的边界。
+BigOS 当前已经从早期 syscall 入口推进到默认用户态 baseline：内核通过 `int 0x80` 提供进程、fd/VFS、pipe、time/identity、signal、`brk`、受限匿名映射和 `execve` 等能力，用户侧已有 crt0、最小 libc、`/bin/sh` 与若干静态用户程序。the documented capability 的核心问题不是新增用户态功能，而是在现有 x86_64-only baseline 上把 kernel/user ABI 事实收束到可审查、可文档化、可复用的边界。
 
 本设计涉及 `kernel/core/syscall`、`kernel/core/proc`、用户态 runtime/libc/build、公共头文件和双语文档。它必须保持当前 runnable backend、内存布局、IDT vector、syscall 寄存器约定、用户栈布局和磁盘镜像布局不变。
 
@@ -25,7 +25,7 @@ BigOS 当前已经从早期 syscall 入口推进到默认用户态 baseline：�
 
 1. 以现有 `int 0x80` ABI 作为当前唯一稳定 syscall ABI。
 
-   理由：现有内核、用户 libc 和 smoke 已经围绕 `rax`/`rdi`/`rsi`/`rdx`/`r10`/`r8`/`r9` 建立最小契约，stage 33 的目标是收紧边界而不是替换入口机制。替代方案是引入 `syscall/sysret` 或 backend-neutral syscall trap 抽象；这会把 runtime 行为变更混入边界整理，并提高 boot/user-mode 风险。
+   理由：现有内核、用户 libc 和 smoke 已经围绕 `rax`/`rdi`/`rsi`/`rdx`/`r10`/`r8`/`r9` 建立最小契约，the documented capability 的目标是收紧边界而不是替换入口机制。替代方案是引入 `syscall/sysret` 或 backend-neutral syscall trap 抽象；这会把 runtime 行为变更混入边界整理，并提高 boot/user-mode 风险。
 
 2. 让 kernel/user ABI 事实从单一来源传播到用户 wrapper 与文档。
 
@@ -37,11 +37,11 @@ BigOS 当前已经从早期 syscall 入口推进到默认用户态 baseline：�
 
 4. 核心层只表达 syscall/user ABI 的语义边界，x86_64 私有细节留在 backend 实现侧。
 
-   理由：当前唯一 runnable backend 仍是 x86_64，但后续 stage 会继续整理中断、VM、用户态入口和 backend 扩展。把裸寄存器布局、descriptor、TSS/RSP0、IDT gate 或汇编 frame 泄漏到核心层会增加后续拆分成本。替代方案是保持当前散落实现；短期改动少，但会让 stage 34/35 的边界整理更难审查。
+   理由：当前唯一 runnable backend 仍是 x86_64，但后续 stage 会继续整理中断、VM、用户态入口和 backend 扩展。把裸寄存器布局、descriptor、TSS/RSP0、IDT gate 或汇编 frame 泄漏到核心层会增加后续拆分成本。替代方案是保持当前散落实现；短期改动少，但会让 the documented capability/35 的边界整理更难审查。
 
 5. ABI 文档合并进现有 syscall/userland 文档，不新增独立 `user-abi.md`。
 
-   理由：当前 `docs/en/arch/syscall-entry.md` 已承载 vector、register、errno、dispatcher 等 syscall ABI 事实，`docs/en/arch/userland-runtime.md` 已承载 crt0、libc、用户程序构建和 bounded userland runtime 事实；`docs/zh` 下也存在同构镜像。stage 33 应先收紧既有文档中的合同，避免新增空泛的第三份 ABI 文档造成漂移。替代方案是新增 `docs/en/arch/user-abi.md` 和 `docs/zh/arch/user-abi.md`；只有当 syscall 与 userland runtime 文档明显膨胀，或后续 backend parity 需要单独 ABI 索引时再考虑。
+   理由：当前 `docs/en/arch/syscall-entry.md` 已承载 vector、register、errno、dispatcher 等 syscall ABI 事实，`docs/en/arch/userland-runtime.md` 已承载 crt0、libc、用户程序构建和 bounded userland runtime 事实；`docs/zh` 下也存在同构镜像。the documented capability 应先收紧既有文档中的合同，避免新增空泛的第三份 ABI 文档造成漂移。替代方案是新增 `docs/en/arch/user-abi.md` 和 `docs/zh/arch/user-abi.md`；只有当 syscall 与 userland runtime 文档明显膨胀，或后续 backend parity 需要单独 ABI 索引时再考虑。
 
 6. 先补齐已使用的 BigOS-specific 用户头文件规格，再决定是否隐藏声明。
 

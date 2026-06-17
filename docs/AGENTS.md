@@ -23,5 +23,9 @@ This subtree contains bilingual project documentation. `docs/en` is canonical; `
   capabilities, medium/long-term planning, and staged development priorities.
   Do not put concrete entry points, file paths, commands, validation markers,
   implementation details, or archive/version indexes in the roadmap.
+- Do not cite roadmap stage numbers or roadmap task numbers in documentation
+  updates, OpenSpec change notes, or archive notes. Use capability names,
+  behavior names, implementation boundaries, or artifact-local checklist numbers
+  instead.
 - Use repository-relative documentation references such as `docs/en/arch/syscall-entry.md`; do not write machine-specific absolute paths.
 - Do not recreate the removed top-level architecture or KTL documentation roots; the language roots are the only active documentation locations.

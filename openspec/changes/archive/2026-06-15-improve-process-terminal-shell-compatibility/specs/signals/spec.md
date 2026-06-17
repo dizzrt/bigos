@@ -19,7 +19,7 @@ BigOS SHALL align signal default termination with the bounded process wait statu
 - **AND** it MUST NOT imply terminal process groups, foreground/background jobs, stopped/continued states, or POSIX terminal-generated group signaling
 
 ### Requirement: interrupt-like terminal input signal behavior remains explicit
-BigOS SHALL keep interrupt-like terminal input behavior explicit and bounded. In Stage 42, such input SHALL be exposed as a deterministic shell line-cancellation event while editing input, and SHALL NOT deliver a signal to a foreground child or foreground process group.
+BigOS SHALL keep interrupt-like terminal input behavior explicit and bounded. In process/terminal/shell composition hardening, such input SHALL be exposed as a deterministic shell line-cancellation event while editing input, and SHALL NOT deliver a signal to a foreground child or foreground process group.
 
 #### Scenario: interrupt-like input cancels shell line editing
 - **WHEN** the default terminal receives the configured interrupt-like control input while shell line input is active
@@ -31,7 +31,7 @@ BigOS SHALL keep interrupt-like terminal input behavior explicit and bounded. In
 - **THEN** BigOS MUST NOT broadcast a signal to an unspecified foreground process group
 - **AND** it MUST NOT require sessions, job control, termios, or multi-terminal state to decide the target
 
-#### Scenario: interrupt-like input does not signal running child in Stage 42
+#### Scenario: interrupt-like input does not signal running child in process/terminal/shell composition hardening
 - **WHEN** a child command is running and the default terminal receives the configured interrupt-like control input
 - **THEN** BigOS MUST NOT infer a POSIX foreground child or process group target for signal delivery
 - **AND** shell behavior MUST remain bounded as documented no-op, deferred status handling, or prompt recovery after the existing wait path completes

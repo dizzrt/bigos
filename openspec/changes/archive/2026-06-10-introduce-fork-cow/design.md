@@ -1,12 +1,12 @@
 ## Context
 
-BigOS 当前进程只能由 ELF 镜像构造地址空间（`create_elf_user_process` / `exec_current_from_elf_image`），用户内存通过阶段 15 的统一缺页处理 `try_handle_user_page_fault` 惰性物化匿名页。已具备的前置：
+BigOS 当前进程只能由 ELF 镜像构造地址空间（`create_elf_user_process` / `exec_current_from_elf_image`），用户内存通过demand paging capability 的统一缺页处理 `try_handle_user_page_fault` 惰性物化匿名页。已具备的前置：
 
-- 阶段 15.5：进程注册结构与每进程 fd 表已是堆分配、可增长/可回收（`MAX_PROCESSES_SOFT_LIMIT` / `MAX_FDS_SOFT_LIMIT`），`Process` 对象经 `alloc_process_object` 分配、reap 时回收。
-- 阶段 15：`try_handle_user_page_fault` 对 `error_code` present 位（bit0）即判定为保护违例并返回 false（交由调用方 kill）；匿名页惰性物化已用 `alloc_user_frame`/`free_user_frame`/`map_user_page_for_process` 与 VMA `materialized_*` 记账。
+- growable process and fd table capability：进程注册结构与每进程 fd 表已是堆分配、可增长/可回收（`MAX_PROCESSES_SOFT_LIMIT` / `MAX_FDS_SOFT_LIMIT`），`Process` 对象经 `alloc_process_object` 分配、reap 时回收。
+- demand paging capability：`try_handle_user_page_fault` 对 `error_code` present 位（bit0）即判定为保护违例并返回 false（交由调用方 kill）；匿名页惰性物化已用 `alloc_user_frame`/`free_user_frame`/`map_user_page_for_process` 与 VMA `materialized_*` 记账。
 - 地址空间：`derive_user_address_space_root()` 复制内核高半区顶层项、零填充低半区；`teardown_user_address_space()` 仅回收进程拥有的低半区页表项并最后释放 PML4；`map_page_in_root()` 按显式 root 建立映射且不切 CR3。
 
-阶段 16 要在此之上引入 `fork` 与 COW：复制一个进程而非从镜像构造，并以写时复制避免逐页深拷贝。约束：x86_64 单核、同步、无信号、`int 0x80` 与 `InterruptFrame` ABI 不变、`#PF` 仍是异常路径不发 EOI、不引入 SMP/锁。
+fork/exec process capability 要在此之上引入 `fork` 与 COW：复制一个进程而非从镜像构造，并以写时复制避免逐页深拷贝。约束：x86_64 单核、同步、无信号、`int 0x80` 与 `InterruptFrame` ABI 不变、`#PF` 仍是异常路径不发 EOI、不引入 SMP/锁。
 
 ## Goals / Non-Goals
 

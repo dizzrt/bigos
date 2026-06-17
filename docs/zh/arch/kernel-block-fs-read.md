@@ -1,6 +1,6 @@
 # 内核块设备与 exFAT 读取路径
 
-BigOS 阶段 7 新增内核运行期只读块设备与文件系统路径。该路径与 Legacy
+BigOS kernel block and filesystem read capability 新增内核运行期只读块设备与文件系统路径。该路径与 Legacy
 BIOS bootloader 的 exFAT 辅助逻辑分离：bootloader 仍使用固定低地址缓冲区
 和连续启动文件加载 `/boot/boot.bin` 与 kernel；内核运行期则在内存管理完成后
 提供可复用的 bounded API。

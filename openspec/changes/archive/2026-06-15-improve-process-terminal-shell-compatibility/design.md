@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前默认启动路径已经进入 resident init 并启动 `/bin/sh`，用户态可通过现有 fd/syscall、TTY/console、process lifecycle、signals、pipe/dup、cwd/PATH 和路径工具进行基本交互。Stage 42 不再新增一个大型底层设施，而是把这些已存在能力组合成更稳定的交互契约：父 shell 能可靠等待子命令，信号终止能被观察，默认终端控制输入能以有界方式影响读行，pipe/重定向失败不会破坏父 shell fd 状态。
+BigOS 当前默认启动路径已经进入 resident init 并启动 `/bin/sh`，用户态可通过现有 fd/syscall、TTY/console、process lifecycle、signals、pipe/dup、cwd/PATH 和路径工具进行基本交互。process/terminal/shell composition hardening 不再新增一个大型底层设施，而是把这些已存在能力组合成更稳定的交互契约：父 shell 能可靠等待子命令，信号终止能被观察，默认终端控制输入能以有界方式影响读行，pipe/重定向失败不会破坏父 shell fd 状态。
 
 该 change 跨越 `kernel/core/proc`、`kernel/core/signal`、`kernel/core/terminal`、`kernel/core/fs`、`kernel/core/syscall` 与 `user/**`，但不改变 boot、linker、page-table、disk image 或 syscall vector。所有运行时行为仍以 x86_64 Legacy BIOS/MBR/exFAT baseline、单核、同步、有界用户态和静态 user ELF 为前提。
 
@@ -30,9 +30,9 @@ BigOS 当前默认启动路径已经进入 resident init 并启动 `/bin/sh`，�
 
 ## Decisions
 
-### Decision: 把 Stage 42 作为现有能力的 delta，而不是新建能力域
+### Decision: 把 process/terminal/shell composition hardening 作为现有能力的 delta，而不是新建能力域
 
-选择修改 `process-lifecycle`、`signals`、`minimal-terminal-abstraction`、`user-shell` 和 `posix-like-process-io-subset`，因为 Stage 42 的目标是交互兼容性和组合行为，不是引入新的独立内核子系统。
+选择修改 `process-lifecycle`、`signals`、`minimal-terminal-abstraction`、`user-shell` 和 `posix-like-process-io-subset`，因为 process/terminal/shell composition hardening 的目标是交互兼容性和组合行为，不是引入新的独立内核子系统。
 
 替代方案是创建 `process-terminal-shell-compatibility` 新 capability。该方案会重复已有 process、terminal、shell 和 bounded POSIX-like 子集的边界，后续 archive 时更容易形成规格分叉。
 
@@ -52,7 +52,7 @@ Shell 在设置 redirection 或 pipe 前记录所需 fd 状态，失败时关闭
 
 支持当前能力范围内的等待目标匹配和状态写回；unsupported options MUST 返回 deterministic error，而不是静默忽略成完整 POSIX 行为。
 
-替代方案是提前引入更完整的 `waitpid` options。该方案需要更完整的进程状态、信号停止/继续、进程组和 job-control 语义，不符合 Stage 42 边界。
+替代方案是提前引入更完整的 `waitpid` options。该方案需要更完整的进程状态、信号停止/继续、进程组和 job-control 语义，不符合 process/terminal/shell composition hardening 边界。
 
 ### Decision: 信号终止状态通过现有生命周期观察
 
@@ -66,9 +66,9 @@ Signal default terminate 继续进入现有 exit/fault-to-reaper 生命周期，
 
 替代方案是在 terminal/TTY 层直接结束 shell。该方案会让终端层理解具体 consumer，破坏 terminal producer/consumer 分层，也不利于后续非交互输入或普通用户程序复用 stdin 行为。
 
-### Decision: interrupt-like 输入在 Stage 42 只做行取消，不投递前台子命令信号
+### Decision: interrupt-like 输入在 process/terminal/shell composition hardening 只做行取消，不投递前台子命令信号
 
-在没有 sessions、terminal process groups、job control 或 foreground terminal ownership 的前提下，Stage 42 将 interrupt-like 输入定义为 shell line cancellation：编辑行时清空当前输入并恢复 prompt；子命令运行时不向所谓“前台进程组”广播信号，最多记录为 documented no-op 或由 shell 在 wait 返回后恢复状态。向当前前台子命令投递 bounded signal 留给后续显式前台子进程跟踪或终端/session 模型。
+在没有 sessions、terminal process groups、job control 或 foreground terminal ownership 的前提下，process/terminal/shell composition hardening 将 interrupt-like 输入定义为 shell line cancellation：编辑行时清空当前输入并恢复 prompt；子命令运行时不向所谓“前台进程组”广播信号，最多记录为 documented no-op 或由 shell 在 wait 返回后恢复状态。向当前前台子命令投递 bounded signal 留给后续显式前台子进程跟踪或终端/session 模型。
 
 替代方案是立即把 interrupt-like 输入映射到 signal delivery。该方案目标选择不稳定，容易暗示 POSIX terminal-generated signal 和 foreground process group 语义，不符合当前边界。
 
@@ -98,4 +98,4 @@ Rollback 策略是按子系统回退：先禁用或撤回 shell/userland 表层�
 
 ## Open Questions
 
-- 当前无未决设计问题。EOF-like、interrupt-like 和 `waitpid` unsupported options 已在 Decisions 中固定为 Stage 42 行为。
+- 当前无未决设计问题。EOF-like、interrupt-like 和 `waitpid` unsupported options 已在 Decisions 中固定为 process/terminal/shell composition hardening 行为。

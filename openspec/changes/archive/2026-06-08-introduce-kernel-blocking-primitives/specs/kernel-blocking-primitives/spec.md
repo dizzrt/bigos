@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: 线程等待状态是显式且有界的
-BigOS SHALL provide explicit single-core thread wait states for stage 10 blocking primitives, without introducing preemptive scheduling, SMP migration, process ownership, or POSIX blocking policy.
+BigOS SHALL provide explicit single-core thread wait states for the documented capability blocking primitives, without introducing preemptive scheduling, SMP migration, process ownership, or POSIX blocking policy.
 
 #### Scenario: 线程进入等待状态
 - **WHEN** 非中断内核代码把当前线程挂入一个 wait queue 或 sleep queue
@@ -9,7 +9,7 @@ BigOS SHALL provide explicit single-core thread wait states for stage 10 blockin
 - **AND** the thread MUST NOT remain eligible for normal runnable scheduling until a wakeup, timeout, cancellation, or termination transition occurs
 
 #### Scenario: 等待状态保持单核边界
-- **WHEN** scheduler or blocking APIs describe stage 10 wait states
+- **WHEN** scheduler or blocking APIs describe the documented capability wait states
 - **THEN** the documented behavior MUST state that they are single-core cooperative states
 - **AND** they MUST NOT imply SMP migration, IPI, per-CPU run queues, preemptive IRQ-return switching, process wait ownership, or user-visible POSIX semantics
 
@@ -45,7 +45,7 @@ BigOS SHALL define and enforce contexts where blocking, sleeping, or waiting is 
 - **AND** it MUST NOT silently enqueue the current thread or enter an unbounded busy wait
 
 ### Requirement: timeout wait 基于 monotonic tick
-BigOS SHALL provide bounded timeout waits based on the existing monotonic PIT tick under the stage 10 single-core cooperative model.
+BigOS SHALL provide bounded timeout waits based on the existing monotonic PIT tick under the documented capability single-core cooperative model.
 
 #### Scenario: timeout 未到期前被显式唤醒
 - **WHEN** a thread waits with a finite timeout and a producer wakes the wait queue before the deadline

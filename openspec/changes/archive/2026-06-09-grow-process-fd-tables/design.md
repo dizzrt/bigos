@@ -7,7 +7,7 @@
 - 每进程 fd 表：`FdEntry fd_table[MAX_FDS]`（`MAX_FDS = 16`）内联在 `Process` 里，`install_fd_current` 线性扫描首个空位，`read/close/close_all/close_on_exec` 按下标线性遍历。
 - PID 分配：`g_next_pid` 自增并跳过 `0` / `WAIT_ANY`，`alloc_pid` 用 `lookup_process` 去重。
 
-阶段 16 的 `fork` 会在单次调用内复制一个进程及其 fd 表，并支撑多代进程并存，`MAX_PROCESSES = 16` / `MAX_FDS = 16` 与 `static Process` 单例都会成为硬墙。阶段 15.5 的目标是「在 `fork` 撞上之前移除静态槽位上限」，但不引入 `fork` 本身。
+fork/exec process capability 的 `fork` 会在单次调用内复制一个进程及其 fd 表，并支撑多代进程并存，`MAX_PROCESSES = 16` / `MAX_FDS = 16` 与 `static Process` 单例都会成为硬墙。growable process and fd table capability 的目标是「在 `fork` 撞上之前移除静态槽位上限」，但不引入 `fork` 本身。
 
 约束：freestanding、单核、同步、无 libc、无异常/RTTI；`kmalloc`/`free` 已可用，但**不可**在 IRQ 上下文做分配；进程创建/回收发生在普通内核线程上下文（`can_block()` 为真）。
 
@@ -31,7 +31,7 @@
 
 ### 决策 1：进程注册表用侵入式链表 + 软上限，而非更大的固定数组
 - 方案：把 `g_process_table[MAX_PROCESSES]` 改为侵入式双向链表——在 `Process` 内嵌注册节点指针（`reg_next` / `reg_prev`，或内嵌一个 `ktl::__detail::_List_node_base`），由全局链表头穿起所有已注册进程。注册/注销为 O(1) 链表操作、无元素搬迁、不额外分配节点内存（节点随 `Process` 对象一起分配）。以 `constexpr uint32_t MAX_PROCESSES_SOFT_LIMIT = 1024` 作为软上限：`publish_process` 在当前活跃进程数未达软上限时挂入链表，达到软上限返回失败。
-- 备选 1：直接把 `MAX_PROCESSES` 调大到 256/1024 仍用固定数组。否决：仍是硬上限，且静态占用大，未解决「`fork` 撞上限」的根因，也不符合阶段 15.5「可增长/可回收」的明确措辞。
+- 备选 1：直接把 `MAX_PROCESSES` 调大到 256/1024 仍用固定数组。否决：仍是硬上限，且静态占用大，未解决「`fork` 撞上限」的根因，也不符合growable process and fd table capability「可增长/可回收」的明确措辞。
 - 备选 2：KTL `ktl::list<Process*>` 动态数组/链表容器。否决：`ktl::list` 是 std::list 风格的「拥有式」容器，每次插入会额外 `kmalloc` 一个节点，引入与 `Process` 对象分离的第二条失败面与生命周期；侵入式节点随对象分配，零额外分配、与 reap 链/父子链同寿命，更契合单核内核语义。
 - 理由：可增长结构把上限从「编译期硬墙」变成「资源/策略软上限」，回收后链表节点随对象自然摘除复用；侵入式设计对 reap 链友好且无搬迁。
 

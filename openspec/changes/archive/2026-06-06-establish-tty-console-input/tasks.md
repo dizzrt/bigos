@@ -40,7 +40,7 @@
 
 - [x] 7.1 更新或新增 keyboard/TTY/console 架构文档，记录输入数据流、console 输出边界、初始化顺序、overflow 策略和非目标。
 - [x] 7.2 更新中断/异常文档中 keyboard IRQ1 章节，从 smoke-only 描述扩展为受控输入 handoff，并保留 EOI/IRQ-context 约束。
-- [x] 7.3 记录 `kput()`/`kputs()` 在阶段 2 保留 early direct output 语义，普通 runtime 输出使用新的 console API，COM1 仅用于 bounded marker/diagnostic。
+- [x] 7.3 记录 `kput()`/`kputs()` 在TTY console input capability 保留 early direct output 语义，普通 runtime 输出使用新的 console API，COM1 仅用于 bounded marker/diagnostic。
 
 ## 8. 验证
 

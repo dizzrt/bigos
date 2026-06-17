@@ -1,8 +1,8 @@
 # First User Program Runtime Path
 
-Stage 6 `user_program_smoke` is a default-off validation path that proves BigOS can create a minimal user process, load an embedded user program, enter CPL3, and return to the kernel through `write` / `exit` syscalls.
+user entry and syscall capability `user_program_smoke` is a default-off validation path that proves BigOS can create a minimal user process, load an embedded user program, enter CPL3, and return to the kernel through `write` / `exit` syscalls.
 
-Stage 8 adds a separate default-off `user_elf_smoke` path. Stage 12 promotes the
+user ELF loader capability adds a separate default-off `user_elf_smoke` path. process runtime foundation promotes the
 shared process runtime into a normally compiled lifecycle core while keeping both
 smoke entries default-off. The ELF smoke reuses the lifecycle core, syscall gate,
 user fault path, bounded `argv`/`envp` stack setup, and deferred reaper, but loads
@@ -25,7 +25,7 @@ The ELF smoke uses a static freestanding ELF64 `ET_EXEC` image built by
 
 ## Default-On Init Launch
 
-Stage 14.5 promotes ring3 entry onto the normal boot path. `kernel()` creates a
+behavior assertion validation baseline promotes ring3 entry onto the normal boot path. `kernel()` creates a
 default-on, no-`#ifdef` kernel thread running `bigos::proc::launch_init` between
 `proc::init()` and `sched::start()`. `launch_init` reuses the read-only
 VFS/exFAT path: `vfs::init` -> `open_absolute(INIT_ELF_PATH)` -> bounded read ->

@@ -2,7 +2,7 @@
 
 BigOS 已有进程级 VMA 集合与一条专用的栈缺页恢复路径 `try_handle_current_stack_fault`：它仅处理向下增长的 `Stack` VMA，在 `materialized_start` 之上、`start` 之下的页上分配零页并映射。其余用户内存（匿名映射、`brk` 堆、ELF 数据/BSS）在创建 VMA 时即 eager 逐页物化。`page_fault_handler`（[interrupt.cc](kernel/core/irq/interrupt.cc#L42-L61)）在 `BIGOS_USER_PROCESS` 下，对用户态缺页先尝试栈恢复，失败即 `fault_current_and_exit(-14)`；其余路径打印 `BIGOS_PAGE_FAULT` 诊断并 `halt_cpu()`。
 
-约束：freestanding、单核、同步；`#PF` 异常路径不发 EOI、不可重入阻塞（`NonblockingContextGuard`）；CR2/error_code 位语义固定；用户低半区布局、页属性常量、CR3 切换不变。本设计是路线图阶段 15，必须独立完成并独立验证，作为 fork/COW/mmap 的前置。
+约束：freestanding、单核、同步；`#PF` 异常路径不发 EOI、不可重入阻塞（`NonblockingContextGuard`）；CR2/error_code 位语义固定；用户低半区布局、页属性常量、CR3 切换不变。本设计是路线图demand paging capability，必须独立完成并独立验证，作为 fork/COW/mmap 的前置。
 
 VMA 结构已具备记账字段：`materialized_start`（向下增长用）与 `materialized_end`（向上增长 / 区间用），可直接承载惰性物化边界，无需新增结构。
 
@@ -28,7 +28,7 @@ VMA 结构已具备记账字段：`materialized_start`（向下增长用）与 `
 - **brk / 匿名映射改惰性**：`brk_current` 扩展时仅更新 `heap_break` 与 VMA `end`，不预先 `alloc_user_frame`/`map`；收缩时仍即时 unmap 已物化页并回退 `materialized_end`。`map_anonymous_current` 仅登记 VMA 与 `anon_next`，物化交给缺页。回滚因此简化为「仅元数据回滚」，但需保证收缩 / teardown 只 unmap 真正已物化的页（依据 `materialized_*`）。
   - 备选：保持 eager。否决：与阶段目标冲突，且 eager 堆/匿名在大区间上浪费物理页。
 - **失败语义集中在 handler**：物化成功返回 true；分配失败 / 权限不符 / 越界 / 非匿名 backing -> 返回 false。`page_fault_handler` 对用户态 false 一律 `fault_current_and_exit`（确定性 kill），内核态缺页保持现有 panic/halt。区分「分配失败」与「非法访问」仅体现在 kill 原因码，不改变是否 kill。
-- **验证开关**：新增 `demand_paging_smoke` -> `BIGOS_DEMAND_PAGING_SMOKE`，发射 `BIGOS_DEMAND_PAGING_PASSED/FAILED`，默认关闭，纳入 stage 9 QEMU headless 矩阵；不删除 `page_fault_smoke` 与 `user_*_smoke`。
+- **验证开关**：新增 `demand_paging_smoke` -> `BIGOS_DEMAND_PAGING_SMOKE`，发射 `BIGOS_DEMAND_PAGING_PASSED/FAILED`，默认关闭，纳入 the documented capability QEMU headless 矩阵；不删除 `page_fault_smoke` 与 `user_*_smoke`。
 - **kill 原因码复用 fault_reason**：「分配失败 kill」与「非法访问 kill」不分配新的 `BIGOS_*` 诊断码，统一复用既有 `fault_reason`（沿用 `-14` 缺页约定），由 marker 附带 `error_code` 位（present/write/user/instruction-fetch）供行为断言区分两类原因。
   - 备选：为两类失败各引入独立诊断码/原因码。否决：增加 ABI 面与维护成本，error 位已足够区分，且与现有统一 fault 路径一致。
 - **失败注入走 smoke 专用钩子**：`demand_paging_smoke` 的分配失败路径用 smoke 专用、默认关闭的注入钩子（在该 smoke 上下文内强制 `alloc_user_frame` 返回 0），而非全局测试构建宏。
@@ -46,5 +46,5 @@ VMA 结构已具备记账字段：`materialized_start`（向下增长用）与 `
 
 1. 引入统一缺页入口与惰性物化辅助，保持 `brk`/匿名映射 eager 行为暂不变，仅切换 handler 调用，回归现有 smoke。
 2. 将 `brk` 扩展与匿名映射切换为登记惰性区间；同步修正收缩 / teardown 的按 `materialized_*` unmap。
-3. 新增 `demand_paging_smoke` 与 marker，纳入 stage 9 矩阵与源码契约 / 行为断言测试。
+3. 新增 `demand_paging_smoke` 与 marker，纳入 the documented capability 矩阵与源码契约 / 行为断言测试。
 4. 回滚策略：保留旧 eager 路径为编译期可还原的最小补丁边界；若惰性化暴露回收缺陷，可先回退第 2 步、保留第 1 步统一入口。

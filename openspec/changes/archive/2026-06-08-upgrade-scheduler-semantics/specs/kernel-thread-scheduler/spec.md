@@ -70,7 +70,7 @@ BigOS SHALL track a bounded per-thread or per-current-thread time slice under th
 - **AND** idle MUST remain scheduler-owned and may halt only under documented interrupt-readiness assumptions
 
 ### Requirement: Scheduler supports priority extension hooks
-BigOS SHALL provide a minimal bounded priority hook, static priority field, or reserved scheduler policy slot without requiring a complete priority scheduler in stage 11.
+BigOS SHALL provide a minimal bounded priority hook, static priority field, or reserved scheduler policy slot without requiring a complete priority scheduler in the documented capability.
 
 #### Scenario: Default policy remains round-robin
 - **WHEN** no explicit priority policy is configured or implemented beyond the hook

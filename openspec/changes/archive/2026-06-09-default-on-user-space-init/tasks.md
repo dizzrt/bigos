@@ -19,7 +19,7 @@
 
 ## 4. 验证与行为断言
 
-- [x] 4.1 在 Stage 9 运行时 smoke 矩阵新增默认构建（无 smoke 开关）init case，断言 `BIGOS_INIT_ENTER` / `BIGOS_INIT_EXIT`
+- [x] 4.1 在 runtime smoke validation matrix 运行时 smoke 矩阵新增默认构建（无 smoke 开关）init case，断言 `BIGOS_INIT_ENTER` / `BIGOS_INIT_EXIT`
 - [x] 4.2 用 QEMU headless 默认构建跑通并采集串口 marker（`uv run python tools/boot_debug.py run --emulator qemu --display none ...`）
 - [x] 4.3 新增/调整行为断言测试，本 change 仅断言内核 `BIGOS_INIT_*` marker；init 二进制 stdout 输出断言留待后续阶段（决策 6）
 - [x] 4.4 源码契约断言 `launch_init` 及其调用点无 `#ifdef` 守卫
@@ -27,5 +27,5 @@
 ## 5. 文档同步
 
 - [x] 5.1 更新 `docs/en` 与 `docs/zh` 对应文档，描述默认 init 启动路径、`BIGOS_INIT_*` marker 与新失败模式（保持目录同构、使用仓库相对路径）
-- [x] 5.2 在 `roadmap.md` 中将 Stage 14.5 状态由 proposed 更新为进行中/已实现（落地后）
+- [x] 5.2 在 `roadmap.md` 中将 behavior assertion validation baseline 状态由 proposed 更新为进行中/已实现（落地后）
 - [x] 5.3 运行 `openspec validate default-on-user-space-init` 并记录验证/跳过原因与残留风险

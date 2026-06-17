@@ -2,7 +2,7 @@
 
 - [x] 1.1 盘点 `user/libc/include`、umbrella header、raw syscall primitive、BigOS-specific helper 和 bundled user programs 的声明/包含关系，形成 public、compatibility、internal 分类清单。
 - [x] 1.2 对照 `user-libc-min`、`user-crt0-runtime`、`posix-like-process-io-subset` 规格，标记缺少实现、缺少规格或缺少文档边界的声明。
-- [x] 1.3 确认 Stage 40 第一批必须补齐 `calloc`、`realloc`、`strtol`、`atoi`、bounded `snprintf`、`DIR*` 风格目录 wrapper 和增强 formatter，并记录延后项，例如完整 hosted stdio、动态链接、完整 POSIX libc、locale、threads、完整 precision/flags 和 broad file-backed `mmap`。
+- [x] 1.3 确认 bounded libc foundation 第一批必须补齐 `calloc`、`realloc`、`strtol`、`atoi`、bounded `snprintf`、`DIR*` 风格目录 wrapper 和增强 formatter，并记录延后项，例如完整 hosted stdio、动态链接、完整 POSIX libc、locale、threads、完整 precision/flags 和 broad file-backed `mmap`。
 
 ## 2. 公共头文件与 ABI 收敛
 
@@ -13,7 +13,7 @@
 
 ## 3. libc 基础子集实现
 
-- [x] 3.1 补齐或稳定 Stage 40 第一批基础 stdlib/string/memory 函数，至少覆盖 `strtol` 和 `atoi`，确保 freestanding-safe、有界输入确定性和失败不破坏调用者状态。
+- [x] 3.1 补齐或稳定 bounded libc foundation 第一批基础 stdlib/string/memory 函数，至少覆盖 `strtol` 和 `atoi`，确保 freestanding-safe、有界输入确定性和失败不破坏调用者状态。
 - [x] 3.2 补齐或稳定 allocator helper，至少覆盖 `calloc` 和 `realloc`，保持溢出检查、有界失败语义、原块失败保留和 `free(NULL)` 无副作用。
 - [x] 3.3 增强 bounded stdio/error reporting，覆盖 shared formatter、bounded `snprintf`、宽度、`%u`、`%p`、`%ld`、`%lu`、`%zu`，不得引入完整 hosted `FILE` 流、浮点、locale、宽字符或完整 precision/flags。
 - [x] 3.4 整理文件、进程、cwd、time、signal、wait、pipe、dup 等 wrapper，使简单静态 C 程序能通过 libc 消费现有 bounded syscall 行为。
@@ -22,7 +22,7 @@
 
 ## 4. 用户程序消费路径
 
-- [x] 4.1 更新 packaged `/bin/*` 工具中适合迁移的代码，使其优先消费 Stage 40 public libc API，而不是不必要地依赖 raw syscall 或隐式内部声明。
+- [x] 4.1 更新 packaged `/bin/*` 工具中适合迁移的代码，使其优先消费 bounded libc foundation public libc API，而不是不必要地依赖 raw syscall 或隐式内部声明。
 - [x] 4.2 更新 shell、PID-1 init 或 smoke 程序的 libc 使用方式，确保行为仍属于 bounded POSIX-like process/I/O subset。
 - [x] 4.3 为 BigOS-specific helper 保留必要兼容路径，并记录哪些 helper 是公开支持、compatibility export 或后续清理候选。
 
@@ -36,7 +36,7 @@
 
 ## 6. 文档同步
 
-- [x] 6.1 更新 docs/en 中的用户态 libc/API 边界说明，描述 Stage 40 bounded C library subset 和明确非目标。
+- [x] 6.1 更新 docs/en 中的用户态 libc/API 边界说明，描述 bounded libc foundation bounded C library subset 和明确非目标。
 - [x] 6.2 同步更新 docs/zh 对应镜像文档，保持与 docs/en 相同 ABI 事实和兼容边界。
 - [x] 6.3 检查 `roadmap.md` 如需微调，仅保持项目规划层级，不加入文件路径、命令、验证 marker、实现细节或 archive/version 索引。
 - [x] 6.4 确认所有文档使用 bounded subset / POSIX-like subset 表述，不声明完整 POSIX libc、动态链接、共享库或广泛 POSIX 兼容。

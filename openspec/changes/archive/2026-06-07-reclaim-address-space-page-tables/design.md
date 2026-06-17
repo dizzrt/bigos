@@ -1,6 +1,6 @@
 ## Context
 
-阶段 5 已建立显式页属性、root-targeted user mapping、用户页表根派生和 CR3 activation helper；阶段 6 已在默认关闭的 `user_program_smoke` 下创建最小 `Process`，映射 flat embedded user image、用户数据页和用户栈，并通过 TSS/RSP0 + `iretq` 进入 ring3，最后用 `SYS_WRITE`/`SYS_EXIT` 闭环。当前退出路径只记录 terminated/fault 状态，不承诺回收用户地址空间、用户物理页、动态页表页或 process kernel stack。
+ring0 syscall diagnostic capability 已建立显式页属性、root-targeted user mapping、用户页表根派生和 CR3 activation helper；user entry and syscall capability 已在默认关闭的 `user_program_smoke` 下创建最小 `Process`，映射 flat embedded user image、用户数据页和用户栈，并通过 TSS/RSP0 + `iretq` 进入 ring3，最后用 `SYS_WRITE`/`SYS_EXIT` 闭环。当前退出路径只记录 terminated/fault 状态，不承诺回收用户地址空间、用户物理页、动态页表页或 process kernel stack。
 
 本 change 跨越 `kernel/mm` 和 `kernel/core/proc`：一侧需要让页表 map/unmap 能识别哪些页表页是运行时动态创建且可回收，另一侧需要在进程不再运行、且不处于当前用户 CR3/当前内核栈的路径上执行 teardown。设计必须保持单核 freestanding C++17、无 SMP、无 hosted libc、无异常/RTTI，并且不移动 boot 固定地址、higher-half base、`KVMEM_BASE`、direct map、recursive self-mapping 或 BootInfo handoff ABI。
 
@@ -42,7 +42,7 @@
 
 ### Decision: `SYS_EXIT` 和用户 fault 只标记待回收，安全上下文执行 teardown
 
-`SYS_EXIT`、用户态 `#PF` 和非法用户 buffer 处理路径将当前进程状态置为 terminated/faulted，并记录 exit code 或 fault reason。它们不得直接释放当前执行所依赖的 kernel stack、当前 CR3 或 process object。实际 teardown 在已切回 kernel root、当前执行栈不属于被回收 process、且非 IRQ handler 的上下文中执行；阶段 6.5 可使用 bounded reaper helper、scheduler/idle handoff 或 smoke return path。
+`SYS_EXIT`、用户态 `#PF` 和非法用户 buffer 处理路径将当前进程状态置为 terminated/faulted，并记录 exit code 或 fault reason。它们不得直接释放当前执行所依赖的 kernel stack、当前 CR3 或 process object。实际 teardown 在已切回 kernel root、当前执行栈不属于被回收 process、且非 IRQ handler 的上下文中执行；user entry and syscall capability.5 可使用 bounded reaper helper、scheduler/idle handoff 或 smoke return path。
 
 理由：用户退出时仍可能运行在该进程的内核栈上，且当前 CR3 可能是用户 root。直接 free 会造成 use-after-free 或在 user CR3 下访问未映射诊断/allocator 路径。
 
@@ -60,7 +60,7 @@
 
 页表页元数据分配失败时，map primitive 必须回滚本次已写 descriptor/PTE 和计数，或不发布该映射并返回失败。teardown 中遇到不一致 ownership、计数下溢、非 owned 页表页或无法安全释放的对象时，不继续部分回收到不可推理状态；实现可以记录 `BIGOS_` marker、保留资源泄漏并返回失败，或走统一 panic，具体按调用点安全性决定。
 
-理由：内存回收路径的错误比泄漏更危险。阶段 6.5 优先保证 bootability、页表不被误释放和诊断可观测。
+理由：内存回收路径的错误比泄漏更危险。user entry and syscall capability.5 优先保证 bootability、页表不被误释放和诊断可观测。
 
 替代方案：teardown 忽略异常并尽力释放。否决理由：低层页表错误无法安全忽略，可能导致后续 kernel fault 或 silent memory corruption。
 
@@ -82,7 +82,7 @@
 5. 将 `SYS_EXIT` 与用户 fault 路径改为标记 terminated/faulted + enqueue/reaper handoff，不在当前栈上释放。
 6. 补源码级测试、默认/`user_program_smoke` 构建、OpenSpec validation 和可选 Bochs serial marker smoke。
 
-回滚策略：保留新增元数据但关闭空页表页回收调用点，可退回仅清除 leaf PTE 和记录 terminated 的阶段 6 行为；若默认 boot 或用户 smoke 受影响，优先回退 `SYS_EXIT`/fault 的 reaper wiring，保持页表 ownership 只作为诊断信息。
+回滚策略：保留新增元数据但关闭空页表页回收调用点，可退回仅清除 leaf PTE 和记录 terminated 的user entry and syscall capability 行为；若默认 boot 或用户 smoke 受影响，优先回退 `SYS_EXIT`/fault 的 reaper wiring，保持页表 ownership 只作为诊断信息。
 
 ## Open Questions
 

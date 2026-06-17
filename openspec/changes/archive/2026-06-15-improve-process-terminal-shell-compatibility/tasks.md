@@ -1,6 +1,6 @@
 ## 1. 规格与边界确认
 
-- [x] 1.1 对照 `roadmap.md` Stage 42 和本 change specs，确认实现范围只覆盖有界进程、默认终端和 shell 组合行为。
+- [x] 1.1 对照 `roadmap.md` process/terminal/shell composition hardening 和本 change specs，确认实现范围只覆盖有界进程、默认终端和 shell 组合行为。
 - [x] 1.2 审查现有 `process-lifecycle`、`signals`、`minimal-terminal-abstraction`、`user-shell`、`posix-like-process-io-subset` 规格，确认新增需求没有扩大到 sessions、terminal process groups、job control、termios 或完整 POSIX shell。
 - [x] 1.3 记录架构、地址布局和 ABI 不变性：不修改 boot handoff、linker address、page-table layout、direct map、GDT/TSS、CR3 switching、InterruptFrame、syscall vector `0x80`、disk layout 或 user ELF ABI。
 
@@ -28,7 +28,7 @@
 
 ## 5. 文档与用户可见契约
 
-- [x] 5.1 更新相关规格或文档说明，使用“bounded POSIX-like subset”描述 Stage 42 行为，不声明完整 POSIX process、terminal、shell、libc 或 filesystem。
+- [x] 5.1 更新相关规格或文档说明，使用“bounded POSIX-like subset”描述 process/terminal/shell composition hardening 行为，不声明完整 POSIX process、terminal、shell、libc 或 filesystem。
 - [x] 5.2 若修改 `docs/en` 或 `docs/zh`，同步更新对应语言镜像并保持相同相对路径结构。
 - [x] 5.3 若需要更新 `roadmap.md`，只保留项目规划层级描述，不写入具体入口点、文件路径、命令、validation marker、源码实现细节或 archive/version 索引。
 

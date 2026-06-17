@@ -1,10 +1,10 @@
 ## ADDED Requirements
 
-### Requirement: Stage 42 组合兼容性边界
+### Requirement: process/terminal/shell composition hardening 组合兼容性边界
 BigOS SHALL include bounded process, terminal, and shell composition behavior in its POSIX-like process and I/O subset. The subset SHALL cover wait/waitpid status observation, signal-terminated child reporting, default terminal line-control input, shell error recovery, pipe/redirection fd isolation, and simple static user-program composition while continuing to reject complete POSIX process, terminal, shell, libc, SMP, async I/O, and broad mmap claims.
 
 #### Scenario: 文档描述有界组合能力
-- **WHEN** BigOS documentation, specs, help text, or validation notes describe Stage 42 process/terminal/shell compatibility
+- **WHEN** BigOS documentation, specs, help text, or validation notes describe process/terminal/shell composition hardening process/terminal/shell compatibility
 - **THEN** they MUST describe it as a bounded BigOS POSIX-like subset
 - **AND** they MUST NOT imply complete POSIX shell, sessions, terminal process groups, job control, termios, dynamic linking, complete POSIX libc, SMP, async I/O, persistent full writable filesystem, or broad file-backed `mmap`
 
@@ -13,8 +13,8 @@ BigOS SHALL include bounded process, terminal, and shell composition behavior in
 - **THEN** it MUST be able to rely on deterministic kernel/libc return values, errno translation, and shell-observable output within the bounded subset
 - **AND** it MUST NOT require hosted OS services, shared libraries, threads, terminal process groups, or complete POSIX utilities
 
-### Requirement: Stage 42 行为验证覆盖组合路径
-BigOS SHALL provide layered validation for the Stage 42 process, terminal, and shell composition subset. Validation MUST separate build/static checks, runtime checks that passed, checks skipped due to missing environment, historical diagnostics, current-change diagnostics, and remaining risk.
+### Requirement: process/terminal/shell composition hardening 行为验证覆盖组合路径
+BigOS SHALL provide layered validation for the process/terminal/shell composition hardening process, terminal, and shell composition subset. Validation MUST separate build/static checks, runtime checks that passed, checks skipped due to missing environment, historical diagnostics, current-change diagnostics, and remaining risk.
 
 #### Scenario: runtime validation observes process and shell status
 - **WHEN** runtime validation runs in a configured emulator environment with the required cross-toolchain and disk image

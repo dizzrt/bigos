@@ -353,9 +353,10 @@ def test_default_init_case_uses_marker_behavior_assertion_without_smoke_switch()
     assert all(option.endswith('=n') for option in command[2:])
     assert len(command) == 2 + len(boot_debug.SMOKE_OPTIONS)
 
-    # Stage 19: the default build packages /boot/user/init.elf + /bin/sh and the
-    # resident C PID-1 init forks + execve /bin/sh on normal boot (it does not
-    # exit), so the pass criterion is BIGOS_INIT_ENTER -> BIGOS_USER_EXEC.
+    # Default userland baseline: the default build packages /boot/user/init.elf
+    # plus /bin/sh. The resident C PID-1 init forks + execve /bin/sh on normal
+    # boot (it does not exit), so the pass criterion is BIGOS_INIT_ENTER ->
+    # BIGOS_USER_EXEC.
     assert case.expected_marker == 'BIGOS_USER_EXEC'
     assert case.validation_markers == ('BIGOS_INIT_ENTER', 'BIGOS_USER_EXEC')
     assert 'no smoke switch' in case.proc_boundary

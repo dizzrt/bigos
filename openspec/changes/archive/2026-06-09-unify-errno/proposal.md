@@ -4,7 +4,7 @@
 `SYS_EWOULDBLOCK`/`FD_EWOULDBLOCK`/`WAIT_EWOULDBLOCK`、`SYS_EINVAL`/`WAIT_EINVAL`、
 `SYS_EMFILE`/`FD_EMFILE` 等同值常量分散在 `include/bigos/syscall.h` 与
 `include/bigos/proc.h`。趁现在仅约 10 个值时收敛到单一来源成本极低；一旦 POSIX
-铺开几十个码，重复定义将成为长期维护负担与语义漂移风险。这是 roadmap 阶段 14.1，
+铺开几十个码，重复定义将成为长期维护负担与语义漂移风险。这是 roadmap userland runtime baseline.1，
 独立、应先于其他所有阶段完成。
 
 ## What Changes

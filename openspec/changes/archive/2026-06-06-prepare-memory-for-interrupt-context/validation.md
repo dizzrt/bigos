@@ -35,7 +35,7 @@
 - 引入 `bigos::irq::InterruptGuard`，保存进入前 IF，进入时 `cli`，退出时仅按进入前 IF 状态恢复 `sti`。
 - 为 public allocator、global `new/delete`、内部 buddy/vmem/slab helper 和诊断统计入口补充上下文契约。
 - 在 buddy/slab/vmem 元数据和 accounting 更新边界增加单核 maskable IRQ guard，不改变 boot/linker 地址、direct map、`KVMEM_BASE` heap/vmalloc 语义、BootInfo handoff ABI、IDT vector 或 `InterruptFrame` ABI。
-- 保持普通 `kmalloc()`、`free()`、`alloc_kernel_pages()`、`free_pages()` 和 global `new/delete` 为 non-IRQ-handler-safe；阶段 3 不承诺 IRQ handler 动态分配、SMP safety 或阻塞分配。
+- 保持普通 `kmalloc()`、`free()`、`alloc_kernel_pages()`、`free_pages()` 和 global `new/delete` 为 non-IRQ-handler-safe；kernel memory API capability 不承诺 IRQ handler 动态分配、SMP safety 或阻塞分配。
 
 ## 剩余风险
 

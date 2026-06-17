@@ -26,7 +26,7 @@ BigOS SHALL integrate timer-driven kernel-thread scheduling with the interrupt r
 #### Scenario: Syscall vector keeps early ABI boundary
 - **WHEN** CPL3 code enters through `int 0x80` or kernel code handles the early syscall dispatch path
 - **THEN** the syscall vector MUST preserve its existing ABI and EOI behavior
-- **AND** stage 11 MUST NOT require syscall handlers to become sleepable, preemptible, or process-lifecycle aware
+- **AND** the documented capability MUST NOT require syscall handlers to become sleepable, preemptible, or process-lifecycle aware
 
 ## ADDED Requirements
 

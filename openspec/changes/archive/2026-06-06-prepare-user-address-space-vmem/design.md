@@ -1,6 +1,6 @@
 ## Context
 
-阶段 4 完成后，内核已具备 cooperative 内核线程与单核 round-robin 调度。下一步迈向用户态前，
+kernel thread scheduler capability 完成后，内核已具备 cooperative 内核线程与单核 round-robin 调度。下一步迈向用户态前，
 需要把当前“仅服务内核”的页表代码抽象成显式的 map/unmap primitive，并定义 user/kernel 页属性策略。
 
 当前页表实现位于 `kernel/mm/vmem.cc`：
@@ -88,7 +88,7 @@ self-mapping 地址与 BootInfo handoff ABI。
 - [emulator oracle 不稳定] → 历史 change 多次出现 Bochs serial 30~40s 未观测 marker。缓解：以源码级检查
   为必测，runtime smoke 为可选，oracle 不可用时按既有惯例记录命令、失败点与剩余 bootability 风险。
 - [中断安全] → primitive 仍在非中断上下文调用，页表写入沿用 `InterruptGuard` 屏蔽 same-CPU IRQ 交织，
-  与阶段 3 契约一致；不在 IRQ handler 中调用。
+  与kernel memory API capability 契约一致；不在 IRQ handler 中调用。
 
 ## Migration Plan
 

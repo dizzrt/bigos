@@ -37,9 +37,9 @@ BigOS SHALL create and destroy kernel thread metadata and stacks only from non-i
 
 #### Scenario: Default kernel stack is one page
 
-- **WHEN** a normal stage 4 kernel thread is created
+- **WHEN** a normal kernel thread is created
 - **THEN** BigOS MUST allocate a fixed one-page kernel stack for that thread by default
-- **AND** stage 4 MUST NOT expose a smoke/debug build switch that changes the default kernel thread stack page count
+- **AND** the scheduler MUST NOT expose a smoke/debug build switch that changes the default kernel thread stack page count
 
 ### Requirement: Context switch preserves kernel execution context
 
@@ -96,7 +96,7 @@ BigOS SHALL provide a minimal single-core round-robin scheduler that selects run
 
 ### Requirement: Terminated threads are not immediately reclaimed
 
-BigOS SHALL avoid immediate current-thread TCB or stack reclamation during the stage 4 thread exit path.
+BigOS SHALL avoid immediate current-thread TCB or stack reclamation during the kernel thread exit path.
 
 #### Scenario: Thread exit defers reclamation
 
@@ -104,9 +104,8 @@ BigOS SHALL avoid immediate current-thread TCB or stack reclamation during the s
 - **THEN** BigOS MUST mark the thread terminated and remove it from runnable scheduling
 - **AND** BigOS MUST NOT immediately free the current thread's TCB or kernel stack on that same exit stack
 
-#### Scenario: Terminated list is bounded by stage 4 scope
-
-- **WHEN** a thread becomes terminated in stage 4
+#### Scenario: Terminated list is bounded by scheduler scope
+- **WHEN** a thread becomes terminated
 - **THEN** BigOS MUST keep it in a scheduler-owned terminated list or equivalent non-runnable tracking structure
 - **AND** documentation or validation notes MUST record that safe reclamation is deferred to a later lifecycle change
 
@@ -159,7 +158,7 @@ BigOS SHALL extend the single-core cooperative scheduler so blocked and sleeping
 - **THEN** the scheduler MUST make that thread runnable exactly once
 - **AND** the thread MUST become eligible for a later cooperative scheduling point
 
-#### Scenario: Stage 10 remains non-preemptive
+#### Scenario: blocking primitives and timer ownership capability remains non-preemptive
 - **WHEN** a thread becomes runnable because of wakeup or timeout
 - **THEN** BigOS MUST NOT perform timer-driven IRQ-return context switching in this stage
 - **AND** the existing interrupt frame ABI, context-switch frame layout, EOI ordering, and idle-thread ownership MUST remain unchanged
@@ -206,7 +205,7 @@ BigOS SHALL track a bounded per-thread or per-current-thread time slice under th
 - **AND** idle MUST remain scheduler-owned and may halt only under documented interrupt-readiness assumptions
 
 ### Requirement: Scheduler supports priority extension hooks
-BigOS SHALL provide a minimal bounded priority hook, static priority field, or reserved scheduler policy slot without requiring a complete priority scheduler in stage 11.
+BigOS SHALL provide a minimal bounded priority hook, static priority field, or reserved scheduler policy slot without requiring a complete priority scheduler.
 
 #### Scenario: Default policy remains round-robin
 - **WHEN** no explicit priority policy is configured or implemented beyond the hook

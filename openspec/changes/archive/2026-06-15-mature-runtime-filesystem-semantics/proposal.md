@@ -1,6 +1,6 @@
 ## Why
 
-Stage 41 needs to turn the existing bounded filesystem pieces into a coherent runtime filesystem contract that ordinary static user programs can rely on. BigOS already has read-only exFAT boot assets, RAM-backed `/rw`, fd/VFS operations, metadata queries, current-directory relative paths, and small user tools, but their combined behavior still needs a focused maturity pass before future persistent writable storage can be considered safely.
+runtime filesystem maturity needs to turn the existing bounded filesystem pieces into a coherent runtime filesystem contract that ordinary static user programs can rely on. BigOS already has read-only exFAT boot assets, RAM-backed `/rw`, fd/VFS operations, metadata queries, current-directory relative paths, and small user tools, but their combined behavior still needs a focused maturity pass before future persistent writable storage can be considered safely.
 
 ## What Changes
 
@@ -14,15 +14,15 @@ Stage 41 needs to turn the existing bounded filesystem pieces into a coherent ru
 
 ### New Capabilities
 
-- `runtime-filesystem-maturity`: Defines the Stage 41 cross-capability contract for ordinary-program filesystem behavior, current-runtime consistency, bounded failure semantics, and persistent-storage preparation boundaries.
+- `runtime-filesystem-maturity`: Defines the runtime filesystem maturity cross-capability contract for ordinary-program filesystem behavior, current-runtime consistency, bounded failure semantics, and persistent-storage preparation boundaries.
 
 ### Modified Capabilities
 
 - `fd-vfs-shell`: Clarifies combined path/fd runtime operation behavior, backend dispatch, reference lifecycle, directory fd handling, and stable errno mapping.
 - `writable-filesystem`: Strengthens `/rw` runtime consistency, capacity/permission failure atomicity, open-file reference behavior after unlink/rename, and non-persistent RAM-backed boundaries.
 - `file-metadata-contract`: Requires metadata to reflect successful runtime file and directory changes while preserving path-vs-fd distinctions after unlink/rename.
-- `current-directory-relative-paths`: Clarifies that Stage 41 filesystem operations consistently share cwd-relative path resolution without adding namespace, symlink, or full canonicalization semantics.
-- `runtime-smoke-validation`: Extends behavior validation expectations for Stage 41 filesystem maturity while recording skipped emulator/toolchain dependencies.
+- `current-directory-relative-paths`: Clarifies that runtime filesystem operations consistently share cwd-relative path resolution without adding namespace, symlink, or full canonicalization semantics.
+- `runtime-smoke-validation`: Extends behavior validation expectations for runtime filesystem maturity while recording skipped emulator/toolchain dependencies.
 
 ## Impact
 

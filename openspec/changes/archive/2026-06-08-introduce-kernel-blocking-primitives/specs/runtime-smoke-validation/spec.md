@@ -4,7 +4,7 @@
 BigOS SHALL extend the runtime smoke validation matrix with narrow blocking primitive cases that validate wait queue wakeup, timeout wait, and optional TTY blocking behavior without enabling unrelated smoke switches.
 
 #### Scenario: Matrix lists blocking primitive cases
-- **WHEN** a developer inspects the runtime smoke matrix after stage 10
+- **WHEN** a developer inspects the runtime smoke matrix after the documented capability
 - **THEN** the matrix MUST include at least one narrow blocking primitives case that exercises thread block/wakeup and timeout wait
 - **AND** it MUST list the xmake switches, expected serial markers, case-specific timeout, generated log paths, and whether TTY blocking input is synthetic, manual, skipped, or blocked
 

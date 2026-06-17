@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前已经具备有界用户态、静态用户 ELF 装载、`int 0x80` syscall ABI、fd/VFS I/O、`brk`、`execve` 参数/环境传递，以及一组最小用户态 libc 实现。Stage 22 的重点不是把 BigOS 提升为完整 hosted C 环境，而是把现有 freestanding 用户态支持收敛为可说明、可依赖、可验证的最小 C 标准库子集。
+BigOS 当前已经具备有界用户态、静态用户 ELF 装载、`int 0x80` syscall ABI、fd/VFS I/O、`brk`、`execve` 参数/环境传递，以及一组最小用户态 libc 实现。TTY console input capability2 的重点不是把 BigOS 提升为完整 hosted C 环境，而是把现有 freestanding 用户态支持收敛为可说明、可依赖、可验证的最小 C 标准库子集。
 
 受影响子系统是 freestanding userland libc 与简单 C 用户程序。该 change 不改变 boot 地址、链接地址、页表布局、IDT/syscall vector、磁盘布局或内核 ABI；默认运行假设仍是 x86_64 Legacy BIOS/MBR/exFAT、单核、有界用户态、静态链接和现有用户 ELF 装载路径。
 
@@ -23,7 +23,7 @@ BigOS 当前已经具备有界用户态、静态用户 ELF 装载、`int 0x80` s
 ## Decisions
 
 - 决策：以现有 `user-libc-min` 能力作为唯一规格承载点。
-  备选方案是新增 `minimal-c-library-subset` capability，但这会把同一 libc 契约拆成两个规格并增加归档后的重复维护成本。选择修改 `user-libc-min`，因为 Stage 22 是对已有最小用户态 libc 的边界收敛与扩展。
+  备选方案是新增 `minimal-c-library-subset` capability，但这会把同一 libc 契约拆成两个规格并增加归档后的重复维护成本。选择修改 `user-libc-min`，因为 TTY console input capability2 是对已有最小用户态 libc 的边界收敛与扩展。
 
 - 决策：保持 wrapper 薄封装，错误语义统一为 POSIX 风格 `errno`。
   备选方案是让 C 程序直接处理内核负 errno，但这会暴露内核 ABI 并削弱 libc 的兼容层价值。wrapper 继续把内核负 errno 翻译为用户态正 errno 与 `-1`/失败哨兵，使小型 C 程序的错误处理稳定。

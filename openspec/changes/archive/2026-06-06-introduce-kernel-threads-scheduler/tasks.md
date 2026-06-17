@@ -8,10 +8,10 @@
 ## 2. Thread 创建与生命周期
 
 - [x] 2.1 实现 `create_kernel_thread()` 或等价 API，在非中断上下文分配 TCB 与 kernel stack，并初始化线程入口、参数、状态和 saved context。
-- [x] 2.2 固定阶段 4 普通内核线程默认使用 1 页 kernel stack，记录 stack base/size，并暂不暴露 smoke/debug 栈页数构建开关。
+- [x] 2.2 固定kernel thread scheduler capability 普通内核线程默认使用 1 页 kernel stack，记录 stack base/size，并暂不暴露 smoke/debug 栈页数构建开关。
 - [x] 2.3 构造新线程初始栈帧，使首次调度进入 scheduler-owned trampoline，再调用线程入口函数。
 - [x] 2.4 实现 `thread_exit()` 或等价终止路径，把线程标记为 terminated 并挂入 terminated list，不立即释放当前线程 TCB/stack。
-- [x] 2.5 为创建失败路径提供 deterministic diagnostic 或错误返回，不在 failure path 中破坏 allocator 阶段 3 契约。
+- [x] 2.5 为创建失败路径提供 deterministic diagnostic 或错误返回，不在 failure path 中破坏 allocator kernel memory API capability 契约。
 
 ## 3. Context Switch
 
@@ -29,9 +29,9 @@
 
 ## 5. Timer 与 IRQ 集成
 
-- [x] 5.1 在 timer IRQ0 路径接入 bounded scheduler tick accounting/reschedule intent，保持 `timer::on_tick()` tick ownership 不变，且不在阶段 4 实现 IRQ 返回前抢占切换。
+- [x] 5.1 在 timer IRQ0 路径接入 bounded scheduler tick accounting/reschedule intent，保持 `timer::on_tick()` tick ownership 不变，且不在kernel thread scheduler capability 实现 IRQ 返回前抢占切换。
 - [x] 5.2 确保 timer/keyboard/#PF/IRQ dispatch 路径不调用 ordinary allocator 创建或释放 scheduler 对象。
-- [x] 5.3 用源码级检查固定阶段 4 仅提供 cooperative yield + timer intent，确认 IRQ dispatch 仍按既有 EOI、saved frame、register restore 和 `iretq` 语义返回。
+- [x] 5.3 用源码级检查固定kernel thread scheduler capability 仅提供 cooperative yield + timer intent，确认 IRQ dispatch 仍按既有 EOI、saved frame、register restore 和 `iretq` 语义返回。
 - [x] 5.4 保持 CPU exception path diagnostic-only，不把 `#PF` 或其他 fatal exception 接入线程恢复、唤醒或重试逻辑。
 
 ## 6. Smoke 与文档

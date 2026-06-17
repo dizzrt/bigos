@@ -33,8 +33,9 @@ namespace {
     constexpr uint32_t PF_W = 2;
     constexpr uint32_t PF_R = 4;
 
-    // Flat embedded image selected for stage 6: it avoids any kernel FS/block
-    // dependency and still exercises code, data/BSS, stack, syscall write, exit.
+    // Flat embedded image selected for the first-user-program smoke path: it
+    // avoids any kernel FS/block dependency and still exercises code, data/BSS,
+    // stack, syscall write, and exit.
     // The inline payload writes the deterministic BIGOS_USER_WRITE marker.
     constexpr uint8_t FIRST_USER_CODE[] = {
         0x48,
@@ -298,8 +299,8 @@ namespace {
         return true;
     }
 
-    bool init_runtime_layout(bigos::proc::Process *__process, uint64_t __elf_low, uint64_t __elf_high,
-        uint64_t __heap_base) noexcept {
+    bool init_runtime_layout(
+        bigos::proc::Process *__process, uint64_t __elf_low, uint64_t __elf_high, uint64_t __heap_base) noexcept {
         if (__process == nullptr || !page_aligned(__elf_low) || !page_aligned(__elf_high) || __elf_low >= __elf_high)
             return false;
         uint64_t heap_end = 0;
@@ -331,9 +332,9 @@ namespace {
         return true;
     }
 
-    bool runtime_vma_allowed(
-        const bigos::proc::Process *__process, const bigos::proc::VmaEntry &__entry) noexcept {
-        if (__process == nullptr || !__process->runtime_layout.committed || !vma_range_bounds(__entry.start, __entry.end))
+    bool runtime_vma_allowed(const bigos::proc::Process *__process, const bigos::proc::VmaEntry &__entry) noexcept {
+        if (__process == nullptr || !__process->runtime_layout.committed ||
+            !vma_range_bounds(__entry.start, __entry.end))
             return false;
         if (__entry.backing != bigos::proc::VmaBacking::Guard &&
             (__entry.materialized_start < __entry.start || __entry.materialized_start > __entry.end ||
@@ -524,8 +525,7 @@ namespace {
             return false;
         if (!bigos::mm::map_page_in_root(__process->address_space_root, __vaddr, __phys, __attr))
             return false;
-        if (__also_map_active_root &&
-            !bigos::arch::vm_user::is_active_address_space(__process->address_space_root) &&
+        if (__also_map_active_root && !bigos::arch::vm_user::is_active_address_space(__process->address_space_root) &&
             !bigos::mm::map_page(__vaddr, __phys, __attr))
             return false;
         return true;
@@ -1528,10 +1528,10 @@ namespace bigos::proc {
         }
         for (uint32_t i = 0; i < segment_count; i++) {
             const VmaPurpose purpose = (segments[i].flags & PF_X) != 0 ? VmaPurpose::Code : VmaPurpose::Data;
-            if (!internal_add_process_vma(__process,
-                    {segments[i].map_base, segments[i].map_base + segments[i].map_len, segments[i].map_base,
-                        segments[i].map_base + segments[i].map_len, segment_permissions(segments[i].flags), purpose,
-                        VmaBacking::ElfSegment, VmaGrowth::None, true})) {
+            if (!internal_add_process_vma(
+                    __process, {segments[i].map_base, segments[i].map_base + segments[i].map_len, segments[i].map_base,
+                                   segments[i].map_base + segments[i].map_len, segment_permissions(segments[i].flags),
+                                   purpose, VmaBacking::ElfSegment, VmaGrowth::None, true})) {
                 error = UserElfLoadError::MapFailed;
                 goto fail;
             }
@@ -2076,7 +2076,7 @@ namespace bigos::proc {
             return -bigos::EINVAL;
 
         if (!internal_add_process_vma(process, {base, end, base, base, permissions, VmaPurpose::Anonymous,
-                                                 VmaBacking::Anonymous, VmaGrowth::None, true}))
+                                                   VmaBacking::Anonymous, VmaGrowth::None, true}))
             return -bigos::EFAULT;
 
         // Lazy backing: the VMA range is registered but no physical frames are
@@ -3288,8 +3288,7 @@ namespace bigos::proc {
 
                 bigos::irq::InterruptFrame frame;
                 memset(&frame, 0, sizeof(frame));
-                bigos::arch::vm_user::force_user_return_frame(
-                    &frame, (1ull << 9) | (1ull << 1));   // IF + reserved
+                bigos::arch::vm_user::force_user_return_frame(&frame, (1ull << 9) | (1ull << 1));   // IF + reserved
                 frame.rip = USER_CODE_BASE + 0x40;
                 frame.rsp = USER_STACK_TOP;
                 frame.rax = 0x1111;

@@ -2,13 +2,13 @@
 
 ### Requirement: 运行时 smoke 矩阵覆盖默认 init 行为断言
 
-BigOS SHALL 在 Stage 9 运行时 smoke 矩阵中新增一个**默认构建**（不开启任何 smoke
+BigOS SHALL 在 runtime smoke validation matrix 运行时 smoke 矩阵中新增一个**默认构建**（不开启任何 smoke
 开关）的用例，断言 normal boot 默认进入用户态 init 的行为，并以此启动「行为断言测试」
 轨道——验证逐步从源码字符串契约转向基于串口 marker 与用户态二进制输出的行为断言。
 
 #### Scenario: 矩阵包含默认 init 用例
 
-- **WHEN** 开发者在 Stage 14.5 之后查看运行时 smoke 矩阵
+- **WHEN** 开发者在 behavior assertion validation baseline 之后查看运行时 smoke 矩阵
 - **THEN** 矩阵 MUST 包含一个不依赖任何 smoke 开关的默认构建用例
 - **AND** 该用例 MUST 断言默认构建发出 `BIGOS_INIT_ENTER` 与 `BIGOS_INIT_EXIT` 串口 marker
 - **AND** 该用例 MUST 列出（空的）所需 smoke 开关、首选 QEMU headless 路径、期望 marker、

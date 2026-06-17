@@ -26,9 +26,9 @@ BigOS SHALL create and destroy kernel thread metadata and stacks only from non-i
 - **THEN** the path MUST NOT allocate or free thread control blocks, kernel stacks, run-queue nodes, or other scheduler-owned dynamic objects through ordinary allocator APIs
 
 #### Scenario: Default kernel stack is one page
-- **WHEN** a normal stage 4 kernel thread is created
+- **WHEN** a normal the documented capability kernel thread is created
 - **THEN** BigOS MUST allocate a fixed one-page kernel stack for that thread by default
-- **AND** stage 4 MUST NOT expose a smoke/debug build switch that changes the default kernel thread stack page count
+- **AND** the documented capability MUST NOT expose a smoke/debug build switch that changes the default kernel thread stack page count
 
 ### Requirement: Context switch preserves kernel execution context
 BigOS SHALL provide an x86_64 kernel context switch primitive that transfers execution between kernel threads while preserving the required callee-saved register and stack state.
@@ -63,21 +63,21 @@ BigOS SHALL provide a minimal single-core round-robin scheduler that selects run
 - **WHEN** scheduler APIs or documentation describe scheduling behavior
 - **THEN** they MUST state that the scheduler is single-core only and does not provide SMP balancing, IPI, per-CPU run queues, or cross-CPU synchronization
 
-#### Scenario: Stage 4 does not preempt on IRQ return
-- **WHEN** timer IRQ0 fires during stage 4 scheduler runtime
+#### Scenario: kernel thread scheduler capability does not preempt on IRQ return
+- **WHEN** timer IRQ0 fires during the documented capability scheduler runtime
 - **THEN** BigOS MUST NOT perform IRQ-return preemptive context switching in this change
 - **AND** any timer reschedule intent MUST be recorded only as bounded state for cooperative or future scheduling paths
 
 ### Requirement: Terminated threads are not immediately reclaimed
-BigOS SHALL avoid immediate current-thread TCB or stack reclamation during the stage 4 thread exit path.
+BigOS SHALL avoid immediate current-thread TCB or stack reclamation during the documented capability thread exit path.
 
 #### Scenario: Thread exit defers reclamation
 - **WHEN** a kernel thread entry function returns or calls `thread_exit()`
 - **THEN** BigOS MUST mark the thread terminated and remove it from runnable scheduling
 - **AND** BigOS MUST NOT immediately free the current thread's TCB or kernel stack on that same exit stack
 
-#### Scenario: Terminated list is bounded by stage 4 scope
-- **WHEN** a thread becomes terminated in stage 4
+#### Scenario: Terminated list is bounded by the documented capability scope
+- **WHEN** a thread becomes terminated in the documented capability
 - **THEN** BigOS MUST keep it in a scheduler-owned terminated list or equivalent non-runnable tracking structure
 - **AND** documentation or validation notes MUST record that safe reclamation is deferred to a later lifecycle change
 

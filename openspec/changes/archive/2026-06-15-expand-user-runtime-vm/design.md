@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前已经具备有界用户态：静态 ELF 程序、PID-1 init、`/bin/sh`、VMA-backed 用户内存 API、匿名 demand paging、`fork`/COW、`execve`、fd/VFS、pipe、signals 和 bounded libc-style 支持。Stage 43 的问题不是“让第一个用户程序跑起来”，而是把更复杂用户程序会依赖的 VM/runtime 契约整理成稳定边界。
+BigOS 当前已经具备有界用户态：静态 ELF 程序、PID-1 init、`/bin/sh`、VMA-backed 用户内存 API、匿名 demand paging、`fork`/COW、`execve`、fd/VFS、pipe、signals 和 bounded libc-style 支持。kernel thread scheduler capability3 的问题不是“让第一个用户程序跑起来”，而是把更复杂用户程序会依赖的 VM/runtime 契约整理成稳定边界。
 
 当前相关能力分散在用户页表派生、ELF loader、VMA 集合、缺页恢复、用户范围校验、进程 lifecycle 和 user crt0/libc 约定中。若继续按局部功能扩展，容易出现 loader 直接发布页表、VMA 与页表权限不一致、`brk`/匿名映射/stack growth 使用不同失败语义、未来动态链接没有地址空间预留等问题。
 
@@ -25,11 +25,11 @@ BigOS 当前已经具备有界用户态：静态 ELF 程序、PID-1 init、`/bin
 
 ## Decisions
 
-### Decision: 以 runtime layout capability 作为 Stage 43 的主契约
+### Decision: 以 runtime layout capability 作为 kernel thread scheduler capability3 的主契约
 
 将新增 `user-runtime-vm-layout`，用于描述用户程序 image 在低半区的结构、预留区、提交边界和未来动态链接准备。已有 specs 继续分别约束页表、VMA、缺页和 loader，但它们都引用同一 runtime layout 规则。
 
-备选方案是只修改现有 `user-address-space-vmem` 或 `user-elf-program-loader`。该方案会让 layout、loader、VMA 与 demand paging 的共同约束散落在多个 capability 中，后续 archive 后也难以看出 Stage 43 的核心目标。
+备选方案是只修改现有 `user-address-space-vmem` 或 `user-elf-program-loader`。该方案会让 layout、loader、VMA 与 demand paging 的共同约束散落在多个 capability 中，后续 archive 后也难以看出 kernel thread scheduler capability3 的核心目标。
 
 ### Decision: loader 只准备 image，commit 边界统一发布
 
@@ -47,7 +47,7 @@ ELF loader 应产出一个 bounded runtime image 描述，包括 loadable segmen
 
 本 change 只要求保留 runtime 预留区、loader metadata 扩展点、ABI 边界说明和 unsupported feature 的确定性拒绝。`PT_INTERP`、shared object、relocation、runtime linker entry、lazy binding 等仍必须被拒绝或保持未实现状态。
 
-备选方案是在 Stage 43 直接实现 dynamic loader。该方案用户可见价值大，但会同时依赖更强 VM、filesystem、loader、ABI、libc 和 toolchain 契约，容易把 Stage 43 从“铺地基”变成不可控的大里程碑。
+备选方案是在 kernel thread scheduler capability3 直接实现 dynamic loader。该方案用户可见价值大，但会同时依赖更强 VM、filesystem、loader、ABI、libc 和 toolchain 契约，容易把 kernel thread scheduler capability3 从“铺地基”变成不可控的大里程碑。
 
 ## Risks / Trade-offs
 

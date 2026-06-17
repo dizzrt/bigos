@@ -27,8 +27,8 @@
 - [x] 4.1 迁移 embedded first-user-program smoke，使其复用 normal process lifecycle core，但仍保持 default-off、filesystem-independent 和独立 marker 行为
 - [x] 4.2 迁移 `user_elf_smoke`，使 `/boot/user/init.elf` 加载路径复用 general exec/ELF prepare 逻辑，并保留 image packaging、64KiB bound 和 deterministic marker
 - [x] 4.3 更新 runtime smoke matrix 或相关文档，记录 process lifecycle、wait/exit、exec argv/envp、safe reaper 和 smoke-only entry 的边界
-- [x] 4.4 更新 `docs/en` canonical 文档并同步 `docs/zh` 对应路径，说明阶段 12 的进程生命周期能力、非目标和验证方法
-- [x] 4.5 检查 `roadmap.md` 或阶段记录是否需要标注 `introduce-process-lifecycle` 的设计/实施状态，避免与已归档阶段 9-11 描述冲突
+- [x] 4.4 更新 `docs/en` canonical 文档并同步 `docs/zh` 对应路径，说明process runtime foundation 的进程生命周期能力、非目标和验证方法
+- [x] 4.5 检查 `roadmap.md` 或阶段记录是否需要标注 `introduce-process-lifecycle` 的设计/实施状态，避免与已归档runtime smoke validation matrix-11 描述冲突
 
 ## 5. 源码检查和验证
 

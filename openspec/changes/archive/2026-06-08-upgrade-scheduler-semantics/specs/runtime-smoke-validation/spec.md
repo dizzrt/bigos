@@ -4,7 +4,7 @@
 BigOS SHALL extend the runtime smoke validation matrix with narrow scheduler semantics cases that validate timer-driven preemption, preemption-disable behavior, and preservation of existing cooperative scheduler behavior.
 
 #### Scenario: Matrix lists scheduler semantics cases
-- **WHEN** a developer inspects the runtime smoke matrix after stage 11
+- **WHEN** a developer inspects the runtime smoke matrix after the documented capability
 - **THEN** the matrix MUST include at least one narrow scheduler semantics case that exercises time slice expiry and timer-driven reschedule-on-IRQ-return
 - **AND** it MUST list the xmake switches, expected serial markers, case-specific timeout, generated log paths, and required emulator backend for the case
 

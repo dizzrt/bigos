@@ -22,7 +22,7 @@ The BigOS shell SHALL keep single-stage pipe support bounded and deterministic, 
 - **WHEN** both sides of a single-stage pipe complete
 - **THEN** the shell records the bounded status of the right-side command as the pipeline status
 
-### Requirement: Shell Stage 39 diagnostic consistency
+### Requirement: Shell bounded POSIX-like surface diagnostic consistency
 The BigOS shell SHALL produce deterministic diagnostics and bounded statuses for command-not-found, exec failure, unsupported syntax, parse errors, and external command non-zero exits.
 
 #### Scenario: Command not found status

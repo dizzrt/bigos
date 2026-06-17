@@ -17,7 +17,7 @@ fd/VFS 服务、有界可写 `/rw` 存储、persistent clean-sync `/rw`、cwd/re
 
 ## 状态
 
-阶段 20 到阶段 44 已完成，并压缩为当前有界最小可用系统基线：在 boot 路径、
+已完成能力压缩为当前有界最小可用系统基线：在 boot 路径、
 中断基础设施和早期内存管理之上，具备 timer、输入、调度、syscall、有界 POSIX-like
 进程/I/O 子集、读写 VFS 原语、bounded 用户 ELF 加载、常驻 PID-1 init、最小静态用户程序、
 有界 `/rw` 运行期与 persistent clean-sync 存储、cwd/relative path、受限 rename、

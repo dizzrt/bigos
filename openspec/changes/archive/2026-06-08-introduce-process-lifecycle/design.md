@@ -2,7 +2,7 @@
 
 当前 `kernel/core/proc` 已能创建 embedded first-user-program smoke 和 filesystem-backed ELF smoke，并能通过 `int 0x80` 执行 `SYS_WRITE`/`SYS_EXIT`、处理 CPL3 fault、切回 kernel CR3 并延后回收资源。但该路径仍由 `BIGOS_USER_PROCESS` smoke 开关控制，依赖固定 PID、单个 `g_current_process`、单个 `g_reap_pending_process`，不具备常规进程表、父子关系、`wait` 或 general `exec argv/envp` 语义。
 
-阶段 12 的设计目标是在不引入 `fork`、COW、fd/VFS、demand paging 或 POSIX 大面策略的前提下，把这条 smoke runtime 提升为普通内核子系统。实现必须继续保持 x86_64 单核、Legacy BIOS/MBR/exFAT、read-only filesystem、同步加载、safe teardown 和 freestanding 约束。
+process runtime foundation 的设计目标是在不引入 `fork`、COW、fd/VFS、demand paging 或 POSIX 大面策略的前提下，把这条 smoke runtime 提升为普通内核子系统。实现必须继续保持 x86_64 单核、Legacy BIOS/MBR/exFAT、read-only filesystem、同步加载、safe teardown 和 freestanding 约束。
 
 ## Goals / Non-Goals
 
@@ -26,7 +26,7 @@
 - 常规 process core 与 smoke entry 分离。将 PID、进程表、生命周期状态、父子链表、wait queue 和 reaper queue 编译为常规内核能力；embedded/user-ELF smoke 只负责触发特定启动场景。替代方案是继续让 `kernel/core/proc` 只随 smoke 编译，但这会阻塞 fd/VFS 和 VMA 后续阶段复用进程所有权。
 - 使用固定容量或显式有界的单核进程表。第一版通过稳定 PID 和 bounded table/list 避免动态增长策略、锁复杂度和 SMP 语义；容量耗尽时返回确定性错误或 panic/marker。替代方案是使用无限动态表，但会把 allocator failure、reclaim 和 fork 前置得过早。
 - 将 `exit` 与 resource teardown 分离。`SYS_EXIT` 和用户 fault 只记录 status、切换到安全 kernel root、使当前执行流不可返回，并唤醒等待者；真正释放 user root、用户页、dynamic page-table pages、kernel stack 和 process object 必须在 safe reaper 上下文执行。替代方案是在 syscall/fault 当前栈上立即释放，但会破坏现有 active stack/CR3 安全边界。
-- `wait` 复用现有 blocking primitives，并收敛为单一 syscall 形态。第一版只提供 `wait(pid, status*)`；`pid == BIGOS_WAIT_ANY` 表示等待任一子进程，其他非零 PID 表示等待指定子进程，不额外引入独立 `wait_any()` syscall。父进程等待子进程时进入可唤醒 wait queue；子进程进入 zombie 时 wake parent。若无可等待子进程则返回确定性错误；若有匹配子进程但尚未退出则阻塞。替代方案是 busy polling 或暴露多个 wait variants，但前者破坏阶段 10 blocking 模型，后者会过早扩大 POSIX wait 面。
+- `wait` 复用现有 blocking primitives，并收敛为单一 syscall 形态。第一版只提供 `wait(pid, status*)`；`pid == BIGOS_WAIT_ANY` 表示等待任一子进程，其他非零 PID 表示等待指定子进程，不额外引入独立 `wait_any()` syscall。父进程等待子进程时进入可唤醒 wait queue；子进程进入 zombie 时 wake parent。若无可等待子进程则返回确定性错误；若有匹配子进程但尚未退出则阻塞。替代方案是 busy polling 或暴露多个 wait variants，但前者破坏blocking primitives and timer ownership capability blocking 模型，后者会过早扩大 POSIX wait 面。
 - `exec` 采用 in-place image replacement 的最小语义。本阶段只支持在一个 process 内加载 bounded ELF64 `ET_EXEC`，建立新用户 root/stack/argv/envp 后再切换；commit 前失败必须 rollback 新 image 并保留旧 image，commit 后失败统一终止当前进程并记录 deterministic exec failure status，不尝试恢复旧 image。替代方案是先实现 `fork+exec` 或 commit 后恢复旧 image，但前者依赖尚未稳定的 `fork`/COW/VMA，后者会显著增加 active CR3/root 和资源所有权复杂度。
 - 初始用户栈采用最小 libc-like 形状。第一版布置 `argc`、`argv[]`、`envp[]` 和字符串内容，省略 auxv、动态链接器约定、TLS 和 libc startup 扩展；用户入口约定必须在 BigOS 文档中固定。内核从 bounded kernel-side vector 或 smoke-provided 参数复制字符串，拒绝越界、过多参数、过长字符串或栈空间不足。替代方案是 BigOS 私有寄存器约定，但会降低后续 userland/libc 迁移的连续性。
 - 保持 ABI 和地址布局不变。`int 0x80` vector、GDT/TSS/RSP0、`iretq` ring3 entry、kernel higher-half、direct map、KVMEM、recursive self-map、ELF entry/user low-half bound 和 raw image/exFAT 路径不因本阶段移动。

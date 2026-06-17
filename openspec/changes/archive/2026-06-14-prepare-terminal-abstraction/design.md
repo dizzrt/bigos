@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前默认用户态已经能通过 resident init 进入 `/bin/sh`，并具备键盘 TTY 输入、文本控制台输出、fd/VFS I/O、pipe/dup、signals 和有界 shell 组合能力。Stage 37 的目标不是扩大为完整 POSIX terminal，而是在现有单核、有界用户态、Legacy BIOS baseline 上把“默认控制台终端”整理成可被 kernel TTY、shell、简单用户程序和验证路径共同消费的最小抽象。
+BigOS 当前默认用户态已经能通过 resident init 进入 `/bin/sh`，并具备键盘 TTY 输入、文本控制台输出、fd/VFS I/O、pipe/dup、signals 和有界 shell 组合能力。minimal terminal abstraction 的目标不是扩大为完整 POSIX terminal，而是在现有单核、有界用户态、Legacy BIOS baseline 上把“默认控制台终端”整理成可被 kernel TTY、shell、简单用户程序和验证路径共同消费的最小抽象。
 
 当前相关路径跨越 keyboard IRQ1 producer、TTY 输入缓冲、非中断阻塞/非阻塞 consumer、console 输出、用户态 stdin/stdout/stderr 和 shell 行编辑/错误展示。该 change 需要先明确归属边界：IRQ 只负责有界输入生产，终端抽象负责描述输入/输出语义，shell 和用户程序只通过既有 fd/syscall 路径观察普通终端行为。
 
@@ -48,7 +48,7 @@ Alternative considered: 让 shell 或用户程序绕过 fd 层直接调用 conso
 
 4. 控制字符语义采用有界子集。
 
-Rationale: Stage 37 只需要 shell 和简单用户程序可观察的基本控制字符语义。最小集合覆盖 newline/carriage return/backspace、EOF 类输入、interrupt 类输入和 unsupported control 的确定性处理。EOF/interrupt 可被描述为 BigOS bounded terminal event，不承诺 POSIX signal、process group 或 termios 语义。
+Rationale: minimal terminal abstraction 只需要 shell 和简单用户程序可观察的基本控制字符语义。最小集合覆盖 newline/carriage return/backspace、EOF 类输入、interrupt 类输入和 unsupported control 的确定性处理。EOF/interrupt 可被描述为 BigOS bounded terminal event，不承诺 POSIX signal、process group 或 termios 语义。
 
 Alternative considered: 采用 termios/canonical mode 语义。该方案依赖进程组、session 和完整 terminal state，不适合当前成熟度。
 

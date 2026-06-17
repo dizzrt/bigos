@@ -78,9 +78,10 @@ def test_user_elf_maps_pages_with_explicit_attrs_and_zero_fills_bss() -> None:
     assert 'attr |= bigos::mm::page_attr::NO_EXECUTE;' in proc
     assert 'memset(direct, 0, PAGE_SIZE);' in proc
     assert 'memcpy((uint8_t *)direct + page_offset, __image + file_offset, copy_end - copy_vaddr);' in proc
-    # Stage 19: ELF segment pages live only in the process's own root; mapping
-    # them into the active root too would pollute/collide with whatever root is
-    # current during an execve from another process, so also_map_active_root=false.
+    # Default exec image replacement: ELF segment pages live only in the
+    # process's own root. Mapping them into the active root too would
+    # pollute/collide with whatever root is current during an execve from
+    # another process, so also_map_active_root=false.
     assert 'map_user_page_for_process(__process, page, phys, __segment.attr, false)' in proc
     assert 'bool map_user_page_for_process(' in proc
     assert 'internal_vma_range_allowed(&__process->vmas, __vaddr, PAGE_SIZE, bigos::proc::VmaPermission::Read)' in proc

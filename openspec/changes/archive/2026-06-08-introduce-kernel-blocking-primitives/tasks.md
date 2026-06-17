@@ -3,7 +3,7 @@
 - [x] 1.1 审查 `kernel/core/sched`、`include/bigos/thread.h`、`include/bigos/sched.h` 的线程状态、run queue、idle thread 和 context-switch frame 现状，记录不能改变的 ABI 与所有权边界。
 - [x] 1.2 扩展线程状态模型，加入 blocked/sleeping 或等价非 runnable 状态，并确保 scheduler 只选择 runnable 线程。
 - [x] 1.3 增加 scheduler/context guard，用于判断当前是否允许阻塞，并覆盖 IRQ、异常、fatal path、scheduler critical section、interrupts-disabled 等禁止阻塞上下文。
-- [x] 1.4 保持阶段 10 单核协作式语义，不增加 IRQ-return context switch、time slice 抢占、SMP、per-CPU run queue 或 IPI。
+- [x] 1.4 保持blocking primitives and timer ownership capability 单核协作式语义，不增加 IRQ-return context switch、time slice 抢占、SMP、per-CPU run queue 或 IPI。
 
 ## 2. Wait Queue 与 Wakeup
 
@@ -35,7 +35,7 @@
 
 ## 6. 文档与验证
 
-- [x] 6.1 更新相关英文 canonical 文档和简体中文镜像，说明 blocking context、wait queue、timeout wait、TTY blocking consumer、非目标和阶段 10 边界。
+- [x] 6.1 更新相关英文 canonical 文档和简体中文镜像，说明 blocking context、wait queue、timeout wait、TTY blocking consumer、非目标和blocking primitives and timer ownership capability 边界。
 - [x] 6.2 运行 `openspec validate introduce-kernel-blocking-primitives --strict` 并修复本 change 引入的 OpenSpec 格式或需求问题。
 - [x] 6.3 对 C++/header 改动运行最窄有用 `xmake` / `x86_64-elf-gcc` cross build；若工具链不可用，记录缺失工具、替代检查和残余 bootability 风险。
 - [x] 6.4 对修改过的 C++ 源码和头文件执行 clang/clangd 辅助诊断，尽量使用 freestanding C++17、x86_64 target、no exceptions、no RTTI 和项目 include path；区分历史诊断、当前变更诊断和 freestanding false positive。

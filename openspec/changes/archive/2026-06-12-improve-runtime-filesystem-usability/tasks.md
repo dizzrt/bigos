@@ -36,7 +36,7 @@
 ## 6. 文档与 OpenSpec
 
 - [x] 6.1 更新相关英文文档时同步更新 `docs/zh` 镜像，明确 `/rw` 仅保证运行期一致性且不承诺跨重启持久化
-- [x] 6.2 保持 `roadmap.md` 仅记录规划级 Stage 24 能力和边界，不写入具体入口、命令、marker、源码细节或归档索引
+- [x] 6.2 保持 `roadmap.md` 仅记录规划级 TTY console input capability4 能力和边界，不写入具体入口、命令、marker、源码细节或归档索引
 - [x] 6.3 运行 `openspec status --change "improve-runtime-filesystem-usability"` 和严格校验，修正 proposal/design/spec/tasks 的结构或格式问题
 
 ## 7. 构建、静态检查与运行时验证

@@ -22,7 +22,7 @@ service.
 
 ## Status
 
-Stages 20 through 44 are complete and compressed into the current bounded
+The completed capability baseline is compressed into the current bounded
 minimal usable system baseline: a single-core, mostly synchronous kernel with
 timer, input, scheduling, syscall, a bounded POSIX-like process/I/O subset,
 read/write VFS primitives, bounded user ELF loading, a resident PID-1 init,

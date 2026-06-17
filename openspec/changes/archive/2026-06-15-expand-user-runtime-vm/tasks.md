@@ -38,4 +38,4 @@
 
 - [x] 6.1 更新相关开发文档或验证记录，说明 runtime VM layout、image commit、dynamic-linking non-goals 和已执行/跳过的验证。
 - [x] 6.2 若修改 `docs/en` 或 `docs/zh`，同步对应语言镜像并保持相同相对路径结构。
-- [x] 6.3 在实现完成后检查 `roadmap.md` 是否仍保持项目规划层级；如需更新，只记录 Stage 43 完成状态与高层能力，不加入源代码入口、命令、marker 或版本索引。
+- [x] 6.3 在实现完成后检查 `roadmap.md` 是否仍保持项目规划层级；如需更新，只记录 kernel thread scheduler capability3 完成状态与高层能力，不加入源代码入口、命令、marker 或版本索引。

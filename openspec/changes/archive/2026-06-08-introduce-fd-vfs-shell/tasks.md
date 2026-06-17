@@ -27,9 +27,9 @@
 - [x] 4.1 迁移现有 `fs_smoke` 到 VFS open/read/close 路径，不新增 `fd_vfs_smoke` 开关，通过读取 `/boot/fs_smoke.txt` 输出 deterministic pass/fail COM1 marker
 - [x] 4.2 更新 `user_elf_smoke` 或相关 kernel-only consumer，使至少一个 ELF/image 文件读取路径可选择复用 VFS/fd read 语义，同时保留原 exFAT fallback 或清晰回滚策略
 - [x] 4.3 更新 runtime smoke matrix，记录 fd/VFS、open/read/close、bad-fd、EOF、not-found、invalid-user-buffer、exec inheritance 和 exit/reap close-all 覆盖范围
-- [x] 4.4 更新 `docs/en` canonical 文档，说明阶段 13 fd/VFS syscall ABI、VFS 边界、fd 生命周期、非目标和验证方法
+- [x] 4.4 更新 `docs/en` canonical 文档，说明fd/VFS shell boundary fd/VFS syscall ABI、VFS 边界、fd 生命周期、非目标和验证方法
 - [x] 4.5 同步更新 `docs/zh` 对应 Markdown 路径，保持与 `docs/en` 技术事实和相对路径一致
-- [x] 4.6 检查 `roadmap.md` 是否需要记录 `introduce-fd-vfs-shell` 状态和后续阶段依赖，避免与阶段 14/VMA 或 userland runtime 建议冲突
+- [x] 4.6 检查 `roadmap.md` 是否需要记录 `introduce-fd-vfs-shell` 状态和后续阶段依赖，避免与userland runtime baseline/VMA 或 userland runtime 建议冲突
 
 ## 5. 源码检查和验证
 

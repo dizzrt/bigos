@@ -1,6 +1,6 @@
 ## 1. 行为盘点与边界确认
 
-- [x] 1.1 盘点 `kernel/core/proc`、`kernel/core/syscall`、`kernel/core/fs`、pipe/dup、signals、time/identity、`user` 中 libc/init/shell/小型程序对 Stage 23 子集的现有支持情况，列出已满足、需补齐和需明确 non-goal 的行为。
+- [x] 1.1 盘点 `kernel/core/proc`、`kernel/core/syscall`、`kernel/core/fs`、pipe/dup、signals、time/identity、`user` 中 libc/init/shell/小型程序对 TTY console input capability3 子集的现有支持情况，列出已满足、需补齐和需明确 non-goal 的行为。
 - [x] 1.2 确认本 change 不改变 boot 地址、链接地址、IDT/syscall vector、页表布局、磁盘布局、用户 ELF 装载 ABI、CR3 切换假设或现有 `int 0x80` 寄存器约定。
 - [x] 1.3 对照 `posix-like-process-io-subset` 规格复核当前文档和用户可见描述，确保只声明 bounded POSIX-like process/I/O subset，不暗示完整 POSIX。
 

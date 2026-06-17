@@ -28,14 +28,14 @@ BigOS SHALL make filesystem failures deterministic and state-preserving for ordi
 - **AND** it MUST NOT publish fd entries, dirty cache blocks, directory entries, inode metadata, or partial user output from that context
 
 ### Requirement: 持久存储准备边界
-BigOS SHALL keep the Stage 41 runtime filesystem maturity work compatible with a future persistent writable storage milestone without implementing that milestone. Runtime filesystem semantics MUST avoid depending on RAM-only shortcuts that would make later mount-existing, disk layout protection, clean sync, metadata consistency, and reboot-cycle validation impossible to specify.
+BigOS SHALL keep the runtime filesystem maturity work compatible with a future persistent writable storage milestone without implementing that milestone. Runtime filesystem semantics MUST avoid depending on RAM-only shortcuts that would make later mount-existing, disk layout protection, clean sync, metadata consistency, and reboot-cycle validation impossible to specify.
 
-#### Scenario: Stage 41 不改变磁盘布局
-- **WHEN** Stage 41 filesystem maturity changes are implemented and validated
+#### Scenario: runtime filesystem maturity 不改变磁盘布局
+- **WHEN** runtime filesystem maturity changes are implemented and validated
 - **THEN** the existing x86_64 Legacy BIOS/MBR/exFAT boot image layout, read-only boot assets, exFAT discovery path, and kernel/user packaging path MUST remain unchanged
 - **AND** `/rw` MUST still initialize as a RAM-backed current-session writable backend unless a later accepted change explicitly introduces persistent storage
 
 #### Scenario: 后续持久化可以复用成熟语义
 - **WHEN** a later milestone chooses persistent writable storage
-- **THEN** it MAY reuse the Stage 41 current-runtime semantics for create, write, read, metadata, directory changes, fd references, and errno behavior
+- **THEN** it MAY reuse the runtime filesystem maturity current-runtime semantics for create, write, read, metadata, directory changes, fd references, and errno behavior
 - **AND** it MUST define additional disk layout, mount-existing, recovery, and reboot persistence requirements separately

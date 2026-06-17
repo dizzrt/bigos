@@ -1,6 +1,6 @@
 ## Why
 
-Stage 44 需要在前序 libc、文件系统、进程、终端和 VM 合同稳定后选择一个大型用户可见扩展。根据 `roadmap.md`，持久可写文件系统能优先提升 BigOS 的实际可用性、开发工作流和长时间运行行为，因此本 change 将当前 RAM-backed `/rw` 运行期可写能力推进为有界的磁盘持久化能力。
+persistent clean-sync /rw storage 需要在前序 libc、文件系统、进程、终端和 VM 合同稳定后选择一个大型用户可见扩展。根据 `roadmap.md`，持久可写文件系统能优先提升 BigOS 的实际可用性、开发工作流和长时间运行行为，因此本 change 将当前 RAM-backed `/rw` 运行期可写能力推进为有界的磁盘持久化能力。
 
 ## What Changes
 
@@ -19,7 +19,7 @@ Stage 44 需要在前序 libc、文件系统、进程、终端和 VM 合同稳�
 ### Modified Capabilities
 
 - `writable-filesystem`: 将当前 RAM-backed `/rw` 语义扩展为可选择持久后端，并保留运行期 RAM-backed 模式作为非持久 fallback/验证路径。
-- `runtime-filesystem-maturity`: 修改 Stage 41 “为持久存储做准备但不实现”的边界，使其接纳 Stage 44 的持久化语义，同时继续区分运行期一致性和跨重启持久性。
+- `runtime-filesystem-maturity`: 修改 runtime filesystem maturity “为持久存储做准备但不实现”的边界，使其接纳 persistent clean-sync /rw storage 的持久化语义，同时继续区分运行期一致性和跨重启持久性。
 - `page-buffer-cache`: 扩展同步/淘汰合同，要求持久后端上的 `fsync` 和缓存写回具备跨重启可验证的落盘语义。
 - `block-device-read`: 扩展已有块设备写接口要求，明确持久后端写入路径、只读设备拒绝写和同步轮询失败行为可被文件系统依赖。
 

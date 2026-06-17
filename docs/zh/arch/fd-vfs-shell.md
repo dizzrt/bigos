@@ -1,6 +1,6 @@
 # 文件描述符与 VFS 壳层
 
-BigOS 阶段 13 引入最小的只读 fd/VFS 边界。后续阶段保持这条 exFAT 读路径不变，并在其上加入 bounded VMA metadata、`brk`、restricted anonymous mapping、demand paging、可写 `/rw`、page/buffer cache、pipe/dup 和最小用户态运行时。
+BigOS 引入最小的只读 fd/VFS 边界。后续能力保持这条 exFAT 读路径不变，并在其上加入 bounded VMA metadata、`brk`、restricted anonymous mapping、demand paging、可写 `/rw`、page/buffer cache、pipe/dup 和最小用户态运行时。
 
 ## VFS 边界
 

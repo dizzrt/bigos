@@ -1,6 +1,6 @@
 ## Why
 
-BigOS 目前只能在 Legacy BIOS bootloader 路径中使用一次性的 exFAT 读取逻辑加载 `boot.bin` 和 `kernel`，内核启动后没有可复用的块设备或文件读取能力。阶段 7 需要把只读磁盘访问下沉到 kernel runtime，为后续从文件系统加载 ELF 用户程序、测试资源和更多内核服务做准备。
+BigOS 目前只能在 Legacy BIOS bootloader 路径中使用一次性的 exFAT 读取逻辑加载 `boot.bin` 和 `kernel`，内核启动后没有可复用的块设备或文件读取能力。kernel block and filesystem read capability 需要把只读磁盘访问下沉到 kernel runtime，为后续从文件系统加载 ELF 用户程序、测试资源和更多内核服务做准备。
 
 ## What Changes
 

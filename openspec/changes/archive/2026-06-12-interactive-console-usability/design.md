@@ -1,6 +1,6 @@
 ## Context
 
-Stage 19 之后，BigOS normal boot 已经能打包并启动 resident PID-1 init，再进入 `/bin/sh` 和小型用户程序集合。当前缺口不是新增完整用户态模型，而是把已有键盘 TTY、文本控制台、fd/syscall、init 与 shell 路径整理成默认可见、可操作的交互路径：用户在运行时文本控制台上应能看到 prompt、输入命令、看到输入回显与命令输出。
+unified boot handoff capability9 之后，BigOS normal boot 已经能打包并启动 resident PID-1 init，再进入 `/bin/sh` 和小型用户程序集合。当前缺口不是新增完整用户态模型，而是把已有键盘 TTY、文本控制台、fd/syscall、init 与 shell 路径整理成默认可见、可操作的交互路径：用户在运行时文本控制台上应能看到 prompt、输入命令、看到输入回显与命令输出。
 
 本 change 横跨内核 terminal/TTY、键盘 IRQ handoff、控制台输出、用户态 shell、init 默认 fd 连接，以及 runtime validation。它必须保持当前 x86_64 Legacy BIOS 后端、单核同步模型、现有磁盘镜像路径和串口/日志验证方式，不改变 boot 地址、链接地址、页表布局、IDT/syscall vector、CR3 切换或用户 ABI。
 
@@ -28,7 +28,7 @@ Stage 19 之后，BigOS normal boot 已经能打包并启动 resident PID-1 init
 
    Rationale: shell 需要验证真实用户态 fd 和 syscall 行为；绕过 fd 直接写控制台会掩盖进程、VFS、dup/pipe/redirection 与 stdout/stderr 行为的缺陷。
 
-   Alternatives considered: 为 `/bin/sh` 增加专用 kernel console syscall。该方案实现更快，但会制造第二套 I/O 语义，削弱 Stage 23/24 的 POSIX-like 进程与 I/O 演进。
+   Alternatives considered: 为 `/bin/sh` 增加专用 kernel console syscall。该方案实现更快，但会制造第二套 I/O 语义，削弱 TTY console input capability3/24 的 POSIX-like 进程与 I/O 演进。
 
 2. 输入回显由非中断消费路径负责，而不是由 keyboard ISR 直接写 VGA/serial。
 

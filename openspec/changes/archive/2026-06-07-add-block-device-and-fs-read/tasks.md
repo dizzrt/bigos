@@ -47,7 +47,7 @@
 
 - [x] 7.1 更新相关 docs，说明 kernel runtime block/FS 与 bootloader exFAT 读取路径的区别、支持范围和非目标。
 - [x] 7.2 若更新 `docs/en`，同步更新对应 `docs/zh` 路径，保持双语目录结构一致。
-- [x] 7.3 在路线图或验证说明中记录阶段 7 对阶段 8 `load-user-elf-program` 的 API 前置关系。
+- [x] 7.3 在路线图或验证说明中记录kernel block and filesystem read capability 对user ELF loader capability `load-user-elf-program` 的 API 前置关系。
 
 ## 8. 验证与回归
 

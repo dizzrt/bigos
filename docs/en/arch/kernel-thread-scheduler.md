@@ -1,6 +1,6 @@
 # Kernel Threads And Single-Core Scheduler
 
-BigOS stage 11 keeps the minimal kernel-thread model single-core, but extends the scheduler from purely cooperative round-robin to bounded timer-driven semantics. Ordinary kernel threads still use the same TCB, run queue, idle ownership, and cooperative switch frame; PIT IRQ0 may now expire a time slice and request a guarded IRQ-return switch.
+BigOS keeps the minimal kernel-thread model single-core, but extends the scheduler from purely cooperative round-robin to bounded timer-driven semantics. Ordinary kernel threads still use the same TCB, run queue, idle ownership, and cooperative switch frame; PIT IRQ0 may now expire a time slice and request a guarded IRQ-return switch.
 
 ## Scope
 
@@ -17,12 +17,12 @@ BigOS stage 11 keeps the minimal kernel-thread model single-core, but extends th
 ## Non-Goals And Boundaries
 
 - **Single-core**: no SMP balancing, per-CPU run queues, IPI, affinity, or cross-CPU synchronization.
-- **No full priority scheduler**: stage 11 records bounded priority/policy metadata only. Default selection remains deterministic single-core round-robin.
+- **No full priority scheduler**: the scheduler records bounded priority/policy metadata only. Default selection remains deterministic single-core round-robin.
 - **Bounded process and syscall integration**: timer preemption does not create
   user-visible POSIX scheduling policy. Later process/fd/VFS syscalls may use
   `sched::can_block()` from ordinary process syscall contexts, but only inside
   the same single-core blocking contract.
-- **Stage 11 blocking boundary**: wait queues and tick-based sleep remain
+- **bounded timer-driven scheduler semantics blocking boundary**: wait queues and tick-based sleep remain
   single-core kernel-thread primitives. There is still no CFS, real-time
   scheduling, POSIX blocking IO policy, SMP, or user-visible cancellation and
   signal semantics.
@@ -50,9 +50,9 @@ The run queue, wait queues, sleep list, and terminated list are intrusive lists.
 
 ## Allocator Context Contract
 
-`create_kernel_thread()` may be called only from non-interrupt context. It allocates resources through the stage 3 ordinary allocator contract (`kmalloc()` for TCB, `alloc_kernel_pages()` for stack). Timer IRQ0, keyboard IRQ1, `#PF`, and `irq_dispatch` paths do not create or free thread objects and do not perform ordinary dynamic allocation. Failure paths release only resources allocated by the same non-interrupt-context call path and do not violate the allocator contract.
+`create_kernel_thread()` may be called only from non-interrupt context. It allocates resources through the kernel memory API ordinary allocator contract (`kmalloc()` for TCB, `alloc_kernel_pages()` for stack). Timer IRQ0, keyboard IRQ1, `#PF`, and `irq_dispatch` paths do not create or free thread objects and do not perform ordinary dynamic allocation. Failure paths release only resources allocated by the same non-interrupt-context call path and do not violate the allocator contract.
 
-Stage 4 ordinary kernel threads use a fixed 1-page kernel stack by default, and the TCB records the stack base/size. This default page count is not exposed as a smoke/debug build option. If larger stacks or guard pages become necessary, they should be introduced with stack-overflow diagnostics in a separate change.
+kernel thread scheduler capability ordinary kernel threads use a fixed 1-page kernel stack by default, and the TCB records the stack base/size. This default page count is not exposed as a smoke/debug build option. If larger stacks or guard pages become necessary, they should be introduced with stack-overflow diagnostics in a separate change.
 
 ## Context Switch
 
@@ -80,7 +80,7 @@ Callers execute `cli` before `switch_context`, and each resume point executes `s
 
 ## Thread Exit And Deferred Reclamation
 
-`thread_exit()` removes any stale wait/sleep membership, marks the current thread `Terminated`, removes it from runnable scheduling, and links it into the scheduler-owned terminated list. It **does not** immediately free the current thread's TCB or kernel stack on the exiting stack. Safe reclamation is deferred to a later lifecycle change; this stage only guarantees terminated threads are never reinserted into the runnable queue and the stage 4 thread count is bounded.
+`thread_exit()` removes any stale wait/sleep membership, marks the current thread `Terminated`, removes it from runnable scheduling, and links it into the scheduler-owned terminated list. It **does not** immediately free the current thread's TCB or kernel stack on the exiting stack. Safe reclamation is deferred to a later lifecycle change; this scheduler boundary only guarantees terminated threads are never reinserted into the runnable queue and the kernel thread count is bounded.
 
 ## Timer And IRQ Boundary
 

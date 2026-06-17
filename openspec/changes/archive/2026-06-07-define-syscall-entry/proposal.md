@@ -1,8 +1,8 @@
 ## Why
 
-阶段 5 的 `prepare-user-address-space-vmem` 已归档完成：内核已经有显式页属性 primitive、user/kernel
+ring0 syscall diagnostic capability 的 `prepare-user-address-space-vmem` 已归档完成：内核已经有显式页属性 primitive、user/kernel
 属性策略，以及“复制内核高半区、低半区独立”的用户地址空间页表根派生（但本阶段不切 CR3、不进入 ring3）。
-要继续向阶段 6（加载并运行第一个用户程序）推进，下一块缺口是“内核态如何被显式、受控地进入”：当前内核
+要继续向user entry and syscall capability（加载并运行第一个用户程序）推进，下一块缺口是“内核态如何被显式、受控地进入”：当前内核
 只有 i8259 外部 IRQ 与 CPU 异常两类入口，没有任何供软件主动触发的系统调用入口与最小 ABI。
 
 本 change 只建立 syscall 入口边界与最小调用约定（先做 1~2 个诊断型 syscall），为后续 ring3 切换与用户程序

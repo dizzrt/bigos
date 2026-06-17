@@ -1,7 +1,7 @@
 ## 1. Matrix Definition
 
 - [x] 1.1 盘点现有 runtime smoke 开关、编译边界、预期 COM1/VGA marker、case-specific timeout 和输出日志路径。
-- [x] 1.2 定义阶段 9 runtime smoke matrix，至少包含 memory self-test、timer IRQ、scheduler、syscall、read-only filesystem、first user program、filesystem-backed user ELF 的窄 case。
+- [x] 1.2 定义runtime smoke validation matrix runtime smoke matrix，至少包含 memory self-test、timer IRQ、scheduler、syscall、read-only filesystem、first user program、filesystem-backed user ELF 的窄 case。
 - [x] 1.3 为 `user_program_smoke` 和 `user_elf_smoke` case 明确记录 `kernel/core/proc/**` 编译边界和非默认 boot 边界。
 - [x] 1.4 确认矩阵定义不会改变现有 smoke 默认关闭语义、marker 字符串、boot image layout 或内核运行时 ABI。
 
@@ -19,7 +19,7 @@
 - [x] 3.1 更新 `docs/en` 中的验证或运行文档，说明 runtime smoke matrix、`tools/boot_debug.py` 子命令、QEMU headless 首选自动化路径、单 case 手工执行方式、case-specific timeout 和 validation artifact 字段。
 - [x] 3.2 同步更新 `docs/zh` 中匹配相对路径的中文文档，保持与 `docs/en` 内容结构一致。
 - [x] 3.3 记录 boot、IRQ、timer、ATA PIO、port IO 相关变更应在可用时使用 Bochs 或 QEMU+Bochs 交叉验证，并说明不可用时的记录格式。
-- [x] 3.4 明确阶段 9 非目标：不新增 OS runtime feature、不引入 CI 平台、不实现 UEFI、不改变 smoke marker ABI。
+- [x] 3.4 明确runtime smoke validation matrix 非目标：不新增 OS runtime feature、不引入 CI 平台、不实现 UEFI、不改变 smoke marker ABI。
 
 ## 4. Validation
 

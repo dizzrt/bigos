@@ -1,6 +1,6 @@
 # 内核线程与单核调度器
 
-BigOS 阶段 11 仍保持最小内核线程模型的单核边界，但把调度器从纯协作式 round-robin 扩展为 bounded timer-driven semantics。普通内核线程仍使用相同 TCB、run queue、idle ownership 与 cooperative switch frame；PIT IRQ0 现在可以让 time slice 到期并请求受 guard 保护的 IRQ-return switch。
+BigOS 仍保持最小内核线程模型的单核边界，但把调度器从纯协作式 round-robin 扩展为 bounded timer-driven semantics。普通内核线程仍使用相同 TCB、run queue、idle ownership 与 cooperative switch frame；PIT IRQ0 现在可以让 time slice 到期并请求受 guard 保护的 IRQ-return switch。
 
 ## 范围
 
@@ -16,9 +16,9 @@ BigOS 阶段 11 仍保持最小内核线程模型的单核边界，但把调度�
 ## 非目标与边界
 
 - **单核**：没有 SMP balancing、per-CPU run queue、IPI、affinity 或跨 CPU 同步。
-- **无完整优先级调度器**：阶段 11 只记录 bounded priority/policy metadata，默认选择策略仍是确定性的单核 round-robin。
+- **无完整优先级调度器**：调度器只记录 bounded priority/policy metadata，默认选择策略仍是确定性的单核 round-robin。
 - **Bounded process 与 syscall integration**：timer preemption 不创建用户可见的 POSIX scheduling policy。后续 process/fd/VFS syscall 可以在普通进程 syscall 上下文中使用 `sched::can_block()`，但只限同一个单核 blocking contract。
-- **阶段 11 阻塞边界**：wait queue 与 tick-based sleep 仍是单核内核线程原语。仍没有 CFS、实时调度、POSIX blocking IO policy、SMP、用户可见 cancellation 或 signal 语义。
+- **bounded timer-driven scheduler semantics 阻塞边界**：wait queue 与 tick-based sleep 仍是单核内核线程原语。仍没有 CFS、实时调度、POSIX blocking IO policy、SMP、用户可见 cancellation 或 signal 语义。
 - 不改变 boot 固定地址、higher-half base、kernel load base、BootInfo ABI、direct map、`KVMEM_BASE`、IDT vector 分配或 `InterruptFrame` ABI。
 
 ## 线程模型与状态
@@ -43,9 +43,9 @@ run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表�
 
 ## Allocator 上下文契约
 
-`create_kernel_thread()` 只能在非中断上下文调用。它通过阶段 3 的普通 allocator 契约（`kmalloc()` 取 TCB、`alloc_kernel_pages()` 取栈）分配资源；timer IRQ0、keyboard IRQ1、`#PF` 与 `irq_dispatch` 路径都不创建、不释放线程对象，也不做普通动态分配。创建失败路径只释放本路径已分配的资源（在非中断上下文），不破坏 allocator 契约。
+`create_kernel_thread()` 只能在非中断上下文调用。它通过 kernel memory API 的普通 allocator 契约（`kmalloc()` 取 TCB、`alloc_kernel_pages()` 取栈）分配资源；timer IRQ0、keyboard IRQ1、`#PF` 与 `irq_dispatch` 路径都不创建、不释放线程对象，也不做普通动态分配。创建失败路径只释放本路径已分配的资源（在非中断上下文），不破坏 allocator 契约。
 
-阶段 4 普通内核线程默认固定使用 1 页内核栈，TCB 记录 stack base/size。该默认页数不暴露 smoke/debug 构建开关；后续若需要更大栈或 guard page，应在单独 change 中结合栈溢出诊断推进。
+普通内核线程默认固定使用 1 页内核栈，TCB 记录 stack base/size。该默认页数不暴露 smoke/debug 构建开关；后续若需要更大栈或 guard page，应在单独 change 中结合栈溢出诊断推进。
 
 ## Context Switch
 
@@ -71,7 +71,7 @@ scheduler-owned bridge，在 EOI 之后保存被中断线程的当前内核栈 c
 
 ## 线程退出与延后回收
 
-`thread_exit()` 先移除任何残留 wait/sleep membership，再把当前线程标记为 `Terminated`、移出 runnable 调度，并挂入 scheduler-owned terminated list，但**不**在退出栈上立即释放当前线程的 TCB 或内核栈。安全回收推迟到后续 lifecycle change；当前阶段只保证 terminated 线程不会再次进入 runnable queue，且阶段 4 线程数量 bounded。
+`thread_exit()` 先移除任何残留 wait/sleep membership，再把当前线程标记为 `Terminated`、移出 runnable 调度，并挂入 scheduler-owned terminated list，但**不**在退出栈上立即释放当前线程的 TCB 或内核栈。安全回收推迟到后续 lifecycle change；当前调度边界只保证 terminated 线程不会再次进入 runnable queue，且内核线程数量 bounded。
 
 ## Timer 与 IRQ 边界
 

@@ -51,5 +51,5 @@ BigOS shell SHALL consume the default terminal's bounded control-input results f
 
 #### Scenario: interrupt-like input does not kill child command
 - **WHEN** shell stdin receives the documented interrupt-like terminal result while the shell is waiting for a child command
-- **THEN** the shell MUST NOT assume a POSIX foreground process group or deliver a terminal-generated signal to that child in Stage 42
+- **THEN** the shell MUST NOT assume a POSIX foreground process group or deliver a terminal-generated signal to that child in process/terminal/shell composition hardening
 - **AND** the shell MUST keep behavior bounded as a documented no-op, deferred status handling, or prompt recovery after the child wait path completes

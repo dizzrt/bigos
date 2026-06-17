@@ -8,12 +8,12 @@
 - `xmake`
   - 结果：通过，`build ok`。
   - 备注：`x86_64-elf-ld` 报告现有 `LOAD segment with RWX permissions` warning；本 change 未改变 linker layout。
-- `uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/stage20-default-init.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
+- `uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/default-init.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
   - 结果：通过，串口观察到 `BIGOS_USER_EXEC`。
-  - 日志：`build/test/stage20-default-init.serial.log`。
-- `uv run python tools/boot_debug.py run --emulator bochs --display none --serial-log build/test/stage20-bochs-after-console.serial.log --no-launch` 后运行 `bochs -f build/test/bochsrc.bxrc -q` 约 5 秒
+  - 日志：`build/test/default-init.serial.log`。
+- `uv run python tools/boot_debug.py run --emulator bochs --display none --serial-log build/test/bochs-after-console.serial.log --no-launch` 后运行 `bochs -f build/test/bochsrc.bxrc -q` 约 5 秒
   - 结果：通过，串口日志停在 `BIGOS_USER_WRITE_SYSCALL` 与 `$ `，未继续刷 `BIGOS_PAGE_FAULT`。
-  - 日志：`build/test/stage20-bochs-after-console.serial.log`。
+  - 日志：`build/test/bochs-after-console.serial.log`。
   - 回归原因确认：默认 fd `1/2` console fast path 需要在写 VGA 前临时切回 kernel CR3，避免在 user CR3 下访问低地址 `0xb8000`。
 - `GetDiagnostics`
   - 结果：`kernel/core/syscall/syscall.cc` 与 `user/sh/sh.c` 无诊断。

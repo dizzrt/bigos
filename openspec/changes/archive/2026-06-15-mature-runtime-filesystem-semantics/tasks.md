@@ -1,6 +1,6 @@
 ## 1. 契约盘点与边界确认
 
-- [x] 1.1 盘点 `kernel/core/fs`、`kernel/core/syscall`、`kernel/core/proc`、`user/libc`、`user/bin` 和 `user/sh` 中现有 Stage 41 相关路径，确认哪些行为已满足规格、哪些需要修复。
+- [x] 1.1 盘点 `kernel/core/fs`、`kernel/core/syscall`、`kernel/core/proc`、`user/libc`、`user/bin` 和 `user/sh` 中现有 runtime filesystem maturity 相关路径，确认哪些行为已满足规格、哪些需要修复。
 - [x] 1.2 确认 `/rw` 仍为 RAM-backed current-session backend，记录不改动 MBR、exFAT boot assets、磁盘镜像布局、boot 地址、linker 地址和 syscall vector 的实现约束。
 - [x] 1.3 为 read-only exFAT 与 `/rw` 的后端差异列出用户态可观察矩阵，覆盖 open/read/write/lseek/fsync/stat/fstat/readdir/mkdir/unlink/rename。
 

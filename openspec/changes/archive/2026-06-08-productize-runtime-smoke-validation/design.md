@@ -2,7 +2,7 @@
 
 BigOS 当前已经形成多个默认关闭的 runtime smoke：memory self-test、page fault、timer IRQ、keyboard、scheduler、user virtual memory、syscall、first user program、read-only exFAT、filesystem-backed user ELF。它们分别验证了早期内存、IRQ/timer、TTY、scheduler、syscall、filesystem 和 smoke-only user-mode path，但执行方式仍偏手工：开发者需要自己选择 `xmake f ...=y` 组合、启动 QEMU/Bochs helper、观察串口 marker，并在不可用工具场景下手动描述剩余风险。
 
-阶段 9 的目标不是新增内核运行时能力，而是在进入 blocking/sleep、preemptive scheduler、process lifecycle、VFS、VMA 等更高风险阶段之前，把现有 smoke 组合收敛为一套可重复、可跳过且可审计的验证矩阵。
+runtime smoke validation matrix 的目标不是新增内核运行时能力，而是在进入 blocking/sleep、preemptive scheduler、process lifecycle、VFS、VMA 等更高风险阶段之前，把现有 smoke 组合收敛为一套可重复、可跳过且可审计的验证矩阵。
 
 受影响边界主要在 tooling、validation scripts、文档和 OpenSpec 验证记录。内核 boot protocol、Legacy BIOS/MBR/exFAT raw image、higher-half kernel entry、IDT/IRQ/syscall ABI、CR3 ownership、proc smoke gating 和现有 marker 字符串都必须保持稳定。
 
@@ -10,7 +10,7 @@ BigOS 当前已经形成多个默认关闭的 runtime smoke：memory self-test�
 
 **Goals:**
 
-- 定义阶段 9 runtime smoke matrix，覆盖 memory、timer、scheduler、syscall、filesystem、first user program 和 filesystem-backed user ELF 的最小有价值组合。
+- 定义runtime smoke validation matrix runtime smoke matrix，覆盖 memory、timer、scheduler、syscall、filesystem、first user program 和 filesystem-backed user ELF 的最小有价值组合。
 - 提供一个可由本地开发者或未来 CI 调用的 validation runner 或等价 helper 编排入口，复用 `xmake f`、`xmake run qemu -- --display none` 和 `tools/boot_debug.py` 的现有能力。
 - 为每个 smoke case 记录 build 配置、预期 marker、串口日志路径、执行结果、跳过原因、替代检查和剩余风险。
 - 将自动化默认路径固定为 QEMU headless marker 检查，同时保留 Bochs 或 QEMU+Bochs cross-validation 作为 boot/IRQ/timer/ATA PIO/port IO 高风险变更的建议。
@@ -40,7 +40,7 @@ BigOS 当前已经形成多个默认关闭的 runtime smoke：memory self-test�
 
 4. 结构化 validation artifact 第一版输出 Markdown，并保留 JSON schema 兼容字段。
 
-   理由：Markdown 便于 review，适合作为阶段 9 的第一版人工审查产物；同时在字段设计上保留 case id、status、tool availability、marker、log path、skip reason、residual risk 等 JSON schema 兼容结构，便于后续 CI 消费。备选方案是第一版同时输出 Markdown 和 JSON，但会增加格式同步成本；另一个备选方案是只打印终端日志，但终端日志不利于后续归档和审查。
+   理由：Markdown 便于 review，适合作为runtime smoke validation matrix 的第一版人工审查产物；同时在字段设计上保留 case id、status、tool availability、marker、log path、skip reason、residual risk 等 JSON schema 兼容结构，便于后续 CI 消费。备选方案是第一版同时输出 Markdown 和 JSON，但会增加格式同步成本；另一个备选方案是只打印终端日志，但终端日志不利于后续归档和审查。
 
 5. 矩阵 runner 作为 `tools/boot_debug.py` 的子命令扩展，而不是新增独立 helper。
 
@@ -52,7 +52,7 @@ BigOS 当前已经形成多个默认关闭的 runtime smoke：memory self-test�
 
 7. Runner 不直接修改内核 runtime 语义，只编排构建配置、helper 参数和结果收集。
 
-   理由：阶段 9 是验证产品化，必须保持 boot address、disk layout、interrupt vector、syscall vector、CR3 切换、user process smoke gating 和 marker 字符串稳定。任何 runtime 行为修复都应作为独立 change 提出。
+   理由：runtime smoke validation matrix 是验证产品化，必须保持 boot address、disk layout、interrupt vector、syscall vector、CR3 切换、user process smoke gating 和 marker 字符串稳定。任何 runtime 行为修复都应作为独立 change 提出。
 
 ## Risks / Trade-offs
 
@@ -68,5 +68,5 @@ BigOS 当前已经形成多个默认关闭的 runtime smoke：memory self-test�
 1. 新增 runtime smoke matrix 定义和 Markdown-first 结构化结果格式，先覆盖现有 smoke 开关和 marker，不新增 kernel marker。
 2. 扩展 `tools/boot_debug.py` 子命令，使其按矩阵逐项执行 QEMU headless marker check，并记录 skipped/failed/passed。
 3. 将生成的日志和 validation artifact 放入 `build/test/` 或明确指定的 output path。
-4. 更新文档，说明阶段 9 的推荐执行入口、矩阵内容、跳过记录方式，以及 Bochs/QEMU cross-validation 使用场景。
+4. 更新文档，说明runtime smoke validation matrix 的推荐执行入口、矩阵内容、跳过记录方式，以及 Bochs/QEMU cross-validation 使用场景。
 5. 保留现有 `xmake run qemu`、`xmake run bochs` 和 `tools/boot_debug.py` 单项调试入口，runner 失败时开发者可以回退到单 case 手工执行。

@@ -1,14 +1,14 @@
 ## Purpose
 
-Define productized runtime smoke validation for BigOS, including an explicit stage 9 smoke matrix, QEMU headless marker checks, structured validation artifacts, and scenario-specific low-level cross-validation guidance.
+Define productized runtime smoke validation for BigOS, including an explicit smoke matrix, QEMU headless marker checks, structured validation artifacts, and scenario-specific low-level cross-validation guidance.
 ## Requirements
 ### Requirement: Runtime smoke matrix is explicit
 
-BigOS SHALL provide an explicit runtime smoke validation matrix that lists each supported stage 9 smoke case, the xmake switches required for that case, the preferred emulator path, the expected serial markers, the case-specific timeout, and the generated log or artifact paths.
+BigOS SHALL provide an explicit runtime smoke validation matrix that lists each supported smoke case, the xmake switches required for that case, the preferred emulator path, the expected serial markers, the case-specific timeout, and the generated log or artifact paths.
 
 #### Scenario: Matrix lists narrow smoke cases
 
-- **WHEN** a developer inspects the stage 9 runtime smoke matrix
+- **WHEN** a developer inspects the runtime smoke matrix
 - **THEN** the matrix MUST include narrow cases for memory self-test, timer IRQ, scheduler, syscall, read-only filesystem, first user program, and filesystem-backed user ELF validation
 - **AND** each case MUST list only the smoke switches needed for that case instead of enabling every smoke switch at once
 - **AND** filesystem and filesystem-backed user ELF cases MUST be able to use longer default timeouts than fast memory, timer, scheduler, or syscall cases
@@ -109,7 +109,7 @@ Runtime smoke validation productization SHALL NOT change existing boot layout, k
 BigOS SHALL extend the runtime smoke validation matrix with narrow blocking primitive cases that validate wait queue wakeup, timeout wait, and optional TTY blocking behavior without enabling unrelated smoke switches.
 
 #### Scenario: Matrix lists blocking primitive cases
-- **WHEN** a developer inspects the runtime smoke matrix after stage 10
+- **WHEN** a developer inspects the runtime smoke matrix after blocking primitives are available
 - **THEN** the matrix MUST include at least one narrow blocking primitives case that exercises thread block/wakeup and timeout wait
 - **AND** it MUST list the xmake switches, expected serial markers, case-specific timeout, generated log paths, and whether TTY blocking input is synthetic, manual, skipped, or blocked
 
@@ -138,13 +138,13 @@ BigOS SHALL record executed and skipped blocking validation in the structured ru
 
 ### Requirement: 运行时 smoke 矩阵覆盖默认 init 行为断言
 
-BigOS SHALL 在 Stage 9 运行时 smoke 矩阵中新增一个**默认构建**（不开启任何 smoke
+BigOS SHALL 在 runtime smoke validation matrix 运行时 smoke 矩阵中新增一个**默认构建**（不开启任何 smoke
 开关）的用例，断言 normal boot 默认进入用户态 init 的行为，并以此启动「行为断言测试」
 轨道——验证逐步从源码字符串契约转向基于串口 marker 与用户态二进制输出的行为断言。
 
 #### Scenario: 矩阵包含默认 init 用例
 
-- **WHEN** 开发者在 Stage 14.5 之后查看运行时 smoke 矩阵
+- **WHEN** 开发者在 behavior assertion validation baseline 之后查看运行时 smoke 矩阵
 - **THEN** 矩阵 MUST 包含一个不依赖任何 smoke 开关的默认构建用例
 - **AND** 该用例 MUST 断言默认构建发出 `BIGOS_INIT_ENTER` 与 `BIGOS_INIT_EXIT` 串口 marker
 - **AND** 该用例 MUST 列出（空的）所需 smoke 开关、首选 QEMU headless 路径、期望 marker、
@@ -169,7 +169,7 @@ BigOS SHALL 在 Stage 9 运行时 smoke 矩阵中新增一个**默认构建**（
 BigOS SHALL extend the runtime smoke validation matrix with narrow scheduler semantics cases that validate timer-driven preemption, preemption-disable behavior, and preservation of existing cooperative scheduler behavior.
 
 #### Scenario: Matrix lists scheduler semantics cases
-- **WHEN** a developer inspects the runtime smoke matrix after stage 11
+- **WHEN** a developer inspects the runtime smoke matrix after guarded scheduler semantics are available
 - **THEN** the matrix MUST include at least one narrow scheduler semantics case that exercises time slice expiry and timer-driven reschedule-on-IRQ-return
 - **AND** it MUST list the xmake switches, expected serial markers, case-specific timeout, generated log paths, and required emulator backend for the case
 
@@ -448,60 +448,60 @@ BigOS SHALL keep terminal abstraction validation within the current bounded x86_
 - **THEN** the record MUST distinguish passed checks, skipped or blocked checks, historical diagnostics, current-change diagnostics, substitute checks, and residual risks
 - **AND** Python-related helper execution, if any, MUST be described with `uv run ...`; if `uv` is unavailable, the record MUST state that blocker explicitly
 
-### Requirement: Stage 39 POSIX surface smoke coverage
-BigOS SHALL provide default-off runtime smoke or equivalent source-contract validation for the Stage 39 bounded POSIX surface hardening work.
+### Requirement: bounded POSIX-like surface smoke coverage
+BigOS SHALL provide default-off runtime smoke or equivalent source-contract validation for the bounded POSIX-like surface hardening work.
 
 #### Scenario: Signal surface validation
-- **WHEN** the Stage 39 validation path exercises signal behavior
+- **WHEN** the bounded POSIX-like surface validation path exercises signal behavior
 - **THEN** it covers installing a handler, delivering a signal, returning through the bounded sigreturn path, and preserving the default termination behavior for an unhandled signal
 
 #### Scenario: Wait and status validation
-- **WHEN** the Stage 39 validation path exercises process waiting
+- **WHEN** the bounded POSIX-like surface validation path exercises process waiting
 - **THEN** it covers waiting for any child, waiting for a specific child, status writeback, and deterministic failure for unsupported wait options
 
 #### Scenario: Error text validation
-- **WHEN** the Stage 39 validation path exercises libc error reporting
+- **WHEN** the bounded POSIX-like surface validation path exercises libc error reporting
 - **THEN** it covers errno translation, stable strerror text for known errors, fallback text for unknown errors, and perror output to stderr
 
 #### Scenario: Shell composition validation
-- **WHEN** the Stage 39 validation path exercises shell behavior
+- **WHEN** the bounded POSIX-like surface validation path exercises shell behavior
 - **THEN** it covers successful commands, command-not-found, unsupported syntax, failed redirection recovery, single-stage pipe EOF, and bounded status reporting
 
-### Requirement: Stage 39 source-contract validation
-BigOS SHALL keep user/kernel mirror contracts synchronized for any Stage 39 public header or wrapper that mirrors kernel syscall numbers, errno values, signal constants, wait constants, or ABI-sensitive signal frame data.
+### Requirement: bounded POSIX-like surface source-contract validation
+BigOS SHALL keep user/kernel mirror contracts synchronized for any bounded POSIX-like surface public header or wrapper that mirrors kernel syscall numbers, errno values, signal constants, wait constants, or ABI-sensitive signal frame data.
 
 #### Scenario: Mirror constants remain synchronized
 - **WHEN** source-contract validation runs
 - **THEN** it detects mismatches between user-visible constants and their kernel-owned sources before runtime smoke execution
 
-### Requirement: Stage 41 文件系统行为验证
-BigOS SHALL provide a dedicated default-off behavior-oriented runtime smoke for Stage 41 runtime filesystem maturity. Validation MUST cover current-runtime success and failure paths across read-only exFAT, RAM-backed `/rw`, fd/VFS operations, metadata queries, directory enumeration, cwd-relative paths, libc errno wrappers, and shell-visible user tools. Environment-dependent emulator checks MUST record missing QEMU, Bochs, cross toolchain, ROM/display, disk image, serial oracle, or timeout dependencies as skipped rather than passed.
+### Requirement: runtime filesystem maturity 文件系统行为验证
+BigOS SHALL provide a dedicated default-off behavior-oriented runtime smoke for runtime filesystem maturity. Validation MUST cover current-runtime success and failure paths across read-only exFAT, RAM-backed `/rw`, fd/VFS operations, metadata queries, directory enumeration, cwd-relative paths, libc errno wrappers, and shell-visible user tools. Environment-dependent emulator checks MUST record missing QEMU, Bochs, cross toolchain, ROM/display, disk image, serial oracle, or timeout dependencies as skipped rather than passed.
 
 #### Scenario: 运行期成功组合路径验证
-- **WHEN** Stage 41 filesystem validation runs in an environment with the required build, toolchain, disk image, emulator, and serial observation support
+- **WHEN** runtime filesystem maturity validation runs in an environment with the required build, toolchain, disk image, emulator, and serial observation support
 - **THEN** it MUST exercise at least one read-only exFAT read/metadata path and one `/rw` create/write/read/lseek/fsync/stat/list/unlink/restricted-rename path
 - **AND** it MUST verify that observed file contents, metadata, stable directory entry order, fd references, and shell/libc-visible results match the bounded filesystem contract
 
 #### Scenario: 运行期失败组合路径验证
-- **WHEN** Stage 41 filesystem validation runs
+- **WHEN** runtime filesystem maturity validation runs
 - **THEN** it MUST exercise representative failures for read-only write, missing path, existing target, invalid fd, invalid user buffer, permission denial, naturally filled `/rw` capacity exhaustion, unsupported object type, and directory enumeration output exhaustion
 - **AND** it MUST verify deterministic errno behavior and state preservation for each failure class
 
 #### Scenario: 环境不可用时记录跳过
 - **WHEN** required emulator, cross toolchain, boot image, display/ROM, serial oracle, timeout, or local configuration dependencies are unavailable
 - **THEN** validation notes MUST record the unavailable dependency, skipped cases, substitute checks, and residual risk
-- **AND** they MUST NOT claim Stage 41 runtime filesystem validation passed
+- **AND** they MUST NOT claim runtime filesystem maturity validation passed
 
 ### Requirement: 验证保持 roadmap 边界
-BigOS SHALL keep Stage 41 validation aligned with the bounded userland and non-persistent `/rw` roadmap boundary. Validation MAY use source-level checks, small static C programs, shell tools, and the dedicated default-off filesystem maturity runtime smoke, but MUST NOT require dynamic linking, complete POSIX test suites, SMP, UEFI runtime parity, broad storage drivers, or cross-reboot persistence checks.
+BigOS SHALL keep runtime filesystem maturity validation aligned with the bounded userland and non-persistent `/rw` roadmap boundary. Validation MAY use source-level checks, small static C programs, shell tools, and the dedicated default-off filesystem maturity runtime smoke, but MUST NOT require dynamic linking, complete POSIX test suites, SMP, UEFI runtime parity, broad storage drivers, or cross-reboot persistence checks.
 
 #### Scenario: 专用 smoke 不替代基础回归
-- **WHEN** Stage 41 filesystem maturity validation is added
+- **WHEN** runtime filesystem maturity validation is added
 - **THEN** BigOS MUST keep it as a dedicated default-off runtime path for cross-layer filesystem behavior
-- **AND** existing writable filesystem and userland smokes MAY remain as narrower regression checks rather than carrying the full Stage 41 contract
+- **AND** existing writable filesystem and userland smokes MAY remain as narrower regression checks rather than carrying the full runtime filesystem maturity contract
 
 #### Scenario: 验证不要求跨重启持久化
-- **WHEN** Stage 41 validation writes files under `/rw`
+- **WHEN** runtime filesystem maturity validation writes files under `/rw`
 - **THEN** validation MUST treat those files as current-session state only
 - **AND** it MUST NOT require reboot-and-remount persistence unless a later accepted persistent-storage change adds that requirement
 
@@ -509,4 +509,3 @@ BigOS SHALL keep Stage 41 validation aligned with the bounded userland and non-p
 - **WHEN** validation uses libc wrappers, shell commands, or small user tools to observe filesystem behavior
 - **THEN** it MUST describe the checked behavior as a BigOS bounded filesystem subset
 - **AND** it MUST NOT claim complete POSIX filesystem, shell, libc, directory stream, or metadata compatibility
-

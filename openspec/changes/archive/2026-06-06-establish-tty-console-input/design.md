@@ -25,15 +25,15 @@
 
 1. 使用固定容量静态 ring buffer，而不是 heap 分配队列。
 
-   当前 allocator 不承诺 IRQ-context 安全，阶段 2 也不引入 scheduler 或阻塞语义。TTY 输入缓冲应使用静态存储或初始化期明确构造的固定容量对象，ISR 入队在满时丢弃新输入并记录 drop counter 或可诊断状态，避免在中断上下文分配或等待。
+   当前 allocator 不承诺 IRQ-context 安全，TTY console input capability 也不引入 scheduler 或阻塞语义。TTY 输入缓冲应使用静态存储或初始化期明确构造的固定容量对象，ISR 入队在满时丢弃新输入并记录 drop counter 或可诊断状态，避免在中断上下文分配或等待。
 
-   备选方案是 `kmalloc` 动态队列，但这会提前扩大 allocator 的 IRQ 安全契约，属于阶段 3 的范围。
+   备选方案是 `kmalloc` 动态队列，但这会提前扩大 allocator 的 IRQ 安全契约，属于kernel memory API capability 的范围。
 
 2. keyboard ISR 允许做最小 scancode 解码，但不直接输出。
 
    ISR 读取 port `0x60` 是硬件必须动作；维护 Shift/Ctrl/Alt press/release 状态和 set-1 基础转换可以避免把 raw scancode 语义泄漏到 TTY 层。ISR 不调用 `kprintf`、不格式化字符串、不写 VGA/serial、不阻塞、不发送 EOI。
 
-   备选方案是 ISR 只入队 raw scancode，由非中断上下文解码。该方案更保守，但会让后续消费路径必须理解硬件 scancode；阶段 2 先采用小而固定的 set-1 解码表，且通过源码级检查限制 ISR 行为。
+   备选方案是 ISR 只入队 raw scancode，由非中断上下文解码。该方案更保守，但会让后续消费路径必须理解硬件 scancode；TTY console input capability 先采用小而固定的 set-1 解码表，且通过源码级检查限制 ISR 行为。
 
 3. TTY/console 命名统一到一个主线命名空间。
 
@@ -47,11 +47,11 @@
 
    `initIRQ()` 可以继续注册 keyboard handler，但 IRQ1 默认保持 masked。只有当 TTY input buffer 初始化完成，且 keyboard smoke 或默认输入路径明确需要 keyboard 时，才 unmask IRQ1。`kernel()` 中 `sti` 前必须完成 IDT/PIC/handler/buffer 的顺序约束。
 
-6. 阶段 2 只记录人工 Bochs keyboard smoke，不扩展 `tools/boot_debug.py` 自动注入 scancode。
+6. TTY console input capability 只记录人工 Bochs keyboard smoke，不扩展 `tools/boot_debug.py` 自动注入 scancode。
 
-   当前阶段的目标是建立内核侧输入/TTY/console 边界；自动键盘注入属于 emulator tooling 能力，容易与既有 serial/VGA oracle 不稳定问题耦合。阶段 2 的 runtime 验证可以记录人工 Bochs 键盘操作步骤和观测结果；若人工输入也不可用，记录缺失依赖和剩余 runtime 风险。
+   当前阶段的目标是建立内核侧输入/TTY/console 边界；自动键盘注入属于 emulator tooling 能力，容易与既有 serial/VGA oracle 不稳定问题耦合。TTY console input capability 的 runtime 验证可以记录人工 Bochs 键盘操作步骤和观测结果；若人工输入也不可用，记录缺失依赖和剩余 runtime 风险。
 
-7. `kput()`/`kputs()` 在阶段 2 保留为 early direct output，不迁移为 console wrapper。
+7. `kput()`/`kputs()` 在TTY console input capability 保留为 early direct output，不迁移为 console wrapper。
 
    新 console API 作为普通 runtime 输出入口新增；现有 `kput()`/`kputs()`、`serial_puts()` 和 fatal marker 路径继续保留 direct-output 语义。这样可以避免 page fault、panic、memory self-test 等早期诊断路径在 TTY 初始化前后出现语义变化。是否最终把 `kput()`/`kputs()` 包装到 console 层，留给后续 cleanup change。
 
@@ -64,7 +64,7 @@
   → Mitigation：仅支持固定 set-1 基础表和少量修饰键状态；禁止 formatter、输出、分配和阻塞；用测试检查 handler body。
 
 - [Risk] ring buffer 满时丢输入会影响交互体验。
-  → Mitigation：阶段 2 以可用和安全为优先，满时丢弃并计数；后续 scheduler/阻塞读阶段再引入 backpressure 或 wait queue。
+  → Mitigation：TTY console input capability 以可用和安全为优先，满时丢弃并计数；后续 scheduler/阻塞读阶段再引入 backpressure 或 wait queue。
 
 - [Risk] console 层封装可能影响现有 early diagnostics。
   → Mitigation：保持现有 `serial_puts`、`kput`/`kputs`、fatal marker 路径 direct-output 语义；console 只作为普通运行时输出入口新增。

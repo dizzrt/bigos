@@ -30,11 +30,11 @@
 
 ## 5. 后续阶段项目级路线图
 
-- [x] 5.1 创建项目级路线图章节，列出后续阶段 1：`BootInfoHeader + tagged sections`、寄存器传递 `BootInfo*` 和统一 handoff header 设计与文档化。
-- [x] 5.2 创建项目级路线图章节，列出后续阶段 2：内存模块迁移到统一 `BootMemoryRegion` consumer，并保留 BIOS fallback。
-- [x] 5.3 创建项目级路线图章节，列出后续阶段 3：最小 UEFI loader spike，单独实现 UEFI ELF reader，目标仅为加载 kernel、填充 handoff、进入 `kernel()`。
-- [x] 5.4 创建项目级路线图章节，列出后续阶段 4：ESP/FAT 镜像生成、OVMF/QEMU 调试入口和文档化命令。
-- [x] 5.5 创建项目级路线图章节，列出后续阶段 5：GOP framebuffer、ACPI RSDP/SMBIOS handoff 和更完整的 UEFI 验证策略。
+- [x] 5.1 创建项目级路线图章节，列出后续unified boot handoff capability：`BootInfoHeader + tagged sections`、寄存器传递 `BootInfo*` 和统一 handoff header 设计与文档化。
+- [x] 5.2 创建项目级路线图章节，列出后续TTY console input capability：内存模块迁移到统一 `BootMemoryRegion` consumer，并保留 BIOS fallback。
+- [x] 5.3 创建项目级路线图章节，列出后续kernel memory API capability：最小 UEFI loader spike，单独实现 UEFI ELF reader，目标仅为加载 kernel、填充 handoff、进入 `kernel()`。
+- [x] 5.4 创建项目级路线图章节，列出后续kernel thread scheduler capability：ESP/FAT 镜像生成、OVMF/QEMU 调试入口和文档化命令。
+- [x] 5.5 创建项目级路线图章节，列出后续ring0 syscall diagnostic capability：GOP framebuffer、ACPI RSDP/SMBIOS handoff 和更完整的 UEFI 验证策略。
 - [x] 5.6 创建项目级路线图章节，记录 BIOS 与 UEFI 共享 ELF64 加载规则规范，但不要求近期共享 loader 代码。
 - [x] 5.7 对每个后续阶段标注当前不实现、推荐前置条件、主要风险和对应 OpenSpec change 候选名称。
 

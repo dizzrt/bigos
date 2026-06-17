@@ -41,7 +41,7 @@ BigOS 已经具备只读 exFAT root、RAM-backed `/rw` 可写后端、fd/VFS、p
   替代方案：直接暴露 backend inode 或 exFAT 标识。该方案会把内部结构固化为 ABI。
 
 - 决策：目录枚举只验证最小有界记录和状态可见性。
-  理由：Stage 31 需要确认 create/mkdir/unlink/rename 对目录可观察，但不需要完整 `DIR*`、offset cookie、排序或稳定快照。
+  理由：runtime filesystem semantics hardening 需要确认 create/mkdir/unlink/rename 对目录可观察，但不需要完整 `DIR*`、offset cookie、排序或稳定快照。
   替代方案：实现完整 POSIX `readdir/getdents`。该方案会扩大 user ABI 和 shell/工具范围。
 
 - 决策：最小目录枚举的调用方输出容量不足统一映射为 `-ERANGE`。

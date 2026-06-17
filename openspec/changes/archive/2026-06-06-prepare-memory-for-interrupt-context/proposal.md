@@ -1,8 +1,8 @@
 ## Why
 
-阶段 2 已把 keyboard IRQ1 输入交接接入主线，阶段 4 将引入调度器和内核线程；在进入调度前，需要先把 allocator 在 IRQ disabled、IRQ handler 和普通内核上下文中的可用边界写清楚并用源码检查固定下来。
+TTY console input capability 已把 keyboard IRQ1 输入交接接入主线，kernel thread scheduler capability 将引入调度器和内核线程；在进入调度前，需要先把 allocator 在 IRQ disabled、IRQ handler 和普通内核上下文中的可用边界写清楚并用源码检查固定下来。
 
-当前内存子系统已经具备 buddy、slab/kmalloc、kernel virtual memory 和 runtime self-test，但仍默认只承诺单核早期路径。阶段 3 先建立最小 interrupt-context 契约，避免后续 timer/keyboard/driver/scheduler 代码在 IRQ handler 中误用可能阻塞、扩容或修改页表的 allocator API。
+当前内存子系统已经具备 buddy、slab/kmalloc、kernel virtual memory 和 runtime self-test，但仍默认只承诺单核早期路径。kernel memory API capability 先建立最小 interrupt-context 契约，避免后续 timer/keyboard/driver/scheduler 代码在 IRQ handler 中误用可能阻塞、扩容或修改页表的 allocator API。
 
 ## What Changes
 

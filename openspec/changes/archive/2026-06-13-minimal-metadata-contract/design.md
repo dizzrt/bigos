@@ -26,7 +26,7 @@ BigOS 当前已经有只读 exFAT、RAM-backed `/rw`、fd/VFS、进程 fd table�
 
 采用 BigOS 用户 ABI 专用的固定布局元数据结构，而不是声明完整 POSIX `struct stat` 兼容。结构只包含当前后端能稳定提供且简单程序需要的字段：文件类型、大小、mode、uid、gid、链接计数的有界占位、用户可见对象编号默认零值，以及为未来扩展保留的显式零填充字段。第一版不向用户 ABI 暴露 `/rw` 运行期 inode 编号或 exFAT 后端编号，避免形成持久 inode、跨后端稳定编号或 POSIX `st_ino` 兼容承诺；后续如确有真实消费场景，可通过单独 change 扩展该字段语义。
 
-备选方案是直接复刻 POSIX `struct stat`。该方案会暗示未实现的设备号、完整 inode、时间戳、链接和权限数据库语义，超出 roadmap Stage 27 的边界，因此不采用。
+备选方案是直接复刻 POSIX `struct stat`。该方案会暗示未实现的设备号、完整 inode、时间戳、链接和权限数据库语义，超出 roadmap TTY console input capability7 的边界，因此不采用。
 
 ### Decision: VFS 层统一路径和 fd 元数据查询
 
@@ -50,7 +50,7 @@ BigOS 当前已经有只读 exFAT、RAM-backed `/rw`、fd/VFS、进程 fd table�
 
 新增独立的小型 `stat` 风格用户程序展示元数据，shell 仅作为启动和组合入口消费该工具。输出格式保持确定性、适合行为验证，不把本阶段扩展为完整 POSIX `stat`、完整 POSIX `ls -l`、glob 或脚本环境。
 
-备选方案是大幅扩展 shell 内建、复用路径工具输出或引入更复杂格式化能力。该方案会把 Stage 27 扩大为 shell 语言和工具套件建设，也会模糊 metadata contract 的第一版验证入口，因此不采用。
+备选方案是大幅扩展 shell 内建、复用路径工具输出或引入更复杂格式化能力。该方案会把 TTY console input capability7 扩大为 shell 语言和工具套件建设，也会模糊 metadata contract 的第一版验证入口，因此不采用。
 
 ## Risks / Trade-offs
 

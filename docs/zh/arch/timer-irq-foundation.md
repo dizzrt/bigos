@@ -47,7 +47,7 @@ any ISR handler body.
 
 ## Cooperative Timeout Sleep
 
-Stage 10 keeps tick ownership in the timer subsystem: IRQ0 advances time only by
+blocking primitives and timer ownership capability keeps tick ownership in the timer subsystem: IRQ0 advances time only by
 calling `bigos::timer::on_tick()`, and timeout waits read the monotonic tick
 through `bigos::timer::ticks()`. The scheduler owns waiter state and deadline
 tracking through intrusive TCB links.

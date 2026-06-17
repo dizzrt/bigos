@@ -1,7 +1,7 @@
 ## Why
 
-阶段 4 已经引入 cooperative 内核线程与单核 round-robin 调度，内核已经从“裸初始化”走向
-“可运行多线程”。要进一步迈向用户态（阶段 6 加载第一个用户程序），第一步是把页表能力从
+kernel thread scheduler capability 已经引入 cooperative 内核线程与单核 round-robin 调度，内核已经从“裸初始化”走向
+“可运行多线程”。要进一步迈向用户态（user entry and syscall capability 加载第一个用户程序），第一步是把页表能力从
 当前“仅服务内核 higher-half / KVMEM / direct map”的隐式约定，抽象成一个显式的、可复用的
 map/unmap primitive，并明确 user / writable / NX 等页属性的 bit 策略。
 

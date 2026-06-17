@@ -27,7 +27,7 @@
 - [x] 4.1 在 `xmake.lua` 中新增默认关闭的 timer smoke option，例如 `timer_smoke`。
 - [x] 4.2 将 timer smoke option 映射为 `BIGOS_TIMER_SMOKE` 或等价宏，确保普通 boot 不输出周期性 timer marker。
 - [x] 4.3 让 timer smoke marker 输出有界且稳定，例如只在第一个或前几个 tick 输出 `BIGOS_TIMER_IRQ`。
-- [x] 4.4 更新相关架构文档或 roadmap 注记，说明阶段 1 只建立 PIT/tick foundation，不引入 scheduler、抢占或完整时间服务。
+- [x] 4.4 更新相关架构文档或 roadmap 注记，说明unified boot handoff capability 只建立 PIT/tick foundation，不引入 scheduler、抢占或完整时间服务。
 
 ## 5. 源码级测试与静态检查
 

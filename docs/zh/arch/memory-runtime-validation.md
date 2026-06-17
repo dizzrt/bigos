@@ -23,7 +23,7 @@ BigOS 可以在 `init_mem()` 之后、IRQ/PIC 设置之前运行一个可选的�
 
 ## 中断上下文契约
 
-阶段 3 明确普通 allocator 入口的上下文边界，但不把它们升级为 IRQ handler safe：
+kernel memory API capability 明确普通 allocator 入口的上下文边界，但不把它们升级为 IRQ handler safe：
 
 - `kmalloc()`、`free()`、`alloc_kernel_pages()`、`free_pages()` 和全局 `new/delete` 是 non-IRQ-handler-safe API。
 - `alloc_kernel_pages()` 保持页数语义；内部 buddy `alloc_physical_order()` 保持 order 语义，不新增 `alloc_pages()`、`alloc_physical_pages()` 或 `free_physical_pages()` alias。

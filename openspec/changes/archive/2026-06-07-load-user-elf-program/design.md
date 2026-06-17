@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前已经具备运行第一个 ring3 用户程序的最小闭环：`Process`、派生用户页表 root、TSS/RSP0、`iretq` 进入、`SYS_WRITE`/`SYS_EXIT`、用户 fault 标记和 safe reaper 边界均已建立。阶段 7 又新增了内核态只读 block device 与 exFAT mount/path lookup/bounded read 能力，因此阶段 8 可以把用户程序来源从 flat embedded image 推进到磁盘上的 ELF64 文件。
+BigOS 当前已经具备运行第一个 ring3 用户程序的最小闭环：`Process`、派生用户页表 root、TSS/RSP0、`iretq` 进入、`SYS_WRITE`/`SYS_EXIT`、用户 fault 标记和 safe reaper 边界均已建立。kernel block and filesystem read capability 又新增了内核态只读 block device 与 exFAT mount/path lookup/bounded read 能力，因此user ELF loader capability 可以把用户程序来源从 flat embedded image 推进到磁盘上的 ELF64 文件。
 
 本设计覆盖 `kernel/core/proc`、用户地址空间 map/teardown、`kernel/core/syscall` 的现有用户闭环、只读 FS 调用路径、xmake smoke 配置与测试镜像资产。设计不移动 boot fixed addresses、higher-half base、direct map、`KVMEM_BASE`、self-mapping 地址、syscall vector 或既有 BootInfo ABI。
 
@@ -11,7 +11,7 @@ BigOS 当前已经具备运行第一个 ring3 用户程序的最小闭环：`Pro
 - 从约定 exFAT 路径读取一个 bounded ELF64 用户程序文件，例如 `/boot/user/init.elf`。
 - 校验 ELF64 header 与 `PT_LOAD` program headers，仅接受静态、低半区、用户态可映射的 `ET_EXEC` 产物。
 - 按 segment 权限映射用户 text、rodata/data 和 bss，并创建用户栈页。
-- 复用阶段 6 的 ring3 entry、syscall ABI、用户 fault 终止和阶段 6.5 的 safe teardown 边界。
+- 复用user entry and syscall capability 的 ring3 entry、syscall ABI、用户 fault 终止和user entry and syscall capability.5 的 safe teardown 边界。
 - 新增默认关闭的 ELF 用户程序 smoke，输出可脚本判定的 `BIGOS_USER_ELF_` / `BIGOS_USER_EXIT` marker。
 
 **Non-Goals:**
@@ -26,7 +26,7 @@ BigOS 当前已经具备运行第一个 ring3 用户程序的最小闭环：`Pro
 
 ### Decision: 使用独立 `user_elf_smoke` 开关
 
-ELF 文件加载路径使用新的默认关闭开关，例如 `xmake f --user_elf_smoke=y`。该开关可以复用或显式包含 `kernel/core/proc/**`，但不改变普通 boot，也不让阶段 6 的 flat embedded smoke 依赖 block/FS。
+ELF 文件加载路径使用新的默认关闭开关，例如 `xmake f --user_elf_smoke=y`。该开关可以复用或显式包含 `kernel/core/proc/**`，但不改变普通 boot，也不让user entry and syscall capability 的 flat embedded smoke 依赖 block/FS。
 
 替代方案是直接替换 `user_program_smoke`。该方案会把原本无需磁盘 FS 的 ring3 回归路径变成 FS 相关路径，降低故障定位能力，因此不采用。
 
@@ -34,7 +34,7 @@ ELF 文件加载路径使用新的默认关闭开关，例如 `xmake f --user_el
 
 第一版 loader 通过只读 FS API 将 ELF 文件读取到 bounded kernel buffer，再解析 ELF header 和 program headers。文件大小上限固定为早期 smoke 可接受的常量，分配发生在普通非 IRQ kernel context。
 
-替代方案是按需读取 ELF header 和 segment 数据。该方案更接近真实 loader，但需要更多随机读取状态、错误回滚点和缓存策略；阶段 8 优先验证端到端路径，因此先采用完整 bounded 读取。
+替代方案是按需读取 ELF header 和 segment 数据。该方案更接近真实 loader，但需要更多随机读取状态、错误回滚点和缓存策略；user ELF loader capability 优先验证端到端路径，因此先采用完整 bounded 读取。
 
 ### Decision: 仅接受静态 ELF64 `ET_EXEC` 和 `PT_LOAD`
 
@@ -74,5 +74,5 @@ xmake 或现有镜像安装工具负责把 freestanding 用户 ELF 产物放入 
 ## Resolved Decisions
 
 - ELF 用户程序路径固定为 `/boot/user/init.elf`。第一版不做 xmake 可配置路径，避免 smoke、镜像安装和 loader 查找策略分叉；后续 exec/多程序阶段再引入路径参数化。
-- 第一版用户栈继续沿用阶段 6 的单页栈。阶段 8 的目标是验证 filesystem-backed ELF loader 到 ring3 的端到端链路，单页栈足够承载最小 `SYS_WRITE`/`SYS_EXIT` smoke，并能减少栈增长、guard page、多页回收等额外变量。
+- 第一版用户栈继续沿用user entry and syscall capability 的单页栈。user ELF loader capability 的目标是验证 filesystem-backed ELF loader 到 ring3 的端到端链路，单页栈足够承载最小 `SYS_WRITE`/`SYS_EXIT` smoke，并能减少栈增长、guard page、多页回收等额外变量。
 - 新增 `BIGOS_USER_ELF_LOAD_PASSED` 作为 loader 成功 marker，并继续以用户程序 `SYS_WRITE` payload 和 `BIGOS_USER_EXIT` 作为端到端 oracle。这样可以区分 ELF 文件读取/校验/映射成功与后续 ring3 entry、syscall 或退出路径失败。

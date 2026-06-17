@@ -1,9 +1,9 @@
 # 首个用户程序运行路径
 
-阶段 6 的 `user_program_smoke` 是默认关闭的验证路径，用来证明 BigOS 可以创建一个最小用户进程、
+user entry and syscall capability 的 `user_program_smoke` 是默认关闭的验证路径，用来证明 BigOS 可以创建一个最小用户进程、
 加载内嵌用户程序、进入 CPL3，并通过 `write` / `exit` syscall 回到内核。
 
-阶段 8 新增独立的默认关闭 `user_elf_smoke` 路径。阶段 12 将共享进程运行时提升为
+user ELF loader capability 新增独立的默认关闭 `user_elf_smoke` 路径。process runtime foundation 将共享进程运行时提升为
 常规编译的 lifecycle core，同时保持两个 smoke entry 默认关闭。ELF smoke 复用
 lifecycle core、syscall gate、用户 fault 路径、bounded `argv`/`envp` 栈布置和延后
 reaper，但用户程序来自内核只读 exFAT 栈读取的 `/boot/user/init.elf`，而不是内嵌
@@ -25,7 +25,7 @@ ELF smoke 使用 `xmake build user-init-elf` 构建的静态 freestanding ELF64
 
 ## 默认进入用户态 init
 
-阶段 14.5 把 ring3 进入提升为 normal boot 的固定步骤。`kernel()` 在
+behavior assertion validation baseline 把 ring3 进入提升为 normal boot 的固定步骤。`kernel()` 在
 `proc::init()` 与 `sched::start()` 之间创建一个默认开启、无 `#ifdef` 守卫的内核
 线程运行 `bigos::proc::launch_init`。`launch_init` 复用只读 VFS/exFAT 路径：
 `vfs::init` -> `open_absolute(INIT_ELF_PATH)` -> bounded 读入 ->

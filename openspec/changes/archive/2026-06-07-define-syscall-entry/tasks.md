@@ -10,7 +10,7 @@
 - [x] 2.2 实现 `bigos::sys::dispatch`：从 `InterruptFrame.rax` 读取 number，用 bounded switch/跳转表路由；未知 number 在 `InterruptFrame.rax` 写入确定性负错误码并安全返回，不崩溃、不进入异常路径。
 - [x] 2.3 实现 `SYS_DEBUG_WRITE`：把内核内 bounded buffer 经现有 console/串口输出确定性 `BIGOS_SYSCALL_*` marker；本阶段不校验指针，但把 buffer 限制为内核内 bounded 来源，并在代码/文档记录“ring3 后必须加用户指针/长度校验”。
 - [x] 2.4 实现第二个诊断 syscall（`SYS_GET_TICK` 返回单调 tick，或 `SYS_DEBUG_NOOP` 返回固定值），验证返回值寄存器路径；按 `timer::ticks()` 是否稳定暴露二选一并记录。
-- [x] 2.5 确认 dispatch 与诊断 syscall 遵守阶段 3 中断上下文契约：只做 bounded 输出/读取，不在该路径调用 non-IRQ-safe allocator、不做动态分配。
+- [x] 2.5 确认 dispatch 与诊断 syscall 遵守kernel memory API capability 中断上下文契约：只做 bounded 输出/读取，不在该路径调用 non-IRQ-safe allocator、不做动态分配。
 
 ## 3. 边界与非目标固定
 

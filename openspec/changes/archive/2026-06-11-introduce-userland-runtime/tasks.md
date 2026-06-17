@@ -1,4 +1,4 @@
-# 实施任务：用户态运行时 / libc / shell（阶段 19）
+# 实施任务：用户态运行时 / libc / shell（shell 与用户态组合能力）
 
 ## 1. 内核侧：SYS_EXECVE（append-only 暴露既有 exec 入口）
 - [x] 1.1 在 [syscall.h](include/bigos/syscall.h) 的 `SyscallNumber` 末尾追加 `SYS_EXECVE`（取下一个号位 27），并注释其 ABI（rdi=path、rsi=argv、rdx=envp，成功不返回、失败返回负 errno）；不改动既有号位。
@@ -55,6 +55,6 @@
 - [x] 9.3 注：用户态 C 程序（crt0/libc/sh）按用户 freestanding C 配置审查；clang/clangd 仅作辅助信号，不替代 `x86_64-elf-gcc` 交叉构建。
 
 ## 10. 行为断言/源码契约测试与文档
-- [x] 10.1 新增/扩展 `tests/` 测试：源码契约断言用户 libc 镜像头的 syscall 号/errno 数值与 [syscall.h](include/bigos/syscall.h)/[errno.h](include/bigos/errno.h) 一致；行为断言沿用阶段 14.5 轨道（serial marker + 用户二进制输出）。所有 Python 经 `uv run`（`uv run pytest`、`uv run ruff check`、`uv run ruff format --check`、`uv run pyright`）；若新增/修改 Python 文件，修复新引入的 lint/类型/格式/测试问题；`uv` 不可用时显式记录。
+- [x] 10.1 新增/扩展 `tests/` 测试：源码契约断言用户 libc 镜像头的 syscall 号/errno 数值与 [syscall.h](include/bigos/syscall.h)/[errno.h](include/bigos/errno.h) 一致；行为断言沿用behavior assertion validation baseline 轨道（serial marker + 用户二进制输出）。所有 Python 经 `uv run`（`uv run pytest`、`uv run ruff check`、`uv run ruff format --check`、`uv run pyright`）；若新增/修改 Python 文件，修复新引入的 lint/类型/格式/测试问题；`uv` 不可用时显式记录。
 - [x] 10.2 更新文档（`docs/en` 为准，`docs/zh` 同步同相对路径）：新增用户态运行时/libc/shell 架构说明，记录 crt0 初始栈契约、`SYS_EXECVE` ABI、shell 有界上限与 `/bin/*` 打包路径；使用仓库相对路径，不暗示改动 boot/链接地址/向量/页表/磁盘/CR3/ABI。
-- [x] 10.3 更新 [roadmap.md](roadmap.md) 阶段 19 状态（proposed -> 进行中/完成对应表述）与 README/README-zh 成熟度描述（用户态运行时已落地的 bounded 范围），不夸大为完整 POSIX/通用 OS。
+- [x] 10.3 更新 [roadmap.md](roadmap.md) shell 与用户态组合能力 状态（proposed -> 进行中/完成对应表述）与 README/README-zh 成熟度描述（用户态运行时已落地的 bounded 范围），不夸大为完整 POSIX/通用 OS。

@@ -1,6 +1,6 @@
 ## 1. 契约与现状确认
 
-- [x] 1.1 对照 `include/bigos/syscall.h`、`user/libc/include/sys_nr.h`、`user/libc/syscall.c` 确认 Stage 39 复用现有 syscall number，不新增或重排 syscall ABI。
+- [x] 1.1 对照 `include/bigos/syscall.h`、`user/libc/include/sys_nr.h`、`user/libc/syscall.c` 确认 bounded POSIX-like surface 复用现有 syscall number，不新增或重排 syscall ABI。
 - [x] 1.2 梳理 `kernel/core/signal/**`、`kernel/core/proc/**`、`kernel/core/syscall/**` 中 signal frame、wait status、errno 返回和用户内存校验的现有行为。
 - [x] 1.3 梳理 `user/sh/**` 和 `user/bin/**` 中 pipe、redirection、PATH lookup、错误输出和 status 约定，标记需要硬化的失败路径。
 
@@ -38,7 +38,7 @@
 ## 6. 文档与边界
 
 - [x] 6.1 更新相关架构或用户态文档时保持 `docs/en` canonical 与 `docs/zh` mirror 同步，并使用 repository-relative 路径。
-- [x] 6.2 在文档和 headers 中明确 Stage 39 仍不支持完整 POSIX libc、job control、terminal process groups、termios、dynamic linking、broad mmap、SMP、新 ISA 或持久完整 writable filesystem。
+- [x] 6.2 在文档和 headers 中明确 bounded POSIX-like surface 仍不支持完整 POSIX libc、job control、terminal process groups、termios、dynamic linking、broad mmap、SMP、新 ISA 或持久完整 writable filesystem。
 - [x] 6.3 记录验证结果，分别列出已通过检查、未运行检查及原因、历史诊断、当前 change 引入并已修复的问题。
 
 ## 验证记录

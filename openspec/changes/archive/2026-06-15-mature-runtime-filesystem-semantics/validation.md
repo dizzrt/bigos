@@ -1,4 +1,4 @@
-## Stage 41 Implementation Notes
+## runtime filesystem maturity Implementation Notes
 
 ### Contract Inventory
 
@@ -12,7 +12,7 @@
 ### Preserved Boundaries
 
 - `/rw` remains RAM-backed and freshly initialized for the current boot session.
-- Stage 41 does not modify MBR layout, exFAT boot assets, raw image packaging, boot addresses, linker addresses, page-table layout, IDT layout, or the `int 0x80` syscall vector.
+- runtime filesystem maturity does not modify MBR layout, exFAT boot assets, raw image packaging, boot addresses, linker addresses, page-table layout, IDT layout, or the `int 0x80` syscall vector.
 - `fsync` is a current-runtime cache/backend consistency operation only; it does not imply cross-reboot persistence, journaling, replay, fsck, disk-backed writable partitions, or stable inode identity.
 - Directory enumeration promises stable backend order only: `/rw` directory slot order and exFAT backend traversal order. It does not promise lexicographic order, POSIX cookies, complete snapshots, or full `DIR*` compatibility.
 
@@ -54,4 +54,4 @@
 - Passed: `clang++ -std=c++17 -ffreestanding -fno-exceptions -fno-rtti -target x86_64-elf -Iinclude -Icpp/include -Icpp/libsupc++/include -Ikernel -nostdinc++ -fsyntax-only kernel/core/fs/bigfs.cc kernel/core/fs/vfs.cc kernel/core/proc/proc.cc kernel/core/syscall/syscall.cc`.
 - Passed: `uv run python tools/boot_debug.py runtime-smoke-matrix --case filesystem-maturity --output build/test/filesystem-maturity-validation.md`, observed `BIGOS_FILESYSTEM_MATURITY_PASSED` via QEMU headless serial log.
 - Passed: `uv run python tools/boot_debug.py runtime-smoke-matrix --case filesystem-writable --output build/test/filesystem-writable-validation.md`, observed `BIGOS_WRITABLE_FS_PASSED` via QEMU headless serial log.
-- Skipped: Bochs cross-validation was not run in this pass; QEMU headless plus source, clang syntax, xmake build, and OpenSpec validation are the substitute checks. Residual risk is limited to Bochs-specific BIOS/IDE/display behavior outside the Stage 41 code changes.
+- Skipped: Bochs cross-validation was not run in this pass; QEMU headless plus source, clang syntax, xmake build, and OpenSpec validation are the substitute checks. Residual risk is limited to Bochs-specific BIOS/IDE/display behavior outside the runtime filesystem maturity code changes.

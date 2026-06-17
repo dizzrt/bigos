@@ -1,6 +1,6 @@
 ## Context
 
-`add-timer-irq-foundation`（阶段 1）已实现并归档，当前 timer/IRQ 运行时形态如下：
+`add-timer-irq-foundation`（unified boot handoff capability）已实现并归档，当前 timer/IRQ 运行时形态如下：
 
 ```text
 i8259 IRQ0 fires
@@ -51,7 +51,7 @@ i8259 IRQ0 fires
 
 `g_ticks` 的定义与递增逻辑 SHALL 归位到 timer translation unit（`kernel/core/timer/timer.cc`，状态保留在 `bigos::timer::__detail`）。新增 IRQ-context-safe 的 `bigos::timer::on_tick() noexcept`，只做最小工作：原子地（在单核关中断 IRQ context 下即简单递增）推进单调 tick counter。IRQ0 handler 改为调用 `bigos::timer::on_tick()`，不再出现 `++bigos::timer::__detail::g_ticks`。
 
-理由：阶段 1 为规避“在高频 IRQ0 handler 中跨 translation unit 调用尚未充分 runtime 验证的 timer 内部函数”而采用裸写；阶段 1.5 的目标正是在稳定 oracle 下验证该跨 TU 调用，从而恢复封装、收敛所有权、为阶段 4 scheduler tick hook 预留干净落点。
+理由：unified boot handoff capability 为规避“在高频 IRQ0 handler 中跨 translation unit 调用尚未充分 runtime 验证的 timer 内部函数”而采用裸写；unified boot handoff capability.5 的目标正是在稳定 oracle 下验证该跨 TU 调用，从而恢复封装、收敛所有权、为kernel thread scheduler capability scheduler tick hook 预留干净落点。
 
 替代方案：保持裸写并仅补文档——被否决，因为它把 timer 内部状态语义永久泄漏到 IRQ 层，违背所有权清晰原则，且 scheduler 阶段会再次硬编码。
 
@@ -76,7 +76,7 @@ i8259 IRQ0 fires
 - CPU exception 不发送 PIC EOI；external IRQ（含 vector `0x20`）仅在 handler 返回后发送一次 EOI，再 `iretq` 返回。
 - error-code 槽对无 error-code 向量填充占位，保持 frame 布局稳定。
 
-理由：阶段 2 默认启用 keyboard IRQ1，会更频繁走 ISR ABI 路径；提前把不变量固化为源码级/runtime 检查可避免回归。
+理由：TTY console input capability 默认启用 keyboard IRQ1，会更频繁走 ISR ABI 路径；提前把不变量固化为源码级/runtime 检查可避免回归。
 
 ### Decision: runtime 验证以 Bochs serial marker 为 oracle
 
@@ -84,19 +84,19 @@ i8259 IRQ0 fires
 
 ### Decision: `on_tick()` 不预留 scheduler tick hook 占位接口
 
-本 change 的 `bigos::timer::on_tick()` SHALL 保持最小封装，仅推进单调 tick counter，不引入任何 scheduler tick hook、callback 注册点或预留参数/返回值。scheduler tick hook 留待阶段 4（`introduce-kernel-threads-scheduler`）在有真实调度需求时再引入。
+本 change 的 `bigos::timer::on_tick()` SHALL 保持最小封装，仅推进单调 tick counter，不引入任何 scheduler tick hook、callback 注册点或预留参数/返回值。scheduler tick hook 留待kernel thread scheduler capability（`introduce-kernel-threads-scheduler`）在有真实调度需求时再引入。
 
-理由：阶段 1.5 的目标是验证与封装收敛，而非提前设计调度耦合。当前没有 scheduler，预留占位接口属于过度设计，且会在没有使用者的情况下增加 IRQ-context API 表面与维护成本；阶段 4 引入 scheduler 时再扩展 `on_tick()` 语义即可，届时能基于真实约束定义 hook 契约。
+理由：unified boot handoff capability.5 的目标是验证与封装收敛，而非提前设计调度耦合。当前没有 scheduler，预留占位接口属于过度设计，且会在没有使用者的情况下增加 IRQ-context API 表面与维护成本；kernel thread scheduler capability 引入 scheduler 时再扩展 `on_tick()` 语义即可，届时能基于真实约束定义 hook 契约。
 
 替代方案：在本 change 预留一个空 hook 或可选 callback——被否决，因为它违背“最小封装、不为假设需求设计”的原则，且会让 IRQ-context 安全契约提前承载未验证的调度语义。
 
 ## Risks / Trade-offs
 
 - [Risk] 跨 TU 调用 `on_tick()` 在高频 IRQ0 下若被去优化或引入意外副作用，可能影响 IRQ 延迟 → Mitigation: 保持 `on_tick()` 极简（仅递增 volatile 计数），在 Bochs smoke 下确认 marker 与 tick 推进正常。
-- [Risk] 更新源码级测试断言可能与归档 change 的历史断言冲突 → Mitigation: 明确这是阶段 1.5 对阶段 1 的演进，更新断言为“`on_tick` 必须存在且被 handler 调用、handler 不再裸写 `g_ticks`”，并在 tasks/validation 记录变更理由。
+- [Risk] 更新源码级测试断言可能与归档 change 的历史断言冲突 → Mitigation: 明确这是unified boot handoff capability.5 对unified boot handoff capability 的演进，更新断言为“`on_tick` 必须存在且被 handler 调用、handler 不再裸写 `g_ticks`”，并在 tasks/validation 记录变更理由。
 - [Risk] `mdelay()` 上下文契约仅靠注释/文本检查，运行期仍可能被误用 → Mitigation: 文档与源码级 grep 检查双重约束，并在契约中显式说明 IRQ-disabled 死等风险。
 - [Risk] Bochs/serial oracle 本地不稳定或不可用 → Mitigation: 显式记录原因、已通过的 build/static 检查与剩余 runtime 风险，不谎报 runtime 验证。
-- [Trade-off] 本 change 只做验证与封装收敛，不引入 tick callback 抽象，避免过度设计；scheduler tick hook 留待阶段 4。
+- [Trade-off] 本 change 只做验证与封装收敛，不引入 tick callback 抽象，避免过度设计；scheduler tick hook 留待kernel thread scheduler capability。
 
 ## Migration Plan
 
@@ -113,4 +113,4 @@ i8259 IRQ0 fires
 
 ## Open Questions
 
-- 暂无。`on_tick()` 是否预留 scheduler tick hook 占位接口已收敛为决策：不预留，保持最小封装，待阶段 4（`introduce-kernel-threads-scheduler`）再引入（见 Decisions 节）。
+- 暂无。`on_tick()` 是否预留 scheduler tick hook 占位接口已收敛为决策：不预留，保持最小封装，待kernel thread scheduler capability（`introduce-kernel-threads-scheduler`）再引入（见 Decisions 节）。

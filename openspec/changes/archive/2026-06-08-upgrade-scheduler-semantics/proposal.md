@@ -2,7 +2,7 @@
 
 BigOS 已完成单核协作式调度、阻塞/睡眠原语、PIT tick、IRQ/exception/syscall 分发和 smoke 级用户态闭环；继续推进进程生命周期、文件描述符或更复杂 I/O 前，需要先稳定调度器从“显式 yield”到“timer 驱动抢占”的语义边界。
 
-阶段 11 聚焦升级 scheduler semantics，在保持现有 `InterruptFrame`、context-switch frame、i8259 EOI 顺序和单核边界的前提下，引入 time slice、preemption-disable/critical-section 规则、优先级预留点，以及可验证的 reschedule-on-IRQ-return 路径。
+bounded timer-driven scheduler semantics 聚焦升级 scheduler semantics，在保持现有 `InterruptFrame`、context-switch frame、i8259 EOI 顺序和单核边界的前提下，引入 time slice、preemption-disable/critical-section 规则、优先级预留点，以及可验证的 reschedule-on-IRQ-return 路径。
 
 ## What Changes
 
@@ -17,7 +17,7 @@ BigOS 已完成单核协作式调度、阻塞/睡眠原语、PIT tick、IRQ/exce
 
 ### New Capabilities
 
-- 无。阶段 11 升级现有 scheduler/timer/interrupt 能力，不引入独立新子系统。
+- 无。bounded timer-driven scheduler semantics 升级现有 scheduler/timer/interrupt 能力，不引入独立新子系统。
 
 ### Modified Capabilities
 

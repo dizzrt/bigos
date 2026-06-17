@@ -13,7 +13,7 @@ BigOS SHALL extend the single-core cooperative scheduler so blocked and sleeping
 - **THEN** the scheduler MUST make that thread runnable exactly once
 - **AND** the thread MUST become eligible for a later cooperative scheduling point
 
-#### Scenario: Stage 10 remains non-preemptive
+#### Scenario: blocking primitives and timer ownership capability remains non-preemptive
 - **WHEN** a thread becomes runnable because of wakeup or timeout
 - **THEN** BigOS MUST NOT perform timer-driven IRQ-return context switching in this stage
 - **AND** the existing interrupt frame ABI, context-switch frame layout, EOI ordering, and idle-thread ownership MUST remain unchanged

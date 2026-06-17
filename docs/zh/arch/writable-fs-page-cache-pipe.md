@@ -1,9 +1,9 @@
 # 可写文件系统、页/块缓存与管道
 
-BigOS 阶段 18 在现有只读 I/O 栈（只读 ATA PIO、只读 exFAT 挂载、只读 fd/VFS
+BigOS 可写文件系统与 pipe/dup foundation 在现有只读 I/O 栈（只读 ATA PIO、只读 exFAT 挂载、只读 fd/VFS
 壳层）之上加入第一层可写 I/O 地基：内核块缓冲缓存、块设备写路径、最小可写文件
 系统（`bigfs`）以及 `pipe`/`dup`/`dup2`。owner/mode 权限纯原语
-`cred::may_access`（阶段 16.5）在可写路径上成为实际强制点。只读 exFAT 路径、磁盘
+`cred::may_access`（time and identity capability）在可写路径上成为实际强制点。只读 exFAT 路径、磁盘
 镜像、MBR/分区发现、`int 0x80` 寄存器 ABI、IDT/向量布局、DPL 设置、页表自映射与
 CR3 约定均不变。
 
@@ -69,7 +69,7 @@ magic/version/block-size/capacity/root metadata checksum。Normal boot 只在识
 `cred::permits(file_uid, file_gid, mode, req_uid, req_gid, access)`：root 全放行，
 否则按 owner/group/other 位判定。拒绝返回 `-EACCES` 且不修改文件系统状态。新文件
 owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端对任何写/创建请求返回
-`-EROFS`。判定逻辑本身相对阶段 16.5 不变。
+`-EROFS`。判定逻辑本身相对time and identity capability 不变。
 
 ## VFS 与 fd 扩展
 

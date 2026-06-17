@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 已具备只读 exFAT 启动资产、RAM-backed `/rw`、fd/VFS、page/buffer cache、`int 0x80` syscall、进程 fd 表、最小用户态 libc 和 `/bin/sh`。Stage 24 的设计重点不是引入新的存储 backend，而是把这些已存在的层组合成简单 C 程序可依赖的有界运行时文件系统行为。
+BigOS 已具备只读 exFAT 启动资产、RAM-backed `/rw`、fd/VFS、page/buffer cache、`int 0x80` syscall、进程 fd 表、最小用户态 libc 和 `/bin/sh`。TTY console input capability4 的设计重点不是引入新的存储 backend，而是把这些已存在的层组合成简单 C 程序可依赖的有界运行时文件系统行为。
 
 受影响子系统为 `kernel/core/fs`、`kernel/core/proc`、`kernel/core/syscall`、`user`、`include`、`docs` 和 `tests`。当前可运行环境仍假设 x86_64 Legacy BIOS/MBR/exFAT、现有磁盘镜像布局、RAM-backed 可写后端、xmake 与 `x86_64-elf-gcc`/`x86_64-elf-g++`；本设计不改变 boot 地址、linker 地址、IDT/syscall vector、CR3 切换、page-table layout 或磁盘分区契约。
 

@@ -41,7 +41,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `persistent-writable-fs-write` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` | 40s | 带 `--persistent-image` 的第一次 boot：显式格式化独立测试磁盘、有界写入、`fsync` 与缓存淘汰后读回。 |
 | `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | 复用同一 `--persistent-image` 的第二次 boot：mount-existing 并在 clean reboot 后读回已同步 `/rw` 状态。 |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
-| `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | Stage 41 当前运行期文件系统语义，覆盖只读 exFAT、RAM-backed `/rw`、fd/VFS、metadata、cwd-relative path、libc errno 与 shell-visible tools；不声明重启持久化。 |
+| `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity 当前运行期文件系统语义，覆盖只读 exFAT、RAM-backed `/rw`、fd/VFS、metadata、cwd-relative path、libc errno 与 shell-visible tools；不声明重启持久化。 |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno、`snprintf`/formatter、`strtol`/`atoi`、`calloc`/`realloc`、有界 `DIR*` wrapper、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和有界 `/rw` 运行时文件操作。 |
 | `default-init` | _(无)_ | `BIGOS_USER_EXEC` | 40s | 不加任何 smoke 开关的默认构建；normal boot 打包 PID-1 init、`/bin/sh` 和 bounded `/bin/*`。 |
 
@@ -49,7 +49,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 
 ## 行为导向矩阵
 
-当前压缩后的阶段 20 到阶段 44 基线将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为有界最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查仍保持在默认 x86_64 Legacy BIOS/MBR/exFAT backend 边界内，不要求 UEFI runtime parity、OVMF parity、ESP/FAT runtime storage parity、virtio、AHCI/SATA、NVMe、SMP、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
+当前有界最小可用系统基线将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为有界最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查仍保持在默认 x86_64 Legacy BIOS/MBR/exFAT backend 边界内，不要求 UEFI runtime parity、OVMF parity、ESP/FAT runtime storage parity、virtio、AHCI/SATA、NVMe、SMP、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
 
 | Capability | 输入或路径 | 预期可观察结果 | 失败信号 | 验证层 | 环境依赖 |
 | --- | --- | --- | --- | --- | --- |

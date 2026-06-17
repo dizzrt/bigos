@@ -32,7 +32,7 @@ def test_keyboard_irq1_handoff_preserves_dispatch_eoi_boundary() -> None:
 
     register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
     unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);')
-    # Stage 19: keyboard IRQ1 is unmasked unconditionally (no BIGOS_KEYBOARD_SMOKE
+    # default interactive userland baseline: keyboard IRQ1 is unmasked unconditionally (no BIGOS_KEYBOARD_SMOKE
     # guard) so the default-boot interactive /bin/sh can read from the TTY ring.
     assert '#ifdef BIGOS_KEYBOARD_SMOKE' not in isr
     assert register_index < unmask_index

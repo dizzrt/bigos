@@ -1,8 +1,8 @@
 ## Why
 
-阶段 1 的 `add-timer-irq-foundation` 已实现并归档：PIT channel 0 + i8259 IRQ0 已默认开启，IRQ0 handler 直接递增 `bigos::timer::__detail::g_ticks`，`timer::ticks()` 读取该 counter，`timer::mdelay()` 在其上 busy-wait。为快速完成 bring-up，handler 当前是一段保守的 inline 实现：tick 状态定义在 `kernel/core/irq/isr.cc` 而非 timer translation unit，handler 跨命名空间直接写 `g_ticks`，受控的 timer 内部 API（如 `timer::on_tick()`）被刻意省略，源码级测试甚至断言 `bigos::timer::on_tick();` 不存在。
+unified boot handoff capability 的 `add-timer-irq-foundation` 已实现并归档：PIT channel 0 + i8259 IRQ0 已默认开启，IRQ0 handler 直接递增 `bigos::timer::__detail::g_ticks`，`timer::ticks()` 读取该 counter，`timer::mdelay()` 在其上 busy-wait。为快速完成 bring-up，handler 当前是一段保守的 inline 实现：tick 状态定义在 `kernel/core/irq/isr.cc` 而非 timer translation unit，handler 跨命名空间直接写 `g_ticks`，受控的 timer 内部 API（如 `timer::on_tick()`）被刻意省略，源码级测试甚至断言 `bigos::timer::on_tick();` 不存在。
 
-在进入阶段 2（keyboard/TTY 默认启用 IRQ1）之前，需要在不引入 scheduler、抢占、SMP 或用户态的前提下，把这条保守路径打磨成更干净、可验证的 timer/IRQ runtime path，明确 IRQ-context 安全边界并补齐 ISR ABI 的 runtime 证据，降低后续阶段再次耦合未硬化 IRQ 路径的风险。
+在进入TTY console input capability（keyboard/TTY 默认启用 IRQ1）之前，需要在不引入 scheduler、抢占、SMP 或用户态的前提下，把这条保守路径打磨成更干净、可验证的 timer/IRQ runtime path，明确 IRQ-context 安全边界并补齐 ISR ABI 的 runtime 证据，降低后续阶段再次耦合未硬化 IRQ 路径的风险。
 
 ## What Changes
 

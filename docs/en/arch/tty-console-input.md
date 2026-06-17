@@ -1,6 +1,6 @@
 # TTY, Console, And Keyboard Input
 
-BigOS stage 2 input covers only single-core x86_64, i8259 PIC, PS/2 set-1 keyboard, and VGA text mode. Its goal is a minimal, verifiable keyboard-to-TTY handoff and an ordinary runtime text output entry. It is not a full terminal, shell, or user-mode input subsystem.
+BigOS input covers only single-core x86_64, i8259 PIC, PS/2 set-1 keyboard, and VGA text mode. Its goal is a minimal, verifiable keyboard-to-TTY handoff and an ordinary runtime text output entry. It is not a full terminal, shell, or user-mode input subsystem.
 
 ## Input Data Flow
 
@@ -41,7 +41,7 @@ Overflow is deterministic: when the ring buffer is full, new input is dropped an
 
 ## Blocking Consumer
 
-Stage 10 adds `terminal::read_char_blocking()` as an additive non-interrupt API. It first tries the existing non-blocking `read_char()` path. If the input buffer is empty, it waits on the TTY input wait queue through `sched::wait_queue_wait_until()`, using a predicate checked with IRQs disabled so a producer wakeup cannot be missed between the empty check and enqueue.
+blocking primitives and timer ownership capability adds `terminal::read_char_blocking()` as an additive non-interrupt API. It first tries the existing non-blocking `read_char()` path. If the input buffer is empty, it waits on the TTY input wait queue through `sched::wait_queue_wait_until()`, using a predicate checked with IRQs disabled so a producer wakeup cannot be missed between the empty check and enqueue.
 
 The blocking API is valid only from ordinary running kernel-thread context where `sched::can_block()` succeeds. It returns `1` when it writes a character to the caller buffer, `0` for the bounded EOF-like terminal event, or a deterministic negative wait error such as timeout, invalid argument, or forbidden blocking context. Existing `read_char()` and `drain()` behavior remains non-blocking and does not depend on scheduler progress.
 

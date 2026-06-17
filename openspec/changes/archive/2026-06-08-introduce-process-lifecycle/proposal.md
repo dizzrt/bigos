@@ -2,7 +2,7 @@
 
 BigOS 已完成 smoke 级 ring3 用户程序、filesystem-backed ELF loader、blocking primitives 和 scheduler semantics；继续推进 fd/VFS、VMA/demand paging 或更完整 userland 前，需要先把当前仅在 smoke 配置下编译的 `kernel/core/proc` 提升为可复用的常规内核子系统。
 
-阶段 12 聚焦稳定进程生命周期边界：明确 PID、进程表、父子关系、`wait`/`exit` 和 general `exec argv/envp` 的最小语义，同时保留当前单核、同步、read-only filesystem 和 safe CR3/root teardown 约束。
+process runtime foundation 聚焦稳定进程生命周期边界：明确 PID、进程表、父子关系、`wait`/`exit` 和 general `exec argv/envp` 的最小语义，同时保留当前单核、同步、read-only filesystem 和 safe CR3/root teardown 约束。
 
 ## What Changes
 

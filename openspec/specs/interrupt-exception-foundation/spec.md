@@ -238,7 +238,7 @@ BigOS SHALL integrate timer-driven kernel-thread scheduling with the interrupt r
 
 - **WHEN** CPL3 code enters through `int 0x80` or kernel code handles the early syscall dispatch path
 - **THEN** the syscall vector MUST preserve its existing ABI and EOI behavior
-- **AND** stage 11 MUST NOT require syscall handlers to become sleepable, preemptible, or process-lifecycle aware
+- **AND** bounded timer-driven scheduler semantics MUST NOT require syscall handlers to become sleepable, preemptible, or process-lifecycle aware
 
 ### Requirement: Interrupt frame preemption bridge is auditable
 

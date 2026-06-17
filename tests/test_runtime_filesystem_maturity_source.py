@@ -12,7 +12,7 @@ def read_change(relative: str) -> str:
     return (CHANGE / relative).read_text(encoding='utf-8')
 
 
-def test_stage41_change_artifacts_record_runtime_boundaries_and_backend_matrix() -> None:
+def test_runtime_filesystem_maturity_change_artifacts_record_runtime_boundaries_and_backend_matrix() -> None:
     proposal = read_change('proposal.md')
     design = read_change('design.md')
     runtime_spec = read_change('specs/runtime-filesystem-maturity/spec.md')
@@ -30,7 +30,7 @@ def test_stage41_change_artifacts_record_runtime_boundaries_and_backend_matrix()
     assert '稳定后端顺序' in design
 
 
-def test_stage41_vfs_errno_and_zero_length_read_contracts() -> None:
+def test_runtime_filesystem_maturity_vfs_errno_and_zero_length_read_contracts() -> None:
     kernel_errno = read_source('include/bigos/errno.h')
     user_errno = read_source('user/libc/include/errno.h')
     user_string = read_source('user/libc/string.c')
@@ -52,7 +52,7 @@ def test_stage41_vfs_errno_and_zero_length_read_contracts() -> None:
     assert 'if (__dst == nullptr)\n            return Status::Invalid;' in read_body
 
 
-def test_stage41_directory_growth_rolls_back_before_publication() -> None:
+def test_runtime_filesystem_maturity_directory_growth_rolls_back_before_publication() -> None:
     bigfs = read_source('kernel/core/fs/bigfs.cc')
 
     reserve_start = bigfs.index('Status dir_reserve_slot')
@@ -77,7 +77,7 @@ def test_stage41_directory_growth_rolls_back_before_publication() -> None:
     )
 
 
-def test_stage41_truncate_commits_metadata_before_freeing_old_blocks() -> None:
+def test_runtime_filesystem_maturity_truncate_commits_metadata_before_freeing_old_blocks() -> None:
     bigfs = read_source('kernel/core/fs/bigfs.cc')
 
     trunc_start = bigfs.index('if ((__flags & bigos::vfs::OPEN_TRUNC) != 0)')
@@ -93,7 +93,7 @@ def test_stage41_truncate_commits_metadata_before_freeing_old_blocks() -> None:
     )
 
 
-def test_stage41_cross_directory_rename_pins_source_before_destination_growth() -> None:
+def test_runtime_filesystem_maturity_cross_directory_rename_pins_source_before_destination_growth() -> None:
     bigfs = read_source('kernel/core/fs/bigfs.cc')
 
     rename_start = bigfs.index('Status rename(const char *__old_abs_path')
@@ -111,7 +111,7 @@ def test_stage41_cross_directory_rename_pins_source_before_destination_growth() 
     )
 
 
-def test_stage41_user_buffer_and_fd_validation_contracts() -> None:
+def test_runtime_filesystem_maturity_user_buffer_and_fd_validation_contracts() -> None:
     proc = read_source('kernel/core/proc/proc.cc')
     syscall = read_source('kernel/core/syscall/syscall.cc')
 
@@ -121,7 +121,7 @@ def test_stage41_user_buffer_and_fd_validation_contracts() -> None:
     assert 'copy_to_current_user_buffer(__out, &metadata, sizeof(metadata))' in syscall
 
 
-def test_stage41_dedicated_filesystem_maturity_smoke_is_default_off() -> None:
+def test_runtime_filesystem_maturity_dedicated_filesystem_maturity_smoke_is_default_off() -> None:
     options = read_source('xmake/options.lua')
     kernel = read_source('xmake/kernel.lua')
     package = read_source('xmake/user_package.lua')
@@ -143,7 +143,7 @@ def test_stage41_dedicated_filesystem_maturity_smoke_is_default_off() -> None:
     assert '`filesystem-maturity`' in docs_zh
 
 
-def test_stage41_runtime_smoke_exercises_success_and_failure_paths() -> None:
+def test_runtime_filesystem_maturity_runtime_smoke_exercises_success_and_failure_paths() -> None:
     smoke = read_source('user/smoke/userland_smoke.c')
 
     for snippet in (

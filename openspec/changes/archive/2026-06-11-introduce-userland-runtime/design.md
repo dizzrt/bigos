@@ -1,6 +1,6 @@
 ## Context
 
-阶段 18 完成后，内核侧支撑真实用户态所需的语义已基本齐备：进程生命周期与安全回收、`fork`/COW（阶段 16）、信号（阶段 17）、墙钟与 uid/gid（阶段 16.5）、可写 FS + 页缓存 + `pipe`/`dup`/`dup2`/`lseek`（阶段 18），以及内核内已存在但尚未经 syscall 暴露的当前进程镜像替换入口 `exec_current_from_elf_image`（[proc.cc](kernel/core/proc/proc.cc) 第 1419 行）。`launch_init`（[proc.cc](kernel/core/proc/proc.cc) 第 1065 行）已经在 normal boot 默认加载 `/boot/user/init.elf` 并进入 ring3，初始用户栈布局由 `copy_exec_args_to_stack`（[proc.cc](kernel/core/proc/proc.cc) 第 829 行）按 `[argc][argv...NULL][envp...NULL][strings]` 布置、初始 SP 指向 `argc`。
+可写文件系统与 pipe/dup foundation 完成后，内核侧支撑真实用户态所需的语义已基本齐备：进程生命周期与安全回收、`fork`/COW（fork/exec process capability）、信号（signal capability）、墙钟与 uid/gid（time and identity capability）、可写 FS + 页缓存 + `pipe`/`dup`/`dup2`/`lseek`（可写文件系统与 pipe/dup foundation），以及内核内已存在但尚未经 syscall 暴露的当前进程镜像替换入口 `exec_current_from_elf_image`（[proc.cc](kernel/core/proc/proc.cc) 第 1419 行）。`launch_init`（[proc.cc](kernel/core/proc/proc.cc) 第 1065 行）已经在 normal boot 默认加载 `/boot/user/init.elf` 并进入 ring3，初始用户栈布局由 `copy_exec_args_to_stack`（[proc.cc](kernel/core/proc/proc.cc) 第 829 行）按 `[argc][argv...NULL][envp...NULL][strings]` 布置、初始 SP 指向 `argc`。
 
 但用户态仍是裸的：唯一用户程序是手写汇编 `init`（[user/init/init.s](user/init/init.s)），没有 C 运行时（crt0）、没有 syscall wrapper 库、没有 `/bin/sh`。本设计要在这些内核能力之上建立**最小可用用户态**，并把唯一缺失的内核暴露点 `SYS_EXECVE` 以 append-only 方式补上。
 
@@ -46,7 +46,7 @@
 - 失败安全：过继是纯链表指针改写，无分配、无 IO，不会失败；若 `g_init_process == nullptr`（init 已消失，异常路径）则跳过过继、维持现有自我回收兜底。
 - 替代方案：不实现过继，仅记录差距与残留风险。否决：常驻 init 收割孤儿是其核心价值，缺过继则被 init 间接拉起的程序（经 `fork` 的孙子进程在中间层退出后）会变成无人收割的孤儿，违背决策 4 的 PID-1 语义。
 
-### 决策 10：阶段 19 允许收敛真实用户态链路暴露出的最小内核修复
+### 决策 10：shell 与用户态组合能力 允许收敛真实用户态链路暴露出的最小内核修复
 本阶段的主要目标仍是用户态运行时，但真实 C 程序、`fork`+`execve`、阻塞 `wait`、管道和按需分页组合后，暴露出若干此前 smoke 未覆盖的内核边界问题。为保证默认 boot 能进入 `/bin/sh`、`userland_smoke` 能确定性通过，以下修复纳入本 change，且都保持 append-only/局部语义，不改变既有 syscall 号位、向量、磁盘布局或内核地址布局：
 - **启用 NXE**：用户数据/栈 PTE 带 `NO_EXECUTE`，若 EFER.NXE 未打开，bit63 会成为 reserved bit 并在真实用户栈/数据访问时触发 `#PF`。在长模式启用路径同时设置 EFER.NXE，匹配现有页属性语义。
 - **#PF 恢复门控**：`page_fault_handler` 返回 `bool`，当 `try_handle_user_page_fault` 成功物化 demand-zero/COW 页时直接恢复故障指令，不再落入 `default_exception_handler`。
@@ -61,7 +61,7 @@
 - 替代方案：实现 dlmalloc 级分配器。否决：超出最小目标，且 freestanding 单核下无并发需求。
 
 ### 决策 6：shell 容量全部 bounded 且编译期固定
-`SH_MAX_LINE`（如 256）、`SH_MAX_ARGC`（如 32）、`SH_MAX_PIPE_SEGMENTS`（本阶段 2，即单级管道）、重定向每命令最多各一个 `>`/`<`。超限确定性报错并回到读行循环。
+`SH_MAX_LINE`（如 256）、`SH_MAX_ARGC`（如 32）、`SH_MAX_PIPE_SEGMENTS`（本TTY console input capability，即单级管道）、重定向每命令最多各一个 `>`/`<`。超限确定性报错并回到读行循环。
 
 ### 决策 7：shell 支持用户态 `PATH` 查找
 shell 在用户态层实现命令查找：命令名含 `/`（绝对或相对路径）时直接交给 `execve`；不含 `/` 时按 `PATH` 环境变量（缺省回退到固定默认，如 `/bin`）顺序，对每个目录拼接命令名逐一尝试 `execve`，命中即运行，全部失败则报 "command not found"。`PATH` 解析依赖最小 `environ`/`getenv`（仅读取，不实现完整环境数据库管理），其值经 init -> shell 的 `envp` 传入。候选目录数与拼接路径长度 MUST 有界（复用 `SYS_PATH_MAX_LEN` 约束）。
@@ -105,7 +105,7 @@ user rdi=path, rsi=argv, rdx=envp (int 0x80, rax=SYS_EXECVE)
 - [常驻 init 依赖的"孤儿过继到 PID-1"语义当前未实现] → 核查确认缺失；本阶段在退出路径补齐最小 reparent 接线（决策 9），把退出进程的子进程过继给 init 并对僵尸子进程唤醒 init 的 `wait`；过继为纯指针改写、无分配/IO、不会失败；`g_init_process == nullptr` 时跳过并回退到现有自我回收兜底。
 - [真实用户态链路组合出此前 smoke 未覆盖的内核边界] → 纳入决策 10 的最小修复集合：NXE、#PF 成功恢复门控、#PF 分配前置、fork 真实 `rsp/ss`、ELF 映射不污染 active root、调度恢复用户线程上下文、fd 1 控制台快路径条件化。每项均有源码契约测试或 QEMU serial-marker smoke 覆盖。
 - [shell `PATH` 查找逐目录 `execve` 尝试导致多次失败 syscall / 路径越界] → 候选目录数与拼接路径长度有界（复用 `SYS_PATH_MAX_LEN`）；仅对 `execve` 返回 `-ENOENT` 继续下一候选，其他错误立即停止并报错。
-- [shell 管道/重定向 fd 泄漏或 close-on-exec 处理错误] → 复用阶段 18 的 `dup2`/close-on-exec 语义；shell 在 `fork` 子进程内显式 close 不需要的管道端。
+- [shell 管道/重定向 fd 泄漏或 close-on-exec 处理错误] → 复用可写文件系统与 pipe/dup foundation 的 `dup2`/close-on-exec 语义；shell 在 `fork` 子进程内显式 close 不需要的管道端。
 - [默认 boot 进入交互 shell 后自动化 smoke 卡在等待 stdin] → `userland_smoke` 走独立验证程序/路径并自带确定性输入或非交互断言，不依赖人工输入；交互 shell 仅在图形 QEMU 手工冒烟。
 
 ## Migration Plan
@@ -115,7 +115,7 @@ user rdi=path, rsi=argv, rdx=envp (int 0x80, rax=SYS_EXECVE)
 3. 落地 `/bin/sh` 与若干 `/bin/*` 测试二进制；泛化 xmake 用户程序 target 与镜像打包。
 4. 在内核退出路径补齐最小孤儿过继接线（决策 9），再把默认 `/boot/user/init.elf` 切到常驻 C 版 init（`fork`+`execve("/bin/sh")`+`while(1) wait`）；保留旧汇编 init 路径作为可回退参考。
 5. 新增默认关闭 `userland_smoke` 与 marker；接入 QEMU headless serial-marker 验证；补源码契约/行为断言测试。
-- 回滚：`SYS_EXECVE` 为 append-only，移除其分支与用户态产物即可回到阶段 18 行为；init 可切回旧汇编 init。
+- 回滚：`SYS_EXECVE` 为 append-only，移除其分支与用户态产物即可回到可写文件系统与 pipe/dup foundation 行为；init 可切回旧汇编 init。
 
 ## Open Questions
 

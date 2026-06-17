@@ -1,6 +1,6 @@
 ## Context
 
-Stage 29 的目标是在当前 cwd、`cd`、`pwd` baseline 之上，让路径和元数据 contract 通过交互式 shell 与小型静态用户程序更自然地被消费。当前系统已经具备单核 x86_64 runtime、`int 0x80` syscall、fd/VFS、RAM-backed `/rw`、只读 boot assets、cwd/相对路径、最小 metadata、用户 libc、`/bin/sh` 和若干 `/bin/*` 程序。
+TTY console input capability9 的目标是在当前 cwd、`cd`、`pwd` baseline 之上，让路径和元数据 contract 通过交互式 shell 与小型静态用户程序更自然地被消费。当前系统已经具备单核 x86_64 runtime、`int 0x80` syscall、fd/VFS、RAM-backed `/rw`、只读 boot assets、cwd/相对路径、最小 metadata、用户 libc、`/bin/sh` 和若干 `/bin/*` 程序。
 
 本设计影响正常内核初始化之后的 process/syscall/fs/userland 路径，不改变 bootloader、linker script、固定虚拟地址、页表布局、IDT/syscall vector、磁盘分区发现、exFAT boot image discovery 或 CR3 切换契约。所有新增用户态程序仍是 freestanding C 静态 ELF64，继续通过现有用户程序构建与打包路径进入镜像。
 

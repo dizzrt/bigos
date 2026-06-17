@@ -1,6 +1,6 @@
 ## Why
 
-当前进程表与每进程 fd 表都是编译期固定大小的静态数组（`MAX_PROCESSES = 16`、`MAX_FDS = 16`），进程对象本身也以 `static Process` 单例形式分配（`init_process` / `first_process` / `smoke_process`），不存在真正的进程对象池与回收。路线图阶段 16 的 `fork` 会成倍创建进程并复制 fd 表，必然撞上这两个静态上限；阶段 15.5 要求在 `fork` 撞上静态槽位上限之前先移除它。趁现在语义面小、消费者少时把进程/fd 表改为可增长/可回收结构，是 `fork`/COW 的硬前置。
+当前进程表与每进程 fd 表都是编译期固定大小的静态数组（`MAX_PROCESSES = 16`、`MAX_FDS = 16`），进程对象本身也以 `static Process` 单例形式分配（`init_process` / `first_process` / `smoke_process`），不存在真正的进程对象池与回收。路线图fork/exec process capability 的 `fork` 会成倍创建进程并复制 fd 表，必然撞上这两个静态上限；growable process and fd table capability 要求在 `fork` 撞上静态槽位上限之前先移除它。趁现在语义面小、消费者少时把进程/fd 表改为可增长/可回收结构，是 `fork`/COW 的硬前置。
 
 ## What Changes
 

@@ -1,6 +1,6 @@
 ## Why
 
-阶段 16.5（时间与身份，已完成）已交付 `Process` 的 uid/gid/euid/egid 与纯判定原语 `bigos::cred::may_signal(actor, target)`，但该判定目前没有任何强制点——内核既不能向进程投递任何异步通知，进程也无法相互终止或自愿处理终止请求。路线图阶段 17 要求在 fork/COW（阶段 16）与时间/身份（阶段 16.5）之上补齐**最小 POSIX 信号模型**：这是 shell（阶段 19）做作业控制、可写文件系统（阶段 18）做受控中断、以及未来「一个进程终止另一个进程」语义的硬前置。趁现在语义面仍小（单核、同步、`int 0x80`、已有 IRQ-return reschedule 钩子）时把信号立成最小但正确的地基，可复用现有 `may_signal` 判定与 IRQ-return 边界，避免日后在更复杂的并发模型上补信号。
+time and identity capability（时间与身份，已完成）已交付 `Process` 的 uid/gid/euid/egid 与纯判定原语 `bigos::cred::may_signal(actor, target)`，但该判定目前没有任何强制点——内核既不能向进程投递任何异步通知，进程也无法相互终止或自愿处理终止请求。路线图signal capability 要求在 fork/COW（fork/exec process capability）与时间/身份（time and identity capability）之上补齐**最小 POSIX 信号模型**：这是 shell（shell 与用户态组合能力）做作业控制、可写文件系统（可写文件系统与 pipe/dup foundation）做受控中断、以及未来「一个进程终止另一个进程」语义的硬前置。趁现在语义面仍小（单核、同步、`int 0x80`、已有 IRQ-return reschedule 钩子）时把信号立成最小但正确的地基，可复用现有 `may_signal` 判定与 IRQ-return 边界，避免日后在更复杂的并发模型上补信号。
 
 ## What Changes
 
@@ -28,6 +28,6 @@
 
 - 受影响子系统：新增 `kernel/core/signal`（信号核心：pending/mask/处置表管理、kill 投递、IRQ-return 投递与信号帧构造、sigreturn 恢复）、`kernel/core/syscall`（新增 4 个 syscall 分发分支）、`kernel/core/irq`（IRQ-return 到用户态边界增加信号投递检查点）、`kernel/core/proc`（`Process` 信号字段、init/ELF 初始化、fork 继承、exec 重置、默认 Terminate 接入 teardown、`SIGCHLD` 投递）、`kernel/core/sched`（与 IRQ-return/exit 生命周期协作）。
 - 受影响代码：新增 `include/bigos/signal.h` 与 `kernel/core/signal/*`；[syscall.h](include/bigos/syscall.h) 与 [syscall.cc](kernel/core/syscall/syscall.cc)（新增号位与分支）；[interrupt.cc](kernel/core/irq/interrupt.cc)（IRQ-return 用户态边界投递点）；[proc.h](include/bigos/proc.h) 与 [proc.cc](kernel/core/proc/proc.cc)（信号字段、初始化/继承/重置、默认动作终止、`SIGCHLD`）；[cred.h](include/bigos/cred.h) / [cred.cc](kernel/core/proc/cred.cc)（`may_signal` 接线，判定逻辑不变）；[errno.h](include/bigos/errno.h)（如需 `ESRCH` 等错误码补齐）。
-- 构建/验证：`xmake.lua` 新增默认关闭开关 `signal_smoke`；QEMU headless serial-marker smoke 与源码契约/行为断言测试（沿用阶段 14.5 启动的行为断言测试轨道）；clang/clangd 辅助静态检查。
-- 假设：x86_64 单核、同步、`int 0x80`、`InterruptFrame` ABI 与向量/DPL 布局不变；信号仅在 IRQ-return 到用户态时投递（不在内核态运行用户 handler，不在内核临界区投递）；用户 handler 在用户栈上构造信号帧并依赖用户态 `SYS_SIGRETURN`（本阶段不提供用户态 libc/trampoline，由 smoke 用户程序自行 `int 0x80` 触发 `SYS_SIGRETURN`）；`kmalloc`/`free` 不参与信号投递热路径（pending/mask/处置表为定长内联字段）；阶段 16 的 fork/COW、阶段 15.5 可增长进程/fd 表、阶段 16.5 身份原语已就位；Bochs/QEMU 经 `tools/boot_debug.py` 验证。
-- 非目标：实时信号（`SIGRTMIN`+ 排队计数）、`sigqueue`/`siginfo` 完整负载、`SIGSTOP`/`SIGCONT` 作业停止/恢复语义、`sigsuspend`/`sigpending`/`sigaltstack`/`SA_RESTART` 等完整 `sigaction` 标志、信号驱动的可中断系统调用重启（本阶段同步 syscall 不睡眠故无需 EINTR 重启）、进程组/会话与 `killpg`、core dump 文件、用户态 libc 信号包装与自动 trampoline、SMP 下的跨核信号投递。这些留给阶段 18/19 与后续工作。
+- 构建/验证：`xmake.lua` 新增默认关闭开关 `signal_smoke`；QEMU headless serial-marker smoke 与源码契约/行为断言测试（沿用behavior assertion validation baseline 启动的行为断言测试轨道）；clang/clangd 辅助静态检查。
+- 假设：x86_64 单核、同步、`int 0x80`、`InterruptFrame` ABI 与向量/DPL 布局不变；信号仅在 IRQ-return 到用户态时投递（不在内核态运行用户 handler，不在内核临界区投递）；用户 handler 在用户栈上构造信号帧并依赖用户态 `SYS_SIGRETURN`（本阶段不提供用户态 libc/trampoline，由 smoke 用户程序自行 `int 0x80` 触发 `SYS_SIGRETURN`）；`kmalloc`/`free` 不参与信号投递热路径（pending/mask/处置表为定长内联字段）；fork/exec process capability 的 fork/COW、growable process and fd table capability 可增长进程/fd 表、time and identity capability 身份原语已就位；Bochs/QEMU 经 `tools/boot_debug.py` 验证。
+- 非目标：实时信号（`SIGRTMIN`+ 排队计数）、`sigqueue`/`siginfo` 完整负载、`SIGSTOP`/`SIGCONT` 作业停止/恢复语义、`sigsuspend`/`sigpending`/`sigaltstack`/`SA_RESTART` 等完整 `sigaction` 标志、信号驱动的可中断系统调用重启（本阶段同步 syscall 不睡眠故无需 EINTR 重启）、进程组/会话与 `killpg`、core dump 文件、用户态 libc 信号包装与自动 trampoline、SMP 下的跨核信号投递。这些留给可写文件系统与 pipe/dup foundation/19 与后续工作。

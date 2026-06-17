@@ -11,7 +11,7 @@
 - `uv run pytest tests/test_user_c_baseline_source.py tests/test_boot_debug.py -q`
   - 结果：`36 passed`。
   - 覆盖：simple C program baseline source checks 与 runtime smoke matrix/tooling 回归。
-- `uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/stage21-userland.serial.log --expect-serial-marker BIGOS_USERLAND_PASSED --smoke-timeout 40`
+- `uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/userland-baseline.serial.log --expect-serial-marker BIGOS_USERLAND_PASSED --smoke-timeout 40`
   - 结果：通过，串口 marker 观察到 `BIGOS_USERLAND_PASSED`。
   - 覆盖：QEMU headless 构建 kernel、boot artifacts、user ELFs、raw image，并运行默认关闭 `userland_smoke`。该 smoke 直接执行 `/bin/smoke/*` 探针并通过 `/rw/smoke_*.txt` 记录验证参数、环境、stdout/stderr、`errno`、退出码请求；同时通过 `/bin/sh` 运行非零退出探针后继续执行参数探针。
 - `uv run pyright`

@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前的 bounded userland baseline 已经把若干 UNIX-like 基础能力串联起来：进程生命周期、用户 ELF 装载、`execve`、`fork`/COW、wait/reap、fd/VFS、pipe、dup/dup2、signals、time/identity、最小 libc wrapper、PID-1 init 和 `/bin/sh`。Stage 23 的设计重点不是新增完整 POSIX，而是把这些分散能力稳定为一个明确的组合契约。
+BigOS 当前的 bounded userland baseline 已经把若干 UNIX-like 基础能力串联起来：进程生命周期、用户 ELF 装载、`execve`、`fork`/COW、wait/reap、fd/VFS、pipe、dup/dup2、signals、time/identity、最小 libc wrapper、PID-1 init 和 `/bin/sh`。TTY console input capability3 的设计重点不是新增完整 POSIX，而是把这些分散能力稳定为一个明确的组合契约。
 
 受影响子系统跨越 `kernel/core/proc`、`kernel/core/syscall`、`kernel/core/fs`、pipe/dup 支持、signals、time/identity、`user` 中的最小 libc/init/shell/小型用户程序，以及运行时行为验证。该 change 不改变 boot 地址、链接地址、页表布局、IDT/syscall vector、磁盘布局、CR3 切换假设、用户 ELF 装载 ABI 或现有 `int 0x80` 寄存器约定。
 
@@ -23,13 +23,13 @@ BigOS 当前的 bounded userland baseline 已经把若干 UNIX-like 基础能力
 ## Decisions
 
 - 决策：新增一个聚合 capability `posix-like-process-io-subset`，不修改所有底层 capability。
-  备选方案是分别修改 `process-lifecycle`、`fd-vfs-shell`、`pipe-ipc`、`signals`、`wall-clock-time`、`process-identity-permissions` 和 `user-shell`。这种做法会把 Stage 23 的“组合边界”拆散并增加归档后的重复维护成本。聚合 capability 更适合表达当前阶段的 bounded UNIX-like 兼容目标，同时底层 specs 继续承载各自局部行为。
+  备选方案是分别修改 `process-lifecycle`、`fd-vfs-shell`、`pipe-ipc`、`signals`、`wall-clock-time`、`process-identity-permissions` 和 `user-shell`。这种做法会把 TTY console input capability3 的“组合边界”拆散并增加归档后的重复维护成本。聚合 capability 更适合表达当前阶段的 bounded UNIX-like 兼容目标，同时底层 specs 继续承载各自局部行为。
 
 - 决策：以运行时可观察行为定义稳定性，而不是声明源码结构或实现入口。
   备选方案是把具体函数、文件或验证 marker 写入规格，但这会违背 roadmap 和 OpenSpec 中对项目规划层与实现细节分离的要求。当前规格只要求用户程序、shell、fd/pipe、wait、signals 和错误传播能通过构建、emulator 输出、退出状态或确定性日志被观察。
 
 - 决策：fd 语义围绕继承、duplication、redirection 和 pipe 的组合路径收敛。
-  备选方案是仅把 fd/VFS 作为单独 open/read/write 行为处理，但 Stage 23 关注 shell 命令执行和进程组合路径。实现阶段应确保 child process 在 `fork`/`execve` 后保留预期 fd 映射，dup/dup2 不破坏无关 fd，pipe endpoint 生命周期在 bounded 范围内可预测，redirection 能影响目标命令的标准输入/输出/错误流。
+  备选方案是仅把 fd/VFS 作为单独 open/read/write 行为处理，但 TTY console input capability3 关注 shell 命令执行和进程组合路径。实现阶段应确保 child process 在 `fork`/`execve` 后保留预期 fd 映射，dup/dup2 不破坏无关 fd，pipe endpoint 生命周期在 bounded 范围内可预测，redirection 能影响目标命令的标准输入/输出/错误流。
 
 - 决策：错误语义保持 syscall wrapper 与最小 libc 的薄兼容层。
   备选方案是让用户程序直接依赖内核负 errno 或 kernel-private failure code，但这会削弱简单 C 程序兼容目标。用户态接口继续以 POSIX-like 的 `-1`/失败哨兵和正 `errno` 暴露错误；内核仍保留当前有界 `int 0x80` ABI。

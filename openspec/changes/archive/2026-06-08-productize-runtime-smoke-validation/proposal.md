@@ -2,7 +2,7 @@
 
 BigOS 已经具备多条默认关闭的 runtime smoke 路径，但当前验证仍依赖开发者手动组合 `xmake f`、emulator helper 和串口 marker，难以稳定复现、记录跳过原因或作为后续 blocking、scheduler、process、VFS 等阶段的回归基线。
 
-阶段 9 需要先把现有 smoke 开关和 QEMU headless marker 检查产品化为窄而明确的验证矩阵，降低后续低层 runtime 变更的回归风险。
+runtime smoke validation matrix 需要先把现有 smoke 开关和 QEMU headless marker 检查产品化为窄而明确的验证矩阵，降低后续低层 runtime 变更的回归风险。
 
 ## What Changes
 
@@ -15,7 +15,7 @@ BigOS 已经具备多条默认关闭的 runtime smoke 路径，但当前验证�
 ## Capabilities
 
 ### New Capabilities
-- `runtime-smoke-validation`: 定义 BigOS 阶段 9 的可重复 runtime smoke 矩阵、QEMU headless marker 执行模型、结构化验证记录和跳过原因规则。
+- `runtime-smoke-validation`: 定义 BigOS runtime smoke validation matrix 的可重复 runtime smoke 矩阵、QEMU headless marker 执行模型、结构化验证记录和跳过原因规则。
 
 ### Modified Capabilities
 - 无。现有 `one-command-boot-debug`、`project-quality-assurance` 和各子系统 runtime validation 规格保持不变；本 change 只新增跨子系统验证编排能力。

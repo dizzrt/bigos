@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前默认启动 resident init 并进入 `/bin/sh`，用户态已有 bounded libc、PATH 查找、cwd、路径工具、pipe、dup/dup2、重定向、wait/exit 和运行时 smoke 基线。Stage 32 聚焦把这些已经存在的能力组合成更稳定的交互式 shell 使用体验，而不是新增完整 POSIX shell。
+BigOS 当前默认启动 resident init 并进入 `/bin/sh`，用户态已有 bounded libc、PATH 查找、cwd、路径工具、pipe、dup/dup2、重定向、wait/exit 和运行时 smoke 基线。shell usability hardening 聚焦把这些已经存在的能力组合成更稳定的交互式 shell 使用体验，而不是新增完整 POSIX shell。
 
 受影响子系统主要位于用户态 shell 与用户程序路径，并通过现有 syscall/fd/VFS/process 契约消费内核能力。该设计不改变 x86_64 Legacy BIOS/MBR/exFAT 启动路径、内核链接地址、IDT/syscall vector、页表布局、磁盘布局或 CR3 切换规则。
 
@@ -45,7 +45,7 @@ BigOS 当前默认启动 resident init 并进入 `/bin/sh`，用户态已有 bou
 
    Rationale: roadmap 明确要求改进 pipe、redirection 和小工具组合体验，但保持无完整 POSIX shell 语言边界。单级 pipe、`<` 和 `>` 足以覆盖当前 path tools 与简单 C 程序的主要组合路径。pipeline status 采用 POSIX-like 末端命令规则：setup 失败时记录 shell setup failure；两个子进程均启动后，shell 等待两端完成，但 pipeline 的 bounded status 来自末端命令。
 
-   Alternative considered: 顺便引入多级 pipeline、append、stderr 重定向或 quoting。该方案会扩大解析器和 fd 状态机复杂度，偏离 stage 32 的 hardening 目标。
+   Alternative considered: 顺便引入多级 pipeline、append、stderr 重定向或 quoting。该方案会扩大解析器和 fd 状态机复杂度，偏离 the documented capability 的 hardening 目标。
 
 5. 验证优先覆盖用户可见行为，再根据环境选择 emulator runtime。
 

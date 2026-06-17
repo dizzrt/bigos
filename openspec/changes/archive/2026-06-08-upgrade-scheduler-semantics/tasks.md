@@ -2,7 +2,7 @@
 
 - [x] 1.1 审查 `include/irq/interrupt.h`、`kernel/core/irq/interrupt.s`、`kernel/core/irq/interrupt.cc`、`kernel/core/sched/switch.s` 和 `kernel/core/sched/sched.cc`，记录 `InterruptFrame`、ISR stack layout、context-switch frame、EOI 顺序和 idle ownership 的不可破坏边界。
 - [x] 1.2 审查 timer IRQ0、scheduler tick hook、blocked/sleeping wakeup、TTY/keyboard wakeup 和 syscall dispatch 的当前上下文规则，列出哪些路径可抢占、不可抢占、可阻塞或禁止阻塞。
-- [x] 1.3 确认 Stage 11 不改变 boot layout、link address、IDT vector、syscall vector `0x80`、page-table layout、disk image layout、ATA PIO/exFAT 读路径或现有 smoke marker 含义。
+- [x] 1.3 确认 bounded timer-driven scheduler semantics 不改变 boot layout、link address、IDT vector、syscall vector `0x80`、page-table layout、disk image layout、ATA PIO/exFAT 读路径或现有 smoke marker 含义。
 
 ## 2. Preemption Guard 与调度状态
 
@@ -34,7 +34,7 @@
 
 ## 6. 文档与验证
 
-- [x] 6.1 更新相关英文 canonical 文档和简体中文镜像，说明 Stage 11 scheduler semantics、time slice、preemption-disable、IRQ-return switch、priority hook、非目标和验证方式。
+- [x] 6.1 更新相关英文 canonical 文档和简体中文镜像，说明 bounded timer-driven scheduler semantics scheduler semantics、time slice、preemption-disable、IRQ-return switch、priority hook、非目标和验证方式。
 - [x] 6.2 运行 `openspec validate upgrade-scheduler-semantics --strict` 并修复本 change 引入的 OpenSpec 格式或需求问题。
 - [x] 6.3 对 C++/header/assembly 改动运行最窄有用 `xmake` / `x86_64-elf-gcc` cross build；若工具链不可用，记录缺失工具、替代检查和残余 bootability 风险。
 - [x] 6.4 对修改过的 C++ 源码和头文件执行 clang/clangd 辅助诊断，尽量使用 freestanding C++17、x86_64 target、项目 include path、no exceptions、no RTTI；区分历史诊断、当前变更诊断和 freestanding false positive。

@@ -1,6 +1,6 @@
 ## Why
 
-BigOS 已具备进程生命周期、bounded ELF64 `exec`、fd/VFS 壳层和安全地址空间 teardown，但用户内存仍主要依赖页表探测与加载期固定映射，缺少描述用户虚拟地址策略的内核对象。阶段 14 需要在 demand paging、COW、`fork` 和用户态运行库之前，引入 VMA 与最小用户内存 API，使 `brk`、匿名映射、用户栈增长和用户 buffer 校验具备统一边界。
+BigOS 已具备进程生命周期、bounded ELF64 `exec`、fd/VFS 壳层和安全地址空间 teardown，但用户内存仍主要依赖页表探测与加载期固定映射，缺少描述用户虚拟地址策略的内核对象。userland runtime baseline 需要在 demand paging、COW、`fork` 和用户态运行库之前，引入 VMA 与最小用户内存 API，使 `brk`、匿名映射、用户栈增长和用户 buffer 校验具备统一边界。
 
 ## What Changes
 

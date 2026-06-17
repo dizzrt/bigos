@@ -2,7 +2,7 @@
 
 BigOS 当前已经有可运行的有界用户态：内核通过现有用户 ELF64 装载路径进入静态用户程序，`crt0` 将初始栈转换为 `main(argc, argv, envp)`，用户态 libc 通过 `int 0x80` wrapper 消费内核 syscall，并为 shell、PID-1 init、小型 `/bin/*` 工具和 userland smoke 提供最小 C 运行时支撑。
 
-Stage 40 的问题不在于“没有 libc”，而在于现有 libc 表面来自多个阶段的增量补齐：部分接口是标准 C 风格，部分接口是 POSIX-like wrapper，部分接口是 BigOS-specific helper，部分能力只由 smoke 或 bundled tool 隐式依赖。这个 change 需要把它们整理成一个清晰的标准 C 库基础子集，并明确哪些能力属于当前承诺、哪些只是内部 helper、哪些必须留到后续阶段。
+bounded libc foundation 的问题不在于“没有 libc”，而在于现有 libc 表面来自多个阶段的增量补齐：部分接口是标准 C 风格，部分接口是 POSIX-like wrapper，部分接口是 BigOS-specific helper，部分能力只由 smoke 或 bundled tool 隐式依赖。这个 change 需要把它们整理成一个清晰的标准 C 库基础子集，并明确哪些能力属于当前承诺、哪些只是内部 helper、哪些必须留到后续阶段。
 
 本设计影响用户态运行时和 libc，不改变 boot handoff、ELF 装载地址、页表布局、interrupt/syscall vector、磁盘布局、CR3 切换、内核调度或 VFS 内部 ABI。当前 runnable 目标仍是 x86_64 Legacy BIOS/MBR/exFAT 默认路径；UEFI runtime parity、SMP、多架构、动态链接和持久完整可写文件系统仍在本 change 范围外。
 
@@ -10,10 +10,10 @@ Stage 40 的问题不在于“没有 libc”，而在于现有 libc 表面来自
 
 **Goals:**
 
-- 建立 Stage 40 的 bounded standard C library foundation：public headers、errno、syscall wrapper、字符串/内存函数、stdlib、最小 stdio、环境访问、文件/进程 wrapper、BigOS-specific helper 和验证路径都有明确边界。
+- 建立 bounded libc foundation 的 bounded standard C library foundation：public headers、errno、syscall wrapper、字符串/内存函数、stdlib、最小 stdio、环境访问、文件/进程 wrapper、BigOS-specific helper 和验证路径都有明确边界。
 - 保持简单静态 C 程序为主要消费者，使 packaged tools 和 smoke 程序能更少依赖 raw syscall 或隐式内部声明。
 - 让每个公开声明都能被归类为标准 C 子集、POSIX-like bounded wrapper、BigOS-specific public helper、compatibility umbrella export 或内部实现细节。
-- 继续复用现有内核 syscall ABI 和统一 errno 来源，不新增 syscall 语义作为 Stage 40 的必要前提。
+- 继续复用现有内核 syscall ABI 和统一 errno 来源，不新增 syscall 语义作为 bounded libc foundation 的必要前提。
 - 提供分层验证：头文件/构建一致性、用户态 libc 行为 smoke、代表性 shell/tool 组合行为，以及环境不可用时的明确跳过记录。
 
 **Non-Goals:**
@@ -26,11 +26,11 @@ Stage 40 的问题不在于“没有 libc”，而在于现有 libc 表面来自
 
 ## Decisions
 
-### Decision: 以“静态 C 程序 libc 子集”为 Stage 40 交付边界
+### Decision: 以“静态 C 程序 libc 子集”为 bounded libc foundation 交付边界
 
-Stage 40 的主要交付对象是静态链接的简单 C 程序，而不是通用 Unix/Linux 用户态程序。libc 接口应优先支持 bundled tools、shell 诊断、文件 I/O、进程交互、字符串/内存操作和错误报告。
+bounded libc foundation 的主要交付对象是静态链接的简单 C 程序，而不是通用 Unix/Linux 用户态程序。libc 接口应优先支持 bundled tools、shell 诊断、文件 I/O、进程交互、字符串/内存操作和错误报告。
 
-备选方案是直接追求完整 POSIX libc 或动态 libc。该方案会立即要求 loader、VM、FS、terminal/process、locale/thread 等多个未成熟契约同步稳定，容易把 Stage 40 变成跨系统大迁移，因此不采用。
+备选方案是直接追求完整 POSIX libc 或动态 libc。该方案会立即要求 loader、VM、FS、terminal/process、locale/thread 等多个未成熟契约同步稳定，容易把 bounded libc foundation 变成跨系统大迁移，因此不采用。
 
 ```text
 static user program
@@ -68,15 +68,15 @@ libc wrapper 必须继续把内核负 errno 翻译为用户态正 errno 并返�
 
 ### Decision: stdio 保持 fd-backed bounded helper，不进入完整 FILE 流
 
-Stage 40 可增强 `printf`/`fprintf`/`perror` 等诊断能力，也可以补齐小型工具高频使用的格式能力，但 `FILE` 仍应只作为 standard streams 的最小 opaque 表示。`fopen`、`fclose`、`fread`、`fwrite`、`fflush`、seekable buffered stream、locale 和宽字符不作为本阶段目标。
+bounded libc foundation 可增强 `printf`/`fprintf`/`perror` 等诊断能力，也可以补齐小型工具高频使用的格式能力，但 `FILE` 仍应只作为 standard streams 的最小 opaque 表示。`fopen`、`fclose`、`fread`、`fwrite`、`fflush`、seekable buffered stream、locale 和宽字符不作为本阶段目标。
 
 备选方案是实现 hosted stdio。该方案会与 VFS 文件更新语义、缓冲刷新、错误状态、stdin 交互和未来持久存储强耦合，更适合作为后续独立成熟化项目。
 
-### Decision: Stage 40 第一批 libc 接口按高实用、低系统牵引选择
+### Decision: bounded libc foundation 第一批 libc 接口按高实用、低系统牵引选择
 
 第一批必须接口包括 `calloc`、`realloc`、`strtol`、`atoi` 和 bounded `snprintf`。`calloc` 必须处理乘法溢出并返回清零内存；`realloc` 必须保持失败不破坏原块；`strtol` 作为推荐的数字解析接口；`atoi` 作为 `strtol` 的简化兼容 wrapper；`snprintf` 必须复用 bounded formatter，遵守缓冲区边界和截断返回约定。
 
-备选方案是只补 `calloc`/`realloc` 并推迟转换和 formatting。该方案会让 shell tools 和 packaged programs 继续保留手写解析/格式化逻辑，不利于 Stage 40 提升静态 C 程序可移植性，因此不采用。完整 hosted `snprintf`、浮点、locale、宽字符和完整 flags/precision 仍不属于本阶段目标。
+备选方案是只补 `calloc`/`realloc` 并推迟转换和 formatting。该方案会让 shell tools 和 packaged programs 继续保留手写解析/格式化逻辑，不利于 bounded libc foundation 提升静态 C 程序可移植性，因此不采用。完整 hosted `snprintf`、浮点、locale、宽字符和完整 flags/precision 仍不属于本阶段目标。
 
 ### Decision: raw syscall primitive 只作为 BigOS-specific documented helper 保留
 
@@ -86,21 +86,21 @@ Stage 40 可增强 `printf`/`fprintf`/`perror` 等诊断能力，也可以补齐
 
 ### Decision: 目录枚举采用接近 POSIX 的 DIR* 风格但声明为非完整 POSIX
 
-Stage 40 引入 `DIR*` 风格的 bounded directory enumeration wrapper，使简单 C 程序可以通过更熟悉的 `opendir`/`readdir`/`closedir` 形态消费现有目录枚举能力。该接口必须明确是 BigOS bounded subset：不承诺完整 `struct dirent`、排序、跨调用快照、线程安全、`telldir`/`seekdir`、`rewinddir`、目录 fd 语义、symlink 或完整 POSIX 目录遍历。
+bounded libc foundation 引入 `DIR*` 风格的 bounded directory enumeration wrapper，使简单 C 程序可以通过更熟悉的 `opendir`/`readdir`/`closedir` 形态消费现有目录枚举能力。该接口必须明确是 BigOS bounded subset：不承诺完整 `struct dirent`、排序、跨调用快照、线程安全、`telldir`/`seekdir`、`rewinddir`、目录 fd 语义、symlink 或完整 POSIX 目录遍历。
 
-备选方案是继续只保留 BigOS-specific 目录枚举命名。该方案边界最安全，但降低小程序移植收益；在 Stage 40 目标是建立更清晰 C 库基础的前提下，选择引入受限 `DIR*` 风格 wrapper，并用规格和文档约束非目标。
+备选方案是继续只保留 BigOS-specific 目录枚举命名。该方案边界最安全，但降低小程序移植收益；在 bounded libc foundation 目标是建立更清晰 C 库基础的前提下，选择引入受限 `DIR*` 风格 wrapper，并用规格和文档约束非目标。
 
 ### Decision: printf family 增加常用宽度和整数/指针格式
 
-Stage 40 的 bounded formatter 应在现有 `%s`、`%d`、`%x`、`%c`、`%%` 基础上增加常用宽度和整数/指针格式，至少覆盖 `%u`、`%p`、`%ld`、`%lu`、`%zu`，并支持简单字段宽度用于工具输出对齐。该能力必须适用于 `printf`、`fprintf(stderr, ...)` 和 bounded `snprintf` 的共享 formatter，避免多套格式化行为分叉。
+bounded libc foundation 的 bounded formatter 应在现有 `%s`、`%d`、`%x`、`%c`、`%%` 基础上增加常用宽度和整数/指针格式，至少覆盖 `%u`、`%p`、`%ld`、`%lu`、`%zu`，并支持简单字段宽度用于工具输出对齐。该能力必须适用于 `printf`、`fprintf(stderr, ...)` 和 bounded `snprintf` 的共享 formatter，避免多套格式化行为分叉。
 
 备选方案是只稳定现有最小格式集合。该方案实现风险最低，但不足以支撑更实用的 shell tools、诊断输出和指针/大小值展示，因此不采用。完整 flags、precision、浮点、locale 和宽字符仍明确留到后续阶段。
 
 ### Decision: allocator 以确定性失败语义为优先
 
-Stage 40 可以补齐 `calloc`、`realloc` 等高价值接口，但要求仍是有界、可预测、失败不破坏既有块。不得把当前 allocator 描述成通用高性能、线程安全或完整 coalescing allocator。
+bounded libc foundation 可以补齐 `calloc`、`realloc` 等高价值接口，但要求仍是有界、可预测、失败不破坏既有块。不得把当前 allocator 描述成通用高性能、线程安全或完整 coalescing allocator。
 
-备选方案是重写通用 malloc。该方案会增加 VM 和 fragmentation 复杂度，并可能掩盖 Stage 40 的主要目标，因此不作为首要路径。
+备选方案是重写通用 malloc。该方案会增加 VM 和 fragmentation 复杂度，并可能掩盖 bounded libc foundation 的主要目标，因此不作为首要路径。
 
 ### Decision: 验证围绕可观察用户态行为，而不是外部兼容测试套件
 
@@ -112,7 +112,7 @@ Stage 40 可以补齐 `calloc`、`realloc` 等高价值接口，但要求仍是�
 
 - Scope creep 到完整 POSIX libc -> 通过 proposal/spec 明确非目标，新增声明必须有实现、规格和文档边界。
 - 头文件过早承诺未实现接口 -> 先做 header audit 和声明分类，未实现接口不得暴露为 public support。
-- stdio 增强牵出完整 `FILE` 语义 -> 将 Stage 40 stdio 限定为 fd 0/1/2 与 bounded formatting/error reporting。
+- stdio 增强牵出完整 `FILE` 语义 -> 将 bounded libc foundation stdio 限定为 fd 0/1/2 与 bounded formatting/error reporting。
 - allocator 改动破坏现有用户程序 -> 优先添加行为 smoke，要求失败不破坏既有块，保留 `free(NULL)` 无副作用。
 - wrapper 整理改变 errno 行为 -> 每个新增或调整 wrapper 都必须覆盖成功不改写 errno、失败设置正 errno 和返回哨兵。
 - 文档宣称过宽兼容 -> docs 和 OpenSpec 必须使用 bounded C library subset / POSIX-like subset 表述，不使用广泛 POSIX compatibility 表述。
@@ -121,7 +121,7 @@ Stage 40 可以补齐 `calloc`、`realloc` 等高价值接口，但要求仍是�
 ## Migration Plan
 
 1. 盘点当前用户态 libc public headers、umbrella header、raw syscall primitive、BigOS-specific helper 和 bundled user program 使用点。
-2. 更新 OpenSpec delta，明确 Stage 40 C 库基础子集、crt0 静态入口边界和 POSIX-like 子集兼容声明边界。
+2. 更新 OpenSpec delta，明确 bounded libc foundation子集、crt0 静态入口边界和 POSIX-like 子集兼容声明边界。
 3. 按声明分类整理头文件，先补规格覆盖，再移动、隐藏或保留声明。
 4. 补齐高价值 libc 函数和 wrapper，优先覆盖字符串/内存、stdlib、allocator、stdio/error reporting、文件/进程 wrapper。
 5. 更新或新增用户态 libc subset smoke 和代表性 packaged tool 使用路径。
@@ -130,5 +130,5 @@ Stage 40 可以补齐 `calloc`、`realloc` 等高价值接口，但要求仍是�
 
 ## Open Questions
 
-- 是否需要在 Stage 40 第一批之外追加 `strtoul`、`snprintf` precision、`%o` 或更多 length modifier，取决于 packaged tools 和 smoke 的实际消费需求。
+- 是否需要在 bounded libc foundation 第一批之外追加 `strtoul`、`snprintf` precision、`%o` 或更多 length modifier，取决于 packaged tools 和 smoke 的实际消费需求。
 - `DIR*` 风格 wrapper 的最小 `struct dirent` 字段集合需要在实现前根据现有 VFS 目录项能力最终确认。

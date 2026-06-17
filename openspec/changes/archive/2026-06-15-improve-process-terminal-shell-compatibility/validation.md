@@ -2,7 +2,7 @@
 
 ## Scope And Boundary Review
 
-- Reviewed `roadmap.md` Stage 42 and this change's proposal, design, specs, and tasks.
+- Reviewed `roadmap.md` process/terminal/shell composition hardening and this change's proposal, design, specs, and tasks.
 - Confirmed the implementation scope remains the bounded process, default terminal, and shell composition subset.
 - Confirmed this change does not require sessions, terminal process groups, job control, termios, a complete POSIX shell, a complete POSIX libc, dynamic linking, SMP, async I/O, persistent full writable filesystems, or broad file-backed `mmap`.
 - Confirmed no source changes alter boot handoff, linker address, page-table layout, direct map, GDT/TSS, CR3 switching, `InterruptFrame`, syscall vector `0x80`, disk layout, or user ELF ABI.
@@ -29,7 +29,7 @@
   - Passed with no diagnostics.
 - `clang --target=x86_64-elf -fsyntax-only -std=c17 -Iuser/libc/include -Iinclude -ffreestanding -fno-builtin -mno-red-zone user/sh/sh.c user/libc/syscall.c user/smoke/userland_smoke.c`
   - Passed with no diagnostics.
-- `xmake f --userland_smoke=y && xmake && uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/stage42-userland-serial.log --expect-serial-marker BIGOS_USERLAND_PASSED`
+- `xmake f --userland_smoke=y && xmake && uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/userland-composition-serial.log --expect-serial-marker BIGOS_USERLAND_PASSED`
   - Passed: QEMU observed serial marker `BIGOS_USERLAND_PASSED`.
   - Covered shell-launched child normal exit, deterministic command failure, wait-status recovery, pipe/redirection fd composition, cwd/PATH utility composition, and shell recovery after failures through the existing userland smoke.
 - `xmake f --userland_smoke=n`

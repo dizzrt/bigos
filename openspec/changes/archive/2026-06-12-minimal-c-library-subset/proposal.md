@@ -1,6 +1,6 @@
 ## Why
 
-Stage 22 将 BigOS 现有 freestanding 用户态支持推进为有文档边界的最小 C 标准库子集，使简单静态 C 程序可以依赖稳定、可验证、与实际 syscall 行为一致的 libc 接口。
+TTY console input capability2 将 BigOS 现有 freestanding 用户态支持推进为有文档边界的最小 C 标准库子集，使简单静态 C 程序可以依赖稳定、可验证、与实际 syscall 行为一致的 libc 接口。
 
 当前用户态 libc 已覆盖若干基础能力，但其接口边界、错误语义、stdio 限制、堆行为和头文件暴露范围仍需要收敛为明确契约，以便后续 POSIX-like 进程/I/O、运行时文件系统和行为验证阶段可以在同一用户态兼容基线上推进。
 

@@ -32,6 +32,6 @@
 ## 剩余风险
 
 - **Scheduler runtime 未经 oracle 验证**：cooperative context switch、trampoline 栈帧、yield/idle 路径目前只由源码级检查与 freestanding 构建/语法检查覆盖；两个线程交替 marker 的实际运行时行为尚未在可稳定观测的 Bochs/serial 环境中确认，属剩余 bootability/scheduler runtime 风险。
-- **Terminated 线程延后回收**：阶段 4 不释放当前线程 TCB/栈，安全回收留给后续 lifecycle change；阶段 4 线程数量 bounded。
+- **Terminated 线程延后回收**：kernel thread scheduler capability 不释放当前线程 TCB/栈，安全回收留给后续 lifecycle change；kernel thread scheduler capability 线程数量 bounded。
 - **1 页线程栈无 guard page**：复杂内核路径栈溢出未做诊断，后续需单独 change 扩大栈或加 guard page。
 - **无 IRQ 返回前抢占**：timer 只记录 bounded reschedule intent，抢占切换留给后续专门 change 设计与验证。

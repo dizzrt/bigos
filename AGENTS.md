@@ -275,6 +275,10 @@ Notes:
   while preserving OpenSpec-required structural keywords when needed for tooling.
 - For OpenSpec work, keep change names focused on the capability or behavior and
   do not include roadmap stage numbers in change names.
+- For OpenSpec work, do not cite roadmap stage numbers or roadmap task numbers
+  in new changes, archived changes, validation notes, or documentation updates.
+  Use capability names, behavior names, implementation boundaries, or
+  artifact-local checklist numbers instead.
 - For reviews, focus on correctness, undefined behavior, bootability, memory
   safety, interrupt safety, and initialization order.
 - For documentation sync, keep the current bounded userland baseline aligned

@@ -1,6 +1,6 @@
 ## Why
 
-Stage 24 需要把当前 RAM-backed `/rw` 从“可写 smoke 能力”提升为简单静态 C 程序可依赖的有界运行时文件系统行为。现在应收敛文件创建、读写、seek、sync、目录变更、目录枚举、删除和错误报告的用户可见契约，让后续用户态程序、shell 重定向和行为验证有稳定边界。
+TTY console input capability4 需要把当前 RAM-backed `/rw` 从“可写 smoke 能力”提升为简单静态 C 程序可依赖的有界运行时文件系统行为。现在应收敛文件创建、读写、seek、sync、目录变更、目录枚举、删除和错误报告的用户可见契约，让后续用户态程序、shell 重定向和行为验证有稳定边界。
 
 ## What Changes
 

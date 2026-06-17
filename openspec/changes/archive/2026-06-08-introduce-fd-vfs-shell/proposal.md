@@ -2,7 +2,7 @@
 
 BigOS 已完成常规进程生命周期、bounded ELF64 `exec`、blocking primitives 和只读 exFAT 读取路径；继续推进 VMA、demand paging 或 userland runtime 前，需要先稳定 kernel/user I/O 边界。
 
-阶段 13 聚焦最小 fd/VFS 壳层：把现有只读 exFAT 能力挂到 vnode/file/file table 抽象后面，并向用户态暴露受控的 `open`/`read`/`close` 语义，避免后续 userland 直接依赖 exFAT 私有 API。
+fd/VFS shell boundary 聚焦最小 fd/VFS 壳层：把现有只读 exFAT 能力挂到 vnode/file/file table 抽象后面，并向用户态暴露受控的 `open`/`read`/`close` 语义，避免后续 userland 直接依赖 exFAT 私有 API。
 
 ## What Changes
 

@@ -1,6 +1,6 @@
 /* BigOS bounded wait constants and wrapper declarations.
  *
- * wait()/waitpid() expose the Stage 39 POSIX-like shape over the existing
+ * wait()/waitpid() expose the bounded POSIX-like shape over the existing
  * SYS_WAIT ABI. Only options == 0 is supported: no WNOHANG, process groups,
  * job control, stopped/continued state, or complete POSIX status encoding. */
 #ifndef _BIGOS_USER_SYS_WAIT_H

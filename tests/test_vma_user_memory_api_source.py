@@ -143,7 +143,10 @@ def test_brk_and_anonymous_mapping_are_restricted_and_lazy() -> None:
     assert '__flags != 0' in anon_body
     assert '__len > USER_ANON_MAX_PAGES * PAGE_SIZE' in anon_body
     assert 'permissions_wx(permissions)' in anon_body
-    assert 'const uint64_t anon_limit = process->runtime_layout.anonymous.base + process->runtime_layout.anonymous.len' in anon_body
+    assert (
+        'const uint64_t anon_limit = process->runtime_layout.anonymous.base + process->runtime_layout.anonymous.len'
+        in anon_body
+    )
     assert 'VmaPurpose::Anonymous' in anon_body
     # Lazy backing: registration only, no eager allocation/mapping loop.
     assert 'alloc_user_frame()' not in anon_body
@@ -158,7 +161,8 @@ def test_unified_page_fault_entry_decides_by_vma_metadata() -> None:
     assert 'bigos::proc::fault_current_and_exit(-14)' in irq
 
     entry_body = proc[proc.index('bool try_handle_user_page_fault') : proc.index('int64_t install_fd_current')]
-    # Preconditions: running process, allocation-safe, present-bit gate. Stage 19:
+    # Preconditions: running process, allocation-safe, present-bit gate. The
+    # default userland page-fault path uses this allocation-safe entry:
     # a real ring3 #PF dispatches under the nonblocking guard with IF=0, so the
     # gate is the allocation-safe can_allocate_in_fault() rather than can_block().
     assert '!bigos::sched::can_allocate_in_fault()' in entry_body

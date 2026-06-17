@@ -22,7 +22,7 @@
 
 - [x] 4.1 更新 docs/en 中的验证说明，描述行为导向验证矩阵、分层环境策略和 bounded userland/POSIX-like 边界。
 - [x] 4.2 同步更新 docs/zh 对应 Markdown 路径，保持与 docs/en 结构一致且语义一致。
-- [x] 4.3 复核 `roadmap.md` 中 Stage 26 仍保持项目规划级描述，不加入具体命令、marker、源代码入口、文件路径或 archive 索引。
+- [x] 4.3 复核 `roadmap.md` 中 TTY console input capability6 仍保持项目规划级描述，不加入具体命令、marker、源代码入口、文件路径或 archive 索引。
 
 ## 5. 验证
 

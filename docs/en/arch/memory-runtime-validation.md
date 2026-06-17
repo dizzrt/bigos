@@ -22,7 +22,7 @@ The self-test covers representative `kmalloc/free` size classes, mapped kernel v
 
 ## Interrupt-Context Contract
 
-Stage 3 defines context boundaries for ordinary allocator entries, but does not upgrade them to IRQ-handler-safe APIs:
+kernel memory API capability defines context boundaries for ordinary allocator entries, but does not upgrade them to IRQ-handler-safe APIs:
 
 - `kmalloc()`, `free()`, `alloc_kernel_pages()`, `free_pages()`, and global `new/delete` are non-IRQ-handler-safe APIs.
 - `alloc_kernel_pages()` keeps page-count semantics. Internal buddy `alloc_physical_order()` keeps order semantics. Do not add `alloc_pages()`, `alloc_physical_pages()`, or `free_physical_pages()` aliases.

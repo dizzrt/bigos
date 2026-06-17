@@ -24,7 +24,7 @@
 - 默认构建打包 `/boot/user/init.elf`。
 - 定义并实现 init 缺失/非法 -> `BIGOS_INIT_*` panic 的确定性降级，以及 init
   退出/被 reap 后的确定性内核行为。
-- 默认构建发出 `BIGOS_INIT_ENTER` / `BIGOS_INIT_EXIT` marker，并纳入 Stage 9 矩阵默认 case。
+- 默认构建发出 `BIGOS_INIT_ENTER` / `BIGOS_INIT_EXIT` marker，并纳入 runtime smoke validation matrix 矩阵默认 case。
 
 **Non-Goals:**
 - demand paging、fork/COW、broad mmap、信号、可写 FS、用户态 libc、多进程 shell、SMP、UEFI。
@@ -74,7 +74,7 @@ init 依赖 smoke。
   跑完并 exit」也判为失败，不利于行为断言观察正常 ENTER/EXIT，留作后续阶段按需收紧。
 
 ### 决策 6：本 change 只断言内核 `BIGOS_INIT_*` marker，stdout 行为断言留待后续
-新增默认构建（无 smoke 开关）的 Stage 9 矩阵 case，**定稿**为本 change 仅以
+新增默认构建（无 smoke 开关）的 runtime smoke validation matrix 矩阵 case，**定稿**为本 change 仅以
 `BIGOS_INIT_ENTER` / `BIGOS_INIT_EXIT` 内核串口 marker 为通过判据，启动「行为断言
 测试」轨道；init 二进制自身的 stdout 输出断言留待后续阶段（待用户态有稳定写出路径后）
 再引入。理由：当前 init.elf 是最小汇编程序，先用内核 marker 建立行为断言基线，避免本
@@ -101,7 +101,7 @@ change 绑定尚不稳定的用户态输出约定；该轨道逐步替代源码�
 1. 实现 `launch_init` 并接入 `kernel()`（无 `#ifdef`）。
 2. 修改 `xmake.lua` 使 `user-init-elf` 默认构建，磁盘镜像默认含 `/boot/user/init.elf`。
 3. 实现 `BIGOS_INIT_*` marker 与缺失/退出语义。
-4. 新增 Stage 9 默认 init 矩阵 case 与行为断言验证。
+4. 新增 runtime smoke validation matrix 默认 init 矩阵 case 与行为断言验证。
 5. 回滚策略：若默认 init 引入不稳定，可临时将 `launch_init` 调用与 init.elf 默认打包
    回退为开关控制（仅作应急，非目标状态），既有 smoke 开关始终可用作旁路验证。
 

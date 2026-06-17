@@ -65,7 +65,7 @@
 
 ## 11. 源码契约/行为断言测试
 
-- [x] 11.1 用 `uv run pytest` 增补源码契约/行为断言测试（沿用阶段 14.5 启动的行为断言轨道）：覆盖新增 syscall 号位固定（`SYS_LSEEK=20`..`SYS_UNLINK=26`）、`SYS_OPEN`/`SYS_WRITE` 扩展语义、`BlockDevice` 写入口与 `FileOperations` 写/lseek op 存在、buffer cache 写回/淘汰路径、`may_access` 接线于可写路径、管道 EOF/EPIPE 与 dup 共享 offset，以及 smoke marker 行为断言。
+- [x] 11.1 用 `uv run pytest` 增补源码契约/行为断言测试（沿用behavior assertion validation baseline 启动的行为断言轨道）：覆盖新增 syscall 号位固定（`SYS_LSEEK=20`..`SYS_UNLINK=26`）、`SYS_OPEN`/`SYS_WRITE` 扩展语义、`BlockDevice` 写入口与 `FileOperations` 写/lseek op 存在、buffer cache 写回/淘汰路径、`may_access` 接线于可写路径、管道 EOF/EPIPE 与 dup 共享 offset，以及 smoke marker 行为断言。
 - [x] 11.2 对新增/修改的 Python 文件运行 `uv run ruff check`、`uv run ruff format --check`、`uv run pyright`、`uv run pytest`，修复新引入的 lint/类型/格式/测试问题；若 `uv` 不可用则显式记录该阻塞。
 
 ## 12. 文档与验证记录

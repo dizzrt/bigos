@@ -1,6 +1,6 @@
 # 系统调用入口（syscall entry）
 
-BigOS 阶段 6 使用一条受控的“软件主动进入内核”路径与最小 syscall ABI。阶段 5 的 ring0 诊断 syscall 仍保留；默认关闭的 `user_program_smoke` 路径会在配置 GDT/TSS 与用户地址空间后允许 CPL3 通过 `int 0x80` 进入同一个 dispatcher。
+BigOS user entry and syscall capability 使用一条受控的“软件主动进入内核”路径与最小 syscall ABI。ring0 syscall diagnostic capability 的 ring0 诊断 syscall 仍保留；默认关闭的 `user_program_smoke` 路径会在配置 GDT/TSS 与用户地址空间后允许 CPL3 通过 `int 0x80` 进入同一个 dispatcher。
 
 ## 入口机制选择：`int 0x80` 软件中断门
 

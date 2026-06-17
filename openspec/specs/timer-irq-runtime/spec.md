@@ -73,7 +73,7 @@ BigOS SHALL validate the hardened timer/IRQ runtime path with source-level check
 
 ### Requirement: Timer tick may record scheduler intent without violating IRQ contracts
 
-BigOS SHALL allow the early timer runtime path to interact with the single-core scheduler through bounded IRQ-context-safe accounting, reschedule intent, and stage 11 IRQ-return scheduling while preserving timer tick ownership and the `on_tick()` context contract.
+BigOS SHALL allow the early timer runtime path to interact with the single-core scheduler through bounded IRQ-context-safe accounting, reschedule intent, and guarded IRQ-return scheduling while preserving timer tick ownership and the `on_tick()` context contract.
 
 #### Scenario: Timer IRQ keeps tick ownership in timer API
 
@@ -93,7 +93,7 @@ BigOS SHALL allow the early timer runtime path to interact with the single-core 
 - **THEN** the decision state MUST be represented without ordinary dynamic allocation in the IRQ handler
 - **AND** the timer path MUST preserve the current single-core interrupt, EOI, and return-state contracts
 
-#### Scenario: Stage 11 may preempt on eligible IRQ return
+#### Scenario: bounded timer-driven scheduler semantics may preempt on eligible IRQ return
 
 - **WHEN** timer IRQ0 expires the current thread's time slice and the interrupt dispatch path reaches a documented safe return boundary
 - **THEN** BigOS MAY perform a scheduler-owned context switch before returning to the interrupted kernel thread
@@ -123,7 +123,7 @@ BigOS SHALL keep timer IRQ0 handling bounded and IRQ-context safe while supporti
 #### Scenario: Timer IRQ does not preemptively switch
 - **WHEN** a timeout expires during timer IRQ0
 - **THEN** the IRQ path MAY mark or wake the expired thread through a bounded IRQ-safe path
-- **AND** it MUST NOT perform a full context switch on IRQ return in stage 10
+- **AND** it MUST NOT perform a full context switch on IRQ return before the guarded IRQ-return scheduling capability is active
 - **AND** external IRQ EOI and `iretq` return semantics MUST remain unchanged
 
 ### Requirement: Timer preemption accounting is deterministic

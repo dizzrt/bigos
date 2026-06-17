@@ -2,8 +2,8 @@
 
 BigOS 当前没有任何信号机制：内核无法向进程投递异步通知，进程之间也不能终止彼此或自愿处理终止请求。已有的相关地基包括——
 
-- 阶段 16.5 已在 `Process` 中加入 uid/gid/euid/egid，并实现了纯判定原语 `bigos::cred::may_signal(actor, target)`（见 [cred.cc](kernel/core/proc/cred.cc#L6-L16)），但目前没有任何强制点调用它。
-- 进程生命周期已有 `exit`/`fault_current_and_exit`/zombie-to-reaper 的完整 teardown 路径，以及 `exit_code`/`fault_reason` 字段；fork/COW（阶段 16）与可增长进程/fd 表（阶段 15.5）已就位。
+- time and identity capability 已在 `Process` 中加入 uid/gid/euid/egid，并实现了纯判定原语 `bigos::cred::may_signal(actor, target)`（见 [cred.cc](kernel/core/proc/cred.cc#L6-L16)），但目前没有任何强制点调用它。
+- 进程生命周期已有 `exit`/`fault_current_and_exit`/zombie-to-reaper 的完整 teardown 路径，以及 `exit_code`/`fault_reason` 字段；fork/COW（fork/exec process capability）与可增长进程/fd 表（growable process and fd table capability）已就位。
 - IRQ dispatch（[interrupt.cc](kernel/core/irq/interrupt.cc#L132-L166)）在外部 IRQ handler 返回并发送 EOI 后，调用 `bigos::sched::maybe_preempt_on_irq_return(__frame)`；该路径已通过 `(__frame->cs & 0x3) == 0x3` 区分用户态/内核态被中断帧（见 page_fault_handler）。这正是 POSIX 信号「在返回用户态边界投递」的天然挂载点。
 - syscall 走 `int 0x80`，号位固定、寄存器 ABI 冻结、向量 0x80 的 IDT gate 为 DPL=3 trap gate，syscall 路径不发 i8259 EOI。新增号只能在末尾追加。
 
@@ -60,14 +60,14 @@ BigOS 当前没有任何信号机制：内核无法向进程投递异步通知�
 
 - 理由：这是 Unix 信号交付的标准机制（内核改写返回上下文、用户栈承载 saved context、sigreturn 恢复）。把 saved context 放用户栈使其随进程地址空间天然隔离，无需内核侧每信号上下文存储。
 - 失败行为：构造信号帧前用 VMA-backed 用户范围校验确认用户栈可写、不越界；不可写/越界 -> 确定性终止该进程（等价 `SIGSEGV` 默认），绝不在内核态写非法用户地址、绝不分配、绝不阻塞。
-- 本阶段无 libc trampoline：smoke 用户程序的 handler 末尾自行 `int 0x80` 触发 `SYS_SIGRETURN`（不依赖自动返回地址）。明确记录这是 smoke 约定，阶段 19 libc 落地后再提供标准 `__restore_rt` trampoline。
+- 本阶段无 libc trampoline：smoke 用户程序的 handler 末尾自行 `int 0x80` 触发 `SYS_SIGRETURN`（不依赖自动返回地址）。明确记录这是 smoke 约定，shell 与用户态组合能力 libc 落地后再提供标准 `__restore_rt` trampoline。
 - 备选：在内核态运行 handler —— 破坏 ring 边界与隔离，严重错误，否决；内核侧保存上下文表 —— 引入每进程上下文存储与生命周期，否决。
 
 ### 决策 5：`SYS_KILL` 用 `cred::may_signal` 强制权限，确定性 errno
 
 `SYS_KILL(pid, signo)`：查找目标进程；不存在 -> `-ESRCH`；`cred::may_signal(current, target)` 拒绝 -> `-EPERM`；`signo` 非法 -> `-EINVAL`；否则把 `1<<(signo-1)` 置入目标 `sig_pending`（`SIGKILL`/不可阻塞信号忽略目标 mask）。投递发生在目标进程下次返回用户态时（单核下若目标非当前进程，待其被调度并 IRQ-return 时投递）。
 
-- 理由：阶段 16.5 已实现且测试 `may_signal` 纯判定，本阶段只新增其唯一接线点，判定逻辑零改动，满足「升级强制点、不改语义」。
+- 理由：time and identity capability 已实现且测试 `may_signal` 纯判定，本阶段只新增其唯一接线点，判定逻辑零改动，满足「升级强制点、不改语义」。
 - 备选：`SYS_KILL` 自带权限逻辑 —— 与 cred 重复，否决。
 
 ### 决策 6：syscall 号紧随现有末尾追加
@@ -97,7 +97,7 @@ SYS_SIGRETURN   = 19   // 无参数；从用户栈信号帧恢复被中断上下
 
 子进程进入 zombie（退出/被信号杀）时，向其父进程 `sig_pending` 置 `SIGCHLD` 位（默认动作 Ignore，但会作为「可被 handler 捕获」的事件）。不改变现有 `wait`/reaper 判定与 `wait_status_consumed`/`parent_waiting` 语义。
 
-- 理由：`SIGCHLD` 是 shell（阶段 19）作业控制的基础事件；在已有的退出路径顺带置位，零额外分配。
+- 理由：`SIGCHLD` 是 shell（shell 与用户态组合能力）作业控制的基础事件；在已有的退出路径顺带置位，零额外分配。
 - 备选：本阶段不做 `SIGCHLD` —— 但 shell 几乎必需，且接入成本极低（退出路径一处置位），故纳入；保持默认 Ignore 以不改变现有不捕获程序的行为。
 
 ### 决策 9：本阶段只保留单一 IRQ-return 投递点，不在 syscall 同步返回路径增加第二投递点
@@ -106,7 +106,7 @@ SYS_SIGRETURN   = 19   // 无参数；从用户栈信号帧恢复被中断上下
 
 - 理由：单核下 PIT IRQ0 周期性触发，任何用户进程都会很快（一个 tick 量级）经过 IRQ-return 边界，自投信号的投递延迟有上界且确定；单一投递点避免在每个 syscall 出口零散接线、降低 ABI 与上下文风险，并把「信号投递在下次返回用户态边界」立成明确且可测试的语义。明确不保证 syscall 同步返回即投递。
 - 备选：(a) 在 syscall dispatch 返回前增加第二投递点 —— 多投递点易遗漏、扩大每个 syscall 出口的上下文/ABI 风险，且对当前同步、不睡眠的 syscall 收益有限，否决；(b) 用专门软件中断触发即时投递 —— 引入新向量，超出本阶段最小化目标，否决。
-- 后续演进：若阶段 18/19 出现对自投信号即时性敏感的真实用例（如 `raise` 后立即期望 handler 已运行），再单独评估在 syscall 出口增加受控的第二投递点，复用同一 `deliver_pending_to_user`。
+- 后续演进：若可写文件系统与 pipe/dup foundation/19 出现对自投信号即时性敏感的真实用例（如 `raise` 后立即期望 handler 已运行），再单独评估在 syscall 出口增加受控的第二投递点，复用同一 `deliver_pending_to_user`。
 
 ### 决策 10：exec 的信号语义固化为「handler 重置默认、mask 保留、pending 保留」
 
@@ -114,7 +114,7 @@ SYS_SIGRETURN   = 19   // 无参数；从用户栈信号帧恢复被中断上下
 
 - 理由：handler 入口在 exec 后必然失效，重置默认是正确且必须的；保留 mask 与 pending 是 POSIX `execve` 信号语义的最小正确子集（execve 保留 pending 与 blocked set，仅把已捕获信号恢复为默认）。在当前无 `SIG_IGN` 跨 exec 特殊保留需求下，这是最贴近标准又最小的固化。
 - 备选：(a) exec 清空 pending —— 偏离 POSIX 且会丢失 exec 前已投递的待处理信号，否决；(b) exec 同时清空 mask —— 偏离 POSIX `execve` 保留 blocked set 的语义，否决。
-- 后续演进：若阶段 19 shell（`fork`+`exec`）对 exec 后 pending/`SIG_IGN` 保留有更精细期望，再在该阶段单独评估，不影响本阶段最小交付。
+- 后续演进：若shell 与用户态组合能力 shell（`fork`+`exec`）对 exec 后 pending/`SIG_IGN` 保留有更精细期望，再在该阶段单独评估，不影响本阶段最小交付。
 
 ### 控制流总览
 
@@ -150,7 +150,7 @@ sigreturn 路径:
 ## Risks / Trade-offs
 
 - [单一投递点（仅 IRQ-return）下，自投信号在无 IRQ 时延迟投递] → 单核下 PIT IRQ0 周期性触发，进程总会很快经过 IRQ-return 边界；记录此为「投递在下次返回用户态边界」的明确语义，不保证 syscall 同步返回即投递。如未来需要可在 syscall 出口增加第二投递点。
-- [信号帧构造改写用户栈，越界/不可写会破坏用户进程或内核误写] → 构造前用 VMA-backed 用户范围校验（复用阶段 16.5/既有用户缓冲校验）确认可写与对齐；失败一律确定性终止目标进程，绝不在内核态写非法用户地址。
+- [信号帧构造改写用户栈，越界/不可写会破坏用户进程或内核误写] → 构造前用 VMA-backed 用户范围校验（复用time and identity capability/既有用户缓冲校验）确认可写与对齐；失败一律确定性终止目标进程，绝不在内核态写非法用户地址。
 - [`SYS_SIGRETURN` 从用户栈恢复 `InterruptFrame`，恶意/损坏的信号帧可提权（改写 cs/rflags/rip 到内核）] → sigreturn 恢复时强制用户态约束：cs/ss 强制为用户段、rflags 强制 IF=1 且清除特权敏感位、rip/rsp 限制在用户低半区；不信任用户栈上的特权字段，只恢复用户可见的通用寄存器与受约束的 rip/rsp/rflags。
 - [改写 `InterruptFrame` 破坏既有 iretq 返回约定或与 timer 抢占钩子顺序冲突] → 投递在 `maybe_preempt_on_irq_return` 之后、iretq 之前的单一明确顺序执行；实现前审查 `interrupt.s`/`interrupt.cc`/`switch.s` frame 布局，增加源码级 frame/顺序检查。
 - [信号号集合/位图宽度过早固化] → 固定 N≤64 用 `uint64_t` 位图，预留高位；非实时信号合并语义明确记录，实时信号留作非目标。
@@ -166,4 +166,4 @@ sigreturn 路径:
 
 ## Open Questions
 
-- 无。原先的两个待定项已收敛为决策 9（本阶段只保留单一 IRQ-return 投递点，不在 syscall 同步返回路径增加第二投递点）与决策 10（exec 信号语义固化为「handler 重置默认、mask 保留、pending 保留」）。如阶段 18/19 对自投信号即时性或 exec 后 pending/`SIG_IGN` 保留有不同期望，再在对应阶段单独评估。
+- 无。原先的两个待定项已收敛为决策 9（本阶段只保留单一 IRQ-return 投递点，不在 syscall 同步返回路径增加第二投递点）与决策 10（exec 信号语义固化为「handler 重置默认、mask 保留、pending 保留」）。如可写文件系统与 pipe/dup foundation/19 对自投信号即时性或 exec 后 pending/`SIG_IGN` 保留有不同期望，再在对应阶段单独评估。

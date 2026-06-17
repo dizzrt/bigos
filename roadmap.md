@@ -98,11 +98,11 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
 
 ## Completed Capability Baseline / 已完成能力基线
 
-Stages 20 through 44 are complete and now form a compressed minimal usable
+the relevant capabilities through 44 are complete and now form a compressed minimal usable
 system baseline. The completed work can be treated as the foundation for future
 planning rather than as individual future-stage items.
 
-阶段 20 到阶段 44 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
+TTY console input capability0 到persistent clean-sync `/rw` storage 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
 基础能力，而不是继续把它们作为未来阶段逐项展开。
 
 - Kernel foundation: x86_64 legacy boot, text/serial output,
@@ -144,20 +144,127 @@ user-visible capability goal.
 多个扩展方向可以并行推进，但每个主线阶段仍应有清晰的用户可见能力目标。
 
 Completed stages are intentionally compressed into the completed capability
-baseline above. Stages 39 through 44 should no longer be treated as separate
+baseline above. the relevant capabilities through 44 should no longer be treated as separate
 future-planning items; their outcomes are now part of the current bounded
 userland, filesystem, process, VM, and persistent storage baseline.
 
-已完成阶段已在上方“已完成能力基线”中压缩归纳。阶段 39 到阶段 44 不应再作为独立的
+已完成阶段已在上方“已完成能力基线”中压缩归纳。bounded POSIX-like surface 到persistent clean-sync `/rw` storage 不应再作为独立的
 未来规划项展开；其结果现在属于当前有界用户态、文件系统、进程、VM 与持久存储基线的一部分。
+
+### Mainline Strategy / 主线策略
+
+The next phase follows a capability-first strategy: keep the single-core
+x86_64 kernel as the delivery target and grow user-visible maturity first, then
+sequence real multi-core execution as the final milestone once the affected
+subsystems have matured. New SMP-sensitive code added along the way should be
+designed against the existing SMP preparation boundaries so the later
+multi-core milestone is a controlled activation rather than a broad retrofit.
+
+下一阶段采用功能优先策略：保持单核 x86_64 内核为交付目标，先推进用户可见的成熟度，
+再将真正的多核执行安排为最后一个里程碑，待相关子系统成熟后启用。沿途新增的 SMP 敏感
+代码应按既有 SMP 准备边界设计，使后续多核里程碑成为受控启用，而非大范围 retrofit。
+
+The mainline is organized into five milestones (M1–M5) on top of the completed
+capability baseline. Each milestone lists its tasks. M1 and M2 are high
+priority, M3 and M4 are medium priority, and M5 is the sequenced closing
+milestone.
+
+主线在已完成能力基线之上划分为五个里程碑（M1–M5），每个里程碑列出其任务。M1 与 M2 为高
+优先级，M3 与 M4 为中优先级，M5 为时序靠后的收尾里程碑。
+
+### Milestone M1 — Address Space And mmap Maturity (High Priority) / 里程碑 M1 — 地址空间与 mmap 完善（高优先级）
+
+User-visible goal: user programs can map files and larger anonymous regions,
+enabling more capable programs.
+
+用户可见目标：用户程序可以映射文件与更大的匿名区域，支撑更复杂的程序。
+
+- [ ] Task M1.1: file-backed read mapping built on the existing demand paging and
+  page/buffer cache, without implying broad POSIX `mmap` completeness.
+- [ ] 任务 M1.1：在现有 demand paging 与 page/buffer cache 之上提供 file-backed 读映射，
+  不暗示完整 POSIX `mmap` 语义。
+- [ ] Task M1.2: bounded anonymous mapping lifecycle completion covering map, unmap,
+  and protection change over the current VMA model.
+- [ ] 任务 M1.2：在现有 VMA 模型上完善有界匿名映射生命周期，覆盖映射、解除映射与权限变更。
+- [ ] Task M1.3: shared read-only mapping so multiple processes can share read-only
+  text and data pages, with TLB invalidation expressed through the existing SMP
+  preparation invalidation boundary.
+- [ ] 任务 M1.3：共享只读映射，使多进程可共享只读 text 与数据页，TLB 失效通过既有 SMP 准备
+  失效边界表达。
+
+### Milestone M2 — Real Writable Filesystem (High Priority) / 里程碑 M2 — 真实可写文件系统（高优先级）
+
+User-visible goal: the shell can create and remove directories and reliably
+persist multiple files beyond the current clean-sync boundary.
+
+用户可见目标：shell 能创建/删除目录并可靠持久地写多文件，突破当前 clean-sync 边界限制。
+
+- [ ] Task M2.1: writable directory tree supporting directory creation/removal and
+  creation/removal of multiple files within bounded semantics.
+- [ ] 任务 M2.1：可写目录树，在有界语义内支持目录创建/删除与多文件创建/删除。
+- [ ] Task M2.2: file extension write, truncate, and stable block allocation.
+- [ ] 任务 M2.2：文件扩展写、truncate 与稳定的块分配。
+- [ ] Task M2.3: metadata persistence and a minimal consistency strategy such as
+  bounded journaling or ordered writes, without claiming full crash recovery.
+- [ ] 任务 M2.3：元数据持久化与最小一致性策略（如有界 journaling 或 ordered write），
+  不声称完整 crash recovery。
+- [ ] Task M2.4: writeback path through the page/buffer cache so synchronization
+  durably reaches the backing store.
+- [ ] 任务 M2.4：打通经 page/buffer cache 的回写路径，使同步操作可靠落盘。
+
+### Milestone M3 — Block Layer And Device Framework (Medium Priority) / 里程碑 M3 — 块层与设备框架（中优先级）
+
+User-visible goal: the kernel gains an extensible device model and block I/O is
+no longer constrained to a single synchronous path.
+
+用户可见目标：内核具备可扩展设备模型，块 I/O 不再受限于单一同步路径。
+
+- [ ] Task M3.1: a freestanding-safe device and driver registration/probe framework.
+- [ ] 任务 M3.1：freestanding-safe 的设备与驱动注册/探测框架。
+- [ ] Task M3.2: a block-layer abstraction with request queueing and cache
+  integration, leaving room for future async I/O.
+- [ ] 任务 M3.2：具备请求排队与缓存对接的块层抽象，为后续 async I/O 预留空间。
+- [ ] Task M3.3: a second block-device backend as a framework validation, without
+  adding a new ISA.
+- [ ] 任务 M3.3：以第二个块设备后端作为框架验证，不接入新 ISA。
+
+### Milestone M4 — Process POSIX Subset And libc Maturity (Medium Priority) / 里程碑 M4 — 进程 POSIX 子集与 libc 成熟（中优先级）
+
+User-visible goal: the shell supports job-control-like interaction and more
+standard small programs can compile and run directly.
+
+用户可见目标：shell 支持作业控制类交互，更多标准小程序可直接编译运行。
+
+- [ ] Task M4.1: process group, session, and foreground terminal binding implemented
+  on the existing terminal abstraction within its bounded contract.
+- [ ] 任务 M4.1：在既有终端抽象的有界契约内，实现进程组、session 与前台终端绑定。
+- [ ] Task M4.2: syscall surface expansion covering wait variants and additional
+  bounded file and process primitives.
+- [ ] 任务 M4.2：扩充 syscall 面，覆盖 wait 变体与更多有界文件/进程原语。
+- [ ] Task M4.3: libc subset maturity toward portable small programs while staying
+  freestanding-safe.
+- [ ] 任务 M4.3：推进 libc 子集成熟度以支持可移植小程序，同时保持 freestanding-safe。
+
+### Milestone M5 — Real Multi-Core Execution (Closing Milestone) / 里程碑 M5 — 真实多核执行（收尾里程碑）
+
+User-visible goal: the kernel schedules across multiple cores and throughput
+scales with core count.
+
+用户可见目标：内核跨多核调度，吞吐随核数提升。
+
+- [ ] Task M5.1: application processor startup with LAPIC/IOAPIC and per-CPU timers.
+- [ ] 任务 M5.1：AP 启动，配合 LAPIC/IOAPIC 与 per-CPU 定时器。
+- [ ] Task M5.2: per-CPU run queues with cross-CPU scheduling and wakeups.
+- [ ] 任务 M5.2：per-CPU run queue，支持跨核调度与唤醒。
+- [ ] Task M5.3: activation of IRQ-safe locking, IPI delivery, and cross-CPU TLB
+  shootdown, fulfilling the SMP preparation contracts.
+- [ ] 任务 M5.3：启用 IRQ-safe 锁、IPI 投递与跨核 TLB shootdown，兑现 SMP 准备契约。
+- [ ] Task M5.4: APIC-backed default interrupt delivery and review of any
+  user-visible ABI changes.
+- [ ] 任务 M5.4：APIC-backed 默认中断投递，并评审任何用户可见 ABI 变化。
 
 ### Parallel Foundations / 并行基础方向
 
-- SMP may continue as a parallel foundation, but real multi-core execution,
-  AP startup, APIC-backed default interrupt delivery, cross-CPU scheduling, and
-  user-visible ABI changes remain separate milestones.
-- SMP 可以作为并行基础继续推进，但真正多核执行、AP 启动、APIC-backed 默认中断投递、跨 CPU
-  调度和用户可见 ABI 变化仍属于独立里程碑。
 - Backend work may continue for UEFI runtime parity and future backend cleanup,
   but the short-term plan does not add a new ISA.
 - backend 工作可以继续推进 UEFI 运行时等价和后续 backend 清理，但短期计划不接入新 ISA。

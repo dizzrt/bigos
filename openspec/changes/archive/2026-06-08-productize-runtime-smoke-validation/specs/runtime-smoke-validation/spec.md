@@ -1,10 +1,10 @@
 ## ADDED Requirements
 
 ### Requirement: Runtime smoke matrix is explicit
-BigOS SHALL provide an explicit runtime smoke validation matrix that lists each supported stage 9 smoke case, the xmake switches required for that case, the preferred emulator path, the expected serial markers, the case-specific timeout, and the generated log or artifact paths.
+BigOS SHALL provide an explicit runtime smoke validation matrix that lists each supported the documented capability smoke case, the xmake switches required for that case, the preferred emulator path, the expected serial markers, the case-specific timeout, and the generated log or artifact paths.
 
 #### Scenario: Matrix lists narrow smoke cases
-- **WHEN** a developer inspects the stage 9 runtime smoke matrix
+- **WHEN** a developer inspects the documented capability runtime smoke matrix
 - **THEN** the matrix MUST include narrow cases for memory self-test, timer IRQ, scheduler, syscall, read-only filesystem, first user program, and filesystem-backed user ELF validation
 - **AND** each case MUST list only the smoke switches needed for that case instead of enabling every smoke switch at once
 - **AND** filesystem and filesystem-backed user ELF cases MUST be able to use longer default timeouts than fast memory, timer, scheduler, or syscall cases

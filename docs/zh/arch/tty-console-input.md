@@ -1,6 +1,6 @@
 # TTY、Console 与键盘输入
 
-BigOS 阶段 2 的输入路径只覆盖单核 x86_64、i8259 PIC、PS/2 set-1 keyboard 和 VGA text mode。目标是提供最小、可验证的 keyboard 到 TTY handoff，以及普通运行期文本输出入口；它不是完整终端、shell 或用户态输入子系统。
+BigOS TTY console input capability 的输入路径只覆盖单核 x86_64、i8259 PIC、PS/2 set-1 keyboard 和 VGA text mode。目标是提供最小、可验证的 keyboard 到 TTY handoff，以及普通运行期文本输出入口；它不是完整终端、shell 或用户态输入子系统。
 
 ## 输入数据流
 
@@ -41,7 +41,7 @@ Overflow 策略是确定性的：当 ring buffer 满时丢弃新输入并递增 
 
 ## Blocking Consumer
 
-阶段 10 以 additive 方式增加 `terminal::read_char_blocking()` 非中断 API。它会先尝试既有 non-blocking `read_char()` 路径；如果输入缓冲为空，则通过 `sched::wait_queue_wait_until()` 挂入 TTY input wait queue，并在 IRQ disabled 状态下检查 predicate，避免 empty check 和入队之间漏掉 producer wakeup。
+blocking primitives and timer ownership capability 以 additive 方式增加 `terminal::read_char_blocking()` 非中断 API。它会先尝试既有 non-blocking `read_char()` 路径；如果输入缓冲为空，则通过 `sched::wait_queue_wait_until()` 挂入 TTY input wait queue，并在 IRQ disabled 状态下检查 predicate，避免 empty check 和入队之间漏掉 producer wakeup。
 
 blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-thread 上下文调用。成功写出字符时返回 `1`，遇到有界 EOF-like terminal event 时返回 `0`，否则返回 timeout、invalid argument 或 forbidden blocking context 等确定性负 wait error。既有 `read_char()` 与 `drain()` 仍保持非阻塞，不依赖 scheduler 进度。
 

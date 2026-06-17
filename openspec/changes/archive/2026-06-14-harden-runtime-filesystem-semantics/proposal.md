@@ -1,6 +1,6 @@
 ## Why
 
-Stage 31 需要把 BigOS 已有 fd/VFS、RAM-backed `/rw` 和只读 exFAT 后端从“可用”推进到“用户态可依赖”：错误码、元数据、权限、目录项和只读/可写后端差异都应具有稳定、可验证的运行时语义。现在已有用户态、shell、最小 libc 和可写文件系统基础，正适合在继续扩展 shell 或 ABI 前收紧这些边界。
+runtime filesystem semantics hardening 需要把 BigOS 已有 fd/VFS、RAM-backed `/rw` 和只读 exFAT 后端从“可用”推进到“用户态可依赖”：错误码、元数据、权限、目录项和只读/可写后端差异都应具有稳定、可验证的运行时语义。现在已有用户态、shell、最小 libc 和可写文件系统基础，正适合在继续扩展 shell 或 ABI 前收紧这些边界。
 
 ## What Changes
 

@@ -50,7 +50,7 @@ Timer foundation SHALL 使用 legacy PIT 8253/8254 channel 0 作为首个周期�
 
 选择 PIT 的原因是当前 kernel 已经处在 Legacy BIOS + i8259 bring-up 路线，PIT 与 IRQ0 能直接复用现有 PIC remap 和 external IRQ dispatch，不需要 APIC/HPET 枚举、ACPI 表解析或 calibration。
 
-替代方案是直接引入 APIC timer 或 HPET。它们更接近现代硬件，但需要额外 discovery、MMIO、校准和中断控制器抽象，超出阶段 1 的基础目标。
+替代方案是直接引入 APIC timer 或 HPET。它们更接近现代硬件，但需要额外 discovery、MMIO、校准和中断控制器抽象，超出unified boot handoff capability 的基础目标。
 
 ### Decision: handler 注册先于 IRQ0 unmask
 

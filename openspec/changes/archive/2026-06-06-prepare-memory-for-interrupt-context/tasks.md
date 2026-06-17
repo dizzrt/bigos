@@ -1,7 +1,7 @@
 ## 1. 契约梳理
 
 - [x] 1.1 复核 `include`、`kernel/mm`、`kernel/core/irq` 和现有内存文档，列出 public allocator、internal buddy/vmem helper、只读统计和 IRQ handler 的当前调用边界。
-- [x] 1.2 确认 `mm_self_test()` 仍在 `init_mem()` 之后、PIC 初始化/IRQ unmask/`sti` 之前运行，并记录阶段 3 不改变该初始化顺序。
+- [x] 1.2 确认 `mm_self_test()` 仍在 `init_mem()` 之后、PIC 初始化/IRQ unmask/`sti` 之前运行，并记录kernel memory API capability 不改变该初始化顺序。
 - [x] 1.3 明确本 change 不修改 boot/linker 地址、direct map、`KVMEM_BASE` heap/vmalloc 语义、BootInfo handoff ABI、IDT vector 或 `InterruptFrame` ABI。
 
 ## 2. Interrupt Guard
@@ -35,7 +35,7 @@
 ## 6. 文档更新
 
 - [x] 6.1 更新内存或中断架构文档，记录 allocator 上下文契约、interrupt guard 语义、当前 non-goals 和后续 scheduler/SMP 前置关系。
-- [x] 6.2 更新路线图或 validation notes，说明阶段 3 完成后仍不承诺 IRQ handler 动态分配、SMP safety 或阻塞分配。
+- [x] 6.2 更新路线图或 validation notes，说明kernel memory API capability 完成后仍不承诺 IRQ handler 动态分配、SMP safety 或阻塞分配。
 - [x] 6.3 在文档中记录 Bochs/runtime smoke 可用性边界，区分源码级验证、交叉构建验证和 emulator bootability 风险。
 
 ## 7. 测试与验证

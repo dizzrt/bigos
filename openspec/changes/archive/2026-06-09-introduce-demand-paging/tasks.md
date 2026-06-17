@@ -28,7 +28,7 @@
 
 ## 5. 文档与归档准备
 
-- [x] 5.1 同步 `roadmap.md` 阶段 15 状态（proposed -> 实现/验证记录），保持 `docs/en` canonical 与 `docs/zh` 镜像（如涉及）
+- [x] 5.1 同步 `roadmap.md` demand paging capability 状态（proposed -> 实现/验证记录），保持 `docs/en` canonical 与 `docs/zh` 镜像（如涉及）
 - [x] 5.2 记录架构/内存布局/emulator/toolchain 假设与非目标到 change 的验证笔记，准备 `openspec archive`
 
 ## 验证笔记 / Validation Notes

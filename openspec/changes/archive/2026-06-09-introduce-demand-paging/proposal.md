@@ -1,6 +1,6 @@
 ## Why
 
-当前用户内存（`brk`、匿名映射、ELF 数据/BSS 段）在创建 VMA 时即逐页 eager 分配并映射物理页，唯一的惰性路径是 `try_handle_current_stack_fault` 专门处理向下增长的栈 VMA。`#PF` 处理器只对栈做恢复，其余用户态缺页一律 `fault_current_and_exit`，内核态缺页 panic。这一形态在进入 fork/COW/mmap 之前必须先一般化：路线图阶段 15 要求把现有栈缺页恢复泛化为统一缺页处理，作为第一块 POSIX 地基，且必须独立完成并独立验证。趁现在语义面小、消费者少时把缺页策略立稳，是后续阶段的安全前置。
+当前用户内存（`brk`、匿名映射、ELF 数据/BSS 段）在创建 VMA 时即逐页 eager 分配并映射物理页，唯一的惰性路径是 `try_handle_current_stack_fault` 专门处理向下增长的栈 VMA。`#PF` 处理器只对栈做恢复，其余用户态缺页一律 `fault_current_and_exit`，内核态缺页 panic。这一形态在进入 fork/COW/mmap 之前必须先一般化：路线图demand paging capability 要求把现有栈缺页恢复泛化为统一缺页处理，作为第一块 POSIX 地基，且必须独立完成并独立验证。趁现在语义面小、消费者少时把缺页策略立稳，是后续阶段的安全前置。
 
 ## What Changes
 

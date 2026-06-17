@@ -41,7 +41,7 @@ Behavior-oriented validation distinguishes three entry classes:
 | `persistent-writable-fs-write` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` | 40s | First boot with `--persistent-image`: explicit format of the independent test disk, bounded write, `fsync`, and cache-eviction readback. |
 | `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | Second boot with the same `--persistent-image`: mount-existing and read synchronized `/rw` state after clean reboot. |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup endpoint accounting, blocking wakeup, EOF, and `EPIPE`. |
-| `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | Stage 41 current-runtime filesystem semantics across read-only exFAT, RAM-backed `/rw`, fd/VFS, metadata, cwd-relative paths, libc errno, and shell-visible tools; no reboot persistence. |
+| `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity current-runtime filesystem semantics across read-only exFAT, RAM-backed `/rw`, fd/VFS, metadata, cwd-relative paths, libc errno, and shell-visible tools; no reboot persistence. |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, arg/env handoff, stdout/stderr, errno, `snprintf`/formatter, `strtol`/`atoi`, `calloc`/`realloc`, bounded `DIR*` wrappers, simple C program baseline probes, shell execution, fork/exec/wait, pipe, redirection, and bounded `/rw` runtime file operations. |
 | `default-init` | _(none)_ | `BIGOS_USER_EXEC` | 40s | Default build with no smoke switch; normal boot packages PID-1 init, `/bin/sh`, and bounded `/bin/*`. |
 
@@ -49,7 +49,7 @@ Each case enables only the listed smoke switch and explicitly disables the other
 
 ## Behavior-Oriented Matrix
 
-The current compressed stages 20-44 baseline promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the bounded minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. These checks remain bounded to the default x86_64 Legacy BIOS/MBR/exFAT backend and do not require UEFI runtime parity, OVMF parity, ESP/FAT runtime storage parity, virtio, AHCI/SATA, NVMe, SMP, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
+The current bounded minimal usable system baseline promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the bounded minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. These checks remain bounded to the default x86_64 Legacy BIOS/MBR/exFAT backend and do not require UEFI runtime parity, OVMF parity, ESP/FAT runtime storage parity, virtio, AHCI/SATA, NVMe, SMP, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
 
 | Capability | Input or path | Expected observable result | Failure signal | Layer | Environment dependency |
 | --- | --- | --- | --- | --- | --- |

@@ -19,5 +19,5 @@
 
 - 行为矩阵已覆盖默认 init 和 `/bin/sh`、简单 C 程序、`exec`/`wait`、fd 继承、`dup`、redirection、pipe、RAM-backed `/rw` 文件系统、失败信号、验证层和环境依赖。
 - 文档明确缺失工具、emulator、串口日志、ROM/display、键盘输入或磁盘镜像配置时必须记录 `skipped` 或 `blocked`、替代检查和残留风险。
-- `roadmap.md` Stage 26 保持项目规划级描述；未加入具体命令、marker、源代码入口、文件路径或 archive 索引。
+- `roadmap.md` TTY console input capability6 保持项目规划级描述；未加入具体命令、marker、源代码入口、文件路径或 archive 索引。
 - 行为矩阵不要求 UEFI、OVMF、ESP/FAT、virtio、AHCI/SATA、NVMe、SMP、动态链接、完整 POSIX libc、作业控制或完整 shell 语义。

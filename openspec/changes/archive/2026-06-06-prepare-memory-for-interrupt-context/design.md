@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前已经有较完整的早期内存栈：buddy physical allocator、early metadata arena、slab/kmalloc、kernel virtual memory、page-table map/unmap、`mm::self_test`。阶段 1/1.5 已启用周期性 timer IRQ0，阶段 2 已将 keyboard IRQ1 输入交接到 TTY fixed-capacity ring buffer。下一阶段引入 scheduler 前，allocator 必须先明确在中断上下文中的可用边界。
+BigOS 当前已经有较完整的早期内存栈：buddy physical allocator、early metadata arena、slab/kmalloc、kernel virtual memory、page-table map/unmap、`mm::self_test`。unified boot handoff capability/1.5 已启用周期性 timer IRQ0，TTY console input capability 已将 keyboard IRQ1 输入交接到 TTY fixed-capacity ring buffer。下一阶段引入 scheduler 前，allocator 必须先明确在中断上下文中的可用边界。
 
 当前约束：
 
@@ -32,7 +32,7 @@ BigOS 当前已经有较完整的早期内存栈：buddy physical allocator、ea
 
 ### Decision: 使用“上下文契约”而不是全面 IRQ-safe allocator
 
-普通 allocator 路径可能扩容 slab、分配页表页、修改 vmem list、回收 backing pages 或输出诊断；这些操作不适合在 IRQ handler 中执行。阶段 3 先把它们标为 non-IRQ-context，并通过测试阻止 ISR 误用。
+普通 allocator 路径可能扩容 slab、分配页表页、修改 vmem list、回收 backing pages 或输出诊断；这些操作不适合在 IRQ handler 中执行。kernel memory API capability 先把它们标为 non-IRQ-context，并通过测试阻止 ISR 误用。
 
 替代方案：让 `kmalloc()` 在关中断时可从 ISR 调用。该方案会迫使 slab/VMem/buddy 的失败回滚、页表映射和未来锁策略提前承诺更强并发语义，超出当前阶段。
 
@@ -48,9 +48,9 @@ guard 放在 `bigos::irq` 的小型 public header 中，例如 `include/irq/inte
 
 替代方案：放在 `bigos::mm` 或顶层 `bigos` memory header。该方案会让内存层暴露 CPU interrupt 细节，或把硬件相关 helper 混入通用内核 API，不利于后续区分 interrupt guard、spinlock 和 scheduler-aware lock。
 
-### Decision: 不公开 `interrupts_enabled()` 作为阶段 3 API
+### Decision: 不公开 `interrupts_enabled()` 作为kernel memory API capability API
 
-阶段 3 暂不提供公开的 `interrupts_enabled()` 只读 helper。IF 状态读取应封装在 interrupt guard 内部；测试通过源码检查 guard 的 RFLAGS 读取、IF 保存和条件恢复逻辑，而不是鼓励普通内核代码主动分支依赖当前 IF 状态。
+kernel memory API capability 暂不提供公开的 `interrupts_enabled()` 只读 helper。IF 状态读取应封装在 interrupt guard 内部；测试通过源码检查 guard 的 RFLAGS 读取、IF 保存和条件恢复逻辑，而不是鼓励普通内核代码主动分支依赖当前 IF 状态。
 
 替代方案：公开 `interrupts_enabled()` 用于测试和诊断。该方案会过早形成可依赖 API，后续引入 scheduler、preemption 或 SMP 后容易出现调用方根据瞬时 IF 状态做错误决策。
 
@@ -68,7 +68,7 @@ timer 和 keyboard 已经证明 IRQ handler 可以通过静态状态或 fixed-ca
 
 ### Decision: 验证以源码级契约和现有 runtime self-test 为主
 
-阶段 3 的主要风险是上下文误用和 guard 语义错误，适合通过源码级测试检查 public headers 注释、guard 保存恢复 IF、ISR 禁止 token、`mm_self_test()` 初始化顺序和 OpenSpec 校验。若 Bochs 可用，再补充 boot marker smoke，但不把交互式 keyboard/VGA oracle 作为本阶段必需条件。
+kernel memory API capability 的主要风险是上下文误用和 guard 语义错误，适合通过源码级测试检查 public headers 注释、guard 保存恢复 IF、ISR 禁止 token、`mm_self_test()` 初始化顺序和 OpenSpec 校验。若 Bochs 可用，再补充 boot marker smoke，但不把交互式 keyboard/VGA oracle 作为本阶段必需条件。
 
 替代方案：新增复杂 runtime race test。当前单核无 scheduler，runtime race 覆盖价值有限，源码约束更稳定。
 
@@ -96,4 +96,4 @@ allocator 内部若存在页表页分配、slab 扩容、回收、批量清理�
 
 ## Open Questions
 
-无。阶段 3 当前已将 guard 归属、IF 状态 helper 暴露边界和 allocator 长路径处理方式收敛为上述设计决策。
+无。kernel memory API capability 当前已将 guard 归属、IF 状态 helper 暴露边界和 allocator 长路径处理方式收敛为上述设计决策。

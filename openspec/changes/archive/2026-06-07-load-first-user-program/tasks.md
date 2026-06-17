@@ -21,7 +21,7 @@
 
 ## 4. 用户态 syscall 闭环
 
-- [x] 4.1 扩展 syscall number 定义，新增或收敛最小 `write` 与 `exit` 语义，同时保持阶段 5 ABI 的寄存器约定。
+- [x] 4.1 扩展 syscall number 定义，新增或收敛最小 `write` 与 `exit` 语义，同时保持ring0 syscall diagnostic capability ABI 的寄存器约定。
 - [x] 4.2 实现用户 buffer range 检查或 safe copy helper，验证 user 地址、present/user bit 和 bounded length。
 - [x] 4.3 实现 `write` syscall，经 console/serial 诊断路径输出确定性 `BIGOS_USER_` marker 并返回确定性结果。
 - [x] 4.4 实现 `exit` syscall，记录 exit code、标记当前进程 terminated，并确保不返回已终止用户流。

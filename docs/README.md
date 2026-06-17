@@ -4,7 +4,7 @@
 
 Current project-level status lives in `README.md`, `README-zh.md`, `AGENTS.md`,
 `openspec/config.yaml`, and `roadmap.md`. Architecture docs should describe the
-current compressed stages 20-44 baseline as a single-core, mostly synchronous,
+current bounded minimal usable system baseline as a single-core, mostly synchronous,
 x86_64 research kernel with a bounded POSIX-like subset. Legacy
 BIOS/MBR/exFAT remains the default runnable baseline; the x86_64 UEFI boot
 backend is a runnable non-parity spike. Do not describe BigOS as complete POSIX

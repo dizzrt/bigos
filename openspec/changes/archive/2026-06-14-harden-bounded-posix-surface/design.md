@@ -1,6 +1,6 @@
 ## Context
 
-当前 BigOS 已经具备 bounded userland baseline：`int 0x80` syscall ABI、进程生命周期、`fork`/COW、`execve`、wait/exit、signals、time/identity、fd/VFS、pipe/dup、RAM-backed `/rw`、最小 libc、PID-1 init、`/bin/sh` 和小型 `/bin/*` 工具均已存在。Stage 39 的目标不是扩展成完整 POSIX，而是把这些已有表层能力打磨为一致、可观察、错误契约清楚的有界 Unix-like 环境。
+当前 BigOS 已经具备 bounded userland baseline：`int 0x80` syscall ABI、进程生命周期、`fork`/COW、`execve`、wait/exit、signals、time/identity、fd/VFS、pipe/dup、RAM-backed `/rw`、最小 libc、PID-1 init、`/bin/sh` 和小型 `/bin/*` 工具均已存在。bounded POSIX-like surface 的目标不是扩展成完整 POSIX，而是把这些已有表层能力打磨为一致、可观察、错误契约清楚的有界 Unix-like 环境。
 
 现有 gap 主要集中在用户态表层和组合行为：内核已有 `SYS_SIGACTION`、`SYS_SIGPROCMASK`、`SYS_SIGRETURN`，但 libc 未公开 `signal.h` wrapper；`SYS_WAIT` 已有但用户态 `wait`/`wait_status` 命名与 POSIX-like 状态语义不够清楚；`SYS_GET_TIME` 已有但缺少更常见的 `time` wrapper；`errno` 已有但缺少 `strerror`/`perror` 这类错误文本展示；shell 已有单级 pipe 和基础重定向，但需要更明确的 fd 隔离、失败恢复和退出状态规则。
 
@@ -30,7 +30,7 @@
 
 本 change 复用现有 `SYS_SIGACTION`、`SYS_SIGPROCMASK`、`SYS_SIGRETURN`、`SYS_WAIT`、`SYS_GET_TIME` 和 `errno` 翻译路径。用户态新增内容优先落在 libc header、wrapper、trampoline 和 shell/tool 行为上。
 
-选择理由：Stage 39 目标是表层硬化而不是内核能力扩张；现有 syscall table 已覆盖必要内核入口。保持 syscall number 和 `int 0x80` ABI 不变，可降低 boot/runtime 回归风险。
+选择理由：bounded POSIX-like surface 目标是表层硬化而不是内核能力扩张；现有 syscall table 已覆盖必要内核入口。保持 syscall number 和 `int 0x80` ABI 不变，可降低 boot/runtime 回归风险。
 
 替代方案：新增 POSIX 命名 syscall，例如 `SYS_WAITPID` 或 `SYS_TIME`。该方案会扩大 ABI 面，且现有 `SYS_WAIT`/`SYS_GET_TIME` 足以支撑 bounded wrapper，因此不采用。
 
@@ -40,7 +40,7 @@
 
 选择理由：内核已经有 signal delivery 和 `SYS_SIGRETURN`，但没有公开 wrapper 会让用户程序无法按稳定契约安装 handler。trampoline 将架构相关返回路径封装在 libc 内，避免应用直接依赖 raw syscall 细节。
 
-替代方案：只暴露 raw `syscall` helper，要求用户程序自行调用 `SYS_SIGRETURN`。该方案会泄漏低层 ABI，不符合 Stage 39 的表层硬化目标，因此不采用。
+替代方案：只暴露 raw `syscall` helper，要求用户程序自行调用 `SYS_SIGRETURN`。该方案会泄漏低层 ABI，不符合 bounded POSIX-like surface 的表层硬化目标，因此不采用。
 
 ### Wait 表层提供 bounded POSIX-like 命名
 
@@ -62,9 +62,9 @@
 
 Shell 继续支持 whitespace tokenization、builtin、external command、单级 pipe、`>`/`<` 基础重定向。硬化重点是：失败后父 shell 标准 fd 保持可用；pipe/redirection setup 中打开的临时 fd 全部关闭；unsupported syntax 返回 bounded status；命令查找失败、exec 失败和外部命令非零退出有一致错误展示。
 
-选择理由：Stage 39 要改善交互可用性和小程序组合，而不是扩展 shell grammar。明确失败恢复比增加 `&&`、`;`、`>>`、`2>` 更能降低现有系统使用成本。
+选择理由：bounded POSIX-like surface 要改善交互可用性和小程序组合，而不是扩展 shell grammar。明确失败恢复比增加 `&&`、`;`、`>>`、`2>` 更能降低现有系统使用成本。
 
-替代方案：扩展完整 POSIX shell 语法。该方案会引入 parser、job control、terminal semantics 等一系列后续复杂度，超出 Stage 39。
+替代方案：扩展完整 POSIX shell 语法。该方案会引入 parser、job control、terminal semantics 等一系列后续复杂度，超出 bounded POSIX-like surface。
 
 ### 验证采用 source-contract 加 default-off runtime smoke
 

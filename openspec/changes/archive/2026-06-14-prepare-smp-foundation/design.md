@@ -1,6 +1,6 @@
 ## Context
 
-BigOS 当前内核运行模型是单核 x86_64 Legacy BIOS 路径：引导后进入长模式，使用内核自有 IDT、i8259/PIT 中断、单核 round-robin 调度器、显式 CR3 切换、VMA 支持的用户内存访问、buddy/slab/kmalloc 内存分配，以及默认 PID-1 init 与 `/bin/sh` 用户态基线。Stage 38 的目标不是立即运行多个 CPU，而是在仍保持单核验证路径稳定的前提下，把未来 SMP 所依赖的边界显式整理出来。
+BigOS 当前内核运行模型是单核 x86_64 Legacy BIOS 路径：引导后进入长模式，使用内核自有 IDT、i8259/PIT 中断、单核 round-robin 调度器、显式 CR3 切换、VMA 支持的用户内存访问、buddy/slab/kmalloc 内存分配，以及默认 PID-1 init 与 `/bin/sh` 用户态基线。SMP preparation boundary 的目标不是立即运行多个 CPU，而是在仍保持单核验证路径稳定的前提下，把未来 SMP 所依赖的边界显式整理出来。
 
 这项设计跨越 boot/arch、IRQ、timer、sched、proc 和 mm 边界。它必须保留现有启动地址、链接地址、IDT/syscall vector、页表布局、磁盘布局、syscall ABI 和默认 smoke 语义；任何真实 AP bring-up、LAPIC/IOAPIC 切换、IPI 投递或跨核调度都只能作为后续 change 的依赖。
 

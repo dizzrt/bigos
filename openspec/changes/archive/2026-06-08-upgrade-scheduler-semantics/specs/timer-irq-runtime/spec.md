@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Timer tick may record scheduler intent without violating IRQ contracts
-BigOS SHALL allow the early timer runtime path to interact with the single-core scheduler through bounded IRQ-context-safe accounting, reschedule intent, and stage 11 IRQ-return scheduling while preserving timer tick ownership and the `on_tick()` context contract.
+BigOS SHALL allow the early timer runtime path to interact with the single-core scheduler through bounded IRQ-context-safe accounting, reschedule intent, and the documented capability IRQ-return scheduling while preserving timer tick ownership and the `on_tick()` context contract.
 
 #### Scenario: Timer IRQ keeps tick ownership in timer API
 - **WHEN** i8259 IRQ0 fires after the scheduler is introduced
@@ -18,7 +18,7 @@ BigOS SHALL allow the early timer runtime path to interact with the single-core 
 - **THEN** the decision state MUST be represented without ordinary dynamic allocation in the IRQ handler
 - **AND** the timer path MUST preserve the current single-core interrupt, EOI, and return-state contracts
 
-#### Scenario: Stage 11 may preempt on eligible IRQ return
+#### Scenario: bounded timer-driven scheduler semantics may preempt on eligible IRQ return
 - **WHEN** timer IRQ0 expires the current thread's time slice and the interrupt dispatch path reaches a documented safe return boundary
 - **THEN** BigOS MAY perform a scheduler-owned context switch before returning to the interrupted kernel thread
 - **AND** it MUST do so only when preemption is enabled, the current thread is eligible to be preempted, and the interrupt frame ABI and EOI ordering remain valid

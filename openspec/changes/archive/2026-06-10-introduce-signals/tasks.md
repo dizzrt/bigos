@@ -52,7 +52,7 @@
 
 ## 9. 源码契约/行为断言测试
 
-- [x] 9.1 用 `uv run pytest` 增补源码契约/行为断言测试（沿用阶段 14.5 启动的行为断言轨道）：覆盖新增 syscall 号位固定（`SYS_KILL=16`..`SYS_SIGRETURN=19`）、`Process` 信号字段存在、投递路径无分配、`SIGKILL` 不可捕获/不可阻塞、`may_signal` 接线于 kill、IRQ-return 投递点仅对用户态帧，以及 smoke marker 行为断言。
+- [x] 9.1 用 `uv run pytest` 增补源码契约/行为断言测试（沿用behavior assertion validation baseline 启动的行为断言轨道）：覆盖新增 syscall 号位固定（`SYS_KILL=16`..`SYS_SIGRETURN=19`）、`Process` 信号字段存在、投递路径无分配、`SIGKILL` 不可捕获/不可阻塞、`may_signal` 接线于 kill、IRQ-return 投递点仅对用户态帧，以及 smoke marker 行为断言。
 - [x] 9.2 对新增/修改的 Python 文件运行 `uv run ruff check`、`uv run ruff format --check`、`uv run pyright`、`uv run pytest`，修复新引入的 lint/类型/格式/测试问题；若 `uv` 不可用则显式记录该阻塞。
 
 ## 10. 文档与验证记录

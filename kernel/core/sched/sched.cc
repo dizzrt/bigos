@@ -18,8 +18,8 @@ NAMESPACE_BIGOS_BEG
 namespace sched {
 
     namespace __detail {
-        // Stage 4 fixes the default normal kernel thread stack at one page. No
-        // smoke/debug build switch changes this page count.
+        // The kernel thread scheduler keeps the default normal-thread stack at
+        // one page. No smoke/debug build switch changes this page count.
         constexpr uint32_t KERNEL_THREAD_STACK_PAGES = 1;
         constexpr uint32_t DEFAULT_TIME_SLICE_TICKS = 2;
         constexpr int32_t DEFAULT_STATIC_PRIORITY = 0;
@@ -49,7 +49,7 @@ namespace sched {
             TCB *sleep_next;
             timer::tick_t deadline_tick;
             int wait_result;
-            // Stage 11 bounded scheduling metadata. Priority/policy are reserved
+            // Bounded timer-driven scheduler metadata. Priority/policy are reserved
             // hooks; default selection remains single-core round-robin.
             uint32_t time_slice_remaining;
             int32_t static_priority;

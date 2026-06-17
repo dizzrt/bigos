@@ -36,6 +36,6 @@
 
 ## 7. 文档与一致性
 
-- [x] 7.1 更新 `roadmap.md` 阶段 15.5 状态（建议中 -> 进行中/完成），并在归档时补充 archived change 名称。
+- [x] 7.1 更新 `roadmap.md` growable process and fd table capability 状态（建议中 -> 进行中/完成），并在归档时补充 archived change 名称。
 - [x] 7.2 同步受影响的 `docs/en` 文档并镜像到 `docs/zh`（fd-vfs-shell、进程模型相关页），使用仓库相对路径，不暗示 ABI/引导/页表变更。
 - [x] 7.3 运行 `openspec validate grow-process-fd-tables --strict` 与 `openspec status`，确认 change 结构与 spec delta 可解析。

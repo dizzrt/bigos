@@ -5,7 +5,7 @@ BigOS 当前 I/O 栈是单向只读的，可写语义全缺：
 - 块层 [block_device.h](include/drivers/block/block_device.h) 只有 `ReadSectorsFn read_impl` 与 `read_sectors`，`BlockDevice` 无写入口；ATA PIO 驱动只实现读扇区。
 - 文件系统 [vfs.h](include/bigos/fs/vfs.h) 的 `FileOperations` 只有 `read`/`close`，`File` 有 `offset`/`ref_count`/`readable`/`close_on_exec` 但无写 op、无 `lseek`；`open_absolute` 接受 flags 但只读，`Status` 已含 `Unsupported`/`BlockError`/`WouldBlock` 等。`OPEN_WRONLY`/`OPEN_RDWR`/`OPEN_CREAT`/`OPEN_TRUNC` 常量已定义但未实现。
 - syscall ABI [syscall.h](include/bigos/syscall.h) 最大号是 `SYS_SIGRETURN = 19`；`SYS_WRITE = 2` 当前仅写控制台，`SYS_OPEN = 5` 仅只读。新增号只能在末尾追加，寄存器 ABI 冻结，syscall 路径不发 EOI。
-- 阶段 16.5 已实现并测试文件 owner/mode 访问判定纯原语 `cred::may_access`（见 [process-identity-permissions/spec.md](openspec/specs/process-identity-permissions/spec.md)），但无强制点。
+- time and identity capability 已实现并测试文件 owner/mode 访问判定纯原语 `cred::may_access`（见 [process-identity-permissions/spec.md](openspec/specs/process-identity-permissions/spec.md)），但无强制点。
 - 阻塞原语（wait queue、wake-one/all、timeout、blocking-context guard）、按需分页、fork/COW、可增长 fd 表均已就位；fd 层已有 close-on-exec 与 exec 继承语义雏形（见 [fd-vfs-shell/spec.md](openspec/specs/fd-vfs-shell/spec.md)）。
 
 约束：freestanding、单核、同步、无 libc；落盘与阻塞只能在可阻塞进程上下文进行，绝不在 IRQ/不可阻塞上下文落盘或阻塞；磁盘镜像/MBR/分区/exFAT 只读发现契约与 boot 布局不可变。本阶段把三件事一并立成最小但正确的地基：page/buffer cache、可写 FS、pipe+dup。
@@ -72,7 +72,7 @@ BigOS 当前 I/O 栈是单向只读的，可写语义全缺：
 
 - 理由：管道是 shell 管道的硬前置；环形缓冲 + 两端 `File` + wait queue 是标准最小实现，复用现有阻塞原语，零新调度机制。引用计数让「写端全关 -> 读 EOF、读端全关 -> 写 EPIPE」成为确定语义。
 - 上下文：pipe read/write 的阻塞只在可阻塞进程上下文进行；IRQ/不可阻塞上下文调用确定性失败，绝不阻塞。
-- `SIGPIPE`：本阶段默认以 `-EPIPE` 错误返回为主；若阶段 17 信号已就位，可选在读端全关时向写者投递 `SIGPIPE`（默认 Terminate），由 design 固定为「默认返回 `-EPIPE`，`SIGPIPE` 投递为可选增强，二者语义在 spec 明确」。
+- `SIGPIPE`：本阶段默认以 `-EPIPE` 错误返回为主；若signal capability 信号已就位，可选在读端全关时向写者投递 `SIGPIPE`（默认 Terminate），由 design 固定为「默认返回 `-EPIPE`，`SIGPIPE` 投递为可选增强，二者语义在 spec 明确」。
 - fork/exec：fork 子进程继承管道两端 fd 并增加端引用计数；exec 按 close-on-exec 关闭标记项，否则保留；exit/reap 关闭所有管道端 fd，端引用计数归零时回收 `Pipe`。
 - 备选：(a) 无界缓冲 —— 破坏有界性，否决；(b) 用文件做管道 —— 语义错、需落盘，否决。
 
@@ -99,7 +99,7 @@ SYS_UNLINK = 26   // (path) -> 0 或 -ENOENT/-EACCES/-EISDIR/-EROFS/-EINVAL
 
 可写 FS 的 open（写/创建）、`write`、`mkdir`、`unlink` 在执行前调用 `cred::may_access(file_uid, file_gid, mode, caller_uid, caller_gid, access_type)`：root 全放行；否则按 owner/group/other 与访问类型判定。拒绝 -> `-EACCES`；只读后端的写请求 -> `-EROFS`（先于或独立于权限判定，按 spec 文档化顺序）。判定逻辑零改动，仅新增接线点。
 
-- 理由：阶段 16.5 已实现并测试 `may_access` 纯判定，本阶段只新增其唯一/主要接线点，满足「升级强制点、不改语义」。`O_CREAT` 新建文件的 owner 取调用进程 uid/gid、mode 取调用方传入（经 umask 简化或直接采用，spec 明确）。
+- 理由：time and identity capability 已实现并测试 `may_access` 纯判定，本阶段只新增其唯一/主要接线点，满足「升级强制点、不改语义」。`O_CREAT` 新建文件的 owner 取调用进程 uid/gid、mode 取调用方传入（经 umask 简化或直接采用，spec 明确）。
 - 备选：FS 自带权限逻辑 —— 与 cred 重复，否决。
 
 ### 决策 8：写一致性语义固化为「write 经缓存可见、fsync/卸载前不保证落盘」
@@ -121,11 +121,11 @@ SYS_UNLINK = 26   // (path) -> 0 或 -ENOENT/-EACCES/-EISDIR/-EROFS/-EINVAL
 
 ### 决策 10：管道关闭语义固化为「默认返回 `-EPIPE`，`SIGPIPE` 投递为可选增强」
 
-读端全部关闭后写端写入的语义固化为：**默认返回确定性 `-EPIPE`**。是否额外向写者投递 `SIGPIPE`（默认动作 Terminate）作为**可选增强**，仅在阶段 17 信号能力已就位且显式启用时生效；本阶段正确性与验证只依赖 `-EPIPE` 返回，不依赖 `SIGPIPE`。
+读端全部关闭后写端写入的语义固化为：**默认返回确定性 `-EPIPE`**。是否额外向写者投递 `SIGPIPE`（默认动作 Terminate）作为**可选增强**，仅在signal capability 信号能力已就位且显式启用时生效；本阶段正确性与验证只依赖 `-EPIPE` 返回，不依赖 `SIGPIPE`。
 
-- 理由：`-EPIPE` 返回是管道关闭语义的最小且自洽的正确面，shell 管道（阶段 19）即便没有 `SIGPIPE` 也能据此处理 broken pipe；把 `SIGPIPE` 设为可选可避免本阶段对信号子系统形成硬依赖，保持「先把通用 I/O 正确性立住」的最小目标。POSIX 下 `SIGPIPE` 与 `-EPIPE` 本就并存（信号被忽略/阻塞时写返回 `-EPIPE`），故默认 `-EPIPE` 与标准不冲突。
+- 理由：`-EPIPE` 返回是管道关闭语义的最小且自洽的正确面，shell 管道（shell 与用户态组合能力）即便没有 `SIGPIPE` 也能据此处理 broken pipe；把 `SIGPIPE` 设为可选可避免本阶段对信号子系统形成硬依赖，保持「先把通用 I/O 正确性立住」的最小目标。POSIX 下 `SIGPIPE` 与 `-EPIPE` 本就并存（信号被忽略/阻塞时写返回 `-EPIPE`），故默认 `-EPIPE` 与标准不冲突。
 - 语义固化：spec 以 `-EPIPE` 为 MUST、`SIGPIPE` 为 MAY；smoke 验证「读端全关 -> 写 `-EPIPE`」为必测路径，`SIGPIPE` 投递不作为本阶段必测项。
-- 失败行为：写端在读端全关时返回 `-EPIPE`，不阻塞、不写入；若启用可选 `SIGPIPE`，复用阶段 17 既有投递路径（IRQ-return 边界、默认 Terminate），不在管道热路径新增信号机制。
+- 失败行为：写端在读端全关时返回 `-EPIPE`，不阻塞、不写入；若启用可选 `SIGPIPE`，复用signal capability 既有投递路径（IRQ-return 边界、默认 Terminate），不在管道热路径新增信号机制。
 - 备选：(a) 本阶段强制投递 `SIGPIPE` —— 对信号子系统形成硬依赖且扩大热路径耦合，超最小目标，否决；(b) 读端全关时静默丢弃写入 —— 破坏 broken-pipe 可观测语义，否决。
 
 ### 控制流总览
@@ -178,4 +178,4 @@ pipe 路径 (跨进程):
 
 ## Open Questions
 
-- 无。原先的两个待定项已收敛为决策 9（可写 FS 默认承载介质固化为 RAM-backed BlockDevice，磁盘分区承载留作后续可选）与决策 10（管道关闭语义固化为「默认返回 `-EPIPE`，`SIGPIPE` 投递为可选增强」）。如后续需要跨重启持久化到磁盘分区，或阶段 19 shell 对 `SIGPIPE` 投递有更强期望，再在对应阶段单独评估，不影响本阶段最小交付。
+- 无。原先的两个待定项已收敛为决策 9（可写 FS 默认承载介质固化为 RAM-backed BlockDevice，磁盘分区承载留作后续可选）与决策 10（管道关闭语义固化为「默认返回 `-EPIPE`，`SIGPIPE` 投递为可选增强」）。如后续需要跨重启持久化到磁盘分区，或shell 与用户态组合能力 shell 对 `SIGPIPE` 投递有更强期望，再在对应阶段单独评估，不影响本阶段最小交付。

@@ -1,6 +1,6 @@
 ## Context
 
-阶段 5 `prepare-user-address-space-vmem` 已归档：内核已有显式页属性 primitive、user/kernel 属性策略，以及
+ring0 syscall diagnostic capability `prepare-user-address-space-vmem` 已归档：内核已有显式页属性 primitive、user/kernel 属性策略，以及
 “复制高半区、低半区独立”的用户地址空间页表根派生（不切 CR3、不进入 ring3）。当前内核只有两类入口：
 
 - CPU 异常（vector 0x00–0x1f），由 `irq_dispatch` 路由到 exception handler（`#PF` 诊断-only）。
@@ -76,7 +76,7 @@ base、`KVMEM_BASE`、direct map、self-mapping 地址与 BootInfo handoff ABI�
     `BIGOS_SYSCALL_WRITE`）。本阶段调用方为内核态，buffer 为内核地址；**不做用户指针校验**（无 ring3），
     但 design 明确记录“引入 ring3 后必须加用户指针/长度校验”为后续前置项。
   - `SYS_DEBUG_NOOP` 或 `SYS_GET_TICK`：返回固定值或 `timer::ticks()` 单调 tick，验证返回值寄存器路径。
-- syscall 实现遵循阶段 3 中断上下文契约：dispatcher 在 `int 0x80` 上下文中运行（CPU 已自动关中断进入门），
+- syscall 实现遵循kernel memory API capability 中断上下文契约：dispatcher 在 `int 0x80` 上下文中运行（CPU 已自动关中断进入门），
   诊断 syscall 只做 bounded 输出 / 读取，不做动态分配、不在该路径调用 non-IRQ-safe allocator。
 
 ### 决策 4：验证用默认关闭构建开关 + 确定性 marker

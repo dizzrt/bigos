@@ -2,7 +2,7 @@
 
 当前 BigOS 的文件访问路径仍是内核内部直连：`fs_smoke` 和 `user_elf_smoke` 通过 ATA PIO、MBR exFAT discovery、`mount_exfat`、`lookup`、`read_file` 直接读取文件。进程生命周期已经具备 PID、父子关系、`wait`/`exit`、bounded ELF64 `exec argv/envp` 和 safe reaper，但进程对象尚未拥有 fd table，用户态也没有稳定的 `open`/`read`/`close` I/O 边界。
 
-阶段 13 的目标是在不引入 writable filesystem、page cache、VMA/demand paging 或 libc 的前提下，为后续 userland runtime 提供最小且可验证的 I/O 抽象。实现必须保持 x86_64 单核、Legacy BIOS/MBR/exFAT、同步 ATA PIO、read-only filesystem、`int 0x80` ABI、freestanding C++17/C17 和 blocking-context 约束。
+fd/VFS shell boundary 的目标是在不引入 writable filesystem、page cache、VMA/demand paging 或 libc 的前提下，为后续 userland runtime 提供最小且可验证的 I/O 抽象。实现必须保持 x86_64 单核、Legacy BIOS/MBR/exFAT、同步 ATA PIO、read-only filesystem、`int 0x80` ABI、freestanding C++17/C17 和 blocking-context 约束。
 
 ## Goals / Non-Goals
 
@@ -28,7 +28,7 @@
 - 每个 `Process` 持有固定容量 fd table。fd table entry 指向 ref-counted `File`，`open` 分配最低可用 fd，`close` 释放 entry 并 drop file ref；进程 exit/reap 关闭所有仍打开 fd。第一版不引入全局可增长 fd allocator 或复杂锁，因为当前调度边界仍是单核。
 - `exec` 默认继承 fd，第一版仅保留 close-on-exec 的内部字段和 commit-time 处理，不对用户态暴露 `fcntl`、`O_CLOEXEC` 或独立 flag API。这样 future userland 可以跨 `exec` 保留已打开文件，同时为后续关闭敏感 fd 保留实现钩子。替代方案是立即暴露 close-on-exec 用户 API，但这会把 `fcntl`/open flags 设计提前到 fd/VFS 壳层阶段之外。
 - `open` path 从用户态复制到 bounded kernel buffer 后再进入 VFS。path 必须是 NUL 结尾、绝对路径、长度受限且不包含未支持的相对解析；非法用户指针或过长路径返回确定性负错误码或终止当前进程。替代方案是在 VFS 中逐字节访问用户内存，但这会把用户地址空间校验扩散到 filesystem backend。
-- syscall read/write 边界在阶段 13 保持非对称。`SYS_READ` 使用 fd table 查找 `File` 并复制到用户 buffer；`SYS_WRITE` 继续保留现有 `fd == 1` stdout/serial 特例，不把 console/stdout 建模为 fd table entry。本阶段普通文件写入返回确定性错误。替代方案是把 stdout 立即迁移为 console file，但这会引入 character device/VFS 节点策略，超出只读 regular-file fd/VFS 壳层目标。
+- syscall read/write 边界在fd/VFS shell boundary 保持非对称。`SYS_READ` 使用 fd table 查找 `File` 并复制到用户 buffer；`SYS_WRITE` 继续保留现有 `fd == 1` stdout/serial 特例，不把 console/stdout 建模为 fd table entry。本阶段普通文件写入返回确定性错误。替代方案是把 stdout 立即迁移为 console file，但这会引入 character device/VFS 节点策略，超出只读 regular-file fd/VFS 壳层目标。
 - fd/VFS 操作只允许在可阻塞上下文执行。VFS open/read 可能触发 ATA PIO 和 `kmalloc`，因此 syscall dispatch 必须拒绝或诊断 IRQ、preemption-disabled、scheduler critical section 等不可阻塞上下文。替代方案是在所有 VFS 路径中改造成 nonblocking，但这会提前引入 async I/O 和复杂状态机。
 - 验证以 source-level checks 加 QEMU headless serial marker 为主。第一版复用并迁移现有 `fs_smoke` 到 VFS open/read/close 路径，不新增独立 `fd_vfs_smoke` 开关；smoke 覆盖 successful open/read/close、not-found、bad-fd、EOF clamp 和 close 后 read，用户态 invalid-buffer 与 exec inheritance 由 source-level checks 或 user smoke 扩展覆盖。涉及 ATA PIO、port-IO 或 emulator 行为时在可用环境补充 Bochs 或 QEMU+Bochs 交叉验证。
 
@@ -53,6 +53,6 @@
 
 ## Resolved Decisions
 
-- 阶段 13 不把 `SYS_WRITE` 的 stdout 建模为 fd table entry；保留现有 `fd == 1` stdout/serial 特例，只为普通只读文件实现 `open`/`read`/`close` fd 路径。
-- 阶段 13 不对用户态暴露 close-on-exec flag 或 `fcntl`；仅保留 fd table entry 的内部 close-on-exec 字段，并定义 `exec` commit 时的处理规则。
-- 阶段 13 不新增 `fd_vfs_smoke` 开关；复用并迁移现有 `fs_smoke` 执行 VFS open/read/close 路径验证。
+- fd/VFS shell boundary 不把 `SYS_WRITE` 的 stdout 建模为 fd table entry；保留现有 `fd == 1` stdout/serial 特例，只为普通只读文件实现 `open`/`read`/`close` fd 路径。
+- fd/VFS shell boundary 不对用户态暴露 close-on-exec flag 或 `fcntl`；仅保留 fd table entry 的内部 close-on-exec 字段，并定义 `exec` commit 时的处理规则。
+- fd/VFS shell boundary 不新增 `fd_vfs_smoke` 开关；复用并迁移现有 `fs_smoke` 执行 VFS open/read/close 路径验证。

@@ -17,7 +17,7 @@
 - VS Code diagnostics
   - 结果：`kernel/core/proc/proc.cc`、`include/bigos/proc.h` 无诊断。
   - 覆盖：辅助 clang/clangd 风格静态诊断。
-- `uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/stage43-runtime-vm-serial.log --expect-serial-marker BIGOS_USER_EXEC`
+- `uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/runtime-vm-serial.log --expect-serial-marker BIGOS_USER_EXEC`
   - 结果：通过，QEMU serial marker observed: `BIGOS_USER_EXEC`。
   - 覆盖：normal init/userland exec entry，包含 boot artifact、user init ELF 和 raw image 打包路径。
 - `openspec validate expand-user-runtime-vm --strict`

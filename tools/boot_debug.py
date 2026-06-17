@@ -339,7 +339,8 @@ RUNTIME_SMOKE_MATRIX = (
         expected_marker='BIGOS_FILESYSTEM_MATURITY_PASSED',
         timeout_seconds=40.0,
         risk_area=(
-            'Stage 41 current-runtime filesystem semantics across exFAT, /rw, fd/VFS, metadata, cwd, errno, tools'
+            'runtime filesystem maturity current-runtime filesystem semantics across '
+            'exFAT, /rw, fd/VFS, metadata, cwd, errno, tools'
         ),
         validation_markers=(
             'BIGOS_FILESYSTEM_MATURITY_PASSED',
@@ -1925,7 +1926,7 @@ def make_parser() -> argparse.ArgumentParser:
 
     matrix_parser = subparsers.add_parser(
         'runtime-smoke-matrix',
-        help='run the stage 9 runtime smoke matrix through QEMU headless serial-marker checks',
+        help='run the runtime smoke matrix through QEMU headless serial-marker checks',
     )
     matrix_parser.add_argument(
         '--case',

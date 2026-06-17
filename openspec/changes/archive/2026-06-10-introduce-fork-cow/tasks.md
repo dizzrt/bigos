@@ -35,6 +35,6 @@
 
 - [x] 6.1 运行最窄可用的 `xmake` 交叉工具链构建（确认 `x86_64-elf-gcc/g++/ld` 可用，否则显式记录缺失）；默认构建（无 smoke 开关）不应进入 `fork` 路径。
 - [x] 6.2 运行 `fork_cow_smoke=y` 的 QEMU headless serial-marker smoke（经 `tools/boot_debug.py` 或 `xmake run qemu -- --display none`），断言 `BIGOS_FORK_COW_PASSED`；若 QEMU/Bochs/ROM/串口/镜像不可用则记录缺失依赖与残留 bootability 风险。
-- [x] 6.3 运行相关 `uv run pytest` 源码契约/行为断言测试（沿用阶段 14.5 行为断言轨道，新增 fork/COW 行为断言用例）；`uv` 不可用则显式记录而非回退系统 Python。
+- [x] 6.3 运行相关 `uv run pytest` 源码契约/行为断言测试（沿用behavior assertion validation baseline 行为断言轨道，新增 fork/COW 行为断言用例）；`uv` 不可用则显式记录而非回退系统 Python。
 - [x] 6.4 运行 `openspec validate introduce-fork-cow --strict` 并修正结构问题；确认引用计数表、`PTE_COW` 位、COW 缺页分支等源码契约断言到位。
 - [x] 6.5 复核未改动 boot 固定地址、higher-half base、direct-map 窗口、`KVMEM_BASE`、递归自映射地址、syscall 向量、exception/IRQ EOI 语义；验证记录分列「通过 / 因故未运行+原因+残留风险 / 历史诊断 / 本次引入问题」。
