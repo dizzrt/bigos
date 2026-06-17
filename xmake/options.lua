@@ -90,6 +90,12 @@ option("file_backed_mapping_smoke")
     set_description("enable validation-only bounded read-only file-backed mapping smoke marker")
 option_end()
 
+option("shared_readonly_mappings_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only shared read-only file-backed mapping smoke marker")
+option_end()
+
 option("anonymous_lifecycle_smoke")
     set_default(false)
     set_showmenu(true)

@@ -104,7 +104,7 @@ def test_exec_and_reap_apply_fd_close_rules_from_safe_context() -> None:
     reap_index = source.index('void reap_pending_processes() noexcept')
     close_all_index = source.index('close_all_fds(process);', reap_index)
     stack_check_index = source.index('stack_is_active(process)', reap_index)
-    root_check_index = source.index('process->address_space_root == (bigos::mm::read_cr3()', reap_index)
+    root_check_index = source.index('bigos::arch::vm_user::is_active_address_space(process->address_space_root)', reap_index)
 
     assert exec_index < close_exec_index
     assert stack_check_index < root_check_index < close_all_index
@@ -158,7 +158,10 @@ def test_bounded_metadata_contract_is_vfs_backed() -> None:
     assert 'Status stat(File *__file, bigos::Metadata *__out)' in vfs_h
     assert 'Status rename(const char *__old_path, const char *__new_path, const char *__cwd' in vfs_h
     assert 'fill_metadata_defaults(__out)' in vfs
-    assert '__out->object_id = 0;' in vfs
+    assert 'exfat_identity(const bigos::fs::FileMetadata *__metadata)' in vfs
+    assert 'bigfs_identity(uint32_t __inode)' in vfs
+    assert '__out->object_id = exfat_identity(__metadata).object_id;' in vfs
+    assert '__out->object_id = bigfs_identity(__inode).object_id;' in vfs
     assert 'bigos::fs::lookup(&g_mount, __path, &metadata)' in vfs
     assert 'bigos::bigfs::stat(__inode' in vfs
     assert 'return Status::Unsupported;' in vfs
@@ -395,7 +398,7 @@ def test_runtime_filesystem_metadata_contract_review_is_documented() -> None:
         assert phrase in notes
 
     assert 'fill_metadata_defaults(__out)' in vfs
-    assert '__out->object_id = 0;' in vfs
+    assert 'bool file_identity(File *__file, FileIdentity *__out)' in vfs
     assert '__out->mode = (__metadata->is_directory ? (bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444));' not in vfs
     assert '__out->mode = __metadata->is_directory ? (bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444);' in vfs
     assert 'return fill_bigfs_metadata(state->inode, __out);' in vfs
@@ -406,5 +409,5 @@ def test_runtime_filesystem_metadata_contract_review_is_documented() -> None:
     assert 'stat("/rw/runtime_rename_dst.txt", &st) != 0 || st.st_size != 11' in smoke
     assert 'stat("/rw/runtime_unlink.txt", &st) != -1 || errno != ENOENT' in smoke
     assert 'fstat(fd, &st) != 0 || st.st_size != 4' in smoke
-    assert 'st.st_object_id != 0' in smoke
+    assert 'st.st_object_id == 0' in smoke
     assert 'object=' in stat_tool

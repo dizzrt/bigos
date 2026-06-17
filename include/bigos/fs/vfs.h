@@ -77,6 +77,16 @@ namespace vfs {
         void *private_data;
     };
 
+    struct FileIdentity {
+        uint32_t backend_id;
+        uint32_t mount_id;
+        uint64_t object_id;
+    };
+
+    constexpr uint32_t FILE_BACKEND_NONE = 0;
+    constexpr uint32_t FILE_BACKEND_EXFAT = 1;
+    constexpr uint32_t FILE_BACKEND_BIGFS = 2;
+
     struct File {
         const FileOperations *ops;
         Vnode *vnode;
@@ -88,6 +98,7 @@ namespace vfs {
         // Appended field (do not reorder the layout above). True when the file
         // object was opened with write access.
         bool writable;
+        FileIdentity identity;
     };
 
     const char *status_name(Status __status) noexcept;
@@ -120,6 +131,7 @@ namespace vfs {
     Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept;
     Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out) noexcept;
     Status stat(File *__file, bigos::Metadata *__out) noexcept;
+    bool file_identity(File *__file, FileIdentity *__out) noexcept;
     // Directory mutation on the writable backend. owner/identity are the caller's.
     Status mkdir(const char *__path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status mkdir(const char *__path, const char *__cwd, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;

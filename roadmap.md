@@ -186,10 +186,10 @@ enabling more capable programs.
 - [x] Task M1.2: bounded anonymous mapping lifecycle completion covering map, unmap,
   and protection change over the current VMA model.
 - [x] 任务 M1.2：在现有 VMA 模型上完善有界匿名映射生命周期，覆盖映射、解除映射与权限变更。
-- [ ] Task M1.3: shared read-only mapping so multiple processes can share read-only
+- [x] Task M1.3: shared read-only mapping so multiple processes can share read-only
   text and data pages, with TLB invalidation expressed through the existing SMP
   preparation invalidation boundary.
-- [ ] 任务 M1.3：共享只读映射，使多进程可共享只读 text 与数据页，TLB 失效通过既有 SMP 准备
+- [x] 任务 M1.3：共享只读映射，使多进程可共享只读 text 与数据页，TLB 失效通过既有 SMP 准备
   失效边界表达。
 
 ### Milestone M2 — Real Writable Filesystem (High Priority) / 里程碑 M2 — 真实可写文件系统（高优先级）

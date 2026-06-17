@@ -169,6 +169,20 @@ namespace {
 
     const bigos::vfs::FileOperations EXFAT_FILE_OPS = {&exfat_read, &exfat_close, nullptr, nullptr, &exfat_readdir};
 
+    bigos::vfs::FileIdentity exfat_identity(const bigos::fs::FileMetadata *__metadata) noexcept {
+        bigos::vfs::FileIdentity identity = {bigos::vfs::FILE_BACKEND_EXFAT, 1, 0};
+        if (__metadata == nullptr)
+            return identity;
+        identity.object_id = ((uint64_t)__metadata->parent_cluster << 32) | (uint64_t)__metadata->entry_offset;
+        if (identity.object_id == 0)
+            identity.object_id = 1;
+        return identity;
+    }
+
+    bigos::vfs::FileIdentity bigfs_identity(uint32_t __inode) noexcept {
+        return {bigos::vfs::FILE_BACKEND_BIGFS, 1, (uint64_t)__inode + 1};
+    }
+
     void fill_metadata_defaults(bigos::Metadata *__out) noexcept {
         if (__out == nullptr)
             return;
@@ -187,6 +201,7 @@ namespace {
         __out->uid = bigos::cred::ROOT_UID;
         __out->gid = 0;
         __out->size = __metadata->data_length;
+        __out->object_id = exfat_identity(__metadata).object_id;
     }
 
     bigos::vfs::Status fill_bigfs_metadata(uint32_t __inode, bigos::Metadata *__out) noexcept {
@@ -205,6 +220,7 @@ namespace {
         __out->uid = uid;
         __out->gid = gid;
         __out->size = size;
+        __out->object_id = bigfs_identity(__inode).object_id;
         return bigos::vfs::Status::Success;
     }
 
@@ -555,6 +571,7 @@ namespace vfs {
             file->close_on_exec = false;
             file->private_data = state;
             file->writable = wants_write;
+            file->identity = bigfs_identity(inode);
             *__out_file = file;
             return Status::Success;
         }
@@ -597,6 +614,7 @@ namespace vfs {
         file->close_on_exec = false;
         file->private_data = state;
         file->writable = false;
+        file->identity = exfat_identity(&metadata);
         *__out_file = file;
         return Status::Success;
     }
@@ -776,7 +794,16 @@ namespace vfs {
         __out->uid = bigos::cred::ROOT_UID;
         __out->gid = 0;
         __out->size = __file->vnode->size;
+        __out->object_id = __file->identity.object_id;
         return Status::Success;
+    }
+
+    bool file_identity(File *__file, FileIdentity *__out) noexcept {
+        if (__file == nullptr || __out == nullptr || __file->identity.backend_id == FILE_BACKEND_NONE ||
+            __file->identity.object_id == 0)
+            return false;
+        *__out = __file->identity;
+        return true;
     }
 
     Status mkdir(const char *__path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept {

@@ -39,6 +39,8 @@ namespace fs {
 
     struct FileMetadata {
         uint32_t first_cluster;
+        uint32_t parent_cluster;
+        uint32_t entry_offset;
         uint64_t data_length;
         bool is_directory;
         bool no_fat_chain;

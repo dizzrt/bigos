@@ -16,6 +16,10 @@
 #include "../../mm/memdef.h"
 #include "../../mm/vmem.h"
 
+namespace bigos::proc {
+    bool materialize_file_backed_page(Process *__process, uint64_t __page, VmaEntry *__vma) noexcept;
+}
+
 namespace {
     constexpr uint32_t PROCESS_KERNEL_STACK_PAGES = 1;
     constexpr uint32_t ELF_MAX_LOAD_SEGMENTS = 8;
@@ -32,6 +36,7 @@ namespace {
     constexpr uint32_t PF_X = 1;
     constexpr uint32_t PF_W = 2;
     constexpr uint32_t PF_R = 4;
+    constexpr uint32_t MAX_SHARED_READONLY_PAGES = 64;
 
     // Flat embedded image selected for the first-user-program smoke path: it
     // avoids any kernel FS/block dependency and still exercises code, data/BSS,
@@ -349,14 +354,20 @@ namespace {
                 return range_inside(__entry.start, __entry.end, layout.elf_load) &&
                        __entry.growth == bigos::proc::VmaGrowth::None &&
                        (__entry.backing == bigos::proc::VmaBacking::ElfSegment ||
+                           __entry.backing == bigos::proc::VmaBacking::FileBacked ||
                            __entry.backing == bigos::proc::VmaBacking::Anonymous) &&
+                       (__entry.backing != bigos::proc::VmaBacking::FileBacked ||
+                           (__entry.file_backing != nullptr && page_aligned(__entry.file_offset))) &&
                        permissions_include(__entry.permissions, bigos::proc::VmaPermission::Execute) &&
                        !permissions_include(__entry.permissions, bigos::proc::VmaPermission::Write);
             case bigos::proc::VmaPurpose::Data:
                 return range_inside(__entry.start, __entry.end, layout.elf_load) &&
                        __entry.growth == bigos::proc::VmaGrowth::None &&
                        (__entry.backing == bigos::proc::VmaBacking::ElfSegment ||
+                           __entry.backing == bigos::proc::VmaBacking::FileBacked ||
                            __entry.backing == bigos::proc::VmaBacking::Anonymous) &&
+                       (__entry.backing != bigos::proc::VmaBacking::FileBacked ||
+                           (__entry.file_backing != nullptr && page_aligned(__entry.file_offset))) &&
                        !permissions_include(__entry.permissions, bigos::proc::VmaPermission::Execute);
             case bigos::proc::VmaPurpose::Heap:
                 return range_inside(__entry.start, __entry.end, layout.heap) &&
@@ -536,6 +547,142 @@ namespace {
         return attr;
     }
 
+    struct SharedReadonlyKey {
+        bigos::vfs::FileIdentity identity;
+        uint64_t file_offset;
+        uint32_t attrs;
+    };
+
+    struct SharedReadonlyPage {
+        bool used;
+        SharedReadonlyKey key;
+        uint64_t frame_phys;
+        uint32_t pte_refs;
+        bigos::vfs::File *backing;
+    };
+
+    SharedReadonlyPage g_shared_readonly_pages[MAX_SHARED_READONLY_PAGES] = {};
+
+    bool shared_readonly_key_equal(const SharedReadonlyKey &__a, const SharedReadonlyKey &__b) noexcept {
+        return __a.identity.backend_id == __b.identity.backend_id && __a.identity.mount_id == __b.identity.mount_id &&
+               __a.identity.object_id == __b.identity.object_id && __a.file_offset == __b.file_offset &&
+               __a.attrs == __b.attrs;
+    }
+
+    bool shared_readonly_key_for_vma(const bigos::proc::VmaEntry *__vma, uint64_t __file_offset,
+        bigos::mm::PageAttr __attr, SharedReadonlyKey *__out) noexcept {
+        if (__vma == nullptr || __out == nullptr || __vma->file_backing == nullptr ||
+            permissions_include(__vma->permissions, bigos::proc::VmaPermission::Write) ||
+            (__attr & bigos::mm::page_attr::WRITABLE) != 0 || (__file_offset & (PAGE_SIZE - 1)) != 0)
+            return false;
+        bigos::vfs::FileIdentity identity = {};
+        if (!bigos::vfs::file_identity(__vma->file_backing, &identity))
+            return false;
+        *__out = {identity, __file_offset, (uint32_t)(__attr & (bigos::mm::page_attr::USER |
+                                                                 bigos::mm::page_attr::NO_EXECUTE))};
+        return true;
+    }
+
+    SharedReadonlyPage *shared_readonly_find(const SharedReadonlyKey &__key) noexcept {
+        for (uint32_t i = 0; i < MAX_SHARED_READONLY_PAGES; i++) {
+            if (g_shared_readonly_pages[i].used && shared_readonly_key_equal(g_shared_readonly_pages[i].key, __key))
+                return &g_shared_readonly_pages[i];
+        }
+        return nullptr;
+    }
+
+    SharedReadonlyPage *shared_readonly_free_slot() noexcept {
+        for (uint32_t i = 0; i < MAX_SHARED_READONLY_PAGES; i++) {
+            if (!g_shared_readonly_pages[i].used)
+                return &g_shared_readonly_pages[i];
+        }
+        return nullptr;
+    }
+
+    bool shared_readonly_retain_mapping(SharedReadonlyPage *__entry, uint64_t *__phys) noexcept {
+        if (__phys != nullptr)
+            *__phys = bigos::mm::INVALID_PHYS_ADDR;
+        if (__entry == nullptr || !__entry->used)
+            return false;
+        // Single-core SMP-preparation boundary: future SMP replaces this with a
+        // shared-directory lock plus acquire/release ordering around pte_refs and
+        // frame_ref updates. This path is only reached from blockable process
+        // context, never from IRQ or scheduler critical sections.
+        bigos::irq::InterruptGuard guard;
+        if (!bigos::mm::frame_ref_inc(__entry->frame_phys))
+            return false;
+        __entry->pte_refs++;
+        if (__phys != nullptr)
+            *__phys = __entry->frame_phys;
+        return true;
+    }
+
+    bool shared_readonly_retain_mapping_by_frame(uint64_t __phys) noexcept {
+        for (uint32_t i = 0; i < MAX_SHARED_READONLY_PAGES; i++) {
+            if (g_shared_readonly_pages[i].used && g_shared_readonly_pages[i].frame_phys == __phys) {
+                uint64_t ignored = bigos::mm::INVALID_PHYS_ADDR;
+                return shared_readonly_retain_mapping(&g_shared_readonly_pages[i], &ignored);
+            }
+        }
+        return bigos::mm::frame_ref_inc(__phys);
+    }
+
+    void shared_readonly_drop_mapping(uint64_t __phys) noexcept {
+        if (__phys == bigos::mm::INVALID_PHYS_ADDR)
+            return;
+        SharedReadonlyPage *entry = nullptr;
+        {
+            bigos::irq::InterruptGuard guard;
+            for (uint32_t i = 0; i < MAX_SHARED_READONLY_PAGES; i++) {
+                if (g_shared_readonly_pages[i].used && g_shared_readonly_pages[i].frame_phys == __phys) {
+                    entry = &g_shared_readonly_pages[i];
+                    break;
+                }
+            }
+            if (entry != nullptr && entry->pte_refs > 0)
+                entry->pte_refs--;
+        }
+        bigos::mm::frame_ref_dec_and_maybe_free(__phys);
+        if (entry != nullptr && entry->pte_refs == 0) {
+            bigos::vfs::File *backing = entry->backing;
+            const uint64_t frame = entry->frame_phys;
+            *entry = {};
+            bigos::mm::frame_ref_dec_and_maybe_free(frame);
+            if (backing != nullptr)
+                bigos::vfs::release(backing);
+        }
+    }
+
+    bool shared_readonly_publish_new(
+        const SharedReadonlyKey &__key, bigos::vfs::File *__backing, uint64_t __phys, SharedReadonlyPage **__out) noexcept {
+        if (__out != nullptr)
+            *__out = nullptr;
+        if (__backing == nullptr || __phys == 0)
+            return false;
+        bigos::irq::InterruptGuard guard;
+        if (shared_readonly_find(__key) != nullptr)
+            return false;
+        SharedReadonlyPage *slot = shared_readonly_free_slot();
+        if (slot == nullptr)
+            return false;
+        bigos::vfs::retain(__backing);
+        *slot = {true, __key, __phys, 0, __backing};
+        if (__out != nullptr)
+            *__out = slot;
+        return true;
+    }
+
+    void shared_readonly_cancel_unmapped(SharedReadonlyPage *__entry) noexcept {
+        if (__entry == nullptr || !__entry->used || __entry->pte_refs != 0)
+            return;
+        bigos::vfs::File *backing = __entry->backing;
+        const uint64_t frame = __entry->frame_phys;
+        *__entry = {};
+        bigos::mm::frame_ref_dec_and_maybe_free(frame);
+        if (backing != nullptr)
+            bigos::vfs::release(backing);
+    }
+
     bool map_user_page_for_process(bigos::proc::Process *__process, uint64_t __vaddr, uint64_t __phys,
         bigos::mm::PageAttr __attr, bool __also_map_active_root) noexcept {
         if (__process == nullptr || !page_aligned(__vaddr) || !page_aligned(__phys))
@@ -671,6 +818,28 @@ namespace {
                 return false;
             if (phys != bigos::mm::INVALID_PHYS_ADDR)
                 bigos::mm::frame_ref_dec_and_maybe_free(phys);
+        }
+        return true;
+    }
+
+    bool unmap_shared_file_backed_pages(uint64_t __root, const bigos::proc::VmaCollection *__vmas) noexcept {
+        if (__root == bigos::mm::INVALID_PHYS_ADDR || __vmas == nullptr)
+            return true;
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            const bigos::proc::VmaEntry &vma = __vmas->entries[i];
+            if (!vma.used || vma.backing != bigos::proc::VmaBacking::FileBacked)
+                continue;
+            for (uint64_t page = vma.start; page < vma.end; page += PAGE_SIZE) {
+                uint64_t phys = bigos::mm::INVALID_PHYS_ADDR;
+                bigos::mm::PageAttr attr = 0;
+                if (!bigos::mm::read_user_leaf_in_root(__root, page, &phys, &attr))
+                    continue;
+                if ((attr & bigos::mm::page_attr::USER) == 0)
+                    return false;
+                if (!bigos::mm::unmap_user_page_in_root(__root, page, &phys))
+                    return false;
+                shared_readonly_drop_mapping(phys);
+            }
         }
         return true;
     }
@@ -885,6 +1054,11 @@ namespace {
         return (__flags & PF_W) != 0 && (__flags & PF_X) != 0;
     }
 
+    bool elf_segment_shared_readonly_compatible(const LoadSegment &__segment, bigos::vfs::File *__backing) noexcept {
+        return __backing != nullptr && (__segment.flags & PF_W) == 0 && __segment.filesz == __segment.memsz &&
+               page_aligned(__segment.vaddr) && page_aligned(__segment.offset) && __segment.map_base == __segment.vaddr;
+    }
+
     bool track_page(TrackedPage *__pages, uint32_t *__count, uint64_t __vaddr, bigos::mm::PageAttr __attr) noexcept {
         for (uint32_t i = 0; i < *__count; i++) {
             if (__pages[i].vaddr == __vaddr)
@@ -979,8 +1153,16 @@ namespace {
         return bigos::proc::UserElfLoadError::Success;
     }
 
-    bigos::proc::UserElfLoadError map_segment(
-        bigos::proc::Process *__process, const uint8_t *__image, const LoadSegment &__segment) noexcept {
+    bigos::proc::UserElfLoadError map_segment(bigos::proc::Process *__process, const uint8_t *__image,
+        const LoadSegment &__segment, bool __shared_file_backed) noexcept {
+        if (__shared_file_backed) {
+            for (uint64_t page = __segment.map_base; page < __segment.map_base + __segment.map_len; page += PAGE_SIZE) {
+                bigos::proc::VmaEntry *vma = internal_find_vma_mut(&__process->vmas, page);
+                if (!bigos::proc::materialize_file_backed_page(__process, page, vma))
+                    return bigos::proc::UserElfLoadError::MapFailed;
+            }
+            return bigos::proc::UserElfLoadError::Success;
+        }
         for (uint64_t page = __segment.map_base; page < __segment.map_base + __segment.map_len; page += PAGE_SIZE) {
             const uint64_t phys = alloc_user_frame();
             bool mapped = false;
@@ -1299,10 +1481,10 @@ namespace {
             // needed), counting the extra owner. Decision 4: already-materialized
             // pages are shared, not deep-copied; unmaterialized pages re-fault
             // independently through the cache in whichever process touches them.
-            if (!bigos::mm::frame_ref_inc(__parent_phys))
+            if (!shared_readonly_retain_mapping_by_frame(__parent_phys))
                 return false;
             if (!bigos::mm::map_page_in_root(__child->address_space_root, __page, __parent_phys, __parent_attr)) {
-                bigos::mm::frame_ref_dec_and_maybe_free(__parent_phys);
+                shared_readonly_drop_mapping(__parent_phys);
                 return false;
             }
             return true;
@@ -1442,6 +1624,8 @@ namespace bigos::proc {
     // Defined later in this namespace; forward-declared so the fork rollback,
     // exec replacement, and reap paths can release references symmetrically.
     void release_file_backed_vmas(Process *__process) noexcept;
+    UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len,
+        const ExecArgs *__args, bigos::vfs::File *__elf_file) noexcept;
 
     void init() noexcept {
         if (g_proc_initialized)
@@ -1489,9 +1673,9 @@ namespace bigos::proc {
 
         size_t bytes_read = 0;
         status = bigos::vfs::read(file, image, (size_t)file_size, &bytes_read);
-        bigos::vfs::release(file);
         if (status != bigos::vfs::Status::Success || bytes_read != file_size) {
             const char *reason = status == bigos::vfs::Status::Success ? "short-read" : bigos::vfs::status_name(status);
+            bigos::vfs::release(file);
             bigos::free(image);
             launch_init_failed(reason);
         }
@@ -1507,7 +1691,8 @@ namespace bigos::proc {
             bigos::free(image);
             launch_init_failed("process-object");
         }
-        const UserElfLoadError load_status = create_elf_user_process(init_process, image, file_size, &args);
+        const UserElfLoadError load_status = create_elf_user_process(init_process, image, file_size, &args, file);
+        bigos::vfs::release(file);
         bigos::free(image);
         if (load_status != UserElfLoadError::Success) {
             free_process_object(init_process);
@@ -1623,8 +1808,10 @@ namespace bigos::proc {
     fail:
         if (__process->kernel_stack_base != nullptr)
             bigos::free_pages(__process->kernel_stack_base);
-        if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+        if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR) {
+            (void)unmap_shared_file_backed_pages(__process->address_space_root, &__process->vmas);
             (void)bigos::mm::teardown_user_address_space(__process->address_space_root);
+        }
         if (!code_mapped)
             free_user_frame(code_phys);
         if (!data_mapped)
@@ -1669,8 +1856,8 @@ namespace bigos::proc {
         return "unknown";
     }
 
-    UserElfLoadError create_elf_user_process(
-        Process *__process, const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept {
+    UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len,
+        const ExecArgs *__args, bigos::vfs::File *__elf_file) noexcept {
         if (__process == nullptr)
             return UserElfLoadError::InvalidArgument;
         if (!g_proc_initialized)
@@ -1712,10 +1899,20 @@ namespace bigos::proc {
         }
         for (uint32_t i = 0; i < segment_count; i++) {
             const VmaPurpose purpose = (segments[i].flags & PF_X) != 0 ? VmaPurpose::Code : VmaPurpose::Data;
+            const bool shared_file_backed = elf_segment_shared_readonly_compatible(segments[i], __elf_file);
+            bigos::vfs::File *file_backing = nullptr;
+            if (shared_file_backed) {
+                bigos::vfs::retain(__elf_file);
+                file_backing = __elf_file;
+            }
             if (!internal_add_process_vma(
                     __process, {segments[i].map_base, segments[i].map_base + segments[i].map_len, segments[i].map_base,
-                                   segments[i].map_base + segments[i].map_len, segment_permissions(segments[i].flags),
-                                   purpose, VmaBacking::ElfSegment, VmaGrowth::None, true})) {
+                                   shared_file_backed ? segments[i].map_base : segments[i].map_base + segments[i].map_len,
+                                   segment_permissions(segments[i].flags), purpose,
+                                   shared_file_backed ? VmaBacking::FileBacked : VmaBacking::ElfSegment,
+                                   VmaGrowth::None, true, file_backing, shared_file_backed ? segments[i].offset : 0})) {
+                if (file_backing != nullptr)
+                    bigos::vfs::release(file_backing);
                 error = UserElfLoadError::MapFailed;
                 goto fail;
             }
@@ -1732,7 +1929,8 @@ namespace bigos::proc {
         }
 
         for (uint32_t i = 0; i < segment_count; i++) {
-            error = map_segment(__process, (const uint8_t *)__image, segments[i]);
+            const bool shared_file_backed = elf_segment_shared_readonly_compatible(segments[i], __elf_file);
+            error = map_segment(__process, (const uint8_t *)__image, segments[i], shared_file_backed);
             if (error != UserElfLoadError::Success)
                 goto fail;
         }
@@ -1815,8 +2013,11 @@ namespace bigos::proc {
     fail:
         if (__process->kernel_stack_base != nullptr)
             bigos::free_pages(__process->kernel_stack_base);
-        if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+        if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR) {
+            (void)unmap_shared_file_backed_pages(__process->address_space_root, &__process->vmas);
             (void)bigos::mm::teardown_user_address_space(__process->address_space_root);
+        }
+        release_file_backed_vmas(__process);
         if (__process->table_published)
             unpublish_process(__process);
         free_fd_table(__process);
@@ -1825,12 +2026,17 @@ namespace bigos::proc {
         return error;
     }
 
-    UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len) noexcept {
-        return create_elf_user_process(__process, __image, __image_len, nullptr);
+    UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len,
+        const ExecArgs *__args) noexcept {
+        return create_elf_user_process(__process, __image, __image_len, __args, nullptr);
     }
 
-    UserElfLoadError exec_current_from_elf_image(
-        const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept {
+    UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len) noexcept {
+        return create_elf_user_process(__process, __image, __image_len, nullptr, nullptr);
+    }
+
+    UserElfLoadError exec_current_from_elf_image(const void *__image, uint64_t __image_len, const ExecArgs *__args,
+        bigos::vfs::File *__elf_file) noexcept {
         Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running)
             return UserElfLoadError::InvalidArgument;
@@ -1840,7 +2046,7 @@ namespace bigos::proc {
         Process *prepared = alloc_process_object();
         if (prepared == nullptr)
             return UserElfLoadError::OutOfMemory;
-        UserElfLoadError error = create_elf_user_process(prepared, __image, __image_len, __args);
+        UserElfLoadError error = create_elf_user_process(prepared, __image, __image_len, __args, __elf_file);
         if (error != UserElfLoadError::Success) {
             free_process_object(prepared);
             return error;
@@ -1875,7 +2081,9 @@ namespace bigos::proc {
         prepared->kernel_stack_base = nullptr;
         free_process_object(prepared);
 
-        if (old_root != bigos::mm::INVALID_PHYS_ADDR && !bigos::mm::teardown_user_address_space(old_root)) {
+        if (old_root != bigos::mm::INVALID_PHYS_ADDR &&
+            (!unmap_shared_file_backed_pages(old_root, &old_vmas) ||
+                !bigos::mm::teardown_user_address_space(old_root))) {
             process->exit_code = EXEC_FAILURE_STATUS;
             process->fault_reason = EXEC_FAILURE_STATUS;
             mark_zombie_or_reap_pending(process);
@@ -1982,15 +2190,16 @@ namespace bigos::proc {
 
         size_t bytes_read = 0;
         status = bigos::vfs::read(file, image, (size_t)file_size, &bytes_read);
-        bigos::vfs::release(file);
         if (status != bigos::vfs::Status::Success || bytes_read != file_size) {
+            bigos::vfs::release(file);
             return -bigos::EIO;
         }
 
         const uint64_t user_root = process->address_space_root;
         if (process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
             bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
-        const UserElfLoadError error = exec_current_from_elf_image(image, file_size, __args);
+        const UserElfLoadError error = exec_current_from_elf_image(image, file_size, __args, file);
+        bigos::vfs::release(file);
         if (error != UserElfLoadError::Success) {
             // exec_current_from_elf_image only tears down the old image on the rare
             // teardown-failure path, which also marks the process a zombie. In that
@@ -2552,6 +2761,23 @@ namespace bigos::proc {
         uint64_t file_offset = 0;
         if (add_overflow(__vma->file_offset, page_delta, &file_offset))
             return false;
+        const uint64_t attr = file_backed_page_attr(__vma->permissions);
+        SharedReadonlyKey key = {};
+        if (!shared_readonly_key_for_vma(__vma, file_offset, attr, &key))
+            return false;
+
+        if (SharedReadonlyPage *found = shared_readonly_find(key)) {
+            uint64_t shared_phys = bigos::mm::INVALID_PHYS_ADDR;
+            if (!shared_readonly_retain_mapping(found, &shared_phys))
+                return false;
+            if (!map_user_page_for_process(__process, __page, shared_phys, attr, false)) {
+                shared_readonly_drop_mapping(shared_phys);
+                return false;
+            }
+            if (__page + PAGE_SIZE > __vma->materialized_end)
+                __vma->materialized_end = __page + PAGE_SIZE;
+            return true;
+        }
 
         const uint64_t file_size = __vma->file_backing->vnode != nullptr ? __vma->file_backing->vnode->size : 0;
         // Bytes of real file content that fall inside this page; the remainder of
@@ -2585,9 +2811,18 @@ namespace bigos::proc {
             }
         }
 
-        const uint64_t attr = file_backed_page_attr(__vma->permissions);
-        if (!map_user_page_for_process(__process, __page, phys, attr, false)) {
+        SharedReadonlyPage *published = nullptr;
+        if (!shared_readonly_publish_new(key, __vma->file_backing, phys, &published)) {
             free_user_frame(phys);
+            return false;
+        }
+        uint64_t pte_phys = bigos::mm::INVALID_PHYS_ADDR;
+        if (!shared_readonly_retain_mapping(published, &pte_phys)) {
+            shared_readonly_cancel_unmapped(published);
+            return false;
+        }
+        if (!map_user_page_for_process(__process, __page, pte_phys, attr, false)) {
+            shared_readonly_drop_mapping(pte_phys);
             return false;
         }
         if (__page + PAGE_SIZE > __vma->materialized_end)
@@ -2625,6 +2860,8 @@ namespace bigos::proc {
         if (!clone_user_address_space_cow(parent, child)) {
             // clone_user_address_space_cow may have retained child file-backed VMA
             // references before a later page-clone step failed; release them.
+            if (child->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+                (void)unmap_shared_file_backed_pages(child->address_space_root, &child->vmas);
             release_file_backed_vmas(child);
             if (child->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
                 (void)bigos::mm::teardown_user_address_space(child->address_space_root);
@@ -2634,6 +2871,7 @@ namespace bigos::proc {
         }
 
         if (!clone_fd_table(parent, child)) {
+            (void)unmap_shared_file_backed_pages(child->address_space_root, &child->vmas);
             release_file_backed_vmas(child);
             (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
@@ -2673,6 +2911,7 @@ namespace bigos::proc {
         if (!bigos::arch::vm_user::capture_user_resume_frame(__parent_frame, 0, &child->fork_entry_frame)) {
             close_all_fds(child);
             free_fd_table(child);
+            (void)unmap_shared_file_backed_pages(child->address_space_root, &child->vmas);
             release_file_backed_vmas(child);
             (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
@@ -2684,6 +2923,7 @@ namespace bigos::proc {
         if (!publish_process(child, parent->pid)) {
             close_all_fds(child);
             free_fd_table(child);
+            (void)unmap_shared_file_backed_pages(child->address_space_root, &child->vmas);
             release_file_backed_vmas(child);
             (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
@@ -2698,6 +2938,7 @@ namespace bigos::proc {
             unpublish_process(child);
             close_all_fds(child);
             free_fd_table(child);
+            (void)unmap_shared_file_backed_pages(child->address_space_root, &child->vmas);
             release_file_backed_vmas(child);
             (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
@@ -3057,7 +3298,8 @@ namespace bigos::proc {
             }
 
             if (process->address_space_root != bigos::mm::INVALID_PHYS_ADDR) {
-                if (!bigos::mm::teardown_user_address_space(process->address_space_root)) {
+                if (!unmap_shared_file_backed_pages(process->address_space_root, &process->vmas) ||
+                    !bigos::mm::teardown_user_address_space(process->address_space_root)) {
                     bigos::serial_puts("BIGOS_USER_REAP_FAILED address-space\n");
                     link = &process->next_reap_pid;
                     continue;
@@ -3244,11 +3486,13 @@ namespace bigos::proc {
         file->offset = 0;
         file->ref_count = 1;
         file->readable = true;
+        file->identity = {bigos::vfs::FILE_BACKEND_BIGFS, 0x534d4f4bu, 0x1000u};
 
         set_current_process_slot(__process);
         __process->state = ProcessState::Running;
 
         bool ok = true;
+        uint64_t first_phys = bigos::mm::INVALID_PHYS_ADDR;
         const int64_t fd = install_fd_current(file, false);
         if (fd < 0) {
             bigos::vfs::release(file);
@@ -3273,6 +3517,7 @@ namespace bigos::proc {
             bigos::mm::PageAttr attr = 0;
             if (!bigos::mm::read_user_leaf_in_root(__process->address_space_root, base, &phys, &attr))
                 ok = false;
+            first_phys = phys;
             // Must be present, user, read-only (not writable), non-executable.
             if (ok && ((attr & bigos::mm::page_attr::PRESENT) == 0 || (attr & bigos::mm::page_attr::USER) == 0 ||
                           (attr & bigos::mm::page_attr::WRITABLE) != 0 ||
@@ -3285,7 +3530,74 @@ namespace bigos::proc {
             }
         }
 
-        // 2. File-tail page zero-fill: second page holds 100 in-file bytes then zeros.
+        // 2. A second process independently maps a distinct File object with the
+        // same stable identity and reuses the already materialized shared frame.
+        static Process shared_process;
+        if (ok) {
+            scrub_process(&shared_process);
+            internal_init_vmas(&shared_process.vmas);
+            if (!init_runtime_layout(&shared_process, USER_CODE_BASE, USER_DATA_BASE + PAGE_SIZE,
+                    USER_DATA_BASE + PAGE_SIZE)) {
+                bigos::serial_puts("BIGOS_FILE_BACKED_MAPPING_FAILED shared-layout\n");
+                ok = false;
+            }
+            shared_process.address_space_root = bigos::mm::derive_user_address_space_root();
+            shared_process.kernel_address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+            init_fd_table(&shared_process);
+            if (shared_process.address_space_root == bigos::mm::INVALID_PHYS_ADDR) {
+                bigos::serial_puts("BIGOS_FILE_BACKED_MAPPING_FAILED shared-root\n");
+                ok = false;
+            }
+        }
+        if (ok) {
+            auto *file2 = (bigos::vfs::File *)bigos::kmalloc(sizeof(bigos::vfs::File));
+            if (file2 == nullptr) {
+                ok = false;
+            } else {
+                memset(file2, 0, sizeof(*file2));
+                file2->ops = &g_ops;
+                file2->vnode = &g_vnode;
+                file2->offset = 0;
+                file2->ref_count = 1;
+                file2->readable = true;
+                file2->identity = file->identity;
+                set_current_process_slot(&shared_process);
+                shared_process.state = ProcessState::Running;
+                const int64_t fd2 = install_fd_current(file2, false);
+                const int64_t mapped2 =
+                    fd2 >= 0 ? map_file_current((uint64_t)fd2, 0, PAGE_SIZE, permissions_value(VmaPermission::Read), 0) :
+                               -1;
+                if (fd2 < 0) {
+                    bigos::serial_puts("BIGOS_FILE_BACKED_MAPPING_FAILED shared-fd\n");
+                    bigos::vfs::release(file2);
+                    ok = false;
+                } else if (mapped2 < 0 || !try_handle_user_page_fault((uint64_t)mapped2, read_user_fault)) {
+                    bigos::serial_puts("BIGOS_FILE_BACKED_MAPPING_FAILED shared-map\n");
+                    ok = false;
+                } else {
+                    uint64_t phys2 = bigos::mm::INVALID_PHYS_ADDR;
+                    if (!bigos::mm::read_user_leaf_in_root(
+                            shared_process.address_space_root, (uint64_t)mapped2, &phys2, nullptr) ||
+                        phys2 != first_phys) {
+                        bigos::serial_puts("BIGOS_FILE_BACKED_MAPPING_FAILED shared-phys\n");
+                        ok = false;
+                    }
+                }
+            }
+            set_current_process_slot(nullptr);
+            close_all_fds(&shared_process);
+            free_fd_table(&shared_process);
+            release_file_backed_vmas(&shared_process);
+            if (shared_process.address_space_root != bigos::mm::INVALID_PHYS_ADDR) {
+                (void)unmap_shared_file_backed_pages(shared_process.address_space_root, &shared_process.vmas);
+                (void)bigos::mm::teardown_user_address_space(shared_process.address_space_root);
+                shared_process.address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+            }
+            set_current_process_slot(__process);
+            __process->state = ProcessState::Running;
+        }
+
+        // 3. File-tail page zero-fill: second page holds 100 in-file bytes then zeros.
         if (ok && !try_handle_user_page_fault(base + PAGE_SIZE, read_user_fault))
             ok = false;
         if (ok) {
@@ -3304,12 +3616,12 @@ namespace bigos::proc {
             }
         }
 
-        // 3. Third page is fully beyond the file length but within the VMA:
+        // 4. Third page is fully beyond the file length but within the VMA:
         // materializes as an all-zero read-only page.
         if (ok && !try_handle_user_page_fault(base + 2 * PAGE_SIZE, read_user_fault))
             ok = false;
 
-        // 4. Write to a read-only file-backed page is a deterministic kill (not
+        // 5. Write to a read-only file-backed page is a deterministic kill (not
         // COW, not materialized), for both present and not-present write faults.
         if (ok) {
             const uint64_t write_present_fault = 0x1 | 0x2 | 0x4;   // present + write + user
@@ -3322,7 +3634,7 @@ namespace bigos::proc {
                 ok = false;
         }
 
-        // 5. Out-of-range access beyond the mapped VMA is a deterministic kill.
+        // 6. Out-of-range access beyond the mapped VMA is a deterministic kill.
         if (ok && try_handle_user_page_fault(base + map_len, read_user_fault))
             ok = false;
 

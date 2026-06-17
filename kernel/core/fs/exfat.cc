@@ -402,6 +402,8 @@ namespace {
                 const uint32_t secondary_count = cluster_buffer[offset + 1];
                 offset += (size_t)(secondary_count + 1) * ENTRY_SIZE;
                 if (matched) {
+                    __out->parent_cluster = cluster;
+                    __out->entry_offset = (uint32_t)offset;
                     result = bigos::fs::FsStatus::Success;
                     goto done;
                 }
@@ -498,7 +500,7 @@ namespace fs {
         if (__mount == nullptr || __absolute_path == nullptr || __out == nullptr || __absolute_path[0] != '/')
             return FsStatus::InvalidArgument;
 
-        FileMetadata current = {__mount->root_directory_cluster, __mount->bytes_per_cluster, true, true};
+        FileMetadata current = {__mount->root_directory_cluster, 0, 0, __mount->bytes_per_cluster, true, true};
         const char *cursor = __absolute_path + 1;
         if (*cursor == 0) {
             *__out = current;

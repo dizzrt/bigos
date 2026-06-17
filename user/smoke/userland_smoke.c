@@ -360,7 +360,7 @@ static void test_runtime_filesystem(void) {
     if (stat("/rw/runtime_dir", &st) != 0 || st.type != BIGOS_METADATA_TYPE_DIRECTORY || !S_ISDIR(st.st_mode))
         fail("runtime-stat-dir");
     if (stat("/boot/user/init.elf", &st) != 0 || st.type != BIGOS_METADATA_TYPE_REGULAR || st.st_size == 0 ||
-        st.st_object_id != 0)
+        st.st_object_id == 0)
         fail("runtime-stat-exfat");
 
     int fd = open("/rw/runtime_file.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
@@ -370,7 +370,7 @@ static void test_runtime_filesystem(void) {
     if (write(fd, payload, strlen(payload)) != (ssize_t)strlen(payload))
         fail("runtime-write");
     if (fstat(fd, &st) != 0 || st.type != BIGOS_METADATA_TYPE_REGULAR || st.st_size != strlen(payload) ||
-        st.st_uid != 0 || st.st_gid != 0 || st.st_object_id != 0)
+        st.st_uid != 0 || st.st_gid != 0 || st.st_object_id == 0)
         fail("runtime-fstat-file");
     if (lseek(fd, 0, SEEK_CUR) != (off_t)strlen(payload))
         fail("runtime-fstat-offset");

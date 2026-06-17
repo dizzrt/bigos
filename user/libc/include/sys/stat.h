@@ -21,7 +21,7 @@ struct stat {
     unsigned int st_nlink;
     unsigned int reserved0;
     unsigned long st_size;
-    unsigned long st_object_id; /* first ABI version always returns zero */
+    unsigned long st_object_id; /* stable within a mounted backend while object exists */
     unsigned long reserved[4];
 };
 
