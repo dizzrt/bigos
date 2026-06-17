@@ -196,6 +196,9 @@ namespace bigos::proc {
         // Per-process current directory as a bounded absolute VFS path. It is
         // inline so fork copies independently and reap has no cwd heap teardown.
         char cwd[bigos::vfs::MAX_PATH_LEN + 1];
+        // The cwd path was removed from its parent. getcwd remains deterministic,
+        // while relative lookup from this cwd is rejected until chdir succeeds.
+        bool cwd_deleted;
         // True when the Process object itself was allocated from the kernel heap
         // via alloc_process_object() and must be freed on reap. Static smoke
         // objects keep this false so the reaper never frees static storage.
@@ -285,6 +288,8 @@ namespace bigos::proc {
     bool copy_current_user_buffer(uint64_t __addr, void *__dst, uint64_t __len) noexcept;
     bool copy_to_current_user_buffer(uint64_t __addr, const void *__src, uint64_t __len) noexcept;
     const char *current_cwd() noexcept;
+    bool current_cwd_deleted() noexcept;
+    void mark_cwd_deleted(const char *__abs_path) noexcept;
     bool init_cwd(Process *__process, const char *__cwd = "/") noexcept;
     int64_t chdir_current(const char *__path) noexcept;
     int64_t getcwd_current(char *__dst, size_t __dst_len) noexcept;

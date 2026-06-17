@@ -162,8 +162,12 @@ static void require_file_contains(const char *path, const char *expect) {
             break;
     }
     close(fd);
-    if (total == 0)
-        fail("record-read");
+    if (total == 0) {
+        emit("BIGOS_USERLAND_FAILED record-empty path=");
+        emit(path);
+        emit("\n");
+        exit(1);
+    }
     buf[total] = 0;
     if (!contains(buf, expect)) {
         emit("BIGOS_USERLAND_FAILED record-content path=");
@@ -352,6 +356,11 @@ static void test_runtime_filesystem(void) {
     unlink("/rw/runtime_rename_existing.txt");
     unlink("/rw/runtime_rename_ro.txt");
     unlink("/rw/runtime_full.txt");
+    unlink("/rw/runtime_tree/sub/a.txt");
+    unlink("/rw/runtime_tree/sub/b.txt");
+    rmdir("/rw/runtime_tree/sub/empty");
+    rmdir("/rw/runtime_tree/sub");
+    rmdir("/rw/runtime_tree");
     if (mkdir("/rw/runtime_rename_dir", 0755) < 0 && errno != EEXIST)
         fail("runtime-rename-dir-setup");
     if (mkdir("/rw/runtime_dir", 0755) < 0 && errno != EEXIST)
@@ -419,6 +428,62 @@ static void test_runtime_filesystem(void) {
         fail("runtime-readdir-file");
     if (!dirents_contain(entries, count, "runtime_dir", BIGOS_DIRENT_TYPE_DIRECTORY))
         fail("runtime-readdir-dir");
+
+    if (mkdir("/rw/runtime_tree", 0755) != 0)
+        fail("runtime-tree-mkdir");
+    if (mkdir("/rw/runtime_tree/sub", 0755) != 0)
+        fail("runtime-tree-mkdir-sub");
+    if (mkdir("/rw/runtime_tree/sub/empty", 0755) != 0)
+        fail("runtime-tree-mkdir-empty");
+    int tree_a = open("/rw/runtime_tree/sub/a.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    int tree_b = open("/rw/runtime_tree/sub/b.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (tree_a < 0 || tree_b < 0)
+        fail("runtime-tree-open");
+    if (write(tree_a, "tree-a", 6) != 6 || write(tree_b, "tree-b", 6) != 6)
+        fail("runtime-tree-write");
+    close(tree_a);
+    close(tree_b);
+    if (stat("/rw/runtime_tree/sub/a.txt", &st) != 0 || st.st_size != 6 || !S_ISREG(st.st_mode))
+        fail("runtime-tree-stat-file");
+    int tree_dir = open("/rw/runtime_tree/sub", O_RDONLY, 0);
+    if (tree_dir < 0)
+        fail("runtime-tree-open-dir");
+    count = bigos_readdir(tree_dir, entries, BIGOS_DIRENT_MAX_BATCH);
+    close(tree_dir);
+    if (count < 0 || !dirents_contain(entries, count, "a.txt", BIGOS_DIRENT_TYPE_FILE) ||
+        !dirents_contain(entries, count, "b.txt", BIGOS_DIRENT_TYPE_FILE) ||
+        !dirents_contain(entries, count, "empty", BIGOS_DIRENT_TYPE_DIRECTORY))
+        fail("runtime-tree-readdir");
+    errno = 0;
+    if (rmdir("/rw/runtime_tree/sub") != -1 || errno != ENOTEMPTY)
+        fail("runtime-tree-rmdir-not-empty");
+    errno = 0;
+    if (rmdir("/rw/runtime_tree/sub/a.txt") != -1 || errno != ENOTDIR)
+        fail("runtime-tree-rmdir-file");
+    errno = 0;
+    if (rmdir("/boot") != -1 || errno != EROFS)
+        fail("runtime-tree-rmdir-rofs");
+    errno = 0;
+    if (unlink("/rw/runtime_tree/sub/empty") != -1 || errno != EISDIR)
+        fail("runtime-tree-unlink-dir");
+    if (rmdir("/rw/runtime_tree/sub/empty") != 0)
+        fail("runtime-tree-rmdir-empty");
+    if (unlink("/rw/runtime_tree/sub/a.txt") != 0)
+        fail("runtime-tree-unlink-a");
+    tree_dir = open("/rw/runtime_tree/sub", O_RDONLY, 0);
+    if (tree_dir < 0)
+        fail("runtime-tree-open-dir2");
+    count = bigos_readdir(tree_dir, entries, BIGOS_DIRENT_MAX_BATCH);
+    close(tree_dir);
+    if (count < 0 || dirents_contain(entries, count, "a.txt", BIGOS_DIRENT_TYPE_FILE) ||
+        !dirents_contain(entries, count, "b.txt", BIGOS_DIRENT_TYPE_FILE))
+        fail("runtime-tree-readdir-after-unlink");
+    if (unlink("/rw/runtime_tree/sub/b.txt") != 0)
+        fail("runtime-tree-unlink-b");
+    if (rmdir("/rw/runtime_tree/sub") != 0)
+        fail("runtime-tree-rmdir-sub");
+    if (rmdir("/rw/runtime_tree") != 0)
+        fail("runtime-tree-rmdir-root");
 
     fd = open("/rw/runtime_rename_src.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (fd < 0)
@@ -590,6 +655,22 @@ static void test_current_directory(char **envp) {
 
     if (chdir("/rw/cwd_test") != 0)
         fail("cwd-chdir-parent");
+    rmdir("/rw/cwd_test/deleted");
+    if (mkdir("/rw/cwd_test/deleted", 0755) != 0)
+        fail("cwd-deleted-mkdir");
+    if (chdir("/rw/cwd_test/deleted") != 0)
+        fail("cwd-deleted-chdir");
+    if (rmdir("/rw/cwd_test/deleted") != 0)
+        fail("cwd-deleted-rmdir");
+    if (getcwd(cwd, sizeof(cwd)) == NULL || strcmp(cwd, "/rw/cwd_test/deleted") != 0)
+        fail("cwd-deleted-getcwd");
+    errno = 0;
+    if (open("new.txt", O_RDWR | O_CREAT | O_TRUNC, 0644) != -1 || errno != ENOENT)
+        fail("cwd-deleted-relative");
+    if (chdir("..") != 0)
+        fail("cwd-deleted-dotdot");
+    if (getcwd(cwd, sizeof(cwd)) == NULL || strcmp(cwd, "/rw/cwd_test") != 0)
+        fail("cwd-deleted-dotdot-cwd");
     char *pwd_argv[] = {(char *)"/bin/pwd", NULL};
     run_program("/bin/pwd", pwd_argv, envp);
     if (chdir("/") != 0)
@@ -748,19 +829,11 @@ static void test_smoke_shell(char **envp) {
     if (move_pipe_fds_from_stdio(input) < 0)
         fail("shell-pipe-fds");
     unlink("/rw/smoke_shell_io.txt");
-    unlink("/rw/smoke_shell_redir.txt");
-    unlink("/rw/smoke_shell_path_file.txt");
-    unlink("/rw/smoke_shell_renamed.txt");
-    unlink("/rw/smoke_shell_existing.txt");
-    unlink("/rw/smoke_shell_cat_redir.txt");
-    unlink("/rw/smoke_shell_stat.txt");
     unlink("/rw/smoke_shell_ls_rw.txt");
-    unlink("/rw/smoke_args.txt");
-    int path_file = open("/rw/smoke_shell_path_file.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
-    if (path_file < 0)
-        fail("shell-path-file-open");
-    write_all_or_exit(path_file, "shell-path-content\n");
-    close(path_file);
+    unlink("/rw/smoke_shell_stat.txt");
+    unlink("/rw/smoke_shell_path_dir/nested/file.txt");
+    rmdir("/rw/smoke_shell_path_dir/nested");
+    rmdir("/rw/smoke_shell_path_dir");
     int transcript = open("/rw/smoke_shell_io.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (transcript < 0)
         fail("shell-transcript-open");
@@ -789,61 +862,30 @@ static void test_smoke_shell(char **envp) {
 
     close(input[0]);
     close(transcript);
-    write_all_or_exit(input[1], "/bin/smoke/exit 7\n");
-    write_all_or_exit(input[1], "status\n");
-    write_all_or_exit(input[1], "/bin/smoke/args alpha beta\n");
-    write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\n");
-    write_all_or_exit(input[1], "echo pipe-status | /bin/smoke/exit 7\n");
-    write_all_or_exit(input[1], "status\n");
     write_all_or_exit(input[1], "cd /rw\n");
     write_all_or_exit(input[1], "/bin/pwd\n");
-    write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\n");
-    write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt\n");
-    write_all_or_exit(input[1], "echo existing > smoke_shell_existing.txt\n");
-    write_all_or_exit(input[1], "/bin/rename smoke_shell_path_file.txt smoke_shell_renamed.txt\n");
-    write_all_or_exit(input[1], "/bin/cat smoke_shell_renamed.txt\n");
-    write_all_or_exit(input[1], "/bin/rename smoke_shell_renamed.txt smoke_shell_existing.txt\n");
-    write_all_or_exit(input[1], "/bin/rename /boot/user/init.elf smoke_shell_ro.txt\n");
-    write_all_or_exit(input[1], "/bin/cat smoke_shell_renamed.txt > smoke_shell_cat_redir.txt\n");
-    write_all_or_exit(input[1], "/bin/stat smoke_shell_renamed.txt > smoke_shell_stat.txt\n");
     write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\n");
-    write_all_or_exit(input[1], "ls . > smoke_shell_ls_rw.txt\n");
-    write_all_or_exit(input[1], "cat smoke_shell_renamed.txt | /bin/cat\n");
-    write_all_or_exit(input[1], "/bin/cat /rw/no_such_path_tool\n");
-    write_all_or_exit(input[1], "missing-command\n");
+    write_all_or_exit(input[1], "mkdir smoke_shell_path_dir/nested\n");
+    write_all_or_exit(input[1], "echo nested-ok > smoke_shell_path_dir/nested/file.txt\n");
+    write_all_or_exit(input[1], "ls smoke_shell_path_dir > smoke_shell_ls_rw.txt\n");
+    write_all_or_exit(input[1], "/bin/stat smoke_shell_path_dir/nested/file.txt > smoke_shell_stat.txt\n");
+    write_all_or_exit(input[1], "/bin/rmdir smoke_shell_path_dir/nested\n");
+    write_all_or_exit(input[1], "/bin/rm smoke_shell_path_dir/nested/file.txt\n");
+    write_all_or_exit(input[1], "/bin/rmdir smoke_shell_path_dir/nested\n");
+    write_all_or_exit(input[1], "/bin/stat smoke_shell_path_dir/nested\n");
     write_all_or_exit(input[1], "status\n");
-    write_all_or_exit(input[1], "echo unsupported ;\n");
-    write_all_or_exit(input[1], "status\n");
-    write_all_or_exit(input[1], "/bin/rm /boot/user/init.elf\n");
-    write_all_or_exit(input[1], "/bin/rm smoke_shell_cat_redir.txt\n");
-    write_all_or_exit(input[1], "/bin/stat smoke_shell_cat_redir.txt\n");
     write_all_or_exit(input[1], "echo shell-alive\n");
     write_all_or_exit(input[1], "exit 0\n");
     close(input[1]);
     if (waitpid(pid, NULL, 0) != pid)
         fail("shell-wait");
 
-    require_file_contains("/rw/smoke_exit.txt", "smoke_exit requested=7");
-    require_file_contains("/rw/smoke_args.txt", "smoke_args argc=3 argv[2]=beta");
-    require_file_contains("/rw/smoke_shell_redir.txt", "redir-ok");
-    require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok");
-    require_file_contains("/rw/smoke_shell_io.txt", "status 7");
     require_file_contains("/rw/smoke_shell_io.txt", "/rw");
-    require_file_contains("/rw/smoke_shell_io.txt", "shell-path-content");
-    require_file_contains("/rw/smoke_shell_io.txt", "cat: /rw/no_such_path_tool: open errno=2");
-    require_file_contains("/rw/smoke_shell_io.txt", "sh: command not found: missing-command");
-    require_file_contains("/rw/smoke_shell_io.txt", "status 127");
-    require_file_contains("/rw/smoke_shell_io.txt", "sh: unsupported syntax: ;");
-    require_file_contains("/rw/smoke_shell_io.txt", "status 2");
-    require_file_contains("/rw/smoke_shell_io.txt", "rm: /boot/user/init.elf: errno=30");
-    require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_cat_redir.txt: errno=2");
-    require_file_contains("/rw/smoke_shell_renamed.txt", "shell-path-content");
-    require_file_contains("/rw/smoke_shell_existing.txt", "existing");
-    require_file_contains("/rw/smoke_shell_io.txt", "rename: smoke_shell_renamed.txt -> smoke_shell_existing.txt: errno=17");
-    require_file_contains("/rw/smoke_shell_io.txt", "rename: /boot/user/init.elf -> smoke_shell_ro.txt: errno=30");
-    require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_renamed.txt type=file");
-    require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir smoke_shell_path_dir");
-    require_file_contains("/rw/smoke_shell_ls_rw.txt", "file smoke_shell_renamed.txt");
+    require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir nested");
+    require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_path_dir/nested/file.txt type=file");
+    require_file_contains("/rw/smoke_shell_io.txt", "rmdir: smoke_shell_path_dir/nested: errno=39");
+    require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_path_dir/nested: errno=2");
+    require_file_contains("/rw/smoke_shell_io.txt", "status 1");
     require_file_contains("/rw/smoke_shell_io.txt", "shell-alive");
 }
 

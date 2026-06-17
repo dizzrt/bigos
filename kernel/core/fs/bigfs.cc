@@ -1153,10 +1153,60 @@ namespace bigfs {
         if (tnode.type == INODE_DIRECTORY)
             return Status::IsDirectory;
 
-        if (!dir_remove_entry(&dir, leaf))
-            return Status::NotFound;
+        const uint32_t old_link_count = tnode.link_count;
         tnode.link_count = 0;
-        (void)store_inode(target, &tnode);
+        if (!store_inode(target, &tnode))
+            return Status::IoError;
+        if (!dir_remove_entry(&dir, leaf)) {
+            tnode.link_count = old_link_count;
+            (void)store_inode(target, &tnode);
+            return Status::NotFound;
+        }
+        maybe_free_unlinked_inode(target, &tnode);
+        return Status::Success;
+    }
+
+    Status rmdir(const char *__abs_path, uint32_t __uid, uint32_t __gid) noexcept {
+        if (!g_initialized || __abs_path == nullptr)
+            return Status::Invalid;
+        const char *rest = nullptr;
+        if (!strip_prefix(__abs_path, &rest))
+            return Status::Invalid;
+        uint32_t parent = 0;
+        char leaf[DIRENT_NAME_MAX + 1];
+        const Status rp = resolve_parent(rest, &parent, leaf, sizeof(leaf));
+        if (rp != Status::Success)
+            return rp;
+
+        DiskInode dir;
+        if (!load_inode(parent, &dir) || dir.type != INODE_DIRECTORY)
+            return Status::NotDirectory;
+        uint32_t target = 0;
+        if (!dir_lookup(&dir, leaf, &target))
+            return Status::NotFound;
+        const Status acc = check_access(__uid, __gid, &dir, bigos::cred::Access::Write);
+        if (acc != Status::Success)
+            return acc;
+
+        DiskInode tnode;
+        if (!load_inode(target, &tnode))
+            return Status::IoError;
+        if (tnode.type == INODE_REGULAR)
+            return Status::NotDirectory;
+        if (tnode.type != INODE_DIRECTORY)
+            return Status::Invalid;
+        if (!dir_is_empty(&tnode))
+            return Status::NotEmpty;
+
+        const uint32_t old_link_count = tnode.link_count;
+        tnode.link_count = 0;
+        if (!store_inode(target, &tnode))
+            return Status::IoError;
+        if (!dir_remove_entry(&dir, leaf)) {
+            tnode.link_count = old_link_count;
+            (void)store_inode(target, &tnode);
+            return Status::NotFound;
+        }
         maybe_free_unlinked_inode(target, &tnode);
         return Status::Success;
     }

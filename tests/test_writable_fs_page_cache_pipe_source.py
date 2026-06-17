@@ -183,7 +183,9 @@ def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:
     assert 'bigos::bigfs::rename(' in vfs
     assert 'rename("/rw/runtime_rename_src.txt", "/rw/runtime_rename_dst.txt")' in smoke
     assert 'rename("/rw/runtime_rename_dst.txt", "/rw/runtime_rename_existing.txt")' in smoke
-    assert "('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rename', 'stat', 'pwd')" in read_source('tools/boot_debug.py')
+    assert "('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rmdir', 'rename', 'stat', 'pwd')" in read_source(
+        'tools/boot_debug.py'
+    )
     assert 'tnode.link_count = 0;' in bigfs
     assert 'bigos::vfs::DIRENT_TYPE_DIRECTORY' in bigfs
     assert 'Status readdir(File *__file' in vfs

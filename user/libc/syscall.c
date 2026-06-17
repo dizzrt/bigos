@@ -177,6 +177,10 @@ int unlink(const char *path) {
     return (int)errno_translate(syscall1(SYS_UNLINK, (long)path));
 }
 
+int rmdir(const char *path) {
+    return (int)errno_translate(syscall1(SYS_RMDIR, (long)path));
+}
+
 int rename(const char *oldpath, const char *newpath) {
     return (int)errno_translate(syscall2(SYS_RENAME, (long)oldpath, (long)newpath));
 }

@@ -374,7 +374,89 @@ namespace {
             return;
         }
 
-        // 4) read-only exFAT backend write rejected with EROFS via the VFS layer.
+        // 4) nested directory tree mutation, enumeration and empty-directory removal.
+        s = bigos::bigfs::mkdir("/rw/tree", 0755, uid, gid);
+        if (s != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-mkdir\n");
+            return;
+        }
+        s = bigos::bigfs::mkdir("/rw/tree/sub", 0755, uid, gid);
+        if (s != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-mkdir-sub\n");
+            return;
+        }
+        s = bigos::bigfs::mkdir("/rw/tree/sub/empty", 0755, uid, gid);
+        if (s != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-mkdir-empty\n");
+            return;
+        }
+        uint32_t tree_a = 0;
+        s = bigos::bigfs::open("/rw/tree/sub/a.txt", bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid,
+            gid, &tree_a, &size, &is_dir);
+        if (s != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-create-a\n");
+            return;
+        }
+        s = bigos::bigfs::write(tree_a, 0, "tree-a", 6, uid, gid, &written);
+        bigos::bigfs::close_inode(tree_a);
+        if (s != bigos::bigfs::Status::Success || written != 6) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-write-a\n");
+            return;
+        }
+        uint32_t tree_b = 0;
+        s = bigos::bigfs::open("/rw/tree/sub/b.txt", bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid,
+            gid, &tree_b, &size, &is_dir);
+        if (s != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-create-b\n");
+            return;
+        }
+        s = bigos::bigfs::write(tree_b, 0, "tree-b", 6, uid, gid, &written);
+        bigos::bigfs::close_inode(tree_b);
+        if (s != bigos::bigfs::Status::Success || written != 6) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-write-b\n");
+            return;
+        }
+        uint32_t tree_dir = 0;
+        s = bigos::bigfs::open("/rw/tree/sub", bigos::vfs::OPEN_RDONLY, 0644, uid, gid, &tree_dir, &size, &is_dir);
+        if (s != bigos::bigfs::Status::Success || !is_dir) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-open-dir\n");
+            return;
+        }
+        bigos::bigfs::DirectoryEntry entries[4] = {};
+        size_t entries_read = 0;
+        uint64_t next_offset = 0;
+        s = bigos::bigfs::readdir(tree_dir, 0, entries, 4, &entries_read, &next_offset);
+        bigos::bigfs::close_inode(tree_dir);
+        bool found_a = false;
+        bool found_b = false;
+        bool found_empty = false;
+        for (size_t i = 0; i < entries_read; i++) {
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_FILE && wfs_bytes_equal(entries[i].name, "a.txt", 5))
+                found_a = true;
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_FILE && wfs_bytes_equal(entries[i].name, "b.txt", 5))
+                found_b = true;
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_DIRECTORY &&
+                wfs_bytes_equal(entries[i].name, "empty", 5))
+                found_empty = true;
+        }
+        if (s != bigos::bigfs::Status::Success || !found_a || !found_b || !found_empty) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-readdir\n");
+            return;
+        }
+        if (bigos::bigfs::rmdir("/rw/tree/sub", uid, gid) != bigos::bigfs::Status::NotEmpty) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-rmdir-not-empty\n");
+            return;
+        }
+        if (bigos::bigfs::unlink("/rw/tree/sub/a.txt", uid, gid) != bigos::bigfs::Status::Success ||
+            bigos::bigfs::unlink("/rw/tree/sub/b.txt", uid, gid) != bigos::bigfs::Status::Success ||
+            bigos::bigfs::rmdir("/rw/tree/sub/empty", uid, gid) != bigos::bigfs::Status::Success ||
+            bigos::bigfs::rmdir("/rw/tree/sub", uid, gid) != bigos::bigfs::Status::Success ||
+            bigos::bigfs::rmdir("/rw/tree", uid, gid) != bigos::bigfs::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-cleanup\n");
+            return;
+        }
+
+        // 5) read-only exFAT backend write rejected with EROFS via the VFS layer.
         if (bigos::vfs::init() == bigos::vfs::Status::Success) {
             bigos::vfs::File *ro = nullptr;
             const bigos::vfs::Status ro_status =
@@ -443,10 +525,33 @@ namespace {
         const char *dir_path = "/rw/persistdir";
         const char *nested_path = "/rw/persistdir/nested.txt";
         const char *renamed_path = "/rw/persistdir/renamed.txt";
+        const char *tree_path = "/rw/persistdir/tree";
+        const char *tree_sub_path = "/rw/persistdir/tree/sub";
+        const char *tree_empty_path = "/rw/persistdir/tree/sub/empty";
+        const char *tree_a_path = "/rw/persistdir/tree/sub/a.txt";
+        const char *tree_b_path = "/rw/persistdir/tree/sub/b.txt";
         const char *nested_payload = "BIGOS_PERSISTENT_DIR_PAYLOAD";
 
         bigos::bigfs::Status status = bigos::bigfs::mkdir(dir_path, 0755, uid, gid);
         if (status != bigos::bigfs::Status::Success && status != bigos::bigfs::Status::Exists)
+            return false;
+        status = bigos::bigfs::mkdir(tree_path, 0755, uid, gid);
+        if (status != bigos::bigfs::Status::Success && status != bigos::bigfs::Status::Exists)
+            return false;
+        status = bigos::bigfs::mkdir(tree_sub_path, 0755, uid, gid);
+        if (status != bigos::bigfs::Status::Success && status != bigos::bigfs::Status::Exists)
+            return false;
+        status = bigos::bigfs::mkdir(tree_empty_path, 0755, uid, gid);
+        if (status != bigos::bigfs::Status::Success && status != bigos::bigfs::Status::Exists)
+            return false;
+        if (!pfs_write_file(tree_a_path, "persist-a") || !pfs_write_file(tree_b_path, "persist-b"))
+            return false;
+        if (bigos::bigfs::rmdir(tree_sub_path, uid, gid) != bigos::bigfs::Status::NotEmpty)
+            return false;
+        status = bigos::bigfs::rmdir(tree_empty_path, uid, gid);
+        if (status != bigos::bigfs::Status::Success && status != bigos::bigfs::Status::NotFound)
+            return false;
+        if (!pfs_read_file(tree_a_path, "persist-a") || !pfs_read_file(tree_b_path, "persist-b"))
             return false;
         if (!pfs_write_file(nested_path, nested_payload))
             return false;
@@ -474,6 +579,32 @@ namespace {
             if (entries[i].type == bigos::bigfs::INODE_REGULAR && pfs_bytes_equal(entries[i].name, "renamed.txt", 11))
                 found_renamed = true;
         if (!found_renamed)
+            return false;
+
+        status = bigos::bigfs::open(tree_sub_path, bigos::vfs::OPEN_RDONLY, 0644, uid, gid, &dir_inode, &dir_size, &is_dir);
+        if (status != bigos::bigfs::Status::Success || !is_dir)
+            return false;
+        for (size_t i = 0; i < 4; i++)
+            entries[i] = {};
+        entries_read = 0;
+        next_offset = 0;
+        status = bigos::bigfs::readdir(dir_inode, 0, entries, 4, &entries_read, &next_offset);
+        bigos::bigfs::close_inode(dir_inode);
+        if (status != bigos::bigfs::Status::Success)
+            return false;
+        bool found_a = false;
+        bool found_b = false;
+        bool found_empty = false;
+        for (size_t i = 0; i < entries_read; i++) {
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_FILE && pfs_bytes_equal(entries[i].name, "a.txt", 5))
+                found_a = true;
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_FILE && pfs_bytes_equal(entries[i].name, "b.txt", 5))
+                found_b = true;
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_DIRECTORY &&
+                pfs_bytes_equal(entries[i].name, "empty", 5))
+                found_empty = true;
+        }
+        if (!found_a || !found_b || found_empty)
             return false;
 
         uint32_t file_inode = 0;

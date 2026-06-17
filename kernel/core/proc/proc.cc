@@ -120,6 +120,23 @@ namespace {
     bigos::proc::Process *current_process_slot() noexcept {
         return (bigos::proc::Process *)bigos::cpu::current_state().current_process;
     }
+
+    bool path_equal(const char *__a, const char *__b) noexcept {
+        if (__a == nullptr || __b == nullptr)
+            return false;
+        size_t i = 0;
+        while (__a[i] != 0 && __b[i] != 0) {
+            if (__a[i] != __b[i])
+                return false;
+            i++;
+        }
+        return __a[i] == __b[i];
+    }
+
+    bool starts_with_dotdot_component(const char *__path) noexcept {
+        return __path != nullptr && __path[0] == '.' && __path[1] == '.' && (__path[2] == 0 || __path[2] == '/');
+    }
+
     // Intrusive process registry: a singly-anchored doubly linked list head plus
     // a live count bounded by MAX_PROCESSES_SOFT_LIMIT. Replaces the former fixed
     // g_process_table[MAX_PROCESSES] array; nodes are embedded in each Process.
@@ -2255,6 +2272,20 @@ namespace bigos::proc {
         return process->cwd;
     }
 
+    bool current_cwd_deleted() noexcept {
+        const Process *process = current_process_slot();
+        return process != nullptr && process->cwd_deleted;
+    }
+
+    void mark_cwd_deleted(const char *__abs_path) noexcept {
+        if (__abs_path == nullptr || __abs_path[0] != '/')
+            return;
+        for (Process *process = g_process_list_head; process != nullptr; process = process->reg_next) {
+            if (process->cwd[0] != 0 && path_equal(process->cwd, __abs_path))
+                process->cwd_deleted = true;
+        }
+    }
+
     bool init_cwd(Process *__process, const char *__cwd) noexcept {
         if (__process == nullptr || __cwd == nullptr)
             return false;
@@ -2264,6 +2295,7 @@ namespace bigos::proc {
         if (len == 0 || len > bigos::vfs::MAX_PATH_LEN || __cwd[0] != '/')
             return false;
         memcpy(__process->cwd, __cwd, len + 1);
+        __process->cwd_deleted = false;
         return true;
     }
 
@@ -2278,6 +2310,8 @@ namespace bigos::proc {
             if (init_status != bigos::vfs::Status::Success)
                 return (int64_t)init_status;
         }
+        if (process->cwd_deleted && __path[0] != '/' && !starts_with_dotdot_component(__path))
+            return -bigos::ENOENT;
 
         char resolved[bigos::vfs::MAX_PATH_LEN + 1];
         bigos::vfs::Status status = bigos::vfs::resolve_path(__path, process->cwd, resolved, sizeof(resolved));
@@ -2290,6 +2324,7 @@ namespace bigos::proc {
         if (metadata.type != BIGOS_METADATA_TYPE_DIRECTORY)
             return -bigos::ENOTDIR;
         memcpy(process->cwd, resolved, strlen(resolved) + 1);
+        process->cwd_deleted = false;
         return 0;
     }
 
@@ -2900,6 +2935,7 @@ namespace bigos::proc {
         child->egid = parent->egid;
         child->start_unix_time = bigos::time::current_unix_time();
         memcpy(child->cwd, parent->cwd, sizeof(child->cwd));
+        child->cwd_deleted = parent->cwd_deleted;
 
         // Signal inheritance: the child inherits the disposition table and blocked
         // mask field-by-field; its pending set starts empty (POSIX fork). No new

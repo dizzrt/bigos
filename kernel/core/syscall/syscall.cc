@@ -83,6 +83,10 @@ namespace sys {
             return false;
         }
 
+        static bool relative_lookup_blocked_by_deleted_cwd(const char *__path) noexcept {
+            return __path != nullptr && __path[0] != '/' && bigos::proc::current_cwd_deleted();
+        }
+
         static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
             // Default console fast path: fd 1/2 with no installed file writes to
             // the visible runtime console while preserving the serial marker path
@@ -134,6 +138,8 @@ namespace sys {
             char path[SYS_PATH_MAX_LEN + 1];
             if (!copy_user_path(__path, path, sizeof(path)))
                 return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
 
             if (!bigos::vfs::initialized()) {
                 const bigos::vfs::Status init_status = bigos::vfs::init();
@@ -287,6 +293,8 @@ namespace sys {
             char path[SYS_PATH_MAX_LEN + 1];
             if (!copy_user_path(__path, path, sizeof(path)))
                 return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
             if (!bigos::vfs::initialized()) {
                 const bigos::vfs::Status init_status = bigos::vfs::init();
                 if (init_status != bigos::vfs::Status::Success)
@@ -295,7 +303,8 @@ namespace sys {
             bigos::proc::Process *process = bigos::proc::current_process();
             const uint32_t uid = process != nullptr ? process->uid : 0;
             const uint32_t gid = process != nullptr ? process->gid : 0;
-            return vfs_status_to_syscall(bigos::vfs::mkdir(path, bigos::proc::current_cwd(), (uint32_t)__mode, uid, gid));
+            return vfs_status_to_syscall(
+                bigos::vfs::mkdir(path, bigos::proc::current_cwd(), (uint32_t)__mode, uid, gid));
         }
 
         static int64_t sys_unlink(uint64_t __path) noexcept {
@@ -304,6 +313,8 @@ namespace sys {
             char path[SYS_PATH_MAX_LEN + 1];
             if (!copy_user_path(__path, path, sizeof(path)))
                 return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
             if (!bigos::vfs::initialized()) {
                 const bigos::vfs::Status init_status = bigos::vfs::init();
                 if (init_status != bigos::vfs::Status::Success)
@@ -315,6 +326,34 @@ namespace sys {
             return vfs_status_to_syscall(bigos::vfs::unlink(path, bigos::proc::current_cwd(), uid, gid));
         }
 
+        static int64_t sys_rmdir(uint64_t __path) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+            bigos::proc::Process *process = bigos::proc::current_process();
+            const uint32_t uid = process != nullptr ? process->uid : 0;
+            const uint32_t gid = process != nullptr ? process->gid : 0;
+            char resolved[SYS_PATH_MAX_LEN + 1];
+            bigos::vfs::Status status =
+                bigos::vfs::resolve_path(path, bigos::proc::current_cwd(), resolved, sizeof(resolved));
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            status = bigos::vfs::rmdir(resolved, uid, gid);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            bigos::proc::mark_cwd_deleted(resolved);
+            return 0;
+        }
+
         static int64_t sys_rename(uint64_t __old_path, uint64_t __new_path) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
@@ -323,6 +362,8 @@ namespace sys {
             if (!copy_user_path(__old_path, old_path, sizeof(old_path)) ||
                 !copy_user_path(__new_path, new_path, sizeof(new_path)))
                 return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(old_path) || relative_lookup_blocked_by_deleted_cwd(new_path))
+                return -bigos::ENOENT;
             if (!bigos::vfs::initialized()) {
                 const bigos::vfs::Status init_status = bigos::vfs::init();
                 if (init_status != bigos::vfs::Status::Success)
@@ -392,6 +433,8 @@ namespace sys {
             char path[SYS_PATH_MAX_LEN + 1];
             if (!copy_user_path(__path, path, sizeof(path)))
                 return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
             if (!bigos::vfs::initialized()) {
                 const bigos::vfs::Status init_status = bigos::vfs::init();
                 if (init_status != bigos::vfs::Status::Success)
@@ -629,6 +672,8 @@ namespace sys {
             char path[SYS_PATH_MAX_LEN + 1];
             if (!copy_user_path(__path, path, sizeof(path)))
                 return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
 
             char *argv[bigos::proc::EXEC_MAX_ARGC + 1] = {};
             char *envp[bigos::proc::EXEC_MAX_ENVC + 1] = {};
@@ -707,6 +752,9 @@ namespace sys {
                 break;
             case SYS_UNLINK:
                 result = __detail::sys_unlink(__frame->rdi);
+                break;
+            case SYS_RMDIR:
+                result = __detail::sys_rmdir(__frame->rdi);
                 break;
             case SYS_RENAME:
                 result = __detail::sys_rename(__frame->rdi, __frame->rsi);

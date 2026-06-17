@@ -71,6 +71,7 @@ on_build(function()
         { "ls", path.join(projectdir, "user", "bin", "ls.c") },
         { "mkdir", path.join(projectdir, "user", "bin", "mkdir.c") },
         { "rm", path.join(projectdir, "user", "bin", "rm.c") },
+        { "rmdir", path.join(projectdir, "user", "bin", "rmdir.c") },
         { "rename", path.join(projectdir, "user", "bin", "rename.c") },
         { "stat", path.join(projectdir, "user", "bin", "stat.c") },
         { "pwd", path.join(projectdir, "user", "bin", "pwd.c") },

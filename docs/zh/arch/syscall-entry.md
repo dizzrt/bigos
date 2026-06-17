@@ -69,6 +69,7 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_MAP_FILE`（number=35）：使用 `rdi` = fd、`rsi` = 页对齐文件偏移、`rdx` = 页对齐长度、`r10` = 权限、`r8` = 保留 flags（必须为 0）。它在用户 file-mapping 窗口发布一个有界只读、私有、惰性分页的 file-backed 映射，返回映射基址用户地址，或确定性负 errno（`-EBADF`/`-EACCES`/`-EINVAL`/`-ENOMEM`/`-EWOULDBLOCK`）。fd 必须指向可读 regular file，权限必须只读且非 W+X，失败时不发布部分 VMA。覆盖页在首次读访问时经 page/buffer cache 物化；对只读页的写访问、越界访问以及在不可阻塞上下文发起缓存装入均为确定性 kill。
 - `SYS_UNMAP_ANON`（number=36）：使用 `rdi` = 页对齐用户地址、`rsi` = 页对齐非零长度。它只接受用户低半区内由兼容 private anonymous VMA 完整覆盖的范围。成功时删除或拆分受影响 VMA，清除 present user PTE，通过 frame-reference helper 释放 owned/COW-shared frame，按 ownership metadata 回收空的动态用户页表页，并 invalidation 受影响的当前 CPU translation。
 - `SYS_PROTECT_ANON`（number=37）：使用 `rdi` = 页对齐用户地址、`rsi` = 页对齐非零长度、`rdx` = BigOS 权限 bit（`Read=1`、`Write=2`、`Execute=4`）。它只接受兼容 private anonymous VMA，拒绝 W+X 与 unsupported backing，先 staging 所需 VMA split 再发布 metadata，并更新 present PTE 权限，使页表权限不宽于 VMA policy。
+- `SYS_RMDIR`（number=38）：使用 `rdi` = 用户路径，在可写 `/rw` 后端删除空目录。它会以确定性负错误码拒绝常规文件、非空目录、缺失路径、只读后端目标、非法用户路径和不可阻塞上下文。
 
 这些 lifecycle syscall 是有界 BigOS 操作，不是完整 POSIX `munmap` 或 `mprotect`。它们不支持任意字节粒度、`MAP_FIXED` 覆盖、shared writable mapping、file-backed writable upgrade、write-back 语义、swap 或跨 CPU TLB shootdown。
 

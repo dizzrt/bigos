@@ -842,6 +842,24 @@ namespace vfs {
         return unlink(resolved, __uid, __gid);
     }
 
+    Status rmdir(const char *__path, uint32_t __uid, uint32_t __gid) noexcept {
+        if (!g_initialized)
+            return Status::NotInitialized;
+        if (__path == nullptr || __path[0] != '/')
+            return Status::InvalidArgument;
+        if (!bigos::bigfs::owns_path(__path))
+            return Status::ReadOnlyFs;
+        return bigfs_to_vfs(bigos::bigfs::rmdir(__path, __uid, __gid));
+    }
+
+    Status rmdir(const char *__path, const char *__cwd, uint32_t __uid, uint32_t __gid) noexcept {
+        char resolved[MAX_PATH_LEN + 1];
+        const Status status = resolve_path(__path, __cwd, resolved, sizeof(resolved));
+        if (status != Status::Success)
+            return status;
+        return rmdir(resolved, __uid, __gid);
+    }
+
     Status rename(const char *__old_path, const char *__new_path, uint32_t __uid, uint32_t __gid) noexcept {
         if (!g_initialized)
             return Status::NotInitialized;

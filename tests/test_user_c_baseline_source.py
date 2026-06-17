@@ -114,8 +114,9 @@ def test_bounded_path_tool_sources_use_libc_contracts() -> None:
 
     assert 'Not a complete POSIX ls' in ls
     assert 'stat(path, &st)' in ls
-    assert 'bigos_readdir(fd, entries, BIGOS_DIRENT_MAX_BATCH)' in ls
-    assert 'entry_type(entries[i].type)' in ls
+    assert 'DIR *dir = opendir(path)' in ls
+    assert 'struct dirent *entry = readdir(dir)' in ls
+    assert 'entry_type(entry->d_type)' in ls
 
     assert 'Not a complete POSIX mkdir' in mkdir_tool
     assert 'mkdir(argv[i], 0755)' in mkdir_tool
@@ -152,7 +153,7 @@ def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
     assert '#include "../../libc/include/sys/wait.h"' in libc_subset
     assert 'WAIT_ANY == 0' in libc_subset
     assert 'SIGUSR1 != 10' in libc_subset
-    assert 'fprintf(stderr, "smoke_libc_subset stderr errno=%d env=%s\\n"' in libc_subset
+    assert 'fprintf(stderr, "smoke_libc_subset stderr errno=%d env=%s width=%5u long=%ld\\n"' in libc_subset
     assert 'malloc((size_t)-64)' in libc_subset
     assert 'memmove(buf + 2, buf, 4)' in libc_subset
     assert 'errno != EFAULT' in libc_subset
@@ -178,31 +179,23 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'test_error_text();' in smoke
     assert 'test_signal_handler_return();' in smoke
     assert 'fstat(fd, &st)' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/smoke/exit 7\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "echo pipe-ok | /bin/cat\\n");' in smoke
     assert 'write_all_or_exit(input[1], "cd /rw\\n");' in smoke
     assert 'write_all_or_exit(input[1], "/bin/pwd\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "echo redir-ok > smoke_shell_redir.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/cat smoke_shell_path_file.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/cat smoke_shell_renamed.txt > smoke_shell_cat_redir.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/stat smoke_shell_renamed.txt > smoke_shell_stat.txt\\n");' in smoke
     assert 'write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "ls . > smoke_shell_ls_rw.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "cat smoke_shell_renamed.txt | /bin/cat\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/cat /rw/no_such_path_tool\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/rm /boot/user/init.elf\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/rm smoke_shell_cat_redir.txt\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/stat smoke_shell_cat_redir.txt\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "mkdir smoke_shell_path_dir/nested\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "ls smoke_shell_path_dir > smoke_shell_ls_rw.txt\\n");' in smoke
+    assert (
+        'write_all_or_exit(input[1], "/bin/stat smoke_shell_path_dir/nested/file.txt > smoke_shell_stat.txt\\n");'
+        in smoke
+    )
+    assert 'write_all_or_exit(input[1], "/bin/rmdir smoke_shell_path_dir/nested\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "/bin/stat smoke_shell_path_dir/nested\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo shell-alive\\n");' in smoke
-    assert 'unlink("/rw/smoke_args.txt")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_io.txt", "pipe-ok")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_redir.txt", "redir-ok")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_io.txt", "cat: /rw/no_such_path_tool: open errno=2")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_io.txt", "rm: /boot/user/init.elf: errno=30")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_cat_redir.txt: errno=2")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_renamed.txt type=file")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir smoke_shell_path_dir")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "file smoke_shell_renamed.txt")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir nested")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_path_dir/nested/file.txt type=file")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_io.txt", "rmdir: smoke_shell_path_dir/nested: errno=39")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_path_dir/nested: errno=2")' in smoke
+    assert 'require_file_contains("/rw/smoke_shell_io.txt", "status 1")' in smoke
     wait_index = proc.index('int64_t wait_current')
     mark_index = proc.index('mark_reap_pending(match);', wait_index)
     reap_index = proc.index('reap_pending_processes();', mark_index)

@@ -199,9 +199,9 @@ persist multiple files beyond the current clean-sync boundary.
 
 用户可见目标：shell 能创建/删除目录并可靠持久地写多文件，突破当前 clean-sync 边界限制。
 
-- [ ] Task M2.1: writable directory tree supporting directory creation/removal and
+- [x] Task M2.1: writable directory tree supporting directory creation/removal and
   creation/removal of multiple files within bounded semantics.
-- [ ] 任务 M2.1：可写目录树，在有界语义内支持目录创建/删除与多文件创建/删除。
+- [x] 任务 M2.1：可写目录树，在有界语义内支持目录创建/删除与多文件创建/删除。
 - [ ] Task M2.2: file extension write, truncate, and stable block allocation.
 - [ ] 任务 M2.2：文件扩展写、truncate 与稳定的块分配。
 - [ ] Task M2.3: metadata persistence and a minimal consistency strategy such as

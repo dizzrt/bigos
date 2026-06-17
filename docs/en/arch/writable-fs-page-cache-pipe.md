@@ -121,7 +121,8 @@ reclaiming the pipe when both ends are gone.
 
 New numbers are appended after `SYS_SIGRETURN = 19`: `SYS_LSEEK = 20`,
 `SYS_PIPE = 21`, `SYS_DUP = 22`, `SYS_DUP2 = 23`, `SYS_FSYNC = 24`,
-`SYS_MKDIR = 25`, `SYS_UNLINK = 26`, `SYS_EXECVE = 27`, and `SYS_READDIR = 28`.
+`SYS_MKDIR = 25`, `SYS_UNLINK = 26`, `SYS_EXECVE = 27`, `SYS_READDIR = 28`,
+and `SYS_RMDIR = 38`.
 `SYS_OPEN = 5` is extended to accept writable/create flags and an `O_CREAT`
 mode; `SYS_WRITE = 2` is extended to write file and pipe fds while preserving
 the console fast path. The register ABI, existing numbers, vector layout, and

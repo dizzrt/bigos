@@ -95,7 +95,7 @@ owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端�
 
 新号紧随 `SYS_SIGRETURN = 19` 追加：`SYS_LSEEK = 20`、`SYS_PIPE = 21`、
 `SYS_DUP = 22`、`SYS_DUP2 = 23`、`SYS_FSYNC = 24`、`SYS_MKDIR = 25`、
-`SYS_UNLINK = 26`、`SYS_EXECVE = 27`、`SYS_READDIR = 28`。`SYS_OPEN = 5`
+`SYS_UNLINK = 26`、`SYS_EXECVE = 27`、`SYS_READDIR = 28`、`SYS_RMDIR = 38`。`SYS_OPEN = 5`
 扩展为接受可写/创建 flags 与 `O_CREAT` 的 mode；`SYS_WRITE = 2` 扩展为写文件/管道
 fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布局与「syscall 不发 EOI」规则
 不变。写/管道/FS syscall 在分配或进入同步块 IO/阻塞前检查调度阻塞守卫。

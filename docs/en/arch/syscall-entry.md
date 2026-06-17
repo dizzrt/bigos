@@ -123,6 +123,10 @@ an EOI:
   anonymous VMAs, rejects W+X and unsupported backing, stages required VMA
   splits before publishing metadata, and updates present PTE permissions so page
   tables are no wider than VMA policy.
+- `SYS_RMDIR` (number=38): takes `rdi` = user path and removes an empty directory
+  on the writable `/rw` backend. It rejects regular files, non-empty directories,
+  missing paths, read-only backend targets, invalid user paths, and nonblocking
+  context with deterministic negative errno values.
 
 These lifecycle calls are bounded BigOS operations, not full POSIX `munmap` or
 `mprotect`. They do not support arbitrary byte granularity, `MAP_FIXED`
