@@ -106,6 +106,13 @@ namespace vfs {
     Status open(const char *__path, const char *__cwd, uint64_t __flags, uint32_t __mode, uint32_t __uid,
         uint32_t __gid, File **__out_file) noexcept;
     Status read(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
+    // Positioned read for file-backed page materialization. Reads up to __len
+    // bytes at the absolute file offset __offset through the existing cache-backed
+    // read path without permanently changing __file->offset. It is the single
+    // page-granular entry the demand-paging file-backed branch uses, so a single
+    // page that spans multiple cache blocks is aggregated by the backend read
+    // path and any underlying block IO error fails the whole call deterministically.
+    Status pread(File *__file, uint64_t __offset, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
     Status write(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
     Status lseek(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
     Status fsync(File *__file) noexcept;

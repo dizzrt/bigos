@@ -66,6 +66,7 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_CHDIR`（number=31）：使用 `rdi` = 用户 path；只有在完成有界路径复制、解析并确认目标为目录后，才提交进程 cwd。
 - `SYS_GETCWD`（number=32）：使用 `rdi` = 用户缓冲区、`rsi` = 缓冲区大小；复制 NUL 结尾 cwd，或返回确定性 `-ERANGE`、`-EFAULT`、`-EINVAL`。
 - `SYS_RENAME`（number=33）：使用 `rdi` = 旧用户 path、`rsi` = 新用户 path。它受限于当前有界可写 `/rw` regular-file rename 语义，不表示完整持久文件系统或跨设备 rename 支持。
+- `SYS_MAP_FILE`（number=35）：使用 `rdi` = fd、`rsi` = 页对齐文件偏移、`rdx` = 页对齐长度、`r10` = 权限、`r8` = 保留 flags（必须为 0）。它在用户 file-mapping 窗口发布一个有界只读、私有、惰性分页的 file-backed 映射，返回映射基址用户地址，或确定性负 errno（`-EBADF`/`-EACCES`/`-EINVAL`/`-ENOMEM`/`-EWOULDBLOCK`）。fd 必须指向可读 regular file，权限必须只读且非 W+X，失败时不发布部分 VMA。覆盖页在首次读访问时经 page/buffer cache 物化；对只读页的写访问、越界访问以及在不可阻塞上下文发起缓存装入均为确定性 kill。它不是完整 POSIX `mmap`：不支持可写/写回映射、`MAP_SHARED`、`mprotect`、`MAP_FIXED` 或 `munmap`。
 
 syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
 
@@ -73,13 +74,13 @@ syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU excep
 
 ## 验证：默认关闭构建开关 + 确定性 marker
 
-默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）继续从 ring0 验证 `SYS_DEBUG_WRITE`、`SYS_GET_TICK` 和未知 number。额外默认关闭的 smoke 覆盖 flat 首个用户程序、filesystem-backed user ELF、demand paging、fork/COW、time/identity、signals、writable FS、pipes 和 userland runtime。普通启动现在会打包 `/boot/user/init.elf`，进入常驻 PID-1 init，并启动 `/bin/sh`；默认 headless 验证观察 `BIGOS_USER_EXEC`。
+默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）继续从 ring0 验证 `SYS_DEBUG_WRITE`、`SYS_GET_TICK` 和未知 number。额外默认关闭的 smoke 覆盖 flat 首个用户程序、filesystem-backed user ELF、demand paging、有界只读 file-backed 映射（`xmake f --file_backed_mapping_smoke=y`，marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`）、fork/COW、time/identity、signals、writable FS、pipes 和 userland runtime。普通启动现在会打包 `/boot/user/init.elf`，进入常驻 PID-1 init，并启动 `/bin/sh`；默认 headless 验证观察 `BIGOS_USER_EXEC`。
 
 ## 本阶段非目标
 
 - 不切换到 `syscall`/`sysret` MSR 快速路径。
 - 不把当前 bounded syscall 集解释为完整 POSIX-wide syscall 语义、用户线程、作业控制、动态链接或完整 libc。
-- 不把 demand paging/COW 扩展到当前 bounded anonymous mapping 之外，也不引入广泛 file-backed `mmap`。
+- 不把 demand paging/COW 扩展到当前 bounded anonymous mapping 与有界只读 file-backed 映射之外，也不引入可写/写回或共享 file-backed `mmap`。
 - 不对 syscall 以外的 IDT gate 放宽 DPL；不从 syscall path 发送 i8259 EOI。
 
 ## 横切工程化项

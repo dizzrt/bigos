@@ -111,6 +111,10 @@ if has_config("demand_paging_smoke") then
     add_defines("BIGOS_DEMAND_PAGING_SMOKE")
 end
 
+if has_config("file_backed_mapping_smoke") then
+    add_defines("BIGOS_FILE_BACKED_MAPPING_SMOKE")
+end
+
 if has_config("growable_tables_smoke") then
     add_defines("BIGOS_GROWABLE_TABLES_SMOKE")
 end

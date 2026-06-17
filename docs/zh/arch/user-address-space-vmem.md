@@ -97,3 +97,28 @@ IRQ 交错，不得从 IRQ handler 调用，也不在 IRQ handler 中触发动�
 若需调整 `tools/boot_debug.py` 才能注入该开关并观测 marker，应作为独立横切工程化项处理，不混入
 本 change。Bochs runtime smoke 依赖本机 ROM、image lock、serial oracle 与交互能力；不可用时按
 既有惯例记录未运行原因与剩余 bootability 风险。
+
+## 有界只读 file-backed 映射
+
+除 anonymous、ELF-segment、guard backing 外，VMA 模型还携带一个只读 file-backed backing 类型。
+file-backed VMA 记录支撑 `vfs::File` 引用与页对齐的起始文件偏移，落在专用的用户低半区
+file-mapping 窗口（`USER_FILEMAP_BASE`，受 `USER_FILEMAP_MAX_PAGES` 约束），除非显式只读可执行
+策略允许，否则始终只读且非可执行。它由有界 `SYS_MAP_FILE` 请求发布（只读、私有、offset/length
+页对齐、不重叠、非 W+X），并按需惰性物化。
+
+对该类 VMA 的 CPL3 not-present 读缺页，统一缺页入口计算 `文件偏移 = VMA 文件偏移 + (faulting page -
+VMA 起始)`，经现有 page/buffer cache 读取覆盖该页的文件块（单页可能跨多个缓存块，任一块 IO 失败该
+次物化确定性失败），建立只读非可执行用户 PTE，并推进 VMA 物化记账。对超出文件长度但仍在 VMA 范围
+内的页尾部分按零填充处理，与 ELF 零填充约定一致。
+
+这是对“非匿名 backing 且无恢复策略的 CPL3 缺页即 kill”规则的受控例外。对只读 file-backed 页的写
+访问（present 或 not-present）、越界访问，以及需要在不可阻塞上下文发起阻塞缓存装入的物化，均保留既有
+确定性 kill 语义；file-backed 页不进入 copy-on-write。`fork` 复制 file-backed VMA 元数据，自行 retain
+其支撑文件引用，并以引用计数共享已物化的只读页而非深拷贝；未物化部分在各进程首次访问时独立重新缺页。
+进程拆除与 exec 替换会释放每个 file-backed VMA 持有的文件引用，且不破坏仍被其他进程引用的共享只读缓存
+状态。
+
+默认关闭的 `file_backed_mapping_smoke` 开关（`xmake f --file_backed_mapping_smoke=y`）驱动映射创建、
+首次访问物化命中正确文件内容、文件尾页零填充、对只读页写访问确定性 kill 以及越界访问确定性 kill，发射
+`BIGOS_FILE_BACKED_MAPPING_PASSED` / `BIGOS_FILE_BACKED_MAPPING_FAILED`。它不是完整 POSIX `mmap`：不支持
+可写/写回映射、`MAP_SHARED`、`mprotect`、`MAP_FIXED`、swap 或 `munmap`。

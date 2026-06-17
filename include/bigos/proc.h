@@ -18,6 +18,12 @@ namespace bigos::proc {
     constexpr uint64_t USER_HEAP_MAX_PAGES = 16;
     constexpr uint64_t USER_ANON_BASE = 0x0000000001000000ull;
     constexpr uint64_t USER_ANON_MAX_PAGES = 32;
+    // Bounded read-only file-backed mapping window. It sits well above the
+    // anonymous window and clear of the demand-paging smoke's out-of-range probe
+    // address, inside the supported user low half and away from the kernel
+    // higher half, direct-map, KVMEM, and recursive self-mapping ranges.
+    constexpr uint64_t USER_FILEMAP_BASE = 0x0000000004000000ull;
+    constexpr uint64_t USER_FILEMAP_MAX_PAGES = 32;
     constexpr uint64_t USER_RUNTIME_RESERVED_BASE = USER_STACK_TOP;
     constexpr uint64_t USER_RUNTIME_RESERVED_END = USER_ANON_BASE;
     constexpr const char *USER_ELF_SMOKE_PATH = "/boot/user/init.elf";
@@ -82,12 +88,14 @@ namespace bigos::proc {
         Anonymous,
         Stack,
         StackGuard,
+        FileMapped,
     };
 
     enum class VmaBacking : uint8_t {
         Anonymous = 0,
         ElfSegment,
         Guard,
+        FileBacked,
     };
 
     enum class VmaGrowth : uint8_t {
@@ -106,6 +114,13 @@ namespace bigos::proc {
         VmaBacking backing;
         VmaGrowth growth;
         bool used;
+        // File-backed backing only (VmaBacking::FileBacked). file_backing is the
+        // retained read-only vfs::File the range maps, and file_offset is the
+        // page-aligned file offset corresponding to `start`. The materialization
+        // file offset of any covered page is file_offset + (page - start). For
+        // every other backing these stay null/zero and are unused.
+        bigos::vfs::File *file_backing;
+        uint64_t file_offset;
     };
 
     struct VmaCollection {
@@ -115,6 +130,7 @@ namespace bigos::proc {
         uint64_t heap_break;
         uint64_t heap_limit;
         uint64_t anon_next;
+        uint64_t filemap_next;
     };
 
     struct UserRuntimeLayout {
@@ -126,6 +142,7 @@ namespace bigos::proc {
         UserRange stack;
         UserRange arguments;
         UserRange future_runtime;
+        UserRange file_mapped;
         bool committed;
     };
 
@@ -273,6 +290,14 @@ namespace bigos::proc {
     int64_t getcwd_current(char *__dst, size_t __dst_len) noexcept;
     int64_t brk_current(uint64_t __new_break) noexcept;
     int64_t map_anonymous_current(uint64_t __len, uint64_t __permissions, uint64_t __flags) noexcept;
+    // Bounded read-only file-backed mapping request (SYS_MAP_FILE backing). Maps
+    // a page-aligned [__offset, __offset + __len) extent of the readable regular
+    // file behind __fd into a read-only, private, lazily backed user range in the
+    // file-mapping window. Returns the mapped base user address or a deterministic
+    // negative errno; on failure no partial VMA is published. Blockable (CPL3
+    // syscall) context only.
+    int64_t map_file_current(uint64_t __fd, uint64_t __offset, uint64_t __len, uint64_t __permissions,
+        uint64_t __flags) noexcept;
     bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept;
     // Duplicates the current user process into a new child (POSIX-style fork).
     // __parent_frame is the parent's saved int 0x80 InterruptFrame from the
@@ -340,6 +365,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_SIGNAL_SMOKE
     void signal_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_FILE_BACKED_MAPPING_SMOKE
+    void file_backed_mapping_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 

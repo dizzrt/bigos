@@ -100,6 +100,18 @@ an EOI:
 - `SYS_RENAME` (number=33): takes `rdi` = old user path and `rsi` = new user path.
   It is restricted to the current bounded writable `/rw` regular-file semantics
   and does not imply full persistent filesystem or cross-device rename support.
+- `SYS_MAP_FILE` (number=35): takes `rdi` = fd, `rsi` = page-aligned file offset,
+  `rdx` = page-aligned length, `r10` = permissions, and `r8` = reserved flags
+  (must be 0). It publishes a bounded read-only, private, lazily backed
+  file-backed mapping in the user file-mapping window and returns the mapped base
+  user address, or a deterministic negative errno
+  (`-EBADF`/`-EACCES`/`-EINVAL`/`-ENOMEM`/`-EWOULDBLOCK`). The fd must reference a
+  readable regular file, permissions must be read-only and non-W+X, and the
+  request publishes no partial VMA on failure. Covered pages materialize on first
+  read access through the page/buffer cache; writes to the read-only pages,
+  out-of-range access, and cache load from a non-blocking context are
+  deterministic kills. It is not a full POSIX `mmap`: no writable/write-back
+  mapping, `MAP_SHARED`, `mprotect`, `MAP_FIXED`, or `munmap`.
 
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 
@@ -113,13 +125,13 @@ remain responsible for translating negative kernel returns into positive
 
 ## Validation: Default-Off Build Switches And Deterministic Markers
 
-The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. Additional default-off smokes cover the flat first user program, filesystem-backed user ELF, demand paging, fork/COW, time/identity, signals, writable FS, pipes, and userland runtime. Normal boot now packages `/boot/user/init.elf`, enters resident PID-1 init, and starts `/bin/sh`; default headless validation observes `BIGOS_USER_EXEC`.
+The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. Additional default-off smokes cover the flat first user program, filesystem-backed user ELF, demand paging, the bounded read-only file-backed mapping (`xmake f --file_backed_mapping_smoke=y`, marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`), fork/COW, time/identity, signals, writable FS, pipes, and userland runtime. Normal boot now packages `/boot/user/init.elf`, enters resident PID-1 init, and starts `/bin/sh`; default headless validation observes `BIGOS_USER_EXEC`.
 
 ## Non-Goals For This Stage
 
 - Do not switch to the `syscall`/`sysret` MSR fast path.
 - Do not reinterpret the bounded syscall set as complete POSIX-wide syscall semantics, user threads, job control, dynamic linking, or a full libc.
-- Do not broaden demand paging/COW beyond the current bounded anonymous mappings or add broad file-backed `mmap`.
+- Do not broaden demand paging/COW beyond the current bounded anonymous mappings and the bounded read-only file-backed mapping, and do not add writable/write-back or shared file-backed `mmap`.
 - Do not relax DPL for IDT gates other than syscall; do not send i8259 EOI from the syscall path.
 
 ## Cross-Cutting Engineering Items

@@ -286,6 +286,7 @@ namespace {
             __layout.stack_growth,
             __layout.stack,
             __layout.future_runtime,
+            __layout.file_mapped,
         };
         for (uint32_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++) {
             if (ranges[i].len == 0 || !user_range_valid(ranges[i].base, ranges[i].len) ||
@@ -325,6 +326,7 @@ namespace {
             bigos::proc::USER_RUNTIME_RESERVED_END - bigos::proc::USER_RUNTIME_RESERVED_BASE,
         };
         layout.anonymous = {bigos::proc::USER_ANON_BASE, bigos::proc::USER_ANON_MAX_PAGES * PAGE_SIZE};
+        layout.file_mapped = {bigos::proc::USER_FILEMAP_BASE, bigos::proc::USER_FILEMAP_MAX_PAGES * PAGE_SIZE};
         layout.committed = true;
         if (!runtime_layout_valid(layout))
             return false;
@@ -379,6 +381,13 @@ namespace {
                        __entry.backing == bigos::proc::VmaBacking::Guard &&
                        __entry.growth == bigos::proc::VmaGrowth::None &&
                        __entry.permissions == bigos::proc::VmaPermission::None;
+            case bigos::proc::VmaPurpose::FileMapped:
+                return range_inside(__entry.start, __entry.end, layout.file_mapped) &&
+                       __entry.backing == bigos::proc::VmaBacking::FileBacked &&
+                       __entry.growth == bigos::proc::VmaGrowth::None &&
+                       __entry.file_backing != nullptr && page_aligned(__entry.file_offset) &&
+                       permissions_include(__entry.permissions, bigos::proc::VmaPermission::Read) &&
+                       !permissions_include(__entry.permissions, bigos::proc::VmaPermission::Write);
         }
         return false;
     }
@@ -388,6 +397,7 @@ namespace {
             return;
         memset(__vmas, 0, sizeof(*__vmas));
         __vmas->anon_next = bigos::proc::USER_ANON_BASE;
+        __vmas->filemap_next = bigos::proc::USER_FILEMAP_BASE;
     }
 
     bool internal_add_vma(bigos::proc::VmaCollection *__vmas, const bigos::proc::VmaEntry &__entry) noexcept {
@@ -510,6 +520,17 @@ namespace {
         bigos::mm::PageAttr attr = bigos::mm::page_attr::PRESENT | bigos::mm::page_attr::USER;
         if (permissions_include(__permissions, bigos::proc::VmaPermission::Write))
             attr |= bigos::mm::page_attr::WRITABLE;
+        if (!permissions_include(__permissions, bigos::proc::VmaPermission::Execute))
+            attr |= bigos::mm::page_attr::NO_EXECUTE;
+        return attr;
+    }
+
+    // Derives the leaf PTE attributes for a file-backed page. The mapping is
+    // always read-only (never WRITABLE), and non-executable unless the VMA
+    // carries an explicit read-only-executable policy. A write to such a page
+    // therefore always traps as a permission violation rather than splitting COW.
+    bigos::mm::PageAttr file_backed_page_attr(bigos::proc::VmaPermission __permissions) noexcept {
+        bigos::mm::PageAttr attr = bigos::mm::page_attr::PRESENT | bigos::mm::page_attr::USER;
         if (!permissions_include(__permissions, bigos::proc::VmaPermission::Execute))
             attr |= bigos::mm::page_attr::NO_EXECUTE;
         return attr;
@@ -1138,6 +1159,21 @@ namespace {
             return true;
         }
 
+        if (__vma.backing == bigos::proc::VmaBacking::FileBacked) {
+            // File-backed read-only page: share the underlying frame between
+            // parent and child (it never becomes writable, so no COW marker is
+            // needed), counting the extra owner. Decision 4: already-materialized
+            // pages are shared, not deep-copied; unmaterialized pages re-fault
+            // independently through the cache in whichever process touches them.
+            if (!bigos::mm::frame_ref_inc(__parent_phys))
+                return false;
+            if (!bigos::mm::map_page_in_root(__child->address_space_root, __page, __parent_phys, __parent_attr)) {
+                bigos::mm::frame_ref_dec_and_maybe_free(__parent_phys);
+                return false;
+            }
+            return true;
+        }
+
         // Anonymous backing.
         if ((__parent_attr & bigos::mm::page_attr::WRITABLE) != 0) {
             // Writable anonymous page -> COW share: downgrade both sides to
@@ -1184,6 +1220,15 @@ namespace {
         // permissions, materialization accounting, heap/anon bookkeeping).
         __child->runtime_layout = __parent->runtime_layout;
         __child->vmas = __parent->vmas;
+
+        // File-backed VMAs carry a retained backing-file reference. The value copy
+        // duplicated the pointer, so the child must take its own retain per
+        // file-backed VMA; teardown/exec release one per child VMA symmetrically.
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            const bigos::proc::VmaEntry &vma = __child->vmas.entries[i];
+            if (vma.used && vma.backing == bigos::proc::VmaBacking::FileBacked && vma.file_backing != nullptr)
+                bigos::vfs::retain(vma.file_backing);
+        }
 
         // Walk every VMA's registered range and replicate only the pages that are
         // actually present in the parent root. Unmaterialized lazy pages are left
@@ -1259,6 +1304,11 @@ namespace {
 }   // namespace
 
 namespace bigos::proc {
+    // Drops each file-backed VMA's retained backing-file reference for __process.
+    // Defined later in this namespace; forward-declared so the fork rollback,
+    // exec replacement, and reap paths can release references symmetrically.
+    void release_file_backed_vmas(Process *__process) noexcept;
+
     void init() noexcept {
         if (g_proc_initialized)
             return;
@@ -1706,7 +1756,15 @@ namespace bigos::proc {
         (void)old_data;
         (void)old_stack;
         (void)old_runtime_layout;
-        (void)old_vmas;
+        // The old image's address space has been torn down; drop this process's
+        // retained backing-file references for any file-backed VMA it held so exec
+        // does not leak them. The shared read-only cache frames are reference
+        // counted and reclaimed by the teardown above.
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            const VmaEntry &entry = old_vmas.entries[i];
+            if (entry.used && entry.backing == VmaBacking::FileBacked && entry.file_backing != nullptr)
+                bigos::vfs::release(entry.file_backing);
+        }
         (void)old_code_phys;
         (void)old_data_phys;
         (void)old_stack_phys;
@@ -2088,10 +2146,80 @@ namespace bigos::proc {
         return (int64_t)base;
     }
 
+    int64_t map_file_current(uint64_t __fd, uint64_t __offset, uint64_t __len, uint64_t __permissions,
+        uint64_t __flags) noexcept {
+        Process *process = current_process_slot();
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+            return -bigos::EWOULDBLOCK;
+        // Reserved flags; offset and length must be page-aligned and non-zero.
+        if (__flags != 0 || __len == 0 || !page_aligned(__offset) || !page_aligned(__len) ||
+            __len > USER_FILEMAP_MAX_PAGES * PAGE_SIZE)
+            return -bigos::EINVAL;
+        // Read-only, non-W+X permission set (must include Read, must not include Write).
+        const auto permissions = (VmaPermission)(uint8_t)__permissions;
+        if ((permissions_value(permissions) &
+                ~(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Execute))) != 0 ||
+            !permissions_include(permissions, VmaPermission::Read) ||
+            permissions_include(permissions, VmaPermission::Write))
+            return -bigos::EINVAL;
+        // offset + len must not overflow the file-offset space.
+        uint64_t file_end = 0;
+        if (add_overflow(__offset, __len, &file_end))
+            return -bigos::EINVAL;
+        (void)file_end;
+
+        // fd must reference a readable regular file (not a directory or pipe).
+        bigos::vfs::File *file = file_for_fd_current((uint32_t)__fd);
+        if (file == nullptr || !file->readable)
+            return -bigos::EBADF;
+        if (file->vnode == nullptr || file->vnode->is_directory)
+            return -bigos::EACCES;
+
+        // Find a non-overlapping page-aligned slot in the file-mapping window.
+        uint64_t base = process->vmas.filemap_next;
+        uint64_t end = 0;
+        const uint64_t filemap_limit =
+            process->runtime_layout.file_mapped.base + process->runtime_layout.file_mapped.len;
+        while (!add_overflow(base, __len, &end) && end <= filemap_limit) {
+            bool overlaps = false;
+            for (uint32_t i = 0; i < MAX_VMAS; i++) {
+                const VmaEntry &entry = process->vmas.entries[i];
+                if (entry.used && base < entry.end && entry.start < end)
+                    overlaps = true;
+            }
+            if (!overlaps)
+                break;
+            base += PAGE_SIZE;
+        }
+        if (add_overflow(base, __len, &end) || end > filemap_limit)
+            return -bigos::ENOMEM;
+
+        // Retain the backing file for the lifetime of the mapping; released by
+        // teardown/exec when the file-backed VMA metadata is dropped.
+        bigos::vfs::retain(file);
+        VmaEntry entry = {base, end, base, base, permissions, VmaPurpose::FileMapped, VmaBacking::FileBacked,
+            VmaGrowth::None, true, file, __offset};
+        if (!internal_add_process_vma(process, entry)) {
+            bigos::vfs::release(file);
+            return -bigos::ENOMEM;
+        }
+
+        // Lazy backing: no frames are mapped here. Covered pages materialize on
+        // first read access through try_handle_user_page_fault.
+        process->vmas.filemap_next = end;
+        return (int64_t)base;
+    }
+
     // Resolves a copy-on-write write fault for the current process on a present,
     // read-only, PTE_COW page covered by a writable anonymous VMA. Defined after
     // try_handle_user_page_fault; declared here so the fault handler can call it.
     bool cow_split_current(Process *__process, uint64_t __page, const VmaEntry *__vma) noexcept;
+
+    // Materializes a single not-present read fault on a read-only file-backed VMA
+    // through the page/buffer cache. Defined after try_handle_user_page_fault;
+    // declared here so the fault handler can call it. Returns false (deterministic
+    // kill via the caller) on any failure without publishing a partial mapping.
+    bool materialize_file_backed_page(Process *__process, uint64_t __page, VmaEntry *__vma) noexcept;
 
     bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept {
         Process *process = current_process_slot();
@@ -2126,9 +2254,26 @@ namespace bigos::proc {
         }
 
         VmaEntry *vma = internal_find_vma_mut(&process->vmas, page);
-        // No covering VMA, or the VMA is not anonymous-backed (guard / ELF file
-        // segments have no demand-zero policy): unrecoverable -> kill.
-        if (vma == nullptr || vma->backing != VmaBacking::Anonymous || !runtime_vma_allowed(process, *vma))
+        if (vma == nullptr || !runtime_vma_allowed(process, *vma))
+            return false;
+
+        // Read-only file-backed not-present fault: a controlled exception to the
+        // "non-anonymous backing has no recovery policy" kill rule. Only a read
+        // (no write bit) is recoverable; a write to a read-only file-backed page,
+        // or an instruction fetch into a non-executable file page, stays a kill.
+        if (vma->backing == VmaBacking::FileBacked) {
+            if ((__error_code & 0x2) != 0)
+                return false;   // write to read-only file page -> permission kill
+            if ((__error_code & (1ull << 4)) != 0 && !permissions_include(vma->permissions, VmaPermission::Execute))
+                return false;   // fetch from NX file page -> kill
+            if (page < vma->start || page >= vma->end)
+                return false;   // out of range -> kill
+            return materialize_file_backed_page(process, page, vma);
+        }
+
+        // No anonymous-backed VMA (guard / ELF file segments have no demand-zero
+        // policy): unrecoverable -> kill.
+        if (vma->backing != VmaBacking::Anonymous)
             return false;
 
         // Access-permission gate. A write fault requires Write permission; an
@@ -2220,6 +2365,65 @@ namespace bigos::proc {
         return true;
     }
 
+    bool materialize_file_backed_page(Process *__process, uint64_t __page, VmaEntry *__vma) noexcept {
+        if (__process == nullptr || __vma == nullptr || __vma->backing != VmaBacking::FileBacked ||
+            __vma->file_backing == nullptr)
+            return false;
+        // Cache load may issue synchronous block IO, so it is only legal from a
+        // blocking-capable context. A real ring3 #PF runs under the nonblocking
+        // guard, so this materialization deterministically fails (and the caller
+        // kills the process) unless the fault is driven from a blockable context.
+        if (!bigos::sched::can_block())
+            return false;
+
+        // file offset = VMA file start offset + (faulting page - VMA start).
+        const uint64_t page_delta = __page - __vma->start;
+        uint64_t file_offset = 0;
+        if (add_overflow(__vma->file_offset, page_delta, &file_offset))
+            return false;
+
+        const uint64_t file_size = __vma->file_backing->vnode != nullptr ? __vma->file_backing->vnode->size : 0;
+        // Bytes of real file content that fall inside this page; the remainder of
+        // the page (file tail beyond file_size, still within the VMA) is zero-fill.
+        uint64_t in_file = 0;
+        if (file_offset < file_size) {
+            const uint64_t remaining = file_size - file_offset;
+            in_file = remaining < PAGE_SIZE ? remaining : PAGE_SIZE;
+        }
+
+        const uint64_t phys = alloc_user_frame();
+        if (phys == 0)
+            return false;
+        void *direct = bigos::mm::phys_to_direct(phys);
+        if (direct == nullptr) {
+            free_user_frame(phys);
+            return false;
+        }
+        // Zero the whole frame first so the beyond-file-length tail is zero-filled
+        // deterministically; then fill the in-file portion from the cache-backed
+        // read. A single page may span multiple cache blocks; pread aggregates
+        // them and fails the whole materialization on any underlying block IO error.
+        memset(direct, 0, PAGE_SIZE);
+        if (in_file != 0) {
+            size_t got = 0;
+            const bigos::vfs::Status status =
+                bigos::vfs::pread(__vma->file_backing, file_offset, direct, (size_t)in_file, &got);
+            if (status != bigos::vfs::Status::Success || got != in_file) {
+                free_user_frame(phys);
+                return false;
+            }
+        }
+
+        const uint64_t attr = file_backed_page_attr(__vma->permissions);
+        if (!map_user_page_for_process(__process, __page, phys, attr, false)) {
+            free_user_frame(phys);
+            return false;
+        }
+        if (__page + PAGE_SIZE > __vma->materialized_end)
+            __vma->materialized_end = __page + PAGE_SIZE;
+        return true;
+    }
+
     int64_t fork_current(const bigos::irq::InterruptFrame *__parent_frame) noexcept {
         Process *parent = current_process_slot();
         if (parent == nullptr || parent->state != ProcessState::Running || __parent_frame == nullptr)
@@ -2248,6 +2452,9 @@ namespace bigos::proc {
         // copy shared/allocated are owned by the child root and are released by
         // teardown (reference-count-aware), so a single teardown undoes them.
         if (!clone_user_address_space_cow(parent, child)) {
+            // clone_user_address_space_cow may have retained child file-backed VMA
+            // references before a later page-clone step failed; release them.
+            release_file_backed_vmas(child);
             if (child->address_space_root != bigos::mm::INVALID_PHYS_ADDR)
                 (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
@@ -2256,6 +2463,7 @@ namespace bigos::proc {
         }
 
         if (!clone_fd_table(parent, child)) {
+            release_file_backed_vmas(child);
             (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
             free_process_object(child);
@@ -2294,6 +2502,7 @@ namespace bigos::proc {
         if (!bigos::arch::vm_user::capture_user_resume_frame(__parent_frame, 0, &child->fork_entry_frame)) {
             close_all_fds(child);
             free_fd_table(child);
+            release_file_backed_vmas(child);
             (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
             free_process_object(child);
@@ -2304,6 +2513,7 @@ namespace bigos::proc {
         if (!publish_process(child, parent->pid)) {
             close_all_fds(child);
             free_fd_table(child);
+            release_file_backed_vmas(child);
             (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
             free_process_object(child);
@@ -2317,6 +2527,7 @@ namespace bigos::proc {
             unpublish_process(child);
             close_all_fds(child);
             free_fd_table(child);
+            release_file_backed_vmas(child);
             (void)bigos::mm::teardown_user_address_space(child->address_space_root);
             bigos::free_pages(child->kernel_stack_base);
             free_process_object(child);
@@ -2508,6 +2719,24 @@ namespace bigos::proc {
         }
     }
 
+    // Releases the retained backing-file reference held by every file-backed VMA
+    // and clears the pointer so a double release cannot occur. The process-owned
+    // page-table entries (including any shared read-only cache frame, reference
+    // counted) are reclaimed separately by teardown_user_address_space; this only
+    // drops this process's hold on the vfs::File, never on shared cache state.
+    void release_file_backed_vmas(Process *__process) noexcept {
+        if (__process == nullptr)
+            return;
+        for (uint32_t i = 0; i < bigos::proc::MAX_VMAS; i++) {
+            VmaEntry &entry = __process->vmas.entries[i];
+            if (entry.used && entry.backing == VmaBacking::FileBacked && entry.file_backing != nullptr) {
+                bigos::vfs::File *file = entry.file_backing;
+                entry.file_backing = nullptr;
+                bigos::vfs::release(file);
+            }
+        }
+    }
+
     void close_on_exec_fds(Process *__process) noexcept {
         if (__process == nullptr)
             return;
@@ -2667,6 +2896,7 @@ namespace bigos::proc {
 
             close_all_fds(process);
             free_fd_table(process);
+            release_file_backed_vmas(process);
 
             if (process->kernel_stack_base != nullptr) {
                 bigos::free_pages(process->kernel_stack_base);
@@ -2771,6 +3001,175 @@ namespace bigos::proc {
             bigos::serial_puts("BIGOS_DEMAND_PAGING_PASSED\n");
         else
             bigos::serial_puts("BIGOS_DEMAND_PAGING_FAILED\n");
+    }
+#endif
+
+#ifdef BIGOS_FILE_BACKED_MAPPING_SMOKE
+    // Validation-only, default-off bounded read-only file-backed mapping smoke.
+    // Runs from ordinary kernel-thread context (can_block() true) and drives the
+    // mapping request and unified user page-fault entry against a constructed
+    // process backed by a synthetic in-RAM read-only file, without entering ring3.
+    // The process address-space root is inactive here, so map/teardown target the
+    // process root only and never touch the active kernel CR3 or VGA/MMIO. It
+    // covers: mapping creation, first-access materialization observing correct
+    // file content, file-tail-page zero-fill, out-of-range deterministic kill, and
+    // write-to-read-only deterministic kill.
+    namespace filemap_smoke {
+        // Synthetic read-only file backed by a static RAM buffer. The file is one
+        // page plus a partial second page, so the third mapped page is entirely
+        // beyond the file length (full zero) and the second page is a file-tail
+        // page (partial content + zero-fill).
+        constexpr uint64_t kFileSize = PAGE_SIZE + 100;
+        alignas(PAGE_SIZE) static uint8_t g_file_data[PAGE_SIZE * 2];
+        static bigos::vfs::Vnode g_vnode;
+
+        bigos::vfs::Status read_op(
+            bigos::vfs::File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
+            if (__bytes_read != nullptr)
+                *__bytes_read = 0;
+            if (__file == nullptr || __dst == nullptr)
+                return bigos::vfs::Status::BadFileDescriptor;
+            const uint64_t offset = __file->offset;
+            if (offset >= kFileSize)
+                return bigos::vfs::Status::Success;   // 0 bytes at/after EOF
+            uint64_t avail = kFileSize - offset;
+            uint64_t n = __len < avail ? __len : avail;
+            memcpy(__dst, g_file_data + offset, n);
+            __file->offset += n;
+            if (__bytes_read != nullptr)
+                *__bytes_read = (size_t)n;
+            return bigos::vfs::Status::Success;
+        }
+
+        void close_op(bigos::vfs::File *) noexcept {}
+
+        const bigos::vfs::FileOperations g_ops = {read_op, close_op, nullptr, nullptr, nullptr};
+    }   // namespace filemap_smoke
+
+    bool file_backed_mapping_smoke_run(Process *__process) noexcept {
+        using namespace filemap_smoke;
+        if (!create_first_user_process(__process))
+            return false;
+
+        // Initialize the synthetic file content: byte i = (i & 0xff) for the
+        // in-file region; the rest of the static buffer is the zero-fill source.
+        for (uint64_t i = 0; i < kFileSize; i++)
+            g_file_data[i] = (uint8_t)(i & 0xff);
+        for (uint64_t i = kFileSize; i < sizeof(g_file_data); i++)
+            g_file_data[i] = 0;
+
+        // A heap-allocated read-only vfs::File so install/map retain/release
+        // counting matches the real path; its close op is a no-op and release
+        // frees the object once the last reference drops.
+        auto *file = (bigos::vfs::File *)bigos::kmalloc(sizeof(bigos::vfs::File));
+        if (file == nullptr)
+            return false;
+        memset(file, 0, sizeof(*file));
+        g_vnode.size = kFileSize;
+        g_vnode.is_directory = false;
+        g_vnode.private_data = nullptr;
+        file->ops = &g_ops;
+        file->vnode = &g_vnode;
+        file->offset = 0;
+        file->ref_count = 1;
+        file->readable = true;
+
+        set_current_process_slot(__process);
+        __process->state = ProcessState::Running;
+
+        bool ok = true;
+        const int64_t fd = install_fd_current(file, false);
+        if (fd < 0) {
+            bigos::vfs::release(file);
+            ok = false;
+        }
+
+        const uint64_t map_len = 3 * PAGE_SIZE;
+        int64_t mapped = -1;
+        if (ok) {
+            mapped = map_file_current((uint64_t)fd, 0, map_len, permissions_value(VmaPermission::Read), 0);
+            if (mapped < 0)
+                ok = false;
+        }
+        const uint64_t base = (uint64_t)mapped;
+        const uint64_t read_user_fault = 0x4;   // user, present=0, read
+
+        // 1. First-access materialization of the first full in-file page.
+        if (ok && !try_handle_user_page_fault(base, read_user_fault))
+            ok = false;
+        if (ok) {
+            uint64_t phys = bigos::mm::INVALID_PHYS_ADDR;
+            bigos::mm::PageAttr attr = 0;
+            if (!bigos::mm::read_user_leaf_in_root(__process->address_space_root, base, &phys, &attr))
+                ok = false;
+            // Must be present, user, read-only (not writable), non-executable.
+            if (ok && ((attr & bigos::mm::page_attr::PRESENT) == 0 || (attr & bigos::mm::page_attr::USER) == 0 ||
+                          (attr & bigos::mm::page_attr::WRITABLE) != 0 ||
+                          (attr & bigos::mm::page_attr::NO_EXECUTE) == 0))
+                ok = false;
+            if (ok) {
+                const uint8_t *page = (const uint8_t *)bigos::mm::phys_to_direct(phys);
+                if (page == nullptr || page[0] != 0 || page[1] != 1 || page[255] != 255)
+                    ok = false;
+            }
+        }
+
+        // 2. File-tail page zero-fill: second page holds 100 in-file bytes then zeros.
+        if (ok && !try_handle_user_page_fault(base + PAGE_SIZE, read_user_fault))
+            ok = false;
+        if (ok) {
+            uint64_t phys = bigos::mm::INVALID_PHYS_ADDR;
+            bigos::mm::PageAttr attr = 0;
+            if (!bigos::mm::read_user_leaf_in_root(__process->address_space_root, base + PAGE_SIZE, &phys, &attr))
+                ok = false;
+            if (ok) {
+                const uint8_t *page = (const uint8_t *)bigos::mm::phys_to_direct(phys);
+                // In-file byte 0 of this page is file offset PAGE_SIZE -> value
+                // (PAGE_SIZE & 0xff) == 0; byte 99 is the last in-file byte;
+                // byte 100 and beyond must be zero-filled.
+                if (page == nullptr || page[99] != (uint8_t)((PAGE_SIZE + 99) & 0xff) || page[100] != 0 ||
+                    page[PAGE_SIZE - 1] != 0)
+                    ok = false;
+            }
+        }
+
+        // 3. Third page is fully beyond the file length but within the VMA:
+        // materializes as an all-zero read-only page.
+        if (ok && !try_handle_user_page_fault(base + 2 * PAGE_SIZE, read_user_fault))
+            ok = false;
+
+        // 4. Write to a read-only file-backed page is a deterministic kill (not
+        // COW, not materialized), for both present and not-present write faults.
+        if (ok) {
+            const uint64_t write_present_fault = 0x1 | 0x2 | 0x4;   // present + write + user
+            if (try_handle_user_page_fault(base, write_present_fault))
+                ok = false;
+        }
+        if (ok) {
+            const uint64_t write_notpresent_fault = 0x2 | 0x4;   // not-present + write + user
+            if (try_handle_user_page_fault(base + 2 * PAGE_SIZE, write_notpresent_fault))
+                ok = false;
+        }
+
+        // 5. Out-of-range access beyond the mapped VMA is a deterministic kill.
+        if (ok && try_handle_user_page_fault(base + map_len, read_user_fault))
+            ok = false;
+
+        // Deterministic teardown through the existing lifecycle/reaper; this also
+        // releases the file-backed VMA reference and the installed fd.
+        set_current_process_slot(nullptr);
+        __process->state = ProcessState::Terminated;
+        mark_zombie_or_reap_pending(__process);
+        reap_pending_processes();
+        return ok;
+    }
+
+    void file_backed_mapping_smoke_entry(void *) noexcept {
+        static Process smoke_process;
+        if (file_backed_mapping_smoke_run(&smoke_process))
+            bigos::serial_puts("BIGOS_FILE_BACKED_MAPPING_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_FILE_BACKED_MAPPING_FAILED\n");
     }
 #endif
 

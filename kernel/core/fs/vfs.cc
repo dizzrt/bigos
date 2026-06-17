@@ -618,6 +618,26 @@ namespace vfs {
         return __file->ops->read(__file, __dst, __len, __bytes_read);
     }
 
+    Status pread(File *__file, uint64_t __offset, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
+        if (__bytes_read != nullptr)
+            *__bytes_read = 0;
+        if (__file == nullptr || __file->ops == nullptr || __file->ops->read == nullptr)
+            return Status::BadFileDescriptor;
+        // Save and restore the file offset around the positioned read so the
+        // backend read op (which advances __file->offset) leaves no side effect
+        // on the shared file object visible to ordinary read()/lseek() callers.
+        const uint64_t saved_offset = __file->offset;
+        __file->offset = __offset;
+        size_t got = 0;
+        const Status status = __file->ops->read(__file, __dst, __len, &got);
+        __file->offset = saved_offset;
+        if (status != Status::Success)
+            return status;
+        if (__bytes_read != nullptr)
+            *__bytes_read = got;
+        return Status::Success;
+    }
+
     Status write(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept {
         if (__bytes_written != nullptr)
             *__bytes_written = 0;

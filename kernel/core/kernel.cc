@@ -763,6 +763,11 @@ void kernel(const BootInfoHeader *boot_info) {
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_DEMAND_PAGING_FAILED thread\n");
 #endif
+#ifdef BIGOS_FILE_BACKED_MAPPING_SMOKE
+    if (bigos::sched::create_kernel_thread(&bigos::proc::file_backed_mapping_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_FILE_BACKED_MAPPING_FAILED thread\n");
+#endif
 #ifdef BIGOS_GROWABLE_TABLES_SMOKE
     if (bigos::sched::create_kernel_thread(&bigos::proc::growable_tables_smoke_entry, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)

@@ -29,52 +29,59 @@ namespace bigos::sys {
     // semantics make unsuitable as a stable argument slot.
 
     enum SyscallNumber : uint64_t {
-        SYS_DEBUG_WRITE = 0,   // emit a kernel-internal bounded buffer to console/serial
-        SYS_GET_TICK = 1,      // return the monotonic kernel tick via rax
-        SYS_WRITE = 2,         // fd, user buffer, bounded length -> deterministic write result
-        SYS_EXIT = 3,          // exit code -> terminate current user process, does not return
-        SYS_WAIT = 4,          // pid or WAIT_ANY, optional int* status -> child pid, or negative wait error
-        SYS_OPEN = 5,          // user path, read-only flags -> process-local fd
-        SYS_READ = 6,          // fd, user buffer, bounded length -> deterministic read result
-        SYS_CLOSE = 7,         // fd -> close current process descriptor
-        SYS_BRK = 8,           // requested break -> committed heap break or deterministic negative error
-        SYS_MAP_ANON = 9,      // length, permissions, flags -> restricted anonymous user mapping
-        SYS_FORK = 10,         // duplicate current process -> parent gets child PID, child gets 0,
-                               // failure returns a negative errno (e.g. -ENOMEM / -EAGAIN)
-        SYS_GET_TIME = 11,     // return current wall-clock Unix seconds via rax (read-only)
-        SYS_GETPID = 12,       // return current process pid via rax (read-only)
-        SYS_GETPPID = 13,      // return current process parent_pid via rax (read-only)
-        SYS_GETUID = 14,       // return current process uid via rax (read-only)
-        SYS_GETGID = 15,       // return current process gid via rax (read-only)
-        SYS_KILL = 16,         // (pid, signo) -> 0 or -ESRCH/-EPERM/-EINVAL; enforces cred::may_signal
-        SYS_SIGACTION = 17,    // (signo, new_disp, old_disp_out) -> 0 or -EINVAL
-        SYS_SIGPROCMASK = 18,  // (how, new_set, old_set_out) -> 0 or -EINVAL
-        SYS_SIGRETURN = 19,    // restore the interrupted user context from the user-stack signal frame
-        SYS_LSEEK = 20,        // (fd, offset, whence) -> new offset, or -EBADF/-ESPIPE/-EINVAL
-        SYS_PIPE = 21,         // (int out_fds[2]) -> 0, or -EMFILE/-ENOMEM/-EFAULT
-        SYS_DUP = 22,          // (oldfd) -> newfd, or -EBADF/-EMFILE
-        SYS_DUP2 = 23,         // (oldfd, newfd) -> newfd, or -EBADF/-EMFILE
-        SYS_FSYNC = 24,        // (fd) -> 0, or -EBADF/-EIO
-        SYS_MKDIR = 25,        // (path, mode) -> 0, or -EEXIST/-EACCES/-ENOSPC/-EROFS/-EINVAL
-        SYS_UNLINK = 26,       // (path) -> 0, or -ENOENT/-EACCES/-EISDIR/-EROFS/-EINVAL
-        SYS_EXECVE = 27,       // (rdi=path, rsi=argv, rdx=envp) -> replaces the current
-                               // process image and enters the new program entry on
-                               // success (does not return); on failure returns a
-                               // deterministic negative errno (-ENOENT/-EACCES/-ENOEXEC/
-                               // -E2BIG/-EFAULT/-ENOMEM). argv/envp are NULL-terminated
-                               // user pointer arrays copied through VMA-backed validation
-                               // and bounded by EXEC_MAX_ARGC/EXEC_MAX_ENVC/
-                               // EXEC_MAX_STRING_BYTES.
-        SYS_READDIR = 28,      // (fd, struct bigos_dirent *entries, max_entries) -> entry count,
-                               // -EINVAL for illegal arguments, -ERANGE when the
-                               // caller asks beyond the bounded batch capacity,
-                               // or another negative fd/VFS errno.
-        SYS_STAT = 29,         // (path, struct bigos_metadata *out) -> 0 or negative errno.
-        SYS_FSTAT = 30,        // (fd, struct bigos_metadata *out) -> 0 or negative errno.
-        SYS_CHDIR = 31,        // (path) -> 0 or negative errno; cwd changes only after directory validation.
-        SYS_GETCWD = 32,       // (user buffer, len) -> 0 or -ERANGE/-EFAULT/-EINVAL.
-        SYS_RENAME = 33,       // (oldpath, newpath) -> 0 or negative errno; bounded /rw regular-file rename.
-        SYS_MKFS_BIGFS = 34,   // explicit bounded format of the configured persistent /rw test disk.
+        SYS_DEBUG_WRITE = 0,    // emit a kernel-internal bounded buffer to console/serial
+        SYS_GET_TICK = 1,       // return the monotonic kernel tick via rax
+        SYS_WRITE = 2,          // fd, user buffer, bounded length -> deterministic write result
+        SYS_EXIT = 3,           // exit code -> terminate current user process, does not return
+        SYS_WAIT = 4,           // pid or WAIT_ANY, optional int* status -> child pid, or negative wait error
+        SYS_OPEN = 5,           // user path, read-only flags -> process-local fd
+        SYS_READ = 6,           // fd, user buffer, bounded length -> deterministic read result
+        SYS_CLOSE = 7,          // fd -> close current process descriptor
+        SYS_BRK = 8,            // requested break -> committed heap break or deterministic negative error
+        SYS_MAP_ANON = 9,       // length, permissions, flags -> restricted anonymous user mapping
+        SYS_FORK = 10,          // duplicate current process -> parent gets child PID, child gets 0,
+                                // failure returns a negative errno (e.g. -ENOMEM / -EAGAIN)
+        SYS_GET_TIME = 11,      // return current wall-clock Unix seconds via rax (read-only)
+        SYS_GETPID = 12,        // return current process pid via rax (read-only)
+        SYS_GETPPID = 13,       // return current process parent_pid via rax (read-only)
+        SYS_GETUID = 14,        // return current process uid via rax (read-only)
+        SYS_GETGID = 15,        // return current process gid via rax (read-only)
+        SYS_KILL = 16,          // (pid, signo) -> 0 or -ESRCH/-EPERM/-EINVAL; enforces cred::may_signal
+        SYS_SIGACTION = 17,     // (signo, new_disp, old_disp_out) -> 0 or -EINVAL
+        SYS_SIGPROCMASK = 18,   // (how, new_set, old_set_out) -> 0 or -EINVAL
+        SYS_SIGRETURN = 19,     // restore the interrupted user context from the user-stack signal frame
+        SYS_LSEEK = 20,         // (fd, offset, whence) -> new offset, or -EBADF/-ESPIPE/-EINVAL
+        SYS_PIPE = 21,          // (int out_fds[2]) -> 0, or -EMFILE/-ENOMEM/-EFAULT
+        SYS_DUP = 22,           // (oldfd) -> newfd, or -EBADF/-EMFILE
+        SYS_DUP2 = 23,          // (oldfd, newfd) -> newfd, or -EBADF/-EMFILE
+        SYS_FSYNC = 24,         // (fd) -> 0, or -EBADF/-EIO
+        SYS_MKDIR = 25,         // (path, mode) -> 0, or -EEXIST/-EACCES/-ENOSPC/-EROFS/-EINVAL
+        SYS_UNLINK = 26,        // (path) -> 0, or -ENOENT/-EACCES/-EISDIR/-EROFS/-EINVAL
+        SYS_EXECVE = 27,        // (rdi=path, rsi=argv, rdx=envp) -> replaces the current
+                                // process image and enters the new program entry on
+                                // success (does not return); on failure returns a
+                                // deterministic negative errno (-ENOENT/-EACCES/-ENOEXEC/
+                                // -E2BIG/-EFAULT/-ENOMEM). argv/envp are NULL-terminated
+                                // user pointer arrays copied through VMA-backed validation
+                                // and bounded by EXEC_MAX_ARGC/EXEC_MAX_ENVC/
+                                // EXEC_MAX_STRING_BYTES.
+        SYS_READDIR = 28,       // (fd, struct bigos_dirent *entries, max_entries) -> entry count,
+                                // -EINVAL for illegal arguments, -ERANGE when the
+                                // caller asks beyond the bounded batch capacity,
+                                // or another negative fd/VFS errno.
+        SYS_STAT = 29,          // (path, struct bigos_metadata *out) -> 0 or negative errno.
+        SYS_FSTAT = 30,         // (fd, struct bigos_metadata *out) -> 0 or negative errno.
+        SYS_CHDIR = 31,         // (path) -> 0 or negative errno; cwd changes only after directory validation.
+        SYS_GETCWD = 32,        // (user buffer, len) -> 0 or -ERANGE/-EFAULT/-EINVAL.
+        SYS_RENAME = 33,        // (oldpath, newpath) -> 0 or negative errno; bounded /rw regular-file rename.
+        SYS_MKFS_BIGFS = 34,    // explicit bounded format of the configured persistent /rw test disk.
+        SYS_MAP_FILE = 35,      // (rdi=fd, rsi=offset, rdx=len, r10=permissions, r8=flags) ->
+                                // mapped user address of a bounded read-only file-backed
+                                // mapping, or a negative errno
+                                // (-EBADF/-EACCES/-EINVAL/-ENOMEM/-EWOULDBLOCK). offset and
+                                // len are page-aligned; permissions must be read-only and
+                                // non-W+X; flags are reserved (must be 0). No partial VMA is
+                                // published on failure.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

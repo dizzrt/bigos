@@ -179,9 +179,9 @@ enabling more capable programs.
 
 用户可见目标：用户程序可以映射文件与更大的匿名区域，支撑更复杂的程序。
 
-- [ ] Task M1.1: file-backed read mapping built on the existing demand paging and
+- [x] Task M1.1: file-backed read mapping built on the existing demand paging and
   page/buffer cache, without implying broad POSIX `mmap` completeness.
-- [ ] 任务 M1.1：在现有 demand paging 与 page/buffer cache 之上提供 file-backed 读映射，
+- [x] 任务 M1.1：在现有 demand paging 与 page/buffer cache 之上提供 file-backed 读映射，
   不暗示完整 POSIX `mmap` 语义。
 - [ ] Task M1.2: bounded anonymous mapping lifecycle completion covering map, unmap,
   and protection change over the current VMA model.

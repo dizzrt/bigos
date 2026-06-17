@@ -84,6 +84,12 @@ option("demand_paging_smoke")
     set_description("enable validation-only demand-paging lazy materialization / kill smoke marker")
 option_end()
 
+option("file_backed_mapping_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only bounded read-only file-backed mapping smoke marker")
+option_end()
+
 option("growable_tables_smoke")
     set_default(false)
     set_showmenu(true)
