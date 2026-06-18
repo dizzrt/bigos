@@ -159,6 +159,15 @@ namespace bcache {
         return write_back(__block);
     }
 
+    Status sync_block(driver::block::BlockDevice *__dev, uint64_t __block_no) noexcept {
+        if (__dev == nullptr)
+            return Status::InvalidArgument;
+        BufferBlock *slot = find_slot(__dev, __block_no);
+        if (slot == nullptr || !slot->used || !slot->dirty)
+            return Status::Success;
+        return write_back(slot);
+    }
+
     Status sync_all() noexcept {
         Status first_error = Status::Success;
         for (uint32_t i = 0; i < CACHE_BLOCKS; i++) {
@@ -172,15 +181,22 @@ namespace bcache {
         return first_error;
     }
 
-    void invalidate_device(driver::block::BlockDevice *__dev) noexcept {
+    Status invalidate_device(driver::block::BlockDevice *__dev) noexcept {
         if (__dev == nullptr)
-            return;
+            return Status::InvalidArgument;
+        Status first_error = Status::Success;
         for (uint32_t i = 0; i < CACHE_BLOCKS; i++) {
             BufferBlock *slot = &g_slots[i];
             if (!slot->used || slot->dev != __dev || slot->ref_count != 0)
                 continue;
-            if (slot->dirty)
-                (void)write_back(slot);
+            if (slot->dirty) {
+                const Status status = write_back(slot);
+                if (status != Status::Success) {
+                    if (first_error == Status::Success)
+                        first_error = status;
+                    continue;
+                }
+            }
             slot->dev = nullptr;
             slot->block_no = 0;
             slot->valid = false;
@@ -188,6 +204,7 @@ namespace bcache {
             slot->used = false;
             slot->last_use = 0;
         }
+        return first_error;
     }
 }   // namespace bcache
 NAMESPACE_BIGOS_END

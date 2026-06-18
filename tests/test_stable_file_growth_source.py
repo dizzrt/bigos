@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CHANGE = ROOT / 'openspec/changes/add-stable-file-growth'
+CHANGE = ROOT / 'openspec/changes/archive/2026-06-18-add-stable-file-growth'
 
 
 def read_source(relative: str) -> str:

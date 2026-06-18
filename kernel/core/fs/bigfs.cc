@@ -73,6 +73,148 @@ namespace {
     uint8_t g_write_staged[DIRECT_BLOCKS][BLOCK_SIZE] = {};
     bool g_initialized = false;
     bool g_persistent = false;
+    uint8_t g_validate_inode_bitmap[BLOCK_SIZE] = {};
+    uint8_t g_validate_data_bitmap[BLOCK_SIZE] = {};
+    uint8_t g_validate_data_owner[bigos::bigfs::DATA_BLOCK_COUNT] = {};
+    DiskInode g_validate_inodes[INODE_COUNT] = {};
+
+    constexpr uint32_t METADATA_COMMIT_BLOCKS_MAX = 64;
+    struct MetadataCommitPlan {
+        uint32_t blocks[METADATA_COMMIT_BLOCKS_MAX];
+        uint32_t count;
+        bool pending;
+    };
+    MetadataCommitPlan g_metadata_commit = {};
+
+    uint32_t inode_table_block_no(uint32_t __inode) noexcept {
+        return INODE_TABLE_START + __inode / INODES_PER_BLOCK;
+    }
+
+    void metadata_commit_reset() noexcept {
+        g_metadata_commit.count = 0;
+        g_metadata_commit.pending = false;
+    }
+
+    bool metadata_commit_add(uint32_t __block_no) noexcept {
+        if (__block_no >= bigos::bigfs::TOTAL_BLOCKS)
+            return false;
+        for (uint32_t i = 0; i < g_metadata_commit.count; i++) {
+            if (g_metadata_commit.blocks[i] == __block_no)
+                return true;
+        }
+        if (g_metadata_commit.count >= METADATA_COMMIT_BLOCKS_MAX)
+            return false;
+        g_metadata_commit.blocks[g_metadata_commit.count++] = __block_no;
+        g_metadata_commit.pending = true;
+        return true;
+    }
+
+    bool metadata_commit_inode(uint32_t __inode) noexcept {
+        if (__inode >= INODE_COUNT)
+            return false;
+        return metadata_commit_add(inode_table_block_no(__inode));
+    }
+
+    bool metadata_commit_inode_data(const DiskInode *__inode) noexcept {
+        if (__inode == nullptr)
+            return false;
+        for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
+            if (__inode->direct[i] != 0 && !metadata_commit_add(__inode->direct[i]))
+                return false;
+        }
+        return true;
+    }
+
+    bool metadata_commit_flush() noexcept {
+        for (uint32_t i = 0; i < g_metadata_commit.count; i++) {
+            if (bigos::bcache::sync_block(&g_device, g_metadata_commit.blocks[i]) !=
+                bigos::bcache::Status::Success)
+                return false;
+        }
+        metadata_commit_reset();
+        return true;
+    }
+
+    Status metadata_commit_file_create(uint32_t __parent_inode, const DiskInode *__parent, uint32_t __child_inode,
+        const DiskInode *__child) noexcept {
+        metadata_commit_reset();
+        if (!metadata_commit_add(INODE_BITMAP_BLOCK) || !metadata_commit_inode_data(__child) ||
+            !metadata_commit_inode(__child_inode) || !metadata_commit_inode_data(__parent) ||
+            !metadata_commit_inode(__parent_inode))
+            return Status::NoSpace;
+        return metadata_commit_flush() ? Status::Success : Status::IoError;
+    }
+
+    Status metadata_commit_directory_create(
+        uint32_t __parent_inode, const DiskInode *__parent, uint32_t __child_inode, const DiskInode *__child) noexcept {
+        return metadata_commit_file_create(__parent_inode, __parent, __child_inode, __child);
+    }
+
+    Status metadata_commit_unlink(uint32_t __parent_inode, const DiskInode *__parent, uint32_t __target_inode,
+        const DiskInode *__target, const DiskInode *__old_target, bool __released) noexcept {
+        metadata_commit_reset();
+        if (!metadata_commit_inode_data(__parent) || !metadata_commit_inode(__parent_inode) ||
+            !metadata_commit_inode_data(__target) || !metadata_commit_inode(__target_inode))
+            return Status::NoSpace;
+        if (__old_target != nullptr) {
+            for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
+                if (__old_target->direct[i] != 0 && !metadata_commit_add(__old_target->direct[i]))
+                    return Status::NoSpace;
+            }
+        }
+        if (__released) {
+            if (!metadata_commit_add(DATA_BITMAP_BLOCK) || !metadata_commit_add(INODE_BITMAP_BLOCK))
+                return Status::NoSpace;
+        }
+        return metadata_commit_flush() ? Status::Success : Status::IoError;
+    }
+
+    Status metadata_commit_rename(
+        uint32_t __old_parent, const DiskInode *__old_dir, uint32_t __new_parent, const DiskInode *__new_dir) noexcept {
+        metadata_commit_reset();
+        if (!metadata_commit_inode_data(__new_dir) || !metadata_commit_inode(__new_parent) ||
+            !metadata_commit_inode_data(__old_dir) || !metadata_commit_inode(__old_parent))
+            return Status::NoSpace;
+        if (__old_parent != __new_parent && !metadata_commit_add(DATA_BITMAP_BLOCK))
+            return Status::NoSpace;
+        return metadata_commit_flush() ? Status::Success : Status::IoError;
+    }
+
+    Status metadata_commit_growth(uint32_t __inode, const DiskInode *__file, uint32_t *__data_blocks,
+        uint32_t __data_count, bool __allocated_blocks) noexcept {
+        metadata_commit_reset();
+        for (uint32_t i = 0; i < __data_count; i++) {
+            if (__data_blocks[i] != 0 && !metadata_commit_add(__data_blocks[i]))
+                return Status::NoSpace;
+        }
+        if (!metadata_commit_inode_data(__file))
+            return Status::NoSpace;
+        if (__allocated_blocks && !metadata_commit_add(DATA_BITMAP_BLOCK))
+            return Status::NoSpace;
+        if (!metadata_commit_inode(__inode))
+            return Status::NoSpace;
+        return metadata_commit_flush() ? Status::Success : Status::IoError;
+    }
+
+    Status metadata_commit_truncate(uint32_t __inode, const DiskInode *__committed, const DiskInode *__old,
+        uint32_t __tail_block, bool __released_blocks) noexcept {
+        metadata_commit_reset();
+        if (__tail_block != 0 && !metadata_commit_add(__tail_block))
+            return Status::NoSpace;
+        if (!metadata_commit_inode_data(__committed) || !metadata_commit_inode(__inode))
+            return Status::NoSpace;
+        if (__released_blocks) {
+            if (__old != nullptr) {
+                for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
+                    if (__old->direct[i] != 0 && !metadata_commit_add(__old->direct[i]))
+                        return Status::NoSpace;
+                }
+            }
+            if (!metadata_commit_add(DATA_BITMAP_BLOCK))
+                return Status::NoSpace;
+        }
+        return metadata_commit_flush() ? Status::Success : Status::IoError;
+    }
 
     driver::block::BlockStatus ram_read_impl(
         driver::block::BlockDevice *, uint64_t __lba, uint32_t __count, void *__dst, size_t __dst_len) noexcept {
@@ -123,6 +265,104 @@ namespace {
         return sb;
     }
 
+    bool bitmap_bytes_test(const uint8_t *__bitmap, uint32_t __index) noexcept {
+        const uint32_t byte = __index / 8;
+        const uint8_t mask = (uint8_t)(1u << (__index % 8));
+        return (__bitmap[byte] & mask) != 0;
+    }
+
+    Status read_bitmap_block(uint32_t __block_no, uint8_t *__out) noexcept {
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, __block_no);
+        if (block == nullptr)
+            return Status::IoError;
+        memcpy(__out, block->data, BLOCK_SIZE);
+        bigos::bcache::put(block);
+        return Status::Success;
+    }
+
+    bool validate_inode_shape(uint32_t __inode_index, const DiskInode *__inode, bool __bitmap_used) noexcept {
+        if (__inode == nullptr)
+            return false;
+        if (!__bitmap_used)
+            return __inode->type == bigos::bigfs::INODE_FREE;
+        if (__inode->type != bigos::bigfs::INODE_REGULAR && __inode->type != bigos::bigfs::INODE_DIRECTORY)
+            return false;
+        if (__inode_index == ROOT_INODE && __inode->type != bigos::bigfs::INODE_DIRECTORY)
+            return false;
+        if (__inode->link_count == 0 || __inode->size > bigos::bigfs::MAX_FILE_SIZE)
+            return false;
+        if (__inode->type == bigos::bigfs::INODE_DIRECTORY && (__inode->size % BLOCK_SIZE) != 0)
+            return false;
+        for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
+            const uint32_t block_no = __inode->direct[i];
+            if (block_no != 0 && (block_no < DATA_START || block_no >= bigos::bigfs::TOTAL_BLOCKS))
+                return false;
+        }
+        return true;
+    }
+
+    Status validate_metadata_invariants() noexcept {
+        memset(g_validate_inode_bitmap, 0, sizeof(g_validate_inode_bitmap));
+        memset(g_validate_data_bitmap, 0, sizeof(g_validate_data_bitmap));
+        memset(g_validate_data_owner, 0, sizeof(g_validate_data_owner));
+        memset(g_validate_inodes, 0, sizeof(g_validate_inodes));
+        Status status = read_bitmap_block(INODE_BITMAP_BLOCK, g_validate_inode_bitmap);
+        if (status != Status::Success)
+            return status;
+        status = read_bitmap_block(DATA_BITMAP_BLOCK, g_validate_data_bitmap);
+        if (status != Status::Success)
+            return status;
+
+        for (uint32_t i = 0; i < INODE_COUNT; i++) {
+            if (!load_inode(i, &g_validate_inodes[i]))
+                return Status::IoError;
+            if (!validate_inode_shape(i, &g_validate_inodes[i], bitmap_bytes_test(g_validate_inode_bitmap, i)))
+                return Status::Invalid;
+            if (g_validate_inodes[i].type == bigos::bigfs::INODE_FREE)
+                continue;
+            for (uint32_t d = 0; d < DIRECT_BLOCKS; d++) {
+                const uint32_t block_no = g_validate_inodes[i].direct[d];
+                if (block_no == 0)
+                    continue;
+                const uint32_t data_index = block_no - DATA_START;
+                if (!bitmap_bytes_test(g_validate_data_bitmap, data_index) || g_validate_data_owner[data_index] != 0)
+                    return Status::Invalid;
+                g_validate_data_owner[data_index] = 1;
+            }
+        }
+
+        for (uint32_t i = 0; i < bigos::bigfs::DATA_BLOCK_COUNT; i++) {
+            if (bitmap_bytes_test(g_validate_data_bitmap, i) && g_validate_data_owner[i] == 0)
+                return Status::Invalid;
+        }
+
+        for (uint32_t i = 0; i < INODE_COUNT; i++) {
+            if (g_validate_inodes[i].type != bigos::bigfs::INODE_DIRECTORY)
+                continue;
+            for (uint32_t d = 0; d < DIRECT_BLOCKS; d++) {
+                const uint32_t block_no = g_validate_inodes[i].direct[d];
+                if (block_no == 0)
+                    continue;
+                bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, block_no);
+                if (block == nullptr)
+                    return Status::IoError;
+                for (uint32_t e = 0; e < DIRENTS_PER_BLOCK; e++) {
+                    DiskDirent *ent = (DiskDirent *)(block->data + e * bigos::bigfs::DIRENT_SIZE);
+                    if (ent->inode_plus_one == 0)
+                        continue;
+                    const uint32_t child = ent->inode_plus_one - 1;
+                    if (child >= INODE_COUNT || !bitmap_bytes_test(g_validate_inode_bitmap, child) ||
+                        g_validate_inodes[child].type == bigos::bigfs::INODE_FREE) {
+                        bigos::bcache::put(block);
+                        return Status::Invalid;
+                    }
+                }
+                bigos::bcache::put(block);
+            }
+        }
+        return Status::Success;
+    }
+
     Status validate_superblock() noexcept {
         bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, 0);
         if (block == nullptr)
@@ -143,7 +383,7 @@ namespace {
         if (!load_inode(ROOT_INODE, &root) || root.type != bigos::bigfs::INODE_DIRECTORY ||
             root.link_count == 0 || root.size > bigos::bigfs::MAX_FILE_SIZE)
             return Status::Invalid;
-        return Status::Success;
+        return validate_metadata_invariants();
     }
 
     bool str_eq(const char *__a, const char *__b) noexcept {
@@ -205,7 +445,7 @@ namespace {
     bool load_inode(uint32_t __inode, DiskInode *__out) noexcept {
         if (__inode >= INODE_COUNT)
             return false;
-        const uint32_t block_no = INODE_TABLE_START + __inode / INODES_PER_BLOCK;
+        const uint32_t block_no = inode_table_block_no(__inode);
         const uint32_t off = (__inode % INODES_PER_BLOCK) * INODE_SIZE;
         bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, block_no);
         if (block == nullptr)
@@ -218,7 +458,7 @@ namespace {
     bool store_inode(uint32_t __inode, const DiskInode *__in) noexcept {
         if (__inode >= INODE_COUNT)
             return false;
-        const uint32_t block_no = INODE_TABLE_START + __inode / INODES_PER_BLOCK;
+        const uint32_t block_no = inode_table_block_no(__inode);
         const uint32_t off = (__inode % INODES_PER_BLOCK) * INODE_SIZE;
         bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, block_no);
         if (block == nullptr)
@@ -661,9 +901,13 @@ namespace {
         root.link_count = 2;
         if (!store_inode(ROOT_INODE, &root))
             return Status::IoError;
-        if (bigos::bcache::sync_all() != bigos::bcache::Status::Success)
+        metadata_commit_reset();
+        if (!metadata_commit_add(0) || !metadata_commit_add(INODE_BITMAP_BLOCK) || !metadata_commit_inode(ROOT_INODE))
+            return Status::NoSpace;
+        if (!metadata_commit_flush())
             return Status::IoError;
-        bigos::bcache::invalidate_device(&g_device);
+        if (bigos::bcache::invalidate_device(&g_device) != bigos::bcache::Status::Success)
+            return Status::IoError;
         return validate_superblock();
     }
 
@@ -682,8 +926,10 @@ namespace {
         g_device.total_sectors = bigos::bigfs::TOTAL_BLOCKS;
         if (!bigos::bcache::init())
             return false;
-        if (validate_superblock() != Status::Success)
+        if (validate_superblock() != Status::Success) {
+            (void)bigos::bcache::invalidate_device(&g_device);
             return false;
+        }
         memset(g_open_refs, 0, sizeof(g_open_refs));
         g_persistent = true;
         g_initialized = true;
@@ -741,8 +987,8 @@ namespace bigfs {
 #else
         if (g_initialized && any_open_refs())
             return Status::AccessDenied;
-        if (g_initialized)
-            bigos::bcache::invalidate_device(&g_device);
+        if (g_initialized && bigos::bcache::invalidate_device(&g_device) != bigos::bcache::Status::Success)
+            return Status::IoError;
         driver::block::ata_pio_persistent_test_init(&g_persistent_ata);
         g_device = g_persistent_ata.block;
         g_device.context = &g_persistent_ata;
@@ -852,6 +1098,12 @@ namespace bigfs {
             if (add != Status::Success) {
                 discard_new_inode(new_inode);
                 return add;
+            }
+            const Status commit = metadata_commit_file_create(parent, &dir, new_inode, &file);
+            if (commit != Status::Success) {
+            (void)dir_remove_entry(&dir, leaf);
+                discard_new_inode(new_inode);
+                return commit;
             }
             g_open_refs[new_inode]++;
             *__out_inode = new_inode;
@@ -1059,7 +1311,7 @@ namespace bigfs {
             done += chunk;
         }
 
-        const uint32_t inode_block_no = INODE_TABLE_START + __inode / INODES_PER_BLOCK;
+        const uint32_t inode_block_no = inode_table_block_no(__inode);
         const uint32_t inode_off = (__inode % INODES_PER_BLOCK) * INODE_SIZE;
         bigos::bcache::BufferBlock *inode_block = bigos::bcache::get(&g_device, inode_block_no);
         if (inode_block == nullptr) {
@@ -1075,6 +1327,12 @@ namespace bigfs {
         bigos::bcache::mark_dirty(inode_block);
         bigos::bcache::put(inode_block);
         put_pinned_blocks(pinned, block_count);
+        uint32_t data_blocks[DIRECT_BLOCKS] = {};
+        for (uint32_t i = 0; i < block_count; i++)
+            data_blocks[i] = committed.direct[block_indices[i]];
+        const Status commit = metadata_commit_growth(__inode, &committed, data_blocks, block_count, allocated_count != 0);
+        if (commit != Status::Success)
+            return commit;
         if (__out_written != nullptr)
             *__out_written = done;
         return Status::Success;
@@ -1130,11 +1388,15 @@ namespace bigfs {
         if (tail_block != nullptr)
             bigos::bcache::put(tail_block);
 
+        bool released_blocks = false;
         for (uint32_t i = keep_blocks; i < DIRECT_BLOCKS; i++) {
-            if (file.direct[i] != 0)
+            if (file.direct[i] != 0) {
+                released_blocks = true;
                 free_data_block(file.direct[i]);
+            }
         }
-        return Status::Success;
+        const uint32_t tail_block_no = zero_tail ? file.direct[__length / BLOCK_SIZE] : 0;
+        return metadata_commit_truncate(__inode, &committed, &file, tail_block_no, released_blocks);
     }
 
     Status mkdir(const char *__abs_path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept {
@@ -1179,6 +1441,12 @@ namespace bigfs {
             discard_new_inode(new_inode);
             return add;
         }
+        const Status commit = metadata_commit_directory_create(parent, &dir, new_inode, &child);
+        if (commit != Status::Success) {
+            (void)dir_remove_entry(&dir, leaf);
+            discard_new_inode(new_inode);
+            return commit;
+        }
         return Status::Success;
     }
 
@@ -1219,8 +1487,9 @@ namespace bigfs {
             (void)store_inode(target, &tnode);
             return Status::NotFound;
         }
+        const DiskInode old_tnode = tnode;
         maybe_free_unlinked_inode(target, &tnode);
-        return Status::Success;
+        return metadata_commit_unlink(parent, &dir, target, &tnode, &old_tnode, tnode.type == INODE_FREE);
     }
 
     Status rmdir(const char *__abs_path, uint32_t __uid, uint32_t __gid) noexcept {
@@ -1264,8 +1533,9 @@ namespace bigfs {
             (void)store_inode(target, &tnode);
             return Status::NotFound;
         }
+        const DiskInode old_tnode = tnode;
         maybe_free_unlinked_inode(target, &tnode);
-        return Status::Success;
+        return metadata_commit_unlink(parent, &dir, target, &tnode, &old_tnode, tnode.type == INODE_FREE);
     }
 
     Status rename(const char *__old_abs_path, const char *__new_abs_path, uint32_t __uid, uint32_t __gid) noexcept {
@@ -1328,7 +1598,7 @@ namespace bigfs {
             dirent_set(src.entry, new_leaf, target);
             bigos::bcache::mark_dirty(src.block);
             bigos::bcache::put(src.block);
-            return Status::Success;
+            return metadata_commit_rename(old_parent, &old_dir, old_parent, &old_dir);
         }
 
         DirSlot src = {};
@@ -1349,7 +1619,7 @@ namespace bigfs {
         bigos::bcache::mark_dirty(src.block);
         bigos::bcache::put(src.block);
         bigos::bcache::put(dst.block);
-        return Status::Success;
+        return metadata_commit_rename(old_parent, &old_dir, new_parent, &new_dir);
     }
 
     Status readdir(uint32_t __inode, uint64_t __offset, DirectoryEntry *__entries, size_t __max_entries,
@@ -1404,6 +1674,8 @@ namespace bigfs {
     Status fsync() noexcept {
         if (!g_initialized)
             return Status::Invalid;
+        if (g_metadata_commit.pending && !metadata_commit_flush())
+            return Status::IoError;
         if (bigos::bcache::sync_all() != bigos::bcache::Status::Success)
             return Status::IoError;
         return Status::Success;

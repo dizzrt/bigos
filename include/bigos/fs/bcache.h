@@ -62,14 +62,21 @@ namespace bcache {
     // dirty (no data loss) and IoError is returned. Blockable context only.
     Status sync(BufferBlock *__block) noexcept;
 
+    // Writes a selected cached block identified by (device, block_no). Missing
+    // or clean cache entries are success because there is no dirty selected
+    // state to publish. On write-back error the cached block remains dirty.
+    // Blockable context only.
+    Status sync_block(driver::block::BlockDevice *__dev, uint64_t __block_no) noexcept;
+
     // Writes back every dirty cached block. Returns the first error encountered
     // (remaining dirty blocks keep their data). Blockable context only.
     Status sync_all() noexcept;
 
     // Writes back and drops every clean+dirty cached block that belongs to
     // __dev (used when tearing a RAM-backed device down or for smoke eviction).
-    // Blocks still referenced are left in place. Blockable context only.
-    void invalidate_device(driver::block::BlockDevice *__dev) noexcept;
+    // Blocks still referenced are left in place. A dirty block that fails
+    // write-back stays cached and dirty. Blockable context only.
+    Status invalidate_device(driver::block::BlockDevice *__dev) noexcept;
 }   // namespace bcache
 NAMESPACE_BIGOS_END
 

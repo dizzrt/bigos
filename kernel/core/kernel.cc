@@ -443,7 +443,10 @@ namespace {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED fsync\n");
             return;
         }
-        bigos::bcache::invalidate_device(dev);
+        if (bigos::bcache::invalidate_device(dev) != bigos::bcache::Status::Success) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED evict-writeback\n");
+            return;
+        }
         for (size_t i = 0; i < sizeof(buf); i++)
             buf[i] = 0;
         read = 0;
@@ -883,7 +886,10 @@ namespace {
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED fsync\n");
             return;
         }
-        bigos::bcache::invalidate_device(bigos::bigfs::device());
+        if (bigos::bcache::invalidate_device(bigos::bigfs::device()) != bigos::bcache::Status::Success) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED evict-writeback\n");
+            return;
+        }
         if (!pfs_read_file(path, payload)) {
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED evict-readback\n");
             return;

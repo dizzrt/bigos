@@ -18,10 +18,13 @@ CR3 约定均不变。
   `block::read_sectors` 装入。
 - `put`、`mark_dirty`、`sync`、`sync_all` 分别释放引用、标脏、经
   `block::write_sectors` 回写脏块。
+- `sync_block(dev, block_no)` 允许文件系统按显式顺序回写选定的 dirty block。选定块
+  未缓存或已经 clean 视为成功；写失败时对应缓存块保持 dirty 或 pending。
 - 写回（write-back）语义：写入只标脏，落盘点为 `fsync`、淘汰回写或 `sync_all`。
 - 淘汰优先选未被引用的干净块（不触发落盘）；唯一可复用块为脏块时先回写再复用。
   所有槽位都被引用时 `get` 返回 `nullptr`（上层映射为 `-ENOMEM`/`-ENOSPC`），绝
-  不死等阻塞、绝不在 IRQ 上下文落盘。
+  不死等阻塞、绝不在 IRQ 上下文落盘。强制设备失效遇到 dirty block 写失败时也会保
+  留 dirty 缓存块，而不是把槽位当作已 durable 后丢弃。
 - 装入与回写执行同步块 IO，MUST 只在可阻塞进程上下文运行；syscall 层在进入前检查
   调度阻塞守卫。设备写失败时块保持 dirty（不丢数据）并返回 `IoError`。
 
@@ -56,12 +59,17 @@ metadata 与目录枚举可见性，以及 `fsync` 加缓存淘汰后再读一�
 `BIGOS_PERSISTENT_WRITABLE_FS` 会选择独立测试磁盘上的可选 persistent `/rw`
 backend。持久布局复用同一组有界 BigFS 限制，并增加显式 superblock
 magic/version/block-size/capacity/root metadata checksum。Normal boot 只在识别既有
-兼容卷成功后挂载；invalid magic、unsupported version、非法容量或 metadata 不匹配会降
-级到 RAM-backed `/rw`，不会自动格式化。受限 `/bin/mkfs_bigfs` 工具调用 BigOS 专用的
-显式格式化 hook，只面向配置好的 persistent test disk；它不是 POSIX `mkfs`、`mount`
-或设备管理工具。Persistent 模式只承诺成功 `fsync`/write-back 后经 clean reboot 可见。
-不提供 journaling、crash recovery、async I/O、广泛存储驱动、stable inode identity、
-完整 POSIX `DIR*` 或掉电一致性保证。
+兼容卷且有界 metadata validation 成功后挂载；invalid magic、unsupported version、非法
+容量、inode 或 directory-entry 越界、block mapping 冲突、data bitmap 所有权矛盾会降
+级到 RAM-backed `/rw`，不会自动格式化、repair 或 migrate。持久 metadata 更新使用有
+界 ordered commit unit 回写选定 cache blocks：新初始化的数据块或目录块会先于发布它
+们的 inode/目录 metadata 同步；释放块前会先同步 inode 引用移除，再把块记录为可持久
+复用。受限 `/bin/mkfs_bigfs` 工具调用 BigOS 专用的显式格式化 hook，只面向配置好的
+persistent test disk；它不是 POSIX `mkfs`、`mount` 或设备管理工具。Persistent 模式
+只承诺成功 `fsync`/write-back 后经 clean reboot 可见。metadata 写回失败返回确定性错
+误并保留 dirty/pending cache state，不报告 durable success。不提供 journaling、crash
+recovery、async I/O、广泛存储驱动、stable inode identity、完整 POSIX `DIR*` 或掉电一
+致性保证。
 
 ## 权限强制
 
@@ -122,9 +130,11 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
   `BIGOS_PIPE_PASSED`/`BIGOS_PIPE_FAILED`。
 - `xmake f --persistent_writable_fs_smoke=y` 启用
   `BIGOS_PERSISTENT_WRITABLE_FS_SMOKE` 和 persistent backend。helper 可通过
-  `--persistent-image` 挂载独立测试磁盘；第一次 boot 格式化/写入/`fsync` 并等待
-  `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`，第二次 boot 复用同一 persistent image
-  并等待 `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`。
+  `--persistent-image` 挂载独立测试磁盘；第一次 boot 格式化/写入/`fsync` metadata
+  consistency state 并等待 `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`，第二次 boot
+  复用同一 persistent image 并等待 `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`。
+  检查状态覆盖目录项、inode metadata、file size、block mapping、free-space bitmap
+  effects、stable growth/truncate 行为以及只读 exFAT 隔离。
 
 无界 QEMU 串口 marker smoke 示例：
 

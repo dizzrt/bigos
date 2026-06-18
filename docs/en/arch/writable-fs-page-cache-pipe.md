@@ -21,12 +21,17 @@ sector (512 bytes) and the capacity is a bounded compile-time constant
   returns without re-reading, a miss loads via `block::read_sectors`.
 - `put`, `mark_dirty`, `sync`, and `sync_all` release a reference, flag a dirty
   block, and write dirty blocks back through `block::write_sectors`.
+- `sync_block(dev, block_no)` lets filesystem code flush selected dirty blocks
+  in an explicit order. Missing or clean selected blocks are success; failed
+  writes keep the cached block dirty or pending.
 - Write-back semantics: a write only marks the block dirty; the durable point is
   `fsync`, eviction write-back, or `sync_all`.
 - Eviction prefers an unreferenced clean block (no flush); the only evictable
   candidate being dirty is written back first. When every slot is pinned `get`
   returns `nullptr` (the caller maps that to `-ENOMEM`/`-ENOSPC`); it never busy
-  waits and never flushes from IRQ context.
+  waits and never flushes from IRQ context. Forced device invalidation also
+  preserves dirty blocks when write-back fails instead of dropping the cache
+  slot as durable.
 - Load and write-back perform synchronous block I/O and MUST run only in
   blockable process context; the syscall layer checks the scheduler blocking
   guard before entering. On a device write error the block stays dirty (no data
@@ -71,14 +76,21 @@ eviction).
 an independent test disk. The persistent layout keeps the same bounded BigFS
 limits and adds an explicit superblock magic/version/block-size/capacity/root
 metadata checksum. Normal boot mounts an existing compatible volume only after
-recognition succeeds; invalid magic, unsupported version, invalid capacity, or
-metadata mismatch falls back to RAM-backed `/rw` without auto-formatting. The
-bounded `/bin/mkfs_bigfs` tool invokes the BigOS-specific explicit format hook
-for the configured persistent test disk; it is not a POSIX `mkfs`, `mount`, or
-device-management tool. Persistent mode only promises clean-sync plus clean
-reboot visibility for successful `fsync`/write-back state. There is no
-journaling, crash recovery, async I/O, broad storage driver support, stable inode
-identity, full POSIX `DIR*`, or power-loss consistency guarantee.
+recognition and bounded metadata validation succeed; invalid magic, unsupported
+version, invalid capacity, inode or directory-entry bounds errors, block mapping
+conflicts, or data-bitmap ownership contradictions fall back to RAM-backed `/rw`
+without auto-formatting, auto-repair, or migration. Persistent metadata updates
+use a bounded ordered commit unit over selected cache blocks: newly initialized
+data or directory blocks are synchronized before inode or directory metadata that
+publishes them, and inode references are synchronized before released blocks are
+made durably reusable. The bounded `/bin/mkfs_bigfs` tool invokes the
+BigOS-specific explicit format hook for the configured persistent test disk; it
+is not a POSIX `mkfs`, `mount`, or device-management tool. Persistent mode only
+promises clean-sync plus clean reboot visibility for successful
+`fsync`/write-back state. Failed metadata write-back returns a deterministic
+error and leaves dirty/pending cache state; it does not report durable success.
+There is no journaling, crash recovery, async I/O, broad storage driver support,
+stable inode identity, full POSIX `DIR*`, or power-loss consistency guarantee.
 
 ## Permission Enforcement
 
@@ -158,9 +170,12 @@ unchanged.
 - `xmake f --persistent_writable_fs_smoke=y` enables
   `BIGOS_PERSISTENT_WRITABLE_FS_SMOKE` and the persistent backend. The helper can
   attach an independent test disk with `--persistent-image`; the first boot
-  formats/writes/fsyncs and expects `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`,
-  while a second boot with the same persistent image expects
-  `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`.
+  formats/writes/fsyncs metadata consistency state and expects
+  `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`, while a second boot with the same
+  persistent image expects `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`. The
+  checked state includes directory entries, inode metadata, file sizes, block
+  mappings, free-space bitmap effects, stable growth/truncate behavior, and
+  read-only exFAT isolation.
 
 Run the headless QEMU serial-marker smoke with, for example:
 

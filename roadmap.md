@@ -204,9 +204,9 @@ persist multiple files beyond the current clean-sync boundary.
 - [x] 任务 M2.1：可写目录树，在有界语义内支持目录创建/删除与多文件创建/删除。
 - [x] Task M2.2: file extension write, truncate, and stable block allocation.
 - [x] 任务 M2.2：文件扩展写、truncate 与稳定的块分配。
-- [ ] Task M2.3: metadata persistence and a minimal consistency strategy such as
+- [x] Task M2.3: metadata persistence and a minimal consistency strategy such as
   bounded journaling or ordered writes, without claiming full crash recovery.
-- [ ] 任务 M2.3：元数据持久化与最小一致性策略（如有界 journaling 或 ordered write），
+- [x] 任务 M2.3：元数据持久化与最小一致性策略（如有界 journaling 或 ordered write），
   不声称完整 crash recovery。
 - [ ] Task M2.4: writeback path through the page/buffer cache so synchronization
   durably reaches the backing store.
