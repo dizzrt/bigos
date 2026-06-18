@@ -37,9 +37,9 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `fork-cow` | `--fork_cow_smoke=y` | `BIGOS_FORK_COW_PASSED` | 30s | Bounded `fork` 与 anonymous COW split 语义。 |
 | `time-identity` | `--time_identity_smoke=y` | `BIGOS_TIME_IDENTITY_PASSED` | 20s | 墙钟和 pid/ppid/uid/gid syscall 路径。 |
 | `signals` | `--signal_smoke=y` | `BIGOS_SIGNAL_PASSED` | 30s | 最小 signal queue、mask、handler 和投递路径。 |
-| `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`、page/buffer cache、写后读回、fsync 和权限。 |
-| `persistent-writable-fs-write` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` | 40s | 带 `--persistent-image` 的第一次 boot：显式格式化独立测试磁盘、有界写入、`fsync` 与缓存淘汰后读回。 |
-| `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | 复用同一 `--persistent-image` 的第二次 boot：mount-existing 并在 clean reboot 后读回已同步 `/rw` 状态。 |
+| `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`、page/buffer cache、append/cross-block/seek-past-EOF 增长、zero gap、truncate、块复用、fsync 和权限。 |
+| `persistent-writable-fs-write` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` | 40s | 带 `--persistent-image` 的第一次 boot：显式格式化独立测试磁盘、有界增长/截断、`fsync` 与缓存淘汰后读回。 |
+| `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | 复用同一 `--persistent-image` 的第二次 boot：mount-existing 并在 clean reboot 后读回已同步 `/rw` 增长/截断状态。 |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
 | `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity 当前运行期文件系统语义，覆盖只读 exFAT、RAM-backed `/rw`、fd/VFS、metadata、cwd-relative path、libc errno 与 shell-visible tools；不声明重启持久化。 |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno、`snprintf`/formatter、`strtol`/`atoi`、`calloc`/`realloc`、有界 `DIR*` wrapper、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和有界 `/rw` 运行时文件操作。 |
@@ -60,7 +60,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `exec`/`wait` 与 fd 继承 | userland smoke fork、exec packaged program、wait，并保持 stdio 或 redirected descriptor | child output 或 `/rw` 记录可见，parent wait 返回预期 child/status，继承 descriptor 仍可用 | wait 失败、status 错误、缺失输出、descriptor 失败或 failure marker | 默认关闭 userland runtime 断言 | xmake、cross-binutils、QEMU、串口日志 |
 | `dup`、redirection 与无关 fd 状态 | userland smoke 复制 fd、关闭原 fd、将 shell 输出重定向到 `/rw` 并读回 | duplicate fd 在原 fd 关闭后仍可写；重定向文件包含预期数据；shell transcript 仍可用 | 文件内容错误、dup/readback 失败、shell fd 损坏或 failure marker | 默认关闭 userland runtime 断言 | QEMU headless、串口日志、RAM-backed `/rw` |
 | Pipe 端点行为 | userland smoke 传输 `pipe-data`；shell 运行 `echo pipe-ok | /bin/cat`；`pipe` smoke 检查端点计数 | downstream reader 看到字节，writer 全关后出现 EOF，无关 fd 仍可用 | 数据错误、缺失 EOF、`EPIPE`/端点状态不匹配、缺失 pass marker 或 panic | 默认关闭 userland runtime 断言加窄 pipe smoke | QEMU headless、串口日志 |
-| 运行时 `/rw` 文件系统操作 | userland/filesystem maturity smoke 创建文件/目录、write、fsync、seek、读回、枚举 `/rw`、rename、unlink，并检查只读 backend 拒写 | 文件内容、metadata、目录项、稳定后端顺序、open-fd 生命周期和 `EROFS`/`ENOENT`/`EEXIST`/`ENOSPC`/`ERANGE` 错误符合有界 VFS 契约 | 内容错误、缺失 dirent、意外持久化要求、`errno` 错误或 failure marker | 默认关闭 filesystem maturity/userland 断言加 writable-fs smoke | QEMU headless、串口日志、RAM-backed `/rw` |
+| 运行时 `/rw` 文件系统操作 | userland/filesystem maturity smoke 创建文件/目录、write、fsync、seek、truncate、读回、枚举 `/rw`、rename、unlink，并检查只读 backend 拒写 | 文件内容、metadata、zero gap、截断 size、目录项、稳定后端顺序、open-fd 生命周期和 `EROFS`/`ENOENT`/`EEXIST`/`ENOSPC`/`ERANGE` 错误符合有界 VFS 契约 | 内容错误、gap 泄漏旧字节、缺失 dirent、意外持久化要求、`errno` 错误或 failure marker | 默认关闭 filesystem maturity/userland 断言加 writable-fs smoke | QEMU headless、串口日志、RAM-backed `/rw` |
 | 底层 boot/IRQ/timer/storage 行为 | 窄 memory/timer/scheduler/blocking/filesystem case；相关时使用 Bochs 或 QEMU+Bochs | 预期 marker 与可选中间 marker 出现；可用时记录跨 emulator 结果 | 缺失 marker、panic、timeout，或跳过 cross-validation 但无风险记录 | source/spec、build、QEMU headless、可选 Bochs/graphical 证据 | toolchain 加所选 emulator；Bochs/display/ROM 仅在场景需要时要求 |
 
 `default-init` 是不依赖任何 smoke 开关的行为断言 case：它以默认配置（所有 smoke 选项设为 `=n`）构建，并断言 normal boot 到达常驻 PID-1 init 和 `/bin/sh`，以 `BIGOS_USER_EXEC` 作为 QEMU headless marker。缺失该 marker 即判定为失败，不会被重新解读为通过。

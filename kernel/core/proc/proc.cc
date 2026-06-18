@@ -3060,6 +3060,16 @@ namespace bigos::proc {
         return bigos::vfs::lseek(entry->file, __offset, __whence, __new_offset);
     }
 
+    bigos::vfs::Status truncate_fd_current(uint32_t __fd, uint64_t __length) noexcept {
+        Process *process = current_process_slot();
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
+            return bigos::vfs::Status::BadFileDescriptor;
+        FdEntry *entry = &process->fd_table[__fd];
+        if (entry->file == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        return bigos::vfs::truncate(entry->file, __length);
+    }
+
     bigos::vfs::Status fsync_fd_current(uint32_t __fd) noexcept {
         Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
@@ -3492,7 +3502,7 @@ namespace bigos::proc {
 
         void close_op(bigos::vfs::File *) noexcept {}
 
-        const bigos::vfs::FileOperations g_ops = {read_op, close_op, nullptr, nullptr, nullptr};
+        const bigos::vfs::FileOperations g_ops = {read_op, close_op, nullptr, nullptr, nullptr, nullptr};
     }   // namespace filemap_smoke
 
     bool file_backed_mapping_smoke_run(Process *__process) noexcept {

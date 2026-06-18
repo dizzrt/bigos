@@ -287,6 +287,15 @@ namespace sys {
             return 0;
         }
 
+        static int64_t sys_ftruncate(uint64_t __fd, uint64_t __length) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            const bigos::vfs::Status status = bigos::proc::truncate_fd_current((uint32_t)__fd, __length);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            return 0;
+        }
+
         static int64_t sys_mkdir(uint64_t __path, uint64_t __mode) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
@@ -755,6 +764,9 @@ namespace sys {
                 break;
             case SYS_RMDIR:
                 result = __detail::sys_rmdir(__frame->rdi);
+                break;
+            case SYS_FTRUNCATE:
+                result = __detail::sys_ftruncate(__frame->rdi, __frame->rsi);
                 break;
             case SYS_RENAME:
                 result = __detail::sys_rename(__frame->rdi, __frame->rsi);

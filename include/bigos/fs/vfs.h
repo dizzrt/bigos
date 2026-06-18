@@ -56,6 +56,7 @@ namespace vfs {
     using ReadOp = Status (*)(File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
     using WriteOp = Status (*)(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
     using LseekOp = Status (*)(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
+    using TruncateOp = Status (*)(File *__file, uint64_t __length) noexcept;
     using ReaddirOp = Status (*)(
         File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
     using CloseOp = void (*)(File *__file) noexcept;
@@ -68,6 +69,7 @@ namespace vfs {
         // (the wrapper then performs ordinary offset arithmetic).
         WriteOp write;
         LseekOp lseek;
+        TruncateOp truncate;
         ReaddirOp readdir;
     };
 
@@ -126,6 +128,7 @@ namespace vfs {
     Status pread(File *__file, uint64_t __offset, void *__dst, size_t __len, size_t *__bytes_read) noexcept;
     Status write(File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept;
     Status lseek(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
+    Status truncate(File *__file, uint64_t __length) noexcept;
     Status fsync(File *__file) noexcept;
     Status readdir(File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
     Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept;

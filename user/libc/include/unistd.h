@@ -25,6 +25,8 @@ int dup(int oldfd);
 int dup2(int oldfd, int newfd);
 off_t lseek(int fd, off_t offset, int whence);
 int fsync(int fd);
+int ftruncate(int fd, off_t length);
+int truncate(const char *path, off_t length);
 int mkdir(const char *path, mode_t mode);
 int unlink(const char *path);
 int rmdir(const char *path);

@@ -127,11 +127,17 @@ an EOI:
   on the writable `/rw` backend. It rejects regular files, non-empty directories,
   missing paths, read-only backend targets, invalid user paths, and nonblocking
   context with deterministic negative errno values.
+- `SYS_FTRUNCATE` (number=39): takes `rdi` = fd and `rsi` = bounded length. It
+  only accepts writable `/rw` regular files, updates size metadata on success,
+  makes extended ranges read as zero, releases truncated tail blocks for safe
+  reuse, and rejects directories, read-only backends, oversized lengths, bad fds,
+  and nonblocking context with deterministic negative errno values.
 
 These lifecycle calls are bounded BigOS operations, not full POSIX `munmap` or
-`mprotect`. They do not support arbitrary byte granularity, `MAP_FIXED`
-overwrite, shared writable mappings, file-backed writable upgrades, write-back
-semantics, swap, or cross-CPU TLB shootdown.
+`mprotect` or full POSIX file-size management. They do not support arbitrary
+byte granularity for VM operations, `MAP_FIXED` overwrite, shared writable
+mappings, file-backed writable upgrades, sparse-file APIs, journaling,
+power-loss recovery, swap, or cross-CPU TLB shootdown.
 
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 

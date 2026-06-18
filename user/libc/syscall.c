@@ -169,6 +169,30 @@ int fsync(int fd) {
     return (int)errno_translate(syscall1(SYS_FSYNC, (long)fd));
 }
 
+int ftruncate(int fd, off_t length) {
+    if (length < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (int)errno_translate(syscall2(SYS_FTRUNCATE, (long)fd, (long)length));
+}
+
+int truncate(const char *path, off_t length) {
+    if (length < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    int fd = open(path, O_WRONLY, 0);
+    if (fd < 0)
+        return -1;
+    const int rc = ftruncate(fd, length);
+    const int saved_errno = errno;
+    if (close(fd) != 0 && rc == 0)
+        return -1;
+    errno = saved_errno;
+    return rc;
+}
+
 int mkdir(const char *path, mode_t mode) {
     return (int)errno_translate(syscall2(SYS_MKDIR, (long)path, (long)mode));
 }

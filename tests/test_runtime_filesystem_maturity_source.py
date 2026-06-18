@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CHANGE = ROOT / 'openspec/changes/mature-runtime-filesystem-semantics'
+CHANGE = ROOT / 'openspec/changes/archive/2026-06-15-mature-runtime-filesystem-semantics'
 
 
 def read_source(relative: str) -> str:
@@ -83,12 +83,14 @@ def test_runtime_filesystem_maturity_truncate_commits_metadata_before_freeing_ol
     trunc_start = bigfs.index('if ((__flags & bigos::vfs::OPEN_TRUNC) != 0)')
     trunc_body = bigfs[trunc_start : bigfs.index('g_open_refs[inode_num]++;', trunc_start)]
 
-    assert 'DiskInode truncated = file;' in trunc_body
-    assert 'truncated.direct[i] = 0;' in trunc_body
-    assert 'truncated.size = 0;' in trunc_body
-    assert 'if (!store_inode(inode_num, &truncated))' in trunc_body
-    assert 'free_data_block(file.direct[i]);' in trunc_body
-    assert trunc_body.index('if (!store_inode(inode_num, &truncated))') < trunc_body.index(
+    assert 'const Status trunc_status = truncate(inode_num, 0, __uid, __gid);' in trunc_body
+    assert 'if (trunc_status != Status::Success)' in trunc_body
+    truncate_impl = bigfs[bigfs.index('Status truncate(uint32_t __inode') : bigfs.index('Status mkdir(', bigfs.index('Status truncate(uint32_t __inode'))]
+    assert 'committed.direct[i] = 0;' in truncate_impl
+    assert 'committed.size = __length;' in truncate_impl
+    assert 'if (!store_inode(__inode, &committed))' in truncate_impl
+    assert 'free_data_block(file.direct[i]);' in truncate_impl
+    assert truncate_impl.index('if (!store_inode(__inode, &committed))') < truncate_impl.index(
         'free_data_block(file.direct[i]);'
     )
 
@@ -159,6 +161,8 @@ def test_runtime_filesystem_maturity_runtime_smoke_exercises_success_and_failure
         'stat("/rw/runtime_file.txt", (struct stat *)1) != -1 || errno != EFAULT',
         'fstat(250, &st)',
         'write(fd, "x", 1) != -1 || errno != ENOSPC',
+        'ftruncate(fd, 10)',
+        'truncate("/rw/runtime_growth.txt", 1)',
         'bigos_readdir(dirfd, entries, BIGOS_DIRENT_MAX_BATCH + 1) != -1 || errno != ERANGE',
     ):
         assert snippet in smoke

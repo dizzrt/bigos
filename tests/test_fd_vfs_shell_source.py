@@ -242,7 +242,7 @@ def test_shell_errors_and_builtin_redirection_use_fd_paths() -> None:
 
 
 def test_runtime_filesystem_error_mapping_and_user_visible_boundary() -> None:
-    notes = read_source('openspec/changes/harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    notes = read_source('openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
     syscall = read_source('kernel/core/syscall/syscall.cc')
     libc = read_source('user/libc/syscall.c')
     user_errno = read_source('user/libc/include/errno.h')
@@ -297,7 +297,7 @@ def test_runtime_filesystem_error_mapping_and_user_visible_boundary() -> None:
 
 
 def test_runtime_filesystem_blocking_guard_review_is_documented() -> None:
-    notes = read_source('openspec/changes/harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    notes = read_source('openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
     syscall = read_source('kernel/core/syscall/syscall.cc')
 
     for syscall_name in (
@@ -342,7 +342,7 @@ def test_runtime_filesystem_blocking_guard_review_is_documented() -> None:
 
 
 def test_runtime_filesystem_backend_dispatch_and_open_ref_review_is_documented() -> None:
-    notes = read_source('openspec/changes/harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    notes = read_source('openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
     vfs = read_source('kernel/core/fs/vfs.cc')
     proc = read_source('kernel/core/proc/proc.cc')
     bigfs = read_source('kernel/core/fs/bigfs.cc')
@@ -380,7 +380,7 @@ def test_runtime_filesystem_backend_dispatch_and_open_ref_review_is_documented()
 
 
 def test_runtime_filesystem_metadata_contract_review_is_documented() -> None:
-    notes = read_source('openspec/changes/harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    notes = read_source('openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
     vfs = read_source('kernel/core/fs/vfs.cc')
     syscall = read_source('kernel/core/syscall/syscall.cc')
     smoke = read_source('user/smoke/userland_smoke.c')

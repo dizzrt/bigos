@@ -886,17 +886,11 @@ namespace bigfs {
                 return acc;
         }
         if ((__flags & bigos::vfs::OPEN_TRUNC) != 0) {
-            DiskInode truncated = file;
-            for (uint32_t i = 0; i < DIRECT_BLOCKS; i++)
-                truncated.direct[i] = 0;
-            truncated.size = 0;
-            if (!store_inode(inode_num, &truncated))
+            const Status trunc_status = truncate(inode_num, 0, __uid, __gid);
+            if (trunc_status != Status::Success)
+                return trunc_status;
+            if (!load_inode(inode_num, &file))
                 return Status::IoError;
-            for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
-                if (file.direct[i] != 0)
-                    free_data_block(file.direct[i]);
-            }
-            file = truncated;
         }
         g_open_refs[inode_num]++;
         *__out_inode = inode_num;
@@ -1065,7 +1059,10 @@ namespace bigfs {
             done += chunk;
         }
 
-        if (!store_inode(__inode, &committed)) {
+        const uint32_t inode_block_no = INODE_TABLE_START + __inode / INODES_PER_BLOCK;
+        const uint32_t inode_off = (__inode % INODES_PER_BLOCK) * INODE_SIZE;
+        bigos::bcache::BufferBlock *inode_block = bigos::bcache::get(&g_device, inode_block_no);
+        if (inode_block == nullptr) {
             put_pinned_blocks(pinned, block_count);
             rollback_allocated_blocks(allocated, allocated_count);
             return Status::IoError;
@@ -1074,9 +1071,69 @@ namespace bigfs {
             memcpy(pinned[i]->data, g_write_staged[i], BLOCK_SIZE);
             bigos::bcache::mark_dirty(pinned[i]);
         }
+        memcpy(inode_block->data + inode_off, &committed, sizeof(DiskInode));
+        bigos::bcache::mark_dirty(inode_block);
+        bigos::bcache::put(inode_block);
         put_pinned_blocks(pinned, block_count);
         if (__out_written != nullptr)
             *__out_written = done;
+        return Status::Success;
+    }
+
+    Status truncate(uint32_t __inode, uint64_t __length, uint32_t __uid, uint32_t __gid) noexcept {
+        if (!g_initialized)
+            return Status::Invalid;
+        if (__length > MAX_FILE_SIZE)
+            return Status::NoSpace;
+
+        DiskInode file;
+        if (!load_inode(__inode, &file))
+            return Status::Invalid;
+        if (file.type != INODE_REGULAR)
+            return Status::IsDirectory;
+        const Status acc = check_access(__uid, __gid, &file, bigos::cred::Access::Write);
+        if (acc != Status::Success)
+            return acc;
+        if (__length == file.size)
+            return Status::Success;
+
+        DiskInode committed = file;
+        const uint32_t keep_blocks = __length == 0 ? 0 : (uint32_t)((__length - 1) / BLOCK_SIZE) + 1;
+        for (uint32_t i = keep_blocks; i < DIRECT_BLOCKS; i++)
+            committed.direct[i] = 0;
+        committed.size = __length;
+
+        bigos::bcache::BufferBlock *tail_block = nullptr;
+        uint8_t tail_staged[BLOCK_SIZE];
+        bool zero_tail = false;
+        if (__length < file.size && (__length % BLOCK_SIZE) != 0) {
+            const uint32_t tail_index = (uint32_t)(__length / BLOCK_SIZE);
+            if (tail_index < DIRECT_BLOCKS && file.direct[tail_index] != 0) {
+                tail_block = bigos::bcache::get(&g_device, file.direct[tail_index]);
+                if (tail_block == nullptr)
+                    return Status::IoError;
+                memcpy(tail_staged, tail_block->data, BLOCK_SIZE);
+                memset(tail_staged + (__length % BLOCK_SIZE), 0, BLOCK_SIZE - (__length % BLOCK_SIZE));
+                zero_tail = true;
+            }
+        }
+
+        if (!store_inode(__inode, &committed)) {
+            if (tail_block != nullptr)
+                bigos::bcache::put(tail_block);
+            return Status::IoError;
+        }
+        if (zero_tail) {
+            memcpy(tail_block->data, tail_staged, BLOCK_SIZE);
+            bigos::bcache::mark_dirty(tail_block);
+        }
+        if (tail_block != nullptr)
+            bigos::bcache::put(tail_block);
+
+        for (uint32_t i = keep_blocks; i < DIRECT_BLOCKS; i++) {
+            if (file.direct[i] != 0)
+                free_data_block(file.direct[i]);
+        }
         return Status::Success;
     }
 

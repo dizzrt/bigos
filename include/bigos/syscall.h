@@ -87,6 +87,7 @@ namespace bigos::sys {
         SYS_PROTECT_ANON = 37,  // (rdi=addr, rsi=len, rdx=permissions) -> bounded anonymous/private
                                 // protection change. Rejects W+X and unsupported backing.
         SYS_RMDIR = 38,         // (path) -> remove an empty writable /rw directory, or negative errno.
+        SYS_FTRUNCATE = 39,     // (fd, length) -> bounded /rw regular-file truncate, or negative errno.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

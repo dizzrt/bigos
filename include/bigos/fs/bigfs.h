@@ -82,6 +82,7 @@ namespace bigfs {
     Status read(uint32_t __inode, uint64_t __offset, void *__dst, size_t __len, size_t *__out_read) noexcept;
     Status write(uint32_t __inode, uint64_t __offset, const void *__src, size_t __len, uint32_t __uid, uint32_t __gid,
         size_t *__out_written) noexcept;
+    Status truncate(uint32_t __inode, uint64_t __length, uint32_t __uid, uint32_t __gid) noexcept;
 
     Status mkdir(const char *__abs_path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__abs_path, uint32_t __uid, uint32_t __gid) noexcept;

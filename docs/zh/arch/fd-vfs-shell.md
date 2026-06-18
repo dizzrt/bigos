@@ -34,6 +34,9 @@ BigOS 引入最小的只读 fd/VFS 边界。后续能力保持这条 exFAT 读�
 - `SYS_CLOSE = 7`：`rdi=fd`，移除 descriptor 并 drop file reference。
 - `SYS_STAT = 29`：`rdi=path`，`rsi=struct stat*`，返回绝对路径的 BigOS 有界 metadata snapshot。
 - `SYS_FSTAT = 30`：`rdi=fd`，`rsi=struct stat*`，返回 open file object 的 metadata，且不推进 offset。
+- `SYS_FTRUNCATE = 39`：`rdi=fd`，`rsi=length`，对可写 `/rw` 常规文件执行有界
+  truncate。收缩保留前缀并在发布新 size 后释放尾部块；扩展暴露 zero-read 字节。它
+  不是完整 POSIX `ftruncate(2)`。
 - `SYS_CHDIR = 31`：`rdi=path`，解析目标，确认它是目录，并且只在成功时提交新 cwd。
 - `SYS_GETCWD = 32`：`rdi=user_buffer`，`rsi=len`，复制 NUL 结尾 cwd 字符串；有效缓冲区过小时返回 `-ERANGE`。
 - fd/VFS syscall 在初始化 VFS、分配 file 对象或进入同步 exFAT/ATA PIO read 前检查 `sched::can_block()`。
@@ -48,7 +51,7 @@ BigOS 引入最小的只读 fd/VFS 边界。后续能力保持这条 exFAT 读�
 ## 有界元数据
 
 - BigOS 通过 `stat`/`fstat` wrapper 和打包的 `/bin/stat` 观察工具暴露小型 metadata 结构。字段包含对象类型、大小、mode、uid、gid、有界 link-count 默认值、第一版始终为零的用户可见对象编号，以及显式零填充保留字段。
-- exFAT metadata 是只读的，并为 owner/mode 返回文档化默认值。`/rw` metadata 反映运行期 create、write、truncate、mkdir、unlink 和权限 metadata 变化，但仍是 RAM-backed，且不承诺重启后持久化。
+- exFAT metadata 是只读的，并为 owner/mode 返回文档化默认值。`/rw` metadata 反映运行期 create、write、truncate、mkdir、unlink 和权限 metadata 变化。RAM-backed `/rw` 仍不跨重启持久化；persistent 测试后端只声明成功 `fsync` 与 clean reboot 后的 clean-sync 状态。
 - 这是 BigOS bounded metadata subset，不是完整 POSIX `struct stat`、设备节点、符号链接、ACL、xattr、完整时间戳、稳定 inode 或持久对象身份语义。
 
 ## 非目标

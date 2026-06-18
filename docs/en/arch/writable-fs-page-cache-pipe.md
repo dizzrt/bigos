@@ -92,16 +92,26 @@ decision logic itself is unchanged from phase 16.5.
 
 ## VFS And fd Extensions
 
-`FileOperations` gains appended `write`, `lseek`, and minimal `readdir` ops and
-`File` gains an appended `writable` flag (the read-only `read`/`close` layout is
-preserved). A backend with a null `write` op is read-only (`write` returns
-`-EROFS`); a null `lseek` op uses ordinary offset arithmetic with overflow
-checks. `open_absolute` has a writable overload accepting create flags plus
-`O_CREAT` mode/owner; read-only opens of `/rw` directories produce directory fds
-that can enumerate bounded name/type records. The fd layer adds `dup`/`dup2`
-(sharing the same `File` and its offset, retaining once per new fd; `dup2`
-closes an already-open target first), and `write`/`lseek`/`fsync`/minimal
-directory enumeration through a process-local fd.
+`FileOperations` gains appended `write`, `lseek`, `truncate`, and minimal
+`readdir` ops and `File` gains an appended `writable` flag (the read-only
+`read`/`close` layout is preserved). A backend with a null `write` op is
+read-only (`write` returns `-EROFS`); a null `lseek` op uses ordinary offset
+arithmetic with overflow checks. `open_absolute` has a writable overload
+accepting create flags plus `O_CREAT` mode/owner; read-only opens of `/rw`
+directories produce directory fds that can enumerate bounded name/type records.
+The fd layer adds `dup`/`dup2` (sharing the same `File` and its offset,
+retaining once per new fd; `dup2` closes an already-open target first), and
+`write`/`lseek`/`fsync`/bounded `ftruncate`/minimal directory enumeration through
+a process-local fd. The libc `truncate(path, len)` wrapper is implemented as a
+bounded open + `ftruncate` sequence, not a complete POSIX pathname API.
+
+For `/rw` regular files, extension writes can append, cross cache blocks, or
+seek past EOF within `MAX_FILE_SIZE`. Reads from newly exposed gaps return zero
+bytes until overwritten. Shrinking truncate publishes the new size before
+released tail blocks re-enter the free set; extending truncate exposes a
+zero-read range without promising full sparse-file or hole-preservation APIs.
+Reused blocks are zeroed or completely staged before user-visible reads can see
+them.
 
 ## Pipes
 
@@ -122,7 +132,7 @@ reclaiming the pipe when both ends are gone.
 New numbers are appended after `SYS_SIGRETURN = 19`: `SYS_LSEEK = 20`,
 `SYS_PIPE = 21`, `SYS_DUP = 22`, `SYS_DUP2 = 23`, `SYS_FSYNC = 24`,
 `SYS_MKDIR = 25`, `SYS_UNLINK = 26`, `SYS_EXECVE = 27`, `SYS_READDIR = 28`,
-and `SYS_RMDIR = 38`.
+`SYS_RMDIR = 38`, and `SYS_FTRUNCATE = 39`.
 `SYS_OPEN = 5` is extended to accept writable/create flags and an `O_CREAT`
 mode; `SYS_WRITE = 2` is extended to write file and pipe fds while preserving
 the console fast path. The register ABI, existing numbers, vector layout, and
@@ -137,8 +147,10 @@ unchanged.
 
 - `xmake f --writable_fs_smoke=y` enables `BIGOS_WRITABLE_FS_SMOKE`. From a
   blockable kernel thread it covers `O_CREAT` create + write + read-back,
-  `fsync` then forced cache eviction then consistent read-back, owner/mode
-  permission denial, and a read-only backend write rejected with `-EROFS`,
+  append/cross-block/seek-past-EOF growth, zero gap reads, shrink/extend
+  truncate, block reuse zeroing, capacity failure, `fsync` then forced cache
+  eviction then consistent read-back, owner/mode permission denial, and a
+  read-only backend write rejected with `-EROFS`,
   emitting `BIGOS_WRITABLE_FS_PASSED`/`BIGOS_WRITABLE_FS_FAILED`.
 - `xmake f --pipe_smoke=y` enables `BIGOS_PIPE_SMOKE`, covering cross-thread FIFO
   write/read, blocking-read then write wakeup, write-end-closed EOF, and

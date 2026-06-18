@@ -73,13 +73,20 @@ owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端�
 
 ## VFS 与 fd 扩展
 
-`FileOperations` 追加 `write`、`lseek` 与最小 `readdir` op，`File` 追加 `writable`
-标志（保留只读 `read`/`close` 布局）。`write` op 为空的后端即只读（`write` 返回
-`-EROFS`）；`lseek` op 为空时使用带溢出检查的普通 offset 运算。`open_absolute`
-增加可写重载，接受创建 flags 与 `O_CREAT` 的 mode/owner；以只读方式打开 `/rw`
-目录会得到可枚举有界 name/type 记录的目录 fd。fd 层新增 `dup`/`dup2`（共享同一
-`File` 与 offset，每个新 fd 增引用一次；`dup2` 先关闭已打开的目标），以及经进程
-局部 fd 的 `write`/`lseek`/`fsync`/最小目录枚举。
+`FileOperations` 追加 `write`、`lseek`、`truncate` 与最小 `readdir` op，`File`
+追加 `writable` 标志（保留只读 `read`/`close` 布局）。`write` op 为空的后端即只读
+（`write` 返回 `-EROFS`）；`lseek` op 为空时使用带溢出检查的普通 offset 运算。
+`open_absolute` 增加可写重载，接受创建 flags 与 `O_CREAT` 的 mode/owner；以只读方式
+打开 `/rw` 目录会得到可枚举有界 name/type 记录的目录 fd。fd 层新增 `dup`/`dup2`
+（共享同一 `File` 与 offset，每个新 fd 增引用一次；`dup2` 先关闭已打开的目标），
+以及经进程局部 fd 的 `write`/`lseek`/`fsync`/有界 `ftruncate`/最小目录枚举。
+libc 的 `truncate(path, len)` wrapper 由有界 open + `ftruncate` 组合实现，不表示完整
+POSIX 路径 API。
+
+`/rw` 常规文件的扩展写可以在 `MAX_FILE_SIZE` 内追加、跨 cache block 或 seek 越过
+EOF。新暴露 gap 在被覆盖前读取为零。收缩 truncate 会先发布新 size，再让尾部块回到
+free set；扩展 truncate 暴露 zero-read 范围，但不承诺完整 sparse-file 或 hole
+preservation API。复用块在用户可读前必须被清零或经完整 staging 覆盖。
 
 ## 管道
 
@@ -95,7 +102,8 @@ owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端�
 
 新号紧随 `SYS_SIGRETURN = 19` 追加：`SYS_LSEEK = 20`、`SYS_PIPE = 21`、
 `SYS_DUP = 22`、`SYS_DUP2 = 23`、`SYS_FSYNC = 24`、`SYS_MKDIR = 25`、
-`SYS_UNLINK = 26`、`SYS_EXECVE = 27`、`SYS_READDIR = 28`、`SYS_RMDIR = 38`。`SYS_OPEN = 5`
+`SYS_UNLINK = 26`、`SYS_EXECVE = 27`、`SYS_READDIR = 28`、`SYS_RMDIR = 38`、
+`SYS_FTRUNCATE = 39`。`SYS_OPEN = 5`
 扩展为接受可写/创建 flags 与 `O_CREAT` 的 mode；`SYS_WRITE = 2` 扩展为写文件/管道
 fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布局与「syscall 不发 EOI」规则
 不变。写/管道/FS syscall 在分配或进入同步块 IO/阻塞前检查调度阻塞守卫。
@@ -105,8 +113,9 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
 两个默认关闭开关控制运行时 smoke；既有 smoke 矩阵不变。
 
 - `xmake f --writable_fs_smoke=y` 启用 `BIGOS_WRITABLE_FS_SMOKE`。在可阻塞内核线
-  程中覆盖 `O_CREAT` 建文件 + 写 + 读回、`fsync` 后强制淘汰再读一致、owner/mode
-  权限拒绝、只读后端写被 `-EROFS` 拒绝，发射
+  程中覆盖 `O_CREAT` 建文件 + 写 + 读回、append/cross-block/seek-past-EOF 增长、
+  zero gap 读取、收缩/扩展 truncate、块复用清零、容量失败、`fsync` 后强制淘汰再读
+  一致、owner/mode 权限拒绝、只读后端写被 `-EROFS` 拒绝，发射
   `BIGOS_WRITABLE_FS_PASSED`/`BIGOS_WRITABLE_FS_FAILED`。
 - `xmake f --pipe_smoke=y` 启用 `BIGOS_PIPE_SMOKE`，覆盖跨线程 FIFO 写读、读空阻
   塞 + 写入唤醒、写端全关读 EOF、读端全关写 `-EPIPE`，发射

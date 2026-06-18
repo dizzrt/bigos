@@ -303,6 +303,103 @@ namespace {
         return true;
     }
 
+    bool wfs_all_zero(const char *__buf, size_t __len) noexcept {
+        for (size_t i = 0; i < __len; i++)
+            if (__buf[i] != 0)
+                return false;
+        return true;
+    }
+
+    bool wfs_check_stable_growth(uint32_t __uid, uint32_t __gid) noexcept {
+        uint32_t inode = 0;
+        uint64_t size = 0;
+        bool is_dir = false;
+        bigos::bigfs::Status s = bigos::bigfs::open("/rw/growth.txt",
+            bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT | bigos::vfs::OPEN_TRUNC, 0644, __uid, __gid, &inode,
+            &size, &is_dir);
+        if (s != bigos::bigfs::Status::Success || is_dir)
+            return false;
+
+        size_t written = 0;
+        s = bigos::bigfs::write(inode, 0, "abc", 3, __uid, __gid, &written);
+        if (s != bigos::bigfs::Status::Success || written != 3)
+            return false;
+        s = bigos::bigfs::write(inode, bigos::bigfs::BLOCK_SIZE - 2, "uvwxy", 5, __uid, __gid, &written);
+        if (s != bigos::bigfs::Status::Success || written != 5)
+            return false;
+        s = bigos::bigfs::write(inode, bigos::bigfs::BLOCK_SIZE + 9, "Z", 1, __uid, __gid, &written);
+        if (s != bigos::bigfs::Status::Success || written != 1)
+            return false;
+
+        char gap[6] = {};
+        size_t read = 0;
+        s = bigos::bigfs::read(inode, 3, gap, sizeof(gap), &read);
+        if (s != bigos::bigfs::Status::Success || read != sizeof(gap) || !wfs_all_zero(gap, sizeof(gap)))
+            return false;
+        char cross[5] = {};
+        s = bigos::bigfs::read(inode, bigos::bigfs::BLOCK_SIZE - 2, cross, sizeof(cross), &read);
+        if (s != bigos::bigfs::Status::Success || read != sizeof(cross) || !wfs_bytes_equal(cross, "uvwxy", 5))
+            return false;
+
+        if (bigos::bigfs::truncate(inode, 2, __uid, __gid) != bigos::bigfs::Status::Success)
+            return false;
+        uint32_t mode = 0;
+        uint32_t owner = 0;
+        uint32_t group = 0;
+        uint64_t stat_size = 0;
+        bool stat_is_dir = false;
+        if (!bigos::bigfs::stat(inode, &mode, &owner, &group, &stat_size, &stat_is_dir) || stat_size != 2)
+            return false;
+        s = bigos::bigfs::read(inode, 2, gap, sizeof(gap), &read);
+        if (s != bigos::bigfs::Status::Success || read != 0)
+            return false;
+        if (bigos::bigfs::truncate(inode, 10, __uid, __gid) != bigos::bigfs::Status::Success)
+            return false;
+        s = bigos::bigfs::read(inode, 2, gap, sizeof(gap), &read);
+        if (s != bigos::bigfs::Status::Success || read != sizeof(gap) || !wfs_all_zero(gap, sizeof(gap)))
+            return false;
+        s = bigos::bigfs::write(inode, bigos::bigfs::MAX_FILE_SIZE, "x", 1, __uid, __gid, &written);
+        if (s != bigos::bigfs::Status::NoSpace || written != 0)
+            return false;
+        bigos::bigfs::close_inode(inode);
+
+        uint32_t reuse_a = 0;
+        s = bigos::bigfs::open("/rw/reuse-a", bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, __uid, __gid,
+            &reuse_a, &size, &is_dir);
+        if (s != bigos::bigfs::Status::Success)
+            return false;
+        char fill[bigos::bigfs::BLOCK_SIZE];
+        for (size_t i = 0; i < sizeof(fill); i++)
+            fill[i] = 'Q';
+        s = bigos::bigfs::write(reuse_a, 0, fill, sizeof(fill), __uid, __gid, &written);
+        if (s != bigos::bigfs::Status::Success || written != sizeof(fill))
+            return false;
+        if (bigos::bigfs::truncate(reuse_a, 0, __uid, __gid) != bigos::bigfs::Status::Success)
+            return false;
+        bigos::bigfs::close_inode(reuse_a);
+
+        uint32_t reuse_b = 0;
+        s = bigos::bigfs::open("/rw/reuse-b", bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, __uid, __gid,
+            &reuse_b, &size, &is_dir);
+        if (s != bigos::bigfs::Status::Success)
+            return false;
+        if (bigos::bigfs::truncate(reuse_b, 16, __uid, __gid) != bigos::bigfs::Status::Success)
+            return false;
+        char zeros[16] = {};
+        s = bigos::bigfs::read(reuse_b, 0, zeros, sizeof(zeros), &read);
+        if (s != bigos::bigfs::Status::Success || read != sizeof(zeros) || !wfs_all_zero(zeros, sizeof(zeros)))
+            return false;
+        bigos::bigfs::close_inode(reuse_b);
+
+        uint32_t root_inode = 0;
+        s = bigos::bigfs::open("/rw", bigos::vfs::OPEN_RDONLY, 0, __uid, __gid, &root_inode, &size, &is_dir);
+        if (s != bigos::bigfs::Status::Success || !is_dir)
+            return false;
+        s = bigos::bigfs::truncate(root_inode, 0, __uid, __gid);
+        bigos::bigfs::close_inode(root_inode);
+        return s == bigos::bigfs::Status::IsDirectory;
+    }
+
     void writable_fs_smoke_entry(void *) noexcept {
         // Runs from blockable kernel-thread context: bigfs init performs block IO.
         if (!bigos::bigfs::init()) {
@@ -371,6 +468,11 @@ namespace {
         s = bigos::bigfs::write(priv_inode, 0, payload, plen, 2000, 2000, &denied_written);
         if (s != bigos::bigfs::Status::AccessDenied) {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED perm\n");
+            return;
+        }
+
+        if (!wfs_check_stable_growth(uid, gid)) {
+            bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED stable-growth\n");
             return;
         }
 
@@ -483,6 +585,13 @@ namespace {
         return true;
     }
 
+    bool pfs_all_zero(const char *__buf, size_t __len) noexcept {
+        for (size_t i = 0; i < __len; i++)
+            if (__buf[i] != 0)
+                return false;
+        return true;
+    }
+
     bool pfs_write_file(const char *__path, const char *__payload) noexcept {
         const uint32_t uid = bigos::cred::ROOT_UID;
         const uint32_t gid = 0;
@@ -517,6 +626,80 @@ namespace {
         status = bigos::bigfs::read(inode, 0, buf, len, &read);
         bigos::bigfs::close_inode(inode);
         return status == bigos::bigfs::Status::Success && read == len && pfs_bytes_equal(buf, __payload, len);
+    }
+
+    bool pfs_write_stable_growth_state() noexcept {
+        const uint32_t uid = bigos::cred::ROOT_UID;
+        const uint32_t gid = 0;
+        uint32_t inode = 0;
+        uint64_t size = 0;
+        bool is_dir = false;
+        bigos::bigfs::Status status = bigos::bigfs::open("/rw/persist-growth",
+            bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT | bigos::vfs::OPEN_TRUNC, 0644, uid, gid, &inode, &size,
+            &is_dir);
+        if (status != bigos::bigfs::Status::Success || is_dir)
+            return false;
+        size_t written = 0;
+        status = bigos::bigfs::write(inode, 0, "abc", 3, uid, gid, &written);
+        if (status != bigos::bigfs::Status::Success || written != 3)
+            return false;
+        status = bigos::bigfs::write(inode, bigos::bigfs::BLOCK_SIZE - 2, "uvwxy", 5, uid, gid, &written);
+        if (status != bigos::bigfs::Status::Success || written != 5)
+            return false;
+        status = bigos::bigfs::write(inode, bigos::bigfs::BLOCK_SIZE + 9, "Z", 1, uid, gid, &written);
+        if (status != bigos::bigfs::Status::Success || written != 1)
+            return false;
+        bigos::bigfs::close_inode(inode);
+
+        status = bigos::bigfs::open("/rw/persist-trunc",
+            bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT | bigos::vfs::OPEN_TRUNC, 0644, uid, gid, &inode, &size,
+            &is_dir);
+        if (status != bigos::bigfs::Status::Success || is_dir)
+            return false;
+        status = bigos::bigfs::write(inode, 0, "abcdef", 6, uid, gid, &written);
+        if (status != bigos::bigfs::Status::Success || written != 6)
+            return false;
+        if (bigos::bigfs::truncate(inode, 2, uid, gid) != bigos::bigfs::Status::Success)
+            return false;
+        if (bigos::bigfs::truncate(inode, 10, uid, gid) != bigos::bigfs::Status::Success)
+            return false;
+        bigos::bigfs::close_inode(inode);
+        return true;
+    }
+
+    bool pfs_verify_stable_growth_state() noexcept {
+        const uint32_t uid = bigos::cred::ROOT_UID;
+        const uint32_t gid = 0;
+        uint32_t inode = 0;
+        uint64_t size = 0;
+        bool is_dir = false;
+        bigos::bigfs::Status status =
+            bigos::bigfs::open("/rw/persist-growth", bigos::vfs::OPEN_RDONLY, 0, uid, gid, &inode, &size, &is_dir);
+        if (status != bigos::bigfs::Status::Success || is_dir || size != bigos::bigfs::BLOCK_SIZE + 10)
+            return false;
+        char buf[8] = {};
+        size_t read = 0;
+        status = bigos::bigfs::read(inode, 0, buf, 3, &read);
+        if (status != bigos::bigfs::Status::Success || read != 3 || !pfs_bytes_equal(buf, "abc", 3))
+            return false;
+        status = bigos::bigfs::read(inode, 3, buf, sizeof(buf), &read);
+        if (status != bigos::bigfs::Status::Success || read != sizeof(buf) || !pfs_all_zero(buf, sizeof(buf)))
+            return false;
+        status = bigos::bigfs::read(inode, bigos::bigfs::BLOCK_SIZE - 2, buf, 5, &read);
+        if (status != bigos::bigfs::Status::Success || read != 5 || !pfs_bytes_equal(buf, "uvwxy", 5))
+            return false;
+        bigos::bigfs::close_inode(inode);
+
+        status =
+            bigos::bigfs::open("/rw/persist-trunc", bigos::vfs::OPEN_RDONLY, 0, uid, gid, &inode, &size, &is_dir);
+        if (status != bigos::bigfs::Status::Success || is_dir || size != 10)
+            return false;
+        status = bigos::bigfs::read(inode, 0, buf, 2, &read);
+        if (status != bigos::bigfs::Status::Success || read != 2 || !pfs_bytes_equal(buf, "ab", 2))
+            return false;
+        status = bigos::bigfs::read(inode, 2, buf, sizeof(buf), &read);
+        bigos::bigfs::close_inode(inode);
+        return status == bigos::bigfs::Status::Success && read == sizeof(buf) && pfs_all_zero(buf, sizeof(buf));
     }
 
     bool pfs_check_directory_and_metadata(const char *__path, const char *__payload) noexcept {
@@ -664,6 +847,10 @@ namespace {
                 bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_FAILED metadata\n");
                 return;
             }
+            if (!pfs_verify_stable_growth_state()) {
+                bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_FAILED stable-growth\n");
+                return;
+            }
             if (!pfs_check_exfat_read_only_asset()) {
                 bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_FAILED exfat\n");
                 return;
@@ -684,6 +871,10 @@ namespace {
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED metadata\n");
             return;
         }
+        if (!pfs_write_stable_growth_state()) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED stable-growth\n");
+            return;
+        }
         if (!pfs_check_exfat_read_only_asset()) {
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED exfat\n");
             return;
@@ -695,6 +886,10 @@ namespace {
         bigos::bcache::invalidate_device(bigos::bigfs::device());
         if (!pfs_read_file(path, payload)) {
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED evict-readback\n");
+            return;
+        }
+        if (!pfs_verify_stable_growth_state()) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED stable-evict-readback\n");
             return;
         }
         bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED\n");

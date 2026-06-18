@@ -167,7 +167,8 @@ namespace {
         return bigos::vfs::Status::Success;
     }
 
-    const bigos::vfs::FileOperations EXFAT_FILE_OPS = {&exfat_read, &exfat_close, nullptr, nullptr, &exfat_readdir};
+    const bigos::vfs::FileOperations EXFAT_FILE_OPS =
+        {&exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir};
 
     bigos::vfs::FileIdentity exfat_identity(const bigos::fs::FileMetadata *__metadata) noexcept {
         bigos::vfs::FileIdentity identity = {bigos::vfs::FILE_BACKEND_EXFAT, 1, 0};
@@ -298,6 +299,22 @@ namespace {
         return bigos::vfs::Status::Success;
     }
 
+    bigos::vfs::Status bigfs_truncate(bigos::vfs::File *__file, uint64_t __length) noexcept {
+        if (__file == nullptr || __file->private_data == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        if (!__file->writable)
+            return bigos::vfs::Status::BadFileDescriptor;
+        if (__file->vnode == nullptr || __file->vnode->is_directory)
+            return bigos::vfs::Status::IsDirectory;
+        BigfsFileState *state = (BigfsFileState *)__file->private_data;
+        const bigos::bigfs::Status status = bigos::bigfs::truncate(state->inode, __length, state->uid, state->gid);
+        if (status != bigos::bigfs::Status::Success)
+            return bigfs_to_vfs(status);
+        if (__file->vnode != nullptr)
+            __file->vnode->size = __length;
+        return bigos::vfs::Status::Success;
+    }
+
     void bigfs_close(bigos::vfs::File *__file) noexcept {
         if (__file == nullptr)
             return;
@@ -343,7 +360,8 @@ namespace {
         return bigos::vfs::Status::Success;
     }
 
-    const bigos::vfs::FileOperations BIGFS_FILE_OPS = {&bigfs_read, &bigfs_close, &bigfs_write, nullptr, &bigfs_readdir};
+    const bigos::vfs::FileOperations BIGFS_FILE_OPS =
+        {&bigfs_read, &bigfs_close, &bigfs_write, nullptr, &bigfs_truncate, &bigfs_readdir};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG
@@ -704,6 +722,16 @@ namespace vfs {
         if (__new_offset != nullptr)
             *__new_offset = __file->offset;
         return Status::Success;
+    }
+
+    Status truncate(File *__file, uint64_t __length) noexcept {
+        if (__file == nullptr || __file->ops == nullptr)
+            return Status::BadFileDescriptor;
+        if (__file->ops->truncate == nullptr)
+            return __file->ops->write == nullptr ? Status::ReadOnlyFs : Status::Unsupported;
+        if (!__file->writable)
+            return Status::BadFileDescriptor;
+        return __file->ops->truncate(__file, __length);
     }
 
     Status fsync(File *__file) noexcept {

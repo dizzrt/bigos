@@ -57,6 +57,10 @@ and the minimal userland runtime.
   metadata snapshot for an absolute path.
 - `SYS_FSTAT = 30`: `rdi=fd`, `rsi=struct stat*`, returns metadata for the open
   file object without advancing its offset.
+- `SYS_FTRUNCATE = 39`: `rdi=fd`, `rsi=length`, applies bounded truncate to a
+  writable `/rw` regular file. Shrink preserves the retained prefix and releases
+  tail blocks after publishing the new size; extend exposes zero-read bytes. It
+  is not full POSIX `ftruncate(2)`.
 - `SYS_CHDIR = 31`: `rdi=path`, resolves the target, verifies it is a directory,
   and commits the new cwd only on success.
 - `SYS_GETCWD = 32`: `rdi=user_buffer`, `rsi=len`, copies a NUL-terminated cwd
@@ -88,8 +92,9 @@ and the minimal userland runtime.
   version, and reserved zero fields.
 - exFAT metadata is read-only and reports documented defaults for owner and
   mode. `/rw` metadata reflects successful runtime create, write, truncate,
-  mkdir, unlink, and permission metadata changes while remaining RAM-backed and
-  non-persistent across reboot.
+  mkdir, unlink, and permission metadata changes. RAM-backed `/rw` remains
+  non-persistent across reboot; the persistent test backend only claims
+  clean-sync state after successful `fsync` and clean reboot.
 - This is a BigOS bounded metadata subset, not complete POSIX `struct stat`,
   device-node, symlink, ACL, xattr, complete timestamp, stable inode, or
   persistent object identity semantics.

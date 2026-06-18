@@ -51,6 +51,13 @@ static int contains(const char *haystack, const char *needle) {
     return 0;
 }
 
+static int all_zero(const char *buf, size_t len) {
+    for (size_t i = 0; i < len; i++)
+        if (buf[i] != 0)
+            return 0;
+    return 1;
+}
+
 static void write_all_or_exit(int fd, const char *s) {
     size_t len = strlen(s);
     while (len > 0) {
@@ -356,6 +363,9 @@ static void test_runtime_filesystem(void) {
     unlink("/rw/runtime_rename_existing.txt");
     unlink("/rw/runtime_rename_ro.txt");
     unlink("/rw/runtime_full.txt");
+    unlink("/rw/runtime_growth.txt");
+    unlink("/rw/runtime_reuse_a.txt");
+    unlink("/rw/runtime_reuse_b.txt");
     unlink("/rw/runtime_tree/sub/a.txt");
     unlink("/rw/runtime_tree/sub/b.txt");
     rmdir("/rw/runtime_tree/sub/empty");
@@ -397,6 +407,87 @@ static void test_runtime_filesystem(void) {
         fail("runtime-content");
     if (stat("/rw/runtime_file.txt", &st) != 0 || st.st_size != strlen(payload) || !S_ISREG(st.st_mode))
         fail("runtime-stat-file");
+
+    fd = open("/rw/runtime_growth.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        fail("runtime-growth-open");
+    if (write(fd, "abc", 3) != 3)
+        fail("runtime-growth-write");
+    if (lseek(fd, 521, SEEK_SET) != 521)
+        fail("runtime-growth-gap-seek");
+    if (write(fd, "Z", 1) != 1)
+        fail("runtime-growth-gap-write");
+    if (fstat(fd, &st) != 0 || st.st_size != 522)
+        fail("runtime-growth-size");
+    if (lseek(fd, 3, SEEK_SET) != 3)
+        fail("runtime-growth-gap-read-seek");
+    char gap[8];
+    n = read(fd, gap, sizeof(gap));
+    if (n != (ssize_t)sizeof(gap) || !all_zero(gap, sizeof(gap)))
+        fail("runtime-growth-gap-zero");
+    if (lseek(fd, 510, SEEK_SET) != 510)
+        fail("runtime-growth-cross-seek");
+    if (write(fd, "uvwxy", 5) != 5)
+        fail("runtime-growth-cross-write");
+    if (lseek(fd, 510, SEEK_SET) != 510)
+        fail("runtime-growth-cross-read-seek");
+    char cross[6];
+    n = read(fd, cross, 5);
+    if (n != 5)
+        fail("runtime-growth-cross-read");
+    cross[5] = 0;
+    if (strcmp(cross, "uvwxy") != 0)
+        fail("runtime-growth-cross-content");
+    if (ftruncate(fd, 2) != 0)
+        fail("runtime-ftruncate-shrink");
+    if (fstat(fd, &st) != 0 || st.st_size != 2)
+        fail("runtime-ftruncate-shrink-size");
+    if (lseek(fd, 2, SEEK_SET) != 2 || read(fd, gap, sizeof(gap)) != 0)
+        fail("runtime-ftruncate-shrink-eof");
+    if (ftruncate(fd, 10) != 0)
+        fail("runtime-ftruncate-extend");
+    if (fstat(fd, &st) != 0 || st.st_size != 10)
+        fail("runtime-ftruncate-extend-size");
+    if (lseek(fd, 2, SEEK_SET) != 2)
+        fail("runtime-ftruncate-extend-seek");
+    n = read(fd, gap, sizeof(gap));
+    if (n != (ssize_t)sizeof(gap) || !all_zero(gap, sizeof(gap)))
+        fail("runtime-ftruncate-extend-zero");
+    errno = 0;
+    if (ftruncate(fd, 4097) != -1 || errno != ENOSPC)
+        fail("runtime-ftruncate-enospc");
+    if (fstat(fd, &st) != 0 || st.st_size != 10)
+        fail("runtime-ftruncate-enospc-size");
+    close(fd);
+    if (truncate("/rw/runtime_growth.txt", 1) != 0)
+        fail("runtime-truncate-path");
+    if (stat("/rw/runtime_growth.txt", &st) != 0 || st.st_size != 1)
+        fail("runtime-truncate-path-size");
+    errno = 0;
+    if (truncate("/boot/user/init.elf", 0) != -1 || errno != EROFS)
+        fail("runtime-truncate-rofs");
+    int reuse = open("/rw/runtime_reuse_a.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (reuse < 0)
+        fail("runtime-reuse-open-a");
+    char fill[512];
+    for (size_t i = 0; i < sizeof(fill); i++)
+        fill[i] = 'Q';
+    if (write(reuse, fill, sizeof(fill)) != (ssize_t)sizeof(fill))
+        fail("runtime-reuse-write-a");
+    if (ftruncate(reuse, 0) != 0)
+        fail("runtime-reuse-truncate-a");
+    close(reuse);
+    reuse = open("/rw/runtime_reuse_b.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (reuse < 0)
+        fail("runtime-reuse-open-b");
+    if (ftruncate(reuse, 16) != 0)
+        fail("runtime-reuse-truncate-b");
+    char zeros[16];
+    if (lseek(reuse, 0, SEEK_SET) != 0 || read(reuse, zeros, sizeof(zeros)) != (ssize_t)sizeof(zeros) ||
+        !all_zero(zeros, sizeof(zeros)))
+        fail("runtime-reuse-zero");
+    close(reuse);
+
     struct bigos_dirent entries[BIGOS_DIRENT_MAX_BATCH];
     fd = open("/rw/runtime_file.txt", O_RDONLY, 0);
     if (fd < 0)

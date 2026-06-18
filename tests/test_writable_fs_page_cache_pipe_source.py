@@ -38,6 +38,8 @@ def test_syscall_numbers_appended_after_sigreturn() -> None:
     assert 'SYS_CHDIR = 31' in header
     assert 'SYS_GETCWD = 32' in header
     assert 'SYS_RENAME = 33' in header
+    assert 'SYS_RMDIR = 38' in header
+    assert 'SYS_FTRUNCATE = 39' in header
     # Frozen ABI anchors must not move.
     assert 'SYS_OPEN = 5' in header
     assert 'SYS_WRITE = 2' in header
@@ -123,6 +125,10 @@ def test_writable_fs_uses_cache_and_may_access_enforcement() -> None:
     assert 'uint8_t g_write_staged[DIRECT_BLOCKS][BLOCK_SIZE] = {};' in source
     assert 'put_pinned_blocks(pinned, block_count);' in source
     assert 'memcpy(pinned[i]->data, g_write_staged[i], BLOCK_SIZE);' in source
+    assert 'Status truncate(uint32_t __inode, uint64_t __length' in source
+    assert 'if (__length > MAX_FILE_SIZE)' in source
+    assert 'memset(tail_staged + (__length % BLOCK_SIZE), 0' in source
+    assert 'for (uint32_t i = keep_blocks; i < DIRECT_BLOCKS; i++)' in source
 
 
 def test_vfs_file_operations_gain_write_and_lseek() -> None:
@@ -131,14 +137,17 @@ def test_vfs_file_operations_gain_write_and_lseek() -> None:
 
     assert 'WriteOp write;' in header
     assert 'LseekOp lseek;' in header
+    assert 'TruncateOp truncate;' in header
     assert 'ReaddirOp readdir;' in header
     assert 'bool writable;' in header
     assert 'ReadOnlyFs' in header
     # Read-only exFAT backend leaves write/lseek null and is rejected with EROFS.
-    assert '{&exfat_read, &exfat_close, nullptr, nullptr, &exfat_readdir}' in source
+    assert '{&exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir}' in source
     assert 'return Status::ReadOnlyFs;' in source
     # Writable open captures caller identity/mode for bigfs.
     assert 'bigos::bigfs::open(__path, __flags, __mode, __uid, __gid' in source
+    assert '&bigfs_truncate' in source
+    assert 'Status truncate(File *__file, uint64_t __length)' in source
 
 
 def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
@@ -157,12 +166,14 @@ def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
         'case SYS_FSTAT:',
         'case SYS_CHDIR:',
         'case SYS_GETCWD:',
+        'case SYS_FTRUNCATE:',
     ):
         assert branch in source
     # Allocation / blocking syscalls check the scheduler blocking guard.
     assert 'if (!bigos::sched::can_block())' in source
     # SYS_OPEN extended with mode + identity, SYS_WRITE keeps console fast path.
     assert 'sys_open(__frame->rdi, __frame->rsi, __frame->rdx)' in source
+    assert 'sys_ftruncate(__frame->rdi, __frame->rsi)' in source
     assert 'BIGOS_USER_WRITE_SYSCALL' in source
 
 
@@ -183,7 +194,7 @@ def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:
     assert 'bigos::bigfs::rename(' in vfs
     assert 'rename("/rw/runtime_rename_src.txt", "/rw/runtime_rename_dst.txt")' in smoke
     assert 'rename("/rw/runtime_rename_dst.txt", "/rw/runtime_rename_existing.txt")' in smoke
-    assert "('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rmdir', 'rename', 'stat', 'pwd')" in read_source(
+    assert "('sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rmdir', 'rename', 'stat', 'truncate', 'pwd')" in read_source(
         'tools/boot_debug.py'
     )
     assert 'tnode.link_count = 0;' in bigfs
@@ -200,6 +211,8 @@ def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:
     assert 'getcwd(small, sizeof(small)) != NULL || errno != ERANGE' in smoke
     assert 'open("/boot/user/init.elf", O_WRONLY, 0)' in smoke
     assert 'write(fd, "x", 1) != -1 || errno != ENOSPC' in smoke
+    assert 'ftruncate(fd, 10)' in smoke
+    assert 'truncate("/rw/runtime_growth.txt", 1)' in smoke
     assert 'runtime-full-offset' in smoke
     assert 'test_fd_inheritance_and_offsets();' in smoke
     assert 'read(fd, child_buf, 3)' in smoke

@@ -47,5 +47,6 @@
 #define SYS_UNMAP_ANON  36
 #define SYS_PROTECT_ANON 37
 #define SYS_RMDIR       38
+#define SYS_FTRUNCATE   39
 
 #endif /* _BIGOS_USER_SYS_H */

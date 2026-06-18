@@ -70,8 +70,11 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_UNMAP_ANON`（number=36）：使用 `rdi` = 页对齐用户地址、`rsi` = 页对齐非零长度。它只接受用户低半区内由兼容 private anonymous VMA 完整覆盖的范围。成功时删除或拆分受影响 VMA，清除 present user PTE，通过 frame-reference helper 释放 owned/COW-shared frame，按 ownership metadata 回收空的动态用户页表页，并 invalidation 受影响的当前 CPU translation。
 - `SYS_PROTECT_ANON`（number=37）：使用 `rdi` = 页对齐用户地址、`rsi` = 页对齐非零长度、`rdx` = BigOS 权限 bit（`Read=1`、`Write=2`、`Execute=4`）。它只接受兼容 private anonymous VMA，拒绝 W+X 与 unsupported backing，先 staging 所需 VMA split 再发布 metadata，并更新 present PTE 权限，使页表权限不宽于 VMA policy。
 - `SYS_RMDIR`（number=38）：使用 `rdi` = 用户路径，在可写 `/rw` 后端删除空目录。它会以确定性负错误码拒绝常规文件、非空目录、缺失路径、只读后端目标、非法用户路径和不可阻塞上下文。
+- `SYS_FTRUNCATE`（number=39）：使用 `rdi` = fd、`rsi` = 有界长度。它只接受可写
+  `/rw` 常规文件，成功时更新 size metadata，让扩展范围读取为零，并把被截断尾部块
+  安全释放给复用集合；目录、只读后端、过大长度、非法 fd 和不可阻塞上下文都会返回确定性负错误码。
 
-这些 lifecycle syscall 是有界 BigOS 操作，不是完整 POSIX `munmap` 或 `mprotect`。它们不支持任意字节粒度、`MAP_FIXED` 覆盖、shared writable mapping、file-backed writable upgrade、write-back 语义、swap 或跨 CPU TLB shootdown。
+这些 lifecycle syscall 是有界 BigOS 操作，不是完整 POSIX `munmap`、`mprotect` 或完整文件大小管理。它们不支持 VM 操作的任意字节粒度、`MAP_FIXED` 覆盖、shared writable mapping、file-backed writable upgrade、sparse-file API、journal、power-loss recovery、swap 或跨 CPU TLB shootdown。
 
 syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
 
