@@ -395,6 +395,8 @@ static void test_runtime_filesystem(void) {
         fail("runtime-fstat-offset");
     if (fsync(fd) != 0)
         fail("runtime-fsync");
+    if (sync() != 0)
+        fail("runtime-sync");
     if (lseek(fd, 0, SEEK_SET) != 0)
         fail("runtime-seek");
     char buf[32];
@@ -965,6 +967,7 @@ static void test_smoke_shell(char **envp) {
     write_all_or_exit(input[1], "/bin/rmdir smoke_shell_path_dir/nested\n");
     write_all_or_exit(input[1], "/bin/stat smoke_shell_path_dir/nested\n");
     write_all_or_exit(input[1], "status\n");
+    write_all_or_exit(input[1], "sync\n");
     write_all_or_exit(input[1], "echo shell-alive\n");
     write_all_or_exit(input[1], "exit 0\n");
     close(input[1]);

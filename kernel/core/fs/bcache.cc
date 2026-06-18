@@ -1,6 +1,7 @@
 #include <bigos/fs/bcache.h>
 
 #include <bigos/memory.h>
+#include <bigos/sched.h>
 
 // Internal allocator flag: alloc_kernel_pages() only returns mapped, accessible
 // backing when pre-paging is requested. The cache data pages are touched
@@ -30,6 +31,8 @@ namespace {
     }
 
     bigos::bcache::Status write_back(bigos::bcache::BufferBlock *__slot) noexcept {
+        if (!bigos::sched::can_block() || !bigos::sched::preemption_enabled())
+            return bigos::bcache::Status::WouldBlock;
         const driver::block::BlockStatus status = driver::block::write_sectors(
             __slot->dev, __slot->block_no, 1, __slot->data, bigos::bcache::BLOCK_SIZE);
         if (status != driver::block::BlockStatus::Success)
@@ -71,6 +74,8 @@ namespace bcache {
 
     BufferBlock *get(driver::block::BlockDevice *__dev, uint64_t __block_no) noexcept {
         if (__dev == nullptr)
+            return nullptr;
+        if (!bigos::sched::can_block() || !bigos::sched::preemption_enabled())
             return nullptr;
         if (!g_initialized && !init())
             return nullptr;
@@ -166,6 +171,21 @@ namespace bcache {
         if (slot == nullptr || !slot->used || !slot->dirty)
             return Status::Success;
         return write_back(slot);
+    }
+
+    Status sync_device(driver::block::BlockDevice *__dev) noexcept {
+        if (__dev == nullptr)
+            return Status::InvalidArgument;
+        Status first_error = Status::Success;
+        for (uint32_t i = 0; i < CACHE_BLOCKS; i++) {
+            BufferBlock *slot = &g_slots[i];
+            if (!slot->used || slot->dev != __dev || !slot->dirty)
+                continue;
+            const Status status = write_back(slot);
+            if (status != Status::Success && first_error == Status::Success)
+                first_error = status;
+        }
+        return first_error;
     }
 
     Status sync_all() noexcept {

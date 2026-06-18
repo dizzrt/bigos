@@ -50,6 +50,7 @@ namespace bigfs {
         AccessDenied,
         IoError,
         Unsupported,
+        WouldBlock,
     };
 
     // Allocates the RAM-backed device, formats a fresh filesystem and prepares
@@ -91,7 +92,9 @@ namespace bigfs {
     Status readdir(uint32_t __inode, uint64_t __offset, DirectoryEntry *__entries, size_t __max_entries,
         size_t *__out_entries, uint64_t *__next_offset) noexcept;
 
-    // Flushes every dirty cached block for the writable device.
+    // Flushes pending metadata and every dirty cached block for the writable
+    // device. This is a bounded clean-sync operation, not journaling, crash
+    // recovery, power-loss recovery, fdatasync, or async write-back.
     Status fsync() noexcept;
 
     bool stat(uint32_t __inode, uint32_t *__mode, uint32_t *__uid, uint32_t *__gid, uint64_t *__size,

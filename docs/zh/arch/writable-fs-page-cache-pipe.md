@@ -87,9 +87,12 @@ owner 取调用进程身份、mode 取调用方传入值。只读 exFAT 后端�
 `open_absolute` 增加可写重载，接受创建 flags 与 `O_CREAT` 的 mode/owner；以只读方式
 打开 `/rw` 目录会得到可枚举有界 name/type 记录的目录 fd。fd 层新增 `dup`/`dup2`
 （共享同一 `File` 与 offset，每个新 fd 增引用一次；`dup2` 先关闭已打开的目标），
-以及经进程局部 fd 的 `write`/`lseek`/`fsync`/有界 `ftruncate`/最小目录枚举。
-libc 的 `truncate(path, len)` wrapper 由有界 open + `ftruncate` 组合实现，不表示完整
-POSIX 路径 API。
+以及经进程局部 fd 的 `write`/`lseek`/`fsync`/有界 `ftruncate`/最小目录枚举。VFS
+还提供有界 active writable-backend `sync` 入口，先刷新 pending metadata，再通过
+device-scoped cache path 回写 dirty cache blocks；它不是完整 POSIX `sync(2)`、
+`fdatasync`、async write-back、mount namespace 同步、journal、crash recovery 或
+power-loss recovery。libc 的 `truncate(path, len)` wrapper 由有界 open + `ftruncate`
+组合实现，不表示完整 POSIX 路径 API。
 
 `/rw` 常规文件的扩展写可以在 `MAX_FILE_SIZE` 内追加、跨 cache block 或 seek 越过
 EOF。新暴露 gap 在被覆盖前读取为零。收缩 truncate 会先发布新 size，再让尾部块回到
@@ -111,7 +114,7 @@ preservation API。复用块在用户可读前必须被清零或经完整 stagin
 新号紧随 `SYS_SIGRETURN = 19` 追加：`SYS_LSEEK = 20`、`SYS_PIPE = 21`、
 `SYS_DUP = 22`、`SYS_DUP2 = 23`、`SYS_FSYNC = 24`、`SYS_MKDIR = 25`、
 `SYS_UNLINK = 26`、`SYS_EXECVE = 27`、`SYS_READDIR = 28`、`SYS_RMDIR = 38`、
-`SYS_FTRUNCATE = 39`。`SYS_OPEN = 5`
+`SYS_FTRUNCATE = 39`、`SYS_SYNC = 40`。`SYS_OPEN = 5`
 扩展为接受可写/创建 flags 与 `O_CREAT` 的 mode；`SYS_WRITE = 2` 扩展为写文件/管道
 fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布局与「syscall 不发 EOI」规则
 不变。写/管道/FS syscall 在分配或进入同步块 IO/阻塞前检查调度阻塞守卫。
@@ -131,7 +134,8 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
 - `xmake f --persistent_writable_fs_smoke=y` 启用
   `BIGOS_PERSISTENT_WRITABLE_FS_SMOKE` 和 persistent backend。helper 可通过
   `--persistent-image` 挂载独立测试磁盘；第一次 boot 格式化/写入/`fsync` metadata
-  consistency state 并等待 `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`，第二次 boot
+  consistency state，执行有界 explicit writable-backend sync path，并等待
+  `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`，第二次 boot
   复用同一 persistent image 并等待 `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`。
   检查状态覆盖目录项、inode metadata、file size、block mapping、free-space bitmap
   effects、stable growth/truncate 行为以及只读 exFAT 隔离。

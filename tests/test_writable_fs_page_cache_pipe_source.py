@@ -40,6 +40,7 @@ def test_syscall_numbers_appended_after_sigreturn() -> None:
     assert 'SYS_RENAME = 33' in header
     assert 'SYS_RMDIR = 38' in header
     assert 'SYS_FTRUNCATE = 39' in header
+    assert 'SYS_SYNC = 40' in header
     # Frozen ABI anchors must not move.
     assert 'SYS_OPEN = 5' in header
     assert 'SYS_WRITE = 2' in header
@@ -88,7 +89,9 @@ def test_buffer_cache_write_back_and_eviction_contract() -> None:
     assert 'struct BufferBlock' in header
     assert 'BufferBlock *get(' in header
     assert 'Status sync(' in header
+    assert 'Status sync_device(driver::block::BlockDevice *__dev) noexcept;' in header
     assert 'Status sync_all(' in header
+    assert 'persistent success paths should use' in header
     # Eviction prefers an unreferenced clean block, writes back a dirty victim.
     assert 'slot->ref_count != 0 || slot->dirty' in source
     assert 'write_back(dirty_lru)' in source
@@ -96,6 +99,9 @@ def test_buffer_cache_write_back_and_eviction_contract() -> None:
     assert 'return nullptr;   // every slot is pinned' in source
     # Device write failure keeps the block dirty (no data loss).
     assert 'block::write_sectors(' in source
+    assert '!bigos::sched::can_block() || !bigos::sched::preemption_enabled()' in source
+    assert 'Status sync_device(driver::block::BlockDevice *__dev) noexcept' in source
+    assert 'slot->dev != __dev || !slot->dirty' in source
 
 
 def test_writable_fs_uses_cache_and_may_access_enforcement() -> None:
@@ -144,6 +150,8 @@ def test_vfs_file_operations_gain_write_and_lseek() -> None:
     # Read-only exFAT backend leaves write/lseek null and is rejected with EROFS.
     assert '{&exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir}' in source
     assert 'return Status::ReadOnlyFs;' in source
+    assert 'Status sync_writable_backend() noexcept' in header
+    assert 'bigos::bigfs::fsync()' in source
     # Writable open captures caller identity/mode for bigfs.
     assert 'bigos::bigfs::open(__path, __flags, __mode, __uid, __gid' in source
     assert '&bigfs_truncate' in source
@@ -159,6 +167,7 @@ def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
         'case SYS_DUP:',
         'case SYS_DUP2:',
         'case SYS_FSYNC:',
+        'case SYS_SYNC:',
         'case SYS_MKDIR:',
         'case SYS_UNLINK:',
         'case SYS_READDIR:',
@@ -174,6 +183,8 @@ def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
     # SYS_OPEN extended with mode + identity, SYS_WRITE keeps console fast path.
     assert 'sys_open(__frame->rdi, __frame->rsi, __frame->rdx)' in source
     assert 'sys_ftruncate(__frame->rdi, __frame->rsi)' in source
+    assert 'static int64_t sys_sync()' in source
+    assert 'bigos::vfs::sync_writable_backend()' in source
     assert 'BIGOS_USER_WRITE_SYSCALL' in source
 
 

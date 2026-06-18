@@ -88,6 +88,10 @@ namespace bigos::sys {
                                 // protection change. Rejects W+X and unsupported backing.
         SYS_RMDIR = 38,         // (path) -> remove an empty writable /rw directory, or negative errno.
         SYS_FTRUNCATE = 39,     // (fd, length) -> bounded /rw regular-file truncate, or negative errno.
+        SYS_SYNC = 40,          // () -> synchronize active writable backend dirty state, or negative errno.
+                                // Bounded BigOS subset: not full POSIX sync(2),
+                                // fdatasync, async flush, crash recovery, or
+                                // broad mount namespace synchronization.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

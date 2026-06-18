@@ -104,7 +104,9 @@ def test_exec_and_reap_apply_fd_close_rules_from_safe_context() -> None:
     reap_index = source.index('void reap_pending_processes() noexcept')
     close_all_index = source.index('close_all_fds(process);', reap_index)
     stack_check_index = source.index('stack_is_active(process)', reap_index)
-    root_check_index = source.index('bigos::arch::vm_user::is_active_address_space(process->address_space_root)', reap_index)
+    root_check_index = source.index(
+        'bigos::arch::vm_user::is_active_address_space(process->address_space_root)', reap_index
+    )
 
     assert exec_index < close_exec_index
     assert stack_check_index < root_check_index < close_all_index
@@ -236,13 +238,18 @@ def test_shell_errors_and_builtin_redirection_use_fd_paths() -> None:
     assert 'int fd = out_fd >= 0 ? out_fd : 1;' in shell
     assert 'strcmp(argv[0], "cd") == 0' in shell
     assert 'chdir(argv[1])' in shell
+    assert 'strcmp(argv[0], "sync") == 0' in shell
+    assert 'if (sync() != 0)' in shell
+    assert 'sh_errno_error("sh: sync failed", NULL, errno)' in shell
     assert 'if (run_builtin(n, args, out_fd, last_status, &status))' in shell
     assert 'sh: line too long' in shell
     assert 'sh: command not found: ' in shell
 
 
 def test_runtime_filesystem_error_mapping_and_user_visible_boundary() -> None:
-    notes = read_source('openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    notes = read_source(
+        'openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md'
+    )
     syscall = read_source('kernel/core/syscall/syscall.cc')
     libc = read_source('user/libc/syscall.c')
     user_errno = read_source('user/libc/include/errno.h')
@@ -297,7 +304,9 @@ def test_runtime_filesystem_error_mapping_and_user_visible_boundary() -> None:
 
 
 def test_runtime_filesystem_blocking_guard_review_is_documented() -> None:
-    notes = read_source('openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    notes = read_source(
+        'openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md'
+    )
     syscall = read_source('kernel/core/syscall/syscall.cc')
 
     for syscall_name in (
@@ -323,6 +332,7 @@ def test_runtime_filesystem_blocking_guard_review_is_documented() -> None:
         'static int64_t sys_write',
         'static int64_t sys_pipe',
         'static int64_t sys_fsync',
+        'static int64_t sys_sync',
         'static int64_t sys_mkdir',
         'static int64_t sys_unlink',
         'static int64_t sys_rename',
@@ -342,7 +352,9 @@ def test_runtime_filesystem_blocking_guard_review_is_documented() -> None:
 
 
 def test_runtime_filesystem_backend_dispatch_and_open_ref_review_is_documented() -> None:
-    notes = read_source('openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    notes = read_source(
+        'openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md'
+    )
     vfs = read_source('kernel/core/fs/vfs.cc')
     proc = read_source('kernel/core/proc/proc.cc')
     bigfs = read_source('kernel/core/fs/bigfs.cc')
@@ -380,7 +392,9 @@ def test_runtime_filesystem_backend_dispatch_and_open_ref_review_is_documented()
 
 
 def test_runtime_filesystem_metadata_contract_review_is_documented() -> None:
-    notes = read_source('openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md')
+    notes = read_source(
+        'openspec/changes/archive/2026-06-14-harden-runtime-filesystem-semantics/runtime-filesystem-semantics.md'
+    )
     vfs = read_source('kernel/core/fs/vfs.cc')
     syscall = read_source('kernel/core/syscall/syscall.cc')
     smoke = read_source('user/smoke/userland_smoke.c')
@@ -399,8 +413,15 @@ def test_runtime_filesystem_metadata_contract_review_is_documented() -> None:
 
     assert 'fill_metadata_defaults(__out)' in vfs
     assert 'bool file_identity(File *__file, FileIdentity *__out)' in vfs
-    assert '__out->mode = (__metadata->is_directory ? (bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444));' not in vfs
-    assert '__out->mode = __metadata->is_directory ? (bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444);' in vfs
+    old_fallback = (
+        '__out->mode = (__metadata->is_directory ? '
+        '(bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444));'
+    )
+    assert old_fallback not in vfs
+    assert (
+        '__out->mode = __metadata->is_directory ? (bigos::BIGOS_MODE_IFDIR | 0555) : (bigos::BIGOS_MODE_IFREG | 0444);'
+        in vfs
+    )
     assert 'return fill_bigfs_metadata(state->inode, __out);' in vfs
     assert 'if (!bigos::proc::validate_user_io_buffer(__out, sizeof(bigos::Metadata)))' in syscall
     assert 'bigos::Metadata metadata = {};' in syscall

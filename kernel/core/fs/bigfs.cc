@@ -127,8 +127,8 @@ namespace {
 
     bool metadata_commit_flush() noexcept {
         for (uint32_t i = 0; i < g_metadata_commit.count; i++) {
-            if (bigos::bcache::sync_block(&g_device, g_metadata_commit.blocks[i]) !=
-                bigos::bcache::Status::Success)
+            const bigos::bcache::Status status = bigos::bcache::sync_block(&g_device, g_metadata_commit.blocks[i]);
+            if (status != bigos::bcache::Status::Success)
                 return false;
         }
         metadata_commit_reset();
@@ -1676,7 +1676,10 @@ namespace bigfs {
             return Status::Invalid;
         if (g_metadata_commit.pending && !metadata_commit_flush())
             return Status::IoError;
-        if (bigos::bcache::sync_all() != bigos::bcache::Status::Success)
+        const bigos::bcache::Status cache_status = bigos::bcache::sync_device(&g_device);
+        if (cache_status == bigos::bcache::Status::WouldBlock)
+            return Status::WouldBlock;
+        if (cache_status != bigos::bcache::Status::Success)
             return Status::IoError;
         return Status::Success;
     }

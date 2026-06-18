@@ -76,6 +76,8 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'int sigaction(int signo, const struct sigaction *act, struct sigaction *oldact);' in signal
     assert 'int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);' in signal
     assert 'ssize_t write(int fd, const void *buf, size_t len);' in unistd
+    assert 'int sync(void);' in unistd
+    assert 'not full POSIX sync(2)' in unistd
     assert 'int chdir(const char *path);' in unistd
     assert 'char *getcwd(char *buf, size_t size);' in unistd
     assert '#define O_CREAT' in fcntl
@@ -98,6 +100,15 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'int bigos_mprotect_anon(void *addr, size_t len, long prot);' in mman
     assert 'typedef long time_t;' in time_h
     assert 'time_t time(time_t *out);' in time_h
+
+
+def test_user_libc_sync_wrapper_uses_bounded_syscall_and_errno() -> None:
+    sys_nr = read_source('user/libc/include/sys_nr.h')
+    libc = read_source('user/libc/syscall.c')
+
+    assert '#define SYS_SYNC        40' in sys_nr
+    assert 'int sync(void)' in libc
+    assert 'errno_translate(syscall0(SYS_SYNC))' in libc
 
 
 def test_bounded_path_tool_sources_use_libc_contracts() -> None:
@@ -179,6 +190,7 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'test_error_text();' in smoke
     assert 'test_signal_handler_return();' in smoke
     assert 'fstat(fd, &st)' in smoke
+    assert 'if (sync() != 0)' in smoke
     assert 'write_all_or_exit(input[1], "cd /rw\\n");' in smoke
     assert 'write_all_or_exit(input[1], "/bin/pwd\\n");' in smoke
     assert 'write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\\n");' in smoke
@@ -190,9 +202,13 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     )
     assert 'write_all_or_exit(input[1], "/bin/rmdir smoke_shell_path_dir/nested\\n");' in smoke
     assert 'write_all_or_exit(input[1], "/bin/stat smoke_shell_path_dir/nested\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "sync\\n");' in smoke
     assert 'write_all_or_exit(input[1], "echo shell-alive\\n");' in smoke
     assert 'require_file_contains("/rw/smoke_shell_ls_rw.txt", "dir nested")' in smoke
-    assert 'require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_path_dir/nested/file.txt type=file")' in smoke
+    assert (
+        'require_file_contains("/rw/smoke_shell_stat.txt", "path=smoke_shell_path_dir/nested/file.txt type=file")'
+        in smoke
+    )
     assert 'require_file_contains("/rw/smoke_shell_io.txt", "rmdir: smoke_shell_path_dir/nested: errno=39")' in smoke
     assert 'require_file_contains("/rw/smoke_shell_io.txt", "stat: smoke_shell_path_dir/nested: errno=2")' in smoke
     assert 'require_file_contains("/rw/smoke_shell_io.txt", "status 1")' in smoke

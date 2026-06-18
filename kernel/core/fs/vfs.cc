@@ -249,6 +249,8 @@ namespace {
                 return bigos::vfs::Status::BlockError;
             case bigos::bigfs::Status::Unsupported:
                 return bigos::vfs::Status::Unsupported;
+            case bigos::bigfs::Status::WouldBlock:
+                return bigos::vfs::Status::WouldBlock;
         }
         return bigos::vfs::Status::InvalidArgument;
     }
@@ -740,6 +742,12 @@ namespace vfs {
         // Only the writable backend needs a flush; read-only files are no-ops.
         if (__file->ops->write == nullptr)
             return Status::Success;
+        return bigfs_to_vfs(bigos::bigfs::fsync());
+    }
+
+    Status sync_writable_backend() noexcept {
+        if (!g_initialized)
+            return Status::NotInitialized;
         return bigfs_to_vfs(bigos::bigfs::fsync());
     }
 

@@ -17,6 +17,7 @@ namespace bcache {
         InvalidArgument,
         IoError,
         NoSpace,
+        WouldBlock,
     };
 
     // A single cached block keyed by (device, block_no). data points at a
@@ -48,7 +49,8 @@ namespace bcache {
     // only evictable candidate being dirty is written back first. When no slot
     // can be freed it returns nullptr (caller maps to -ENOMEM/-ENOSPC). Blockable
     // context only: it may allocate (during init) and perform synchronous block
-    // IO. MUST NOT be called from IRQ / non-blockable context.
+    // IO. MUST NOT be called from IRQ / non-blockable context; unsupported
+    // non-blockable callers get nullptr before any synchronous device IO.
     BufferBlock *get(driver::block::BlockDevice *__dev, uint64_t __block_no) noexcept;
 
     // Releases one reference acquired by get(). Does not flush.
@@ -68,8 +70,17 @@ namespace bcache {
     // Blockable context only.
     Status sync_block(driver::block::BlockDevice *__dev, uint64_t __block_no) noexcept;
 
-    // Writes back every dirty cached block. Returns the first error encountered
-    // (remaining dirty blocks keep their data). Blockable context only.
+    // Writes back every dirty cached block for one device. This is the durable
+    // contract entry used by writable backend clean-sync paths: it does not
+    // enlarge success to unrelated devices, and failed blocks remain dirty for a
+    // later retry. Blockable context only.
+    Status sync_device(driver::block::BlockDevice *__dev) noexcept;
+
+    // Writes back every dirty cached block globally. Returns the first error
+    // encountered (remaining dirty blocks keep their data). This is an internal
+    // diagnostic/maintenance helper; persistent success paths should use
+    // sync_device() or sync_block() so their durable scope stays explicit.
+    // Blockable context only.
     Status sync_all() noexcept;
 
     // Writes back and drops every clean+dirty cached block that belongs to

@@ -208,9 +208,9 @@ persist multiple files beyond the current clean-sync boundary.
   bounded journaling or ordered writes, without claiming full crash recovery.
 - [x] 任务 M2.3：元数据持久化与最小一致性策略（如有界 journaling 或 ordered write），
   不声称完整 crash recovery。
-- [ ] Task M2.4: writeback path through the page/buffer cache so synchronization
+- [x] Task M2.4: writeback path through the page/buffer cache so synchronization
   durably reaches the backing store.
-- [ ] 任务 M2.4：打通经 page/buffer cache 的回写路径，使同步操作可靠落盘。
+- [x] 任务 M2.4：打通经 page/buffer cache 的回写路径，使同步操作可靠落盘。
 
 ### Milestone M3 — Block Layer And Device Framework (Medium Priority) / 里程碑 M3 — 块层与设备框架（中优先级）
 

@@ -886,6 +886,10 @@ namespace {
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED fsync\n");
             return;
         }
+        if (bigos::vfs::sync_writable_backend() != bigos::vfs::Status::Success) {
+            bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED sync\n");
+            return;
+        }
         if (bigos::bcache::invalidate_device(bigos::bigfs::device()) != bigos::bcache::Status::Success) {
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED evict-writeback\n");
             return;

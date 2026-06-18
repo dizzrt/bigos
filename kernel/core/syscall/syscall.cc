@@ -287,6 +287,20 @@ namespace sys {
             return 0;
         }
 
+        static int64_t sys_sync() noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+            const bigos::vfs::Status status = bigos::vfs::sync_writable_backend();
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+            return 0;
+        }
+
         static int64_t sys_ftruncate(uint64_t __fd, uint64_t __length) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
@@ -755,6 +769,9 @@ namespace sys {
                 break;
             case SYS_FSYNC:
                 result = __detail::sys_fsync(__frame->rdi);
+                break;
+            case SYS_SYNC:
+                result = __detail::sys_sync();
                 break;
             case SYS_MKDIR:
                 result = __detail::sys_mkdir(__frame->rdi, __frame->rsi);

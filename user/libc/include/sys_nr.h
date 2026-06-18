@@ -48,5 +48,6 @@
 #define SYS_PROTECT_ANON 37
 #define SYS_RMDIR       38
 #define SYS_FTRUNCATE   39
+#define SYS_SYNC        40
 
 #endif /* _BIGOS_USER_SYS_H */

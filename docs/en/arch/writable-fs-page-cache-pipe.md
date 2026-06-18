@@ -114,7 +114,11 @@ directories produce directory fds that can enumerate bounded name/type records.
 The fd layer adds `dup`/`dup2` (sharing the same `File` and its offset,
 retaining once per new fd; `dup2` closes an already-open target first), and
 `write`/`lseek`/`fsync`/bounded `ftruncate`/minimal directory enumeration through
-a process-local fd. The libc `truncate(path, len)` wrapper is implemented as a
+a process-local fd. VFS also exposes a bounded active writable-backend `sync`
+entry that flushes pending metadata and dirty cache blocks through the
+device-scoped cache path; it is not full POSIX `sync(2)`, `fdatasync`, async
+write-back, mount namespace synchronization, journaling, crash recovery, or
+power-loss recovery. The libc `truncate(path, len)` wrapper is implemented as a
 bounded open + `ftruncate` sequence, not a complete POSIX pathname API.
 
 For `/rw` regular files, extension writes can append, cross cache blocks, or
@@ -144,7 +148,7 @@ reclaiming the pipe when both ends are gone.
 New numbers are appended after `SYS_SIGRETURN = 19`: `SYS_LSEEK = 20`,
 `SYS_PIPE = 21`, `SYS_DUP = 22`, `SYS_DUP2 = 23`, `SYS_FSYNC = 24`,
 `SYS_MKDIR = 25`, `SYS_UNLINK = 26`, `SYS_EXECVE = 27`, `SYS_READDIR = 28`,
-`SYS_RMDIR = 38`, and `SYS_FTRUNCATE = 39`.
+`SYS_RMDIR = 38`, `SYS_FTRUNCATE = 39`, and `SYS_SYNC = 40`.
 `SYS_OPEN = 5` is extended to accept writable/create flags and an `O_CREAT`
 mode; `SYS_WRITE = 2` is extended to write file and pipe fds while preserving
 the console fast path. The register ABI, existing numbers, vector layout, and
@@ -170,7 +174,8 @@ unchanged.
 - `xmake f --persistent_writable_fs_smoke=y` enables
   `BIGOS_PERSISTENT_WRITABLE_FS_SMOKE` and the persistent backend. The helper can
   attach an independent test disk with `--persistent-image`; the first boot
-  formats/writes/fsyncs metadata consistency state and expects
+  formats/writes/fsyncs metadata consistency state, runs the bounded explicit
+  writable-backend sync path, and expects
   `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED`, while a second boot with the same
   persistent image expects `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`. The
   checked state includes directory entries, inode metadata, file sizes, block

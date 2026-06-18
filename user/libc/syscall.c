@@ -169,6 +169,10 @@ int fsync(int fd) {
     return (int)errno_translate(syscall1(SYS_FSYNC, (long)fd));
 }
 
+int sync(void) {
+    return (int)errno_translate(syscall0(SYS_SYNC));
+}
+
 int ftruncate(int fd, off_t length) {
     if (length < 0) {
         errno = EINVAL;

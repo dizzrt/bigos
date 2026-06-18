@@ -130,6 +130,11 @@ namespace vfs {
     Status lseek(File *__file, int64_t __offset, int __whence, uint64_t *__new_offset) noexcept;
     Status truncate(File *__file, uint64_t __length) noexcept;
     Status fsync(File *__file) noexcept;
+    // Bounded explicit synchronization for BigOS's active writable backend.
+    // Flushes pending backend metadata and device-scoped cache dirty state only;
+    // this is not complete POSIX sync(2), fdatasync, async write-back, mount
+    // namespace synchronization, journaling, or crash/power-loss recovery.
+    Status sync_writable_backend() noexcept;
     Status readdir(File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
     Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept;
     Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out) noexcept;
