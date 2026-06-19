@@ -224,9 +224,9 @@ no longer constrained to a single synchronous path.
 - [x] Task M3.2: a block-layer abstraction with request queueing and cache
   integration, leaving room for future async I/O.
 - [x] 任务 M3.2：具备请求排队与缓存对接的块层抽象，为后续 async I/O 预留空间。
-- [ ] Task M3.3: a second block-device backend as a framework validation, without
+- [x] Task M3.3: a second block-device backend as a framework validation, without
   adding a new ISA.
-- [ ] 任务 M3.3：以第二个块设备后端作为框架验证，不接入新 ISA。
+- [x] 任务 M3.3：以第二个块设备后端作为框架验证，不接入新 ISA。
 
 ### Milestone M4 — Process POSIX Subset And libc Maturity (Medium Priority) / 里程碑 M4 — 进程 POSIX 子集与 libc 成熟（中优先级）
 

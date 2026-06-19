@@ -27,13 +27,17 @@ def test_request_layer_defines_bounded_sync_contract() -> None:
     assert "DeviceNotReady" in header
     assert "struct Request" in header
     assert "Status submit_sync(Request *__request) noexcept;" in header
+    assert "Status read_role_sync(device::DeviceRole __role" in header
+    assert "Status write_role_sync(device::DeviceRole __role" in header
 
     assert "g_queues" in source
     assert "validate_request" in source
+    assert "map_device_status" in source
     assert "queue->depth >= QUEUE_CAPACITY_PER_DEVICE" in source
     assert "Status::QueueFull" in source
     assert "driver::block::read_sectors(" in source
     assert "driver::block::write_sectors(" in source
+    assert "bigos::device::find_interface(bigos::device::DeviceClass::Block, __role, &iface)" in source
     assert "Status::WouldBlock" in source
 
 
@@ -67,11 +71,42 @@ def test_request_layer_smoke_is_default_off_and_in_matrix() -> None:
     assert "#ifdef BIGOS_BLOCK_IO_REQUEST_SMOKE" in kernel
     assert "BIGOS_BLOCK_IO_REQUEST_PASSED" in kernel
     assert "BIGOS_BLOCK_IO_REQUEST_FAILED" in kernel
+    assert "DeviceRole::RamValidationBlock" in kernel
+    assert "bigos::block_io::write_role_sync" in kernel
+    assert "bigos::block_io::read_role_sync" in kernel
+    assert "block_io_smoke_bcache_round_trip" in kernel
+    assert "block_io_smoke_bcache_dirty_failure" in kernel
+    assert "ram_block_set_write_fault" in kernel
     assert "Status::QueueFull" in kernel
     assert "Status::Unsupported" in kernel
     assert "Status::DeviceError" in kernel
+    assert "create_kernel_thread(&block_io_request_smoke_entry" in kernel
 
     assert "'block_io_request_smoke'" in boot_debug
     assert "case_id='block-io-request-layer'" in boot_debug
     assert "BIGOS_BLOCK_IO_REQUEST_PASSED" in boot_debug
     assert "no async I/O" in boot_debug
+
+
+def test_ram_backend_smoke_covers_framework_request_cache_and_boundaries() -> None:
+    kernel = read_source("kernel/core/kernel.cc")
+    boot_debug = read_source("tools/boot_debug.py")
+
+    for token in (
+        "ram-publish",
+        "ram-write",
+        "ram-read",
+        "ram-buffer",
+        "ram-unchanged",
+        "ram-range",
+        "role-not-ready",
+        "ram-cache",
+        "ram-cache-dirty",
+    ):
+        assert token in kernel
+
+    assert "peer_accepted_under_pressure" in kernel
+    assert "bigos::bcache::invalidate_device(__ram)" in kernel
+    assert "block->dirty" in kernel
+    assert "internal RAM block role" in kernel
+    assert "user-visible device node" in boot_debug

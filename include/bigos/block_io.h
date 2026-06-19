@@ -2,6 +2,7 @@
 #define _BIGOS_BLOCK_IO_H
 
 #include <bigos/types.h>
+#include <bigos/device.h>
 #include <drivers/block/block_device.h>
 
 NAMESPACE_BIGOS_BEG
@@ -45,6 +46,10 @@ namespace block_io {
         size_t __dst_len) noexcept;
     Status write_sync(driver::block::BlockDevice *__device, uint64_t __lba, uint32_t __sector_count,
         const void *__src, size_t __src_len) noexcept;
+    Status read_role_sync(device::DeviceRole __role, uint64_t __lba, uint32_t __sector_count, void *__dst,
+        size_t __dst_len) noexcept;
+    Status write_role_sync(device::DeviceRole __role, uint64_t __lba, uint32_t __sector_count, const void *__src,
+        size_t __src_len) noexcept;
     const char *status_name(Status __status) noexcept;
 }   // namespace block_io
 NAMESPACE_BIGOS_END

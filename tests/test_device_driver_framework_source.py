@@ -72,6 +72,7 @@ def test_builtin_devices_publish_existing_class_interfaces() -> None:
     for token in (
         'DeviceRole::BootBlock',
         'DeviceRole::PersistentWritableBlock',
+        'DeviceRole::RamValidationBlock',
         'DeviceRole::PitTimer',
         'DeviceRole::VgaText',
         'DeviceRole::CmosRtc',
@@ -80,7 +81,12 @@ def test_builtin_devices_publish_existing_class_interfaces() -> None:
 
     assert 'driver::block::ata_pio_primary_master_init(ata);' in source
     assert 'driver::block::ata_pio_persistent_test_init(ata);' in source
+    assert 'driver::block::ram_block_init(' in source
+    assert 'DriverId::RamBlock' in source
+    assert 'driver_supports_role' in source
+    assert 'DeviceRole::RamValidationBlock' in source
     assert 'return bigos::device::publish(__device, &ata->block);' in source
+    assert 'return bigos::device::publish(__device, &ram->block);' in source
     assert 'const bigos::device::TimerInterface g_pit_interface' in source
     assert 'const bigos::device::VideoTextInterface g_vga_interface' in source
     assert 'const bigos::device::RtcInterface g_rtc_interface' in source
@@ -133,6 +139,36 @@ def test_internal_device_roles_do_not_escape_user_abi() -> None:
         if path.is_file() and path.suffix in {'.c', '.h', '.s', '.S'}
     )
 
-    for token in ('BootBlock', 'PersistentWritableBlock', 'PitTimer', 'VgaText', 'CmosRtc', 'DeviceRole'):
+    for token in (
+        'BootBlock',
+        'PersistentWritableBlock',
+        'RamValidationBlock',
+        'PitTimer',
+        'VgaText',
+        'CmosRtc',
+        'DeviceRole',
+    ):
         assert token not in syscall_h
         assert token not in user_sources
+
+
+def test_ram_block_backend_is_bounded_internal_and_freestanding_safe() -> None:
+    header = read_source('include/drivers/block/ram_block_device.h')
+    source = read_source('kernel/drivers/block/ram_block_device.cc')
+
+    assert 'RAM_BLOCK_DEFAULT_SECTORS = 64' in header
+    assert 'struct RamBlockDevice' in header
+    assert 'uint8_t *storage;' in header
+    assert 'bool initialized;' in header
+    assert 'ram_block_init(' in header
+    assert 'ram_block_set_write_fault' in header
+
+    assert 'validate_ram_range' in source
+    assert '__sector_count == 0' in source
+    assert '__lba + __sector_count > __ram->sector_count' in source
+    assert 'BlockStatus::BufferTooSmall' in source
+    assert 'memset(__storage, 0, total_bytes);' in source
+    assert 'memcpy(__dst, ram->storage + __lba * ram->sector_size, bytes);' in source
+    assert 'memcpy(ram->storage + __lba * ram->sector_size, __src, bytes);' in source
+    for token in ('throw ', 'new ', 'dynamic_cast', 'typeid', 'std::'):
+        assert token not in source

@@ -22,6 +22,7 @@ namespace device {
     enum class DeviceRole : uint32_t {
         BootBlock = 1,
         PersistentWritableBlock,
+        RamValidationBlock,
         PitTimer,
         VgaText,
         CmosRtc,
@@ -53,6 +54,7 @@ namespace device {
 
     enum class DriverId : uint32_t {
         AtaPio = 1,
+        RamBlock,
         Pit,
         VgaText,
         CmosRtc,

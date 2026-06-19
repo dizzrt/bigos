@@ -2,6 +2,7 @@
 
 #include <bigos/sched.h>
 #include <drivers/block/ata_pio.h>
+#include <drivers/block/ram_block_device.h>
 #include <drivers/timer/pit.h>
 #include <drivers/video/vga.h>
 
@@ -17,6 +18,9 @@ namespace {
     Registry g_registry = {};
     driver::block::AtaPioDevice g_boot_ata = {};
     driver::block::AtaPioDevice g_persistent_ata = {};
+    driver::block::RamBlockDevice g_ram_validation_block = {};
+    uint8_t g_ram_validation_storage
+        [driver::block::RAM_BLOCK_DEFAULT_SECTORS * driver::block::DEFAULT_SECTOR_SIZE] = {};
 
     void pit_init_channel0() noexcept {
         driver::timer::pit::init_channel0();
@@ -64,9 +68,30 @@ namespace {
         return nullptr;
     }
 
-    const bigos::device::DriverDescriptor *matching_driver(bigos::device::DeviceClass __class) noexcept {
+    bool driver_supports_role(const bigos::device::DriverDescriptor &__driver,
+        bigos::device::DeviceRole __role) noexcept {
+        using DriverId = bigos::device::DriverId;
+        using DeviceRole = bigos::device::DeviceRole;
+        switch (__driver.driver_id) {
+            case DriverId::AtaPio:
+                return __role == DeviceRole::BootBlock || __role == DeviceRole::PersistentWritableBlock;
+            case DriverId::RamBlock:
+                return __role == DeviceRole::RamValidationBlock;
+            case DriverId::Pit:
+                return __role == DeviceRole::PitTimer;
+            case DriverId::VgaText:
+                return __role == DeviceRole::VgaText;
+            case DriverId::CmosRtc:
+                return __role == DeviceRole::CmosRtc;
+            default:
+                return false;
+        }
+    }
+
+    const bigos::device::DriverDescriptor *matching_driver(bigos::device::DeviceClass __class,
+        bigos::device::DeviceRole __role) noexcept {
         for (uint32_t i = 0; i < g_registry.driver_count; i++) {
-            if (g_registry.drivers[i].device_class == __class)
+            if (g_registry.drivers[i].device_class == __class && driver_supports_role(g_registry.drivers[i], __role))
                 return &g_registry.drivers[i];
         }
         return nullptr;
@@ -88,6 +113,20 @@ namespace {
         }
 
         return bigos::device::publish(__device, &ata->block);
+    }
+
+    bigos::device::Status ram_block_probe(bigos::device::Device *__device) noexcept {
+        if (__device == nullptr || __device->descriptor.role != bigos::device::DeviceRole::RamValidationBlock)
+            return bigos::device::Status::InvalidArgument;
+        driver::block::RamBlockDevice *ram = (driver::block::RamBlockDevice *)__device->descriptor.private_data;
+        if (ram == nullptr)
+            return bigos::device::Status::InvalidArgument;
+
+        const driver::block::BlockStatus status = driver::block::ram_block_init(
+            ram, g_ram_validation_storage, driver::block::RAM_BLOCK_DEFAULT_SECTORS, driver::block::DEFAULT_SECTOR_SIZE);
+        if (status != driver::block::BlockStatus::Success)
+            return bigos::device::Status::ProbeFailed;
+        return bigos::device::publish(__device, &ram->block);
     }
 
     bigos::device::Status pit_probe(bigos::device::Device *__device) noexcept {
@@ -113,6 +152,7 @@ namespace {
         const DeviceDescriptor devices[] = {
             {DeviceClass::Block, DeviceRole::BootBlock, 0, 0, &g_boot_ata},
             {DeviceClass::Block, DeviceRole::PersistentWritableBlock, 1, 0, &g_persistent_ata},
+            {DeviceClass::Block, DeviceRole::RamValidationBlock, 2, 0, &g_ram_validation_block},
             {DeviceClass::Timer, DeviceRole::PitTimer, 0, 0, nullptr},
             {DeviceClass::Video, DeviceRole::VgaText, 0, 0, nullptr},
             {DeviceClass::Rtc, DeviceRole::CmosRtc, 0, 0, nullptr},
@@ -125,6 +165,7 @@ namespace {
         using namespace bigos::device;
         const DriverDescriptor drivers[] = {
             {DeviceClass::Block, DriverId::AtaPio, &ata_probe, "ata-pio"},
+            {DeviceClass::Block, DriverId::RamBlock, &ram_block_probe, "ram-block-validation"},
             {DeviceClass::Timer, DriverId::Pit, &pit_probe, "pit"},
             {DeviceClass::Video, DriverId::VgaText, &vga_probe, "vga-text"},
             {DeviceClass::Rtc, DriverId::CmosRtc, &rtc_probe, "cmos-rtc"},
@@ -194,7 +235,7 @@ namespace device {
         if (device->state == DeviceState::Published)
             return Status::Success;
 
-        const DriverDescriptor *driver = matching_driver(__class);
+        const DriverDescriptor *driver = matching_driver(__class, __role);
         if (driver == nullptr)
             return Status::NotFound;
 

@@ -52,6 +52,27 @@ namespace {
         }
     }
 
+    bigos::block_io::Status map_device_status(bigos::device::Status __status) noexcept {
+        using DeviceStatus = bigos::device::Status;
+        using Status = bigos::block_io::Status;
+        switch (__status) {
+            case DeviceStatus::Success:
+                return Status::Success;
+            case DeviceStatus::InvalidArgument:
+                return Status::InvalidRequest;
+            case DeviceStatus::NotFound:
+            case DeviceStatus::NotReady:
+            case DeviceStatus::ProbeFailed:
+                return Status::DeviceNotReady;
+            case DeviceStatus::UnsupportedContext:
+                return Status::WouldBlock;
+            case DeviceStatus::Exists:
+            case DeviceStatus::NoSpace:
+            default:
+                return Status::DeviceError;
+        }
+    }
+
     bigos::block_io::Status validate_request(const bigos::block_io::Request *__request) noexcept {
         using Operation = bigos::block_io::Operation;
         using Status = bigos::block_io::Status;
@@ -174,6 +195,26 @@ namespace block_io {
         request.queue_slot = UINT32_MAX;
         request.queued = false;
         return submit_sync(&request);
+    }
+
+    Status read_role_sync(device::DeviceRole __role, uint64_t __lba, uint32_t __sector_count, void *__dst,
+        size_t __dst_len) noexcept {
+        const void *iface = nullptr;
+        const bigos::device::Status status =
+            bigos::device::find_interface(bigos::device::DeviceClass::Block, __role, &iface);
+        if (status != bigos::device::Status::Success)
+            return map_device_status(status);
+        return read_sync((driver::block::BlockDevice *)iface, __lba, __sector_count, __dst, __dst_len);
+    }
+
+    Status write_role_sync(device::DeviceRole __role, uint64_t __lba, uint32_t __sector_count, const void *__src,
+        size_t __src_len) noexcept {
+        const void *iface = nullptr;
+        const bigos::device::Status status =
+            bigos::device::find_interface(bigos::device::DeviceClass::Block, __role, &iface);
+        if (status != bigos::device::Status::Success)
+            return map_device_status(status);
+        return write_sync((driver::block::BlockDevice *)iface, __lba, __sector_count, __src, __src_len);
     }
 
     const char *status_name(Status __status) noexcept {

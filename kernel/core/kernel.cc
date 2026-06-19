@@ -21,9 +21,11 @@
 #include <bigos/fs/vfs.h>
 #include <bigos/io.h>
 #include <ktl/buffer.h>
+#include <drivers/block/ram_block_device.h>
 #include <drivers/video/vga.h>
 #include <string.h>
-#if defined(BIGOS_WRITABLE_FS_SMOKE) || defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE)
+#if defined(BIGOS_BLOCK_IO_REQUEST_SMOKE) || defined(BIGOS_WRITABLE_FS_SMOKE) || \
+    defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE)
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/bigfs.h>
 #include <bigos/cred.h>
@@ -299,11 +301,18 @@ namespace {
 namespace {
     struct BlockIoSmokeContext {
         uint8_t sector[driver::block::DEFAULT_SECTOR_SIZE];
+        driver::block::BlockDevice *peer_device;
         uint32_t recursive_depth;
         bool probe_queue_full;
         bool saw_queue_full;
+        bool peer_accepted_under_pressure;
         bool fail_write;
     };
+
+    uint8_t g_block_io_smoke_write_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
+    uint8_t g_block_io_smoke_read_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
+    uint8_t g_block_io_smoke_nested_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
+    uint8_t g_block_io_smoke_peer_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
 
     driver::block::BlockStatus block_io_smoke_read(driver::block::BlockDevice *__device, uint64_t __lba,
         uint32_t __sector_count, void *__dst, size_t __dst_len) noexcept {
@@ -313,12 +322,18 @@ namespace {
         BlockIoSmokeContext *ctx = (BlockIoSmokeContext *)__device->context;
         if (ctx->probe_queue_full) {
             ctx->recursive_depth++;
-            uint8_t nested[driver::block::DEFAULT_SECTOR_SIZE] = {};
+            if (ctx->recursive_depth == 1 && ctx->peer_device != nullptr) {
+                if (bigos::block_io::read_sync(
+                        ctx->peer_device, 0, 1, g_block_io_smoke_peer_buf, sizeof(g_block_io_smoke_peer_buf)) ==
+                    bigos::block_io::Status::Success)
+                    ctx->peer_accepted_under_pressure = true;
+            }
             if (ctx->recursive_depth < bigos::block_io::QUEUE_CAPACITY_PER_DEVICE) {
-                (void)bigos::block_io::read_sync(__device, 0, 1, nested, sizeof(nested));
+                (void)bigos::block_io::read_sync(
+                    __device, 0, 1, g_block_io_smoke_nested_buf, sizeof(g_block_io_smoke_nested_buf));
             } else {
-                const bigos::block_io::Status status =
-                    bigos::block_io::read_sync(__device, 0, 1, nested, sizeof(nested));
+                const bigos::block_io::Status status = bigos::block_io::read_sync(
+                    __device, 0, 1, g_block_io_smoke_nested_buf, sizeof(g_block_io_smoke_nested_buf));
                 if (status == bigos::block_io::Status::QueueFull)
                     ctx->saw_queue_full = true;
             }
@@ -340,6 +355,48 @@ namespace {
         return driver::block::BlockStatus::Success;
     }
 
+    bool block_io_smoke_bcache_round_trip(driver::block::BlockDevice *__ram) noexcept {
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(__ram, 9);
+        if (block == nullptr)
+            return false;
+        block->data[0] = 0xa5;
+        block->data[1] = 0x5a;
+        bigos::bcache::mark_dirty(block);
+        if (bigos::bcache::sync(block) != bigos::bcache::Status::Success || block->dirty) {
+            bigos::bcache::put(block);
+            return false;
+        }
+        bigos::bcache::put(block);
+        if (bigos::bcache::invalidate_device(__ram) != bigos::bcache::Status::Success)
+            return false;
+
+        block = bigos::bcache::get(__ram, 9);
+        if (block == nullptr)
+            return false;
+        const bool ok = block->data[0] == 0xa5 && block->data[1] == 0x5a;
+        bigos::bcache::put(block);
+        return ok;
+    }
+
+    bool block_io_smoke_bcache_dirty_failure(driver::block::BlockDevice *__ram) noexcept {
+        if (__ram == nullptr || __ram->context == nullptr)
+            return false;
+        driver::block::RamBlockDevice *ram = (driver::block::RamBlockDevice *)__ram->context;
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(__ram, 10);
+        if (block == nullptr)
+            return false;
+        block->data[0] = 0xcc;
+        bigos::bcache::mark_dirty(block);
+        driver::block::ram_block_set_write_fault(ram, true);
+        const bool failed_dirty =
+            bigos::bcache::sync(block) == bigos::bcache::Status::IoError && block->dirty;
+        driver::block::ram_block_set_write_fault(ram, false);
+        const bool recovered =
+            bigos::bcache::sync(block) == bigos::bcache::Status::Success && !block->dirty;
+        bigos::bcache::put(block);
+        return failed_dirty && recovered;
+    }
+
     void block_io_request_smoke() noexcept {
         BlockIoSmokeContext ctx = {};
         driver::block::BlockDevice device = {};
@@ -349,28 +406,37 @@ namespace {
         device.read_impl = &block_io_smoke_read;
         device.write_impl = &block_io_smoke_write;
 
-        uint8_t write_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
-        uint8_t read_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
+        uint8_t *write_buf = g_block_io_smoke_write_buf;
+        uint8_t *read_buf = g_block_io_smoke_read_buf;
+        memset(write_buf, 0, driver::block::DEFAULT_SECTOR_SIZE);
+        memset(read_buf, 0, driver::block::DEFAULT_SECTOR_SIZE);
+        driver::block::BlockDevice *ram_device = bigos::device::block(bigos::device::DeviceRole::RamValidationBlock);
+        if (ram_device == nullptr || ram_device == bigos::device::block(bigos::device::DeviceRole::BootBlock) ||
+            ram_device == bigos::device::block(bigos::device::DeviceRole::PersistentWritableBlock)) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-publish\n");
+            return;
+        }
+
         write_buf[0] = 0x42;
-        if (bigos::block_io::write_sync(&device, 0, 1, write_buf, sizeof(write_buf)) !=
+        if (bigos::block_io::write_sync(&device, 0, 1, write_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
             bigos::block_io::Status::Success) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED write\n");
             return;
         }
-        if (bigos::block_io::read_sync(&device, 0, 1, read_buf, sizeof(read_buf)) !=
+        if (bigos::block_io::read_sync(&device, 0, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
                 bigos::block_io::Status::Success ||
             read_buf[0] != 0x42) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED read\n");
             return;
         }
-        if (bigos::block_io::read_sync(nullptr, 0, 1, read_buf, sizeof(read_buf)) !=
+        if (bigos::block_io::read_sync(nullptr, 0, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
             bigos::block_io::Status::InvalidRequest) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED invalid\n");
             return;
         }
         driver::block::BlockDevice not_ready = device;
         not_ready.read_impl = nullptr;
-        if (bigos::block_io::read_sync(&not_ready, 0, 1, read_buf, sizeof(read_buf)) !=
+        if (bigos::block_io::read_sync(&not_ready, 0, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
             bigos::block_io::Status::DeviceNotReady) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED not-ready\n");
             return;
@@ -379,39 +445,99 @@ namespace {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED buffer\n");
             return;
         }
-        if (bigos::block_io::read_sync(&device, device.total_sectors, 1, read_buf, sizeof(read_buf)) !=
+        if (bigos::block_io::read_sync(&device, device.total_sectors, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
             bigos::block_io::Status::Overflow) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED range\n");
+            return;
+        }
+        if (bigos::block_io::read_sync(&device, 0, 0, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
+            bigos::block_io::Status::InvalidRequest) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED zero\n");
             return;
         }
 
         driver::block::BlockDevice read_only = device;
         read_only.write_impl = nullptr;
-        if (bigos::block_io::write_sync(&read_only, 0, 1, write_buf, sizeof(write_buf)) !=
+        if (bigos::block_io::write_sync(&read_only, 0, 1, write_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
             bigos::block_io::Status::Unsupported) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED readonly\n");
             return;
         }
 
         ctx.fail_write = true;
-        if (bigos::block_io::write_sync(&device, 0, 1, write_buf, sizeof(write_buf)) !=
+        if (bigos::block_io::write_sync(&device, 0, 1, write_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
             bigos::block_io::Status::DeviceError) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED device-error\n");
             return;
         }
         ctx.fail_write = false;
 
+        write_buf[0] = 0x71;
+        write_buf[1] = 0x17;
+        if (bigos::block_io::write_role_sync(
+                bigos::device::DeviceRole::RamValidationBlock, 2, 1, write_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
+            bigos::block_io::Status::Success) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-write\n");
+            return;
+        }
+        if (bigos::block_io::read_role_sync(
+                bigos::device::DeviceRole::RamValidationBlock, 2, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
+                bigos::block_io::Status::Success ||
+            read_buf[0] != 0x71 || read_buf[1] != 0x17) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-read\n");
+            return;
+        }
+        write_buf[0] = 0x99;
+        if (bigos::block_io::write_role_sync(bigos::device::DeviceRole::RamValidationBlock, 2, 1, write_buf, 1) !=
+            bigos::block_io::Status::BufferTooSmall) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-buffer\n");
+            return;
+        }
+        if (bigos::block_io::read_role_sync(
+                bigos::device::DeviceRole::RamValidationBlock, 2, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
+                bigos::block_io::Status::Success ||
+            read_buf[0] != 0x71) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-unchanged\n");
+            return;
+        }
+        if (bigos::block_io::read_role_sync(bigos::device::DeviceRole::RamValidationBlock, ram_device->total_sectors,
+                1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) != bigos::block_io::Status::Overflow) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-range\n");
+            return;
+        }
+        if (bigos::block_io::read_role_sync(
+                bigos::device::DeviceRole::VgaText, 0, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
+            bigos::block_io::Status::DeviceNotReady) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED role-not-ready\n");
+            return;
+        }
+
         ctx.probe_queue_full = true;
+        ctx.peer_device = ram_device;
+        ctx.peer_accepted_under_pressure = false;
         ctx.saw_queue_full = false;
         ctx.recursive_depth = 0;
-        if (bigos::block_io::read_sync(&device, 0, 1, read_buf, sizeof(read_buf)) !=
+        if (bigos::block_io::read_sync(&device, 0, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
                 bigos::block_io::Status::Success ||
-            !ctx.saw_queue_full) {
+            !ctx.saw_queue_full || !ctx.peer_accepted_under_pressure) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED queue-full\n");
             return;
         }
 
+        if (!block_io_smoke_bcache_round_trip(ram_device)) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-cache\n");
+            return;
+        }
+        if (!block_io_smoke_bcache_dirty_failure(ram_device)) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-cache-dirty\n");
+            return;
+        }
+
         bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_PASSED\n");
+    }
+
+    void block_io_request_smoke_entry(void *) noexcept {
+        block_io_request_smoke();
     }
 }   // namespace
 #endif
@@ -1182,10 +1308,12 @@ void kernel(const BootInfoHeader *boot_info) {
 #endif
 
 #ifdef BIGOS_BLOCK_IO_REQUEST_SMOKE
-    // Validation-only one-shot over a fake block device. It exercises request
-    // validation, queue accounting, and status propagation without claiming
-    // async I/O or touching the real disk.
-    block_io_request_smoke();
+    // Validation-only kernel-thread smoke over a fake block device and the
+    // internal RAM block role. It exercises request validation, queue accounting,
+    // framework publication, cache round trips and status propagation without
+    // claiming async I/O, user-visible devices or new hardware storage support.
+    if (bigos::sched::create_kernel_thread(&block_io_request_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_WRITABLE_FS_SMOKE

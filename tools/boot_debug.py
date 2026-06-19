@@ -296,9 +296,15 @@ RUNTIME_SMOKE_MATRIX = (
         switches=('block_io_request_smoke',),
         expected_marker='BIGOS_BLOCK_IO_REQUEST_PASSED',
         timeout_seconds=20.0,
-        risk_area='bounded synchronous request validation, per-device queue exhaustion, and status propagation',
+        risk_area=(
+            'bounded synchronous request validation, internal RAM block backend publication, '
+            'per-device queue exhaustion, cache round trip, and status propagation'
+        ),
         validation_markers=('BIGOS_BLOCK_IO_REQUEST_PASSED',),
-        proc_boundary='default-off kernel-thread smoke; no async I/O, background worker, or user ABI is exposed',
+        proc_boundary=(
+            'default-off kernel-thread smoke over internal block backends; no async I/O, '
+            'background worker, user-visible device node, or user ABI is exposed'
+        ),
     ),
     RuntimeSmokeCase(
         case_id='filesystem-writable',
