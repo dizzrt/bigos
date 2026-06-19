@@ -241,9 +241,9 @@ standard small programs can compile and run directly.
 - [x] Task M4.2: syscall surface expansion covering wait variants and additional
   bounded file and process primitives.
 - [x] 任务 M4.2：扩充 syscall 面，覆盖 wait 变体与更多有界文件/进程原语。
-- [ ] Task M4.3: libc subset maturity toward portable small programs while staying
+- [x] Task M4.3: libc subset maturity toward portable small programs while staying
   freestanding-safe.
-- [ ] 任务 M4.3：推进 libc 子集成熟度以支持可移植小程序，同时保持 freestanding-safe。
+- [x] 任务 M4.3：推进 libc 子集成熟度以支持可移植小程序，同时保持 freestanding-safe。
 
 ### Milestone M5 — Real Multi-Core Execution (Closing Milestone) / 里程碑 M5 — 真实多核执行（收尾里程碑）
 

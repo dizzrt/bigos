@@ -16,6 +16,8 @@
 
 #include "errno.h"        /* IWYU pragma: export */
 #include "bigos_dirent.h" /* IWYU pragma: export */
+#include "assert.h"       /* IWYU pragma: export */
+#include "ctype.h"        /* IWYU pragma: export */
 #include "fcntl.h"        /* IWYU pragma: export */
 #include "signal.h"       /* IWYU pragma: export */
 #include "stdio.h"        /* IWYU pragma: export */

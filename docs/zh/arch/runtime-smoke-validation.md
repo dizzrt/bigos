@@ -43,7 +43,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | 复用同一 `--persistent-image` 的第二次 boot：mount-existing 并在 clean reboot 后读回已同步 `/rw` 增长/截断状态。 |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
 | `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity 当前运行期文件系统语义，覆盖只读 exFAT、RAM-backed `/rw`、fd/VFS、metadata、cwd-relative path、libc errno 与 shell-visible tools；不声明重启持久化。 |
-| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno、`snprintf`/formatter、`strtol`/`atoi`、`calloc`/`realloc`、有界 `DIR*` wrapper、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和有界 `/rw` 运行时文件操作。 |
+| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno/error text、ctype、有界 time/assert、`snprintf`/formatter、`strtol`/`strtoul`/`atoi`、无隐藏状态 search helper、`calloc`/`realloc`、有界 `DIR*` wrapper、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和有界 `/rw` 运行时文件操作。 |
 | `default-init` | _(无)_ | `BIGOS_USER_EXEC` | 40s | 不加任何 smoke 开关的默认构建；normal boot 打包 PID-1 init、`/bin/sh` 和 bounded `/bin/*`。 |
 
 每个 case 只启用表中列出的 smoke 开关，并在构建前显式关闭其他 smoke 开关。runner 之外，所有 runtime smoke 选项仍保持默认关闭，除非开发者通过 `xmake f ...=y` 显式配置。
@@ -94,10 +94,12 @@ fd/VFS syscall 使用 DPL=3 `int 0x80` trap gate，并且必须在同步 storage
 简单 C 程序验证分层接入默认关闭的 `userland-runtime` case。启用
 `userland_smoke` 时，构建会通过与 `/bin/sh`、`/bin/echo`、`/bin/cat` 相同的
 `crt0 + libc + -nostdlib -static` ELF64 路径，打包有界 `/bin/smoke/args`、
-`/bin/smoke/env`、`/bin/smoke/out`、`/bin/smoke/errno` 和 `/bin/smoke/exit` 程序。
-这些探针不会打包进普通镜像。smoke 会观察程序 stdout/stderr，检查参数与环境报告，
-检查失败 wrapper 的 `errno` 翻译，观察请求的退出码探针，并向 `/bin/sh` 输入确定性命令脚本，
-确认 shell 在外部程序非零退出后继续运行。该验证不新增 kernel syscall、不修改 `int 0x80` ABI、
+`/bin/smoke/env`、`/bin/smoke/out`、`/bin/smoke/errno`、`/bin/smoke/exit` 和
+`/bin/smoke/libc_subset` 程序。这些探针不会打包进普通镜像。smoke 会观察程序
+stdout/stderr，检查参数与环境报告，检查失败 wrapper 的 `errno` 翻译，观察请求的退出码探针，
+通过 ctype、time、assert、无符号转换、无隐藏状态 search、formatter/error text 和目录
+wrapper 断言覆盖 portable libc subset，并向 `/bin/sh` 输入确定性命令脚本，确认 shell
+在外部程序非零退出后继续运行。该验证不新增 kernel syscall、不修改 `int 0x80` ABI、
 不改变 boot/disk 布局，也不会让 emulator-dependent smoke 成为默认构建的强制依赖。
 
 ## 手工单 Case 流程

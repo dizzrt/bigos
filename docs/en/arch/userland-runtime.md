@@ -9,9 +9,11 @@ environment.
 - `user/crt0/crt0.s`: user entry `_start`. It consumes the initial stack produced
   by `copy_exec_args_to_stack` in `kernel/core/proc/proc.cc`.
 - `user/libc`: bounded minimal C library subset, syscall wrappers, errno
-  translation, cwd wrappers, string/memory helpers, `brk`-backed `malloc`/`free`, tiny
-  fd-backed stdio with opaque standard streams, `printf`,
-  `fprintf(stderr, ...)`, and read-only `environ`/`getenv`.
+  translation, cwd wrappers, ASCII/C-locale-style `ctype`, bounded
+  `time.h`/`assert.h`, string/memory helpers, `brk`-backed `malloc`/`free`,
+  tiny fd-backed stdio with opaque standard streams, `printf`,
+  `fprintf(stderr, ...)`, deterministic error text, and read-only
+  `environ`/`getenv`.
 - `user/init/init.c`: resident PID-1. It starts `/bin/sh` with
   `fork` + `execve`, waits for children, and restarts the shell when it exits.
 - `user/sh/sh.c`: bounded interactive shell with builtins, cwd-aware PATH lookup,
@@ -119,10 +121,11 @@ a complete POSIX libc.
 
 The user libc exposes a documented bounded subset for simple static C programs:
 
-- Headers: `stdio.h`, `stdlib.h`, `string.h`, `errno.h`, `unistd.h`,
-  `fcntl.h`, `sys/types.h`, `sys/wait.h`, `sys/stat.h`, `bigos_dirent.h`, plus
-  the compatibility umbrella `libc.h`. Raw syscall primitives are opt-in through
-  `bigos_syscall.h`, not exported by the ordinary umbrella header.
+- Headers: `assert.h`, `ctype.h`, `stdio.h`, `stdlib.h`, `string.h`,
+  `errno.h`, `time.h`, `unistd.h`, `fcntl.h`, `sys/types.h`, `sys/wait.h`,
+  `sys/stat.h`, `bigos_dirent.h`, plus the compatibility umbrella `libc.h`.
+  Raw syscall primitives are opt-in through `bigos_syscall.h`, not exported by
+  the ordinary umbrella header.
 - Types and constants: `size_t`, `ssize_t`, `off_t`, `pid_t`, `NULL`, the
   implemented open flags, bounded fd-control constants (`F_GETFD`, `F_SETFD`,
   `F_DUPFD`, `FD_CLOEXEC`), access mode bits, seek constants, `WAIT_ANY`,
@@ -147,17 +150,24 @@ The user libc exposes a documented bounded subset for simple static C programs:
   `syscall0` through `syscall6` remain low-level BigOS ABI helpers only for
   libc internals or callers that explicitly include `bigos_syscall.h`; they do
   not translate `errno` and are not POSIX `syscall(2)` compatibility.
+- `ctype`, time, and assert: `ctype.h` provides deterministic ASCII/C-locale
+  classification and `toupper`/`tolower` only. `time.h` exposes second-resolution
+  `time()` backed by the BigOS bounded time primitive. `assert.h` supports
+  `NDEBUG`; enabled failures print a deterministic stderr diagnostic and
+  terminate through the user libc exit path.
 - Strings and memory: the subset includes the implemented bounded routines such
   as `strlen`, `strcmp`, `strncmp`, `memcpy`, `memset`, and overlap-safe
-  `memmove`, plus `strchr` for current user-program parsing paths. Null pointer
+  `memmove`, plus the stateless search helpers `strchr`, `strrchr`, `strstr`,
+  and `memchr`. It does not expose `strtok`, `qsort`, or `bsearch`. Null pointer
   inputs keep ordinary C preconditions and are not given extra BigOS-specific
   safety promises.
-- Stdlib and heap: `strtol` supports bounded integer parsing with base handling,
-  `endptr`, and `ERANGE`; `atoi` is the decimal convenience wrapper. `malloc`,
-  `calloc`, and `realloc` are backed by the bounded brk allocator: `calloc`
-  checks multiplication overflow and zeroes memory, `realloc` preserves the old
-  allocation on failure, and `free(NULL)` is a no-op. The allocator does not
-  promise thread safety, complete coalescing, or hosted allocator behavior.
+- Stdlib and heap: `strtol` and `strtoul` support bounded integer parsing with
+  base handling, `endptr`, no-digit behavior, and `ERANGE`; `atoi` is the decimal
+  convenience wrapper. `malloc`, `calloc`, and `realloc` are backed by the
+  bounded brk allocator: `calloc` checks multiplication overflow and zeroes
+  memory, `realloc` preserves the old allocation on failure, and `free(NULL)` is
+  a no-op. The allocator does not promise thread safety, complete coalescing, or
+  hosted allocator behavior.
 - Stdio: `stdin`, `stdout`, and `stderr` are opaque handles for fd `0`, `1`, and
   `2` only. `putchar`, `puts`, `printf`, and `fprintf(stderr, ...)` are fd/write
   based; `snprintf` uses the same bounded formatter. The formatter supports the
@@ -185,10 +195,10 @@ baseline, still within the existing freestanding runtime boundary:
   `/bin/smoke/errno`, `/bin/smoke/exit`, and `/bin/smoke/libc_subset` cover
   argument handoff, environment reporting, stdout/stderr, wrapper failure plus
   `errno`, requested exit status, fine-grained libc headers,
-  `fprintf(stderr, ...)`, `snprintf`/formatter behavior, string/memory
-  boundaries, `strtol`/`atoi`, `calloc`/`realloc`, `DIR*` wrappers, and bounded
-  heap behavior
-  when `userland_smoke` is enabled.
+  ASCII/C-locale `ctype`, bounded `time.h`, enabled `assert`, `strtoul`,
+  stateless search helpers, `fprintf(stderr, ...)`, `snprintf`/formatter
+  behavior, string/memory boundaries, `strtol`/`atoi`, `calloc`/`realloc`,
+  `DIR*` wrappers, and bounded heap behavior when `userland_smoke` is enabled.
 
 This baseline does not add kernel syscalls, change the `int 0x80` register ABI,
 change boot or disk layout, introduce dynamic linking, or claim hosted libc or
@@ -229,8 +239,11 @@ observes their stdout/stderr, verifies argument and environment reporting,
 verifies `errno` translation through failing wrappers and success paths that do
 not rewrite `errno`, observes the requested exit-code probe, checks cwd-relative
 open/stat/`..`, fork inheritance, exec preservation through `/bin/pwd`, shell
-`cd`, and the bounded libc subset probe, and runs probes through `/bin/sh` to
-confirm the shell continues after a non-zero external program. Interactive
+`cd`, and the bounded libc subset probe for public headers, ctype, time,
+assert, unsigned conversion, stateless search helpers, formatter behavior,
+error text, directory wrappers, and failure paths. It also runs probes through
+`/bin/sh` to confirm the shell continues after a non-zero external program.
+Interactive
 console usability also
 keeps the default-init headless marker assertion (`BIGOS_USER_EXEC`) while
 adding optional manual or emulator-input checks for prompt visibility, input

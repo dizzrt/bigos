@@ -37,7 +37,7 @@ on_build(function()
     os.exec("x86_64-elf-as -c %s -o %s", path.join(projectdir, "user", "crt0", "crt0.s"), crt0_obj)
 
     -- Compile the user libc once into a list of object files.
-    local libc_srcs = { "syscall.c", "string.c", "malloc.c", "stdio.c", "env.c" }
+    local libc_srcs = { "syscall.c", "string.c", "malloc.c", "stdio.c", "env.c", "ctype.c", "assert.c" }
     local libc_objs = {}
     for _, src in ipairs(libc_srcs) do
         local obj = path.join(user_tempdir, "libc_" .. path.basename(src) .. ".o")

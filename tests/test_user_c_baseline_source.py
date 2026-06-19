@@ -34,6 +34,8 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     stdio = read_source('user/libc/include/stdio.h')
     stdlib = read_source('user/libc/include/stdlib.h')
     string = read_source('user/libc/include/string.h')
+    ctype = read_source('user/libc/include/ctype.h')
+    assert_h = read_source('user/libc/include/assert.h')
     signal = read_source('user/libc/include/signal.h')
     unistd = read_source('user/libc/include/unistd.h')
     time_h = read_source('user/libc/include/time.h')
@@ -46,6 +48,8 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
 
     for include in (
         '"stdio.h"',
+        '"assert.h"',
+        '"ctype.h"',
         '"signal.h"',
         '"stdlib.h"',
         '"string.h"',
@@ -67,9 +71,17 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'void perror(const char *s);' in stdio
     assert 'fopen(' not in stdio and 'fclose(' not in stdio
     assert 'void *malloc(size_t n);' in stdlib
+    assert 'unsigned long strtoul(const char *nptr, char **endptr, int base);' in stdlib
     assert 'char *getenv(const char *name);' in stdlib
     assert 'int strncmp(const char *a, const char *b, size_t n);' in string
+    assert 'char *strrchr(const char *s, int c);' in string
+    assert 'char *strstr(const char *haystack, const char *needle);' in string
+    assert 'void *memchr(const void *s, int c, size_t n);' in string
     assert 'const char *strerror(int errnum);' in string
+    assert 'int isalpha(int c);' in ctype
+    assert 'int toupper(int c);' in ctype
+    assert '#define assert(expr)' in assert_h
+    assert '#ifdef NDEBUG' in assert_h
     assert '#define SIGUSR1 10' in signal
     assert 'typedef unsigned long sigset_t;' in signal
     assert 'struct sigaction' in signal
@@ -176,8 +188,15 @@ def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
     assert 'record("smoke_errno open=-1 errno=2\\n")' in errno_probe
     assert 'return status;' in exit_probe
     assert '#include "../../libc/include/stdio.h"' in libc_subset
+    assert '#include "../../libc/include/assert.h"' in libc_subset
+    assert '#include "../../libc/include/ctype.h"' in libc_subset
     assert '#include "../../libc/include/signal.h"' in libc_subset
+    assert '#include "../../libc/include/time.h"' in libc_subset
     assert '#include "../../libc/include/sys/wait.h"' in libc_subset
+    assert 'strtoul("0x2a!", &end, 0)' in libc_subset
+    assert 'strrchr("ababa", \'a\')' in libc_subset
+    assert 'strstr("portable libc subset", "libc")' in libc_subset
+    assert 'memchr(with_nul, 0, sizeof(with_nul) - 1)' in libc_subset
     assert 'WAIT_ANY == 0' in libc_subset
     assert 'SIGUSR1 != 10' in libc_subset
     assert 'fprintf(stderr, "smoke_libc_subset stderr errno=%d env=%s width=%5u long=%ld\\n"' in libc_subset

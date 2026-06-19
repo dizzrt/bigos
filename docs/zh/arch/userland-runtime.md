@@ -8,9 +8,10 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
 - `user/crt0/crt0.s`：用户入口 `_start`，消费 `kernel/core/proc/proc.cc` 中
   `copy_exec_args_to_stack` 生成的初始用户栈。
 - `user/libc`：有界最小 C 标准库子集，包括 syscall wrapper、errno 翻译、
-  cwd wrapper、字符串/内存函数、基于 `brk` 的 `malloc`/`free`、带 opaque standard streams
-  的 fd-backed 极简 stdio、`printf`、`fprintf(stderr, ...)`，以及只读
-  `environ`/`getenv`。
+  cwd wrapper、ASCII/C-locale-style `ctype`、有界 `time.h`/`assert.h`、
+  字符串/内存函数、基于 `brk` 的 `malloc`/`free`、带 opaque standard streams
+  的 fd-backed 极简 stdio、`printf`、`fprintf(stderr, ...)`、确定性错误文本，
+  以及只读 `environ`/`getenv`。
 - `user/init/init.c`：常驻 PID-1，通过 `fork` + `execve` 启动 `/bin/sh`，
   等待子进程，并在 shell 退出后重新拉起。
 - `user/sh/sh.c`：有界交互 shell，支持内建命令、cwd-aware PATH 查找、
@@ -98,10 +99,10 @@ Shell 有意保持很小：
 
 用户态 libc 为简单静态 C 程序暴露有文档边界的有界子集：
 
-- 头文件：`stdio.h`、`stdlib.h`、`string.h`、`errno.h`、`unistd.h`、
-  `fcntl.h`、`sys/types.h`、`sys/wait.h`、`sys/stat.h`、`bigos_dirent.h`，
-  以及兼容用 umbrella 头 `libc.h`。Raw syscall primitive 需要显式包含
-  `bigos_syscall.h`，不会从普通 umbrella 头导出。
+- 头文件：`assert.h`、`ctype.h`、`stdio.h`、`stdlib.h`、`string.h`、
+  `errno.h`、`time.h`、`unistd.h`、`fcntl.h`、`sys/types.h`、`sys/wait.h`、
+  `sys/stat.h`、`bigos_dirent.h`，以及兼容用 umbrella 头 `libc.h`。Raw syscall
+  primitive 需要显式包含 `bigos_syscall.h`，不会从普通 umbrella 头导出。
 - 类型与常量：`size_t`、`ssize_t`、`off_t`、`pid_t`、`NULL`、已实现的
   open flags、有界 fd-control 常量（`F_GETFD`、`F_SETFD`、`F_DUPFD`、
   `FD_CLOEXEC`）、access mode bits、seek 常量、`WAIT_ANY`、`WNOHANG`，以及与
@@ -122,13 +123,19 @@ Shell 有意保持很小：
   shell、smoke、libc 或打包用户程序路径会使用它们。Raw `syscall0` 到 `syscall6`
   只作为 libc 内部或显式包含 `bigos_syscall.h` 的低层 BigOS ABI helper 保留；
   它们不翻译 `errno`，也不是 POSIX `syscall(2)` 兼容。
+- `ctype`、time 与 assert：`ctype.h` 只提供确定性的 ASCII/C-locale 分类和
+  `toupper`/`tolower`。`time.h` 暴露由 BigOS 有界 time primitive 支撑的秒级
+  `time()`。`assert.h` 支持 `NDEBUG`；启用的断言失败会向 stderr 输出确定性诊断，
+  并通过用户态 libc exit 路径终止。
 - 字符串与内存：子集包含已实现的有界例程，例如 `strlen`、`strcmp`、
-  `strncmp`、`memcpy`、`memset` 和 overlap-safe `memmove`，以及当前用户程序解析路径使用的
-  `strchr`。NULL 指针输入仍遵循普通 C 前置条件，BigOS 不额外承诺 hosted 安全检查。
-- Stdlib 与堆：`strtol` 支持有界整数解析、base 处理、`endptr` 和 `ERANGE`；
-  `atoi` 是十进制便利 wrapper。`malloc`、`calloc` 和 `realloc` 使用有界 brk allocator；
-  `calloc` 检查乘法溢出并清零内存，`realloc` 失败时保留原块，`free(NULL)` 无副作用。
-  分配器不承诺线程安全、完整 coalescing 或 hosted allocator 行为。
+  `strncmp`、`memcpy`、`memset` 和 overlap-safe `memmove`，以及无隐藏状态 search
+  helper：`strchr`、`strrchr`、`strstr` 和 `memchr`。它不暴露 `strtok`、`qsort`
+  或 `bsearch`。NULL 指针输入仍遵循普通 C 前置条件，BigOS 不额外承诺 hosted 安全检查。
+- Stdlib 与堆：`strtol` 和 `strtoul` 支持有界整数解析、base 处理、`endptr`、
+  no-digit 行为和 `ERANGE`；`atoi` 是十进制便利 wrapper。`malloc`、`calloc` 和
+  `realloc` 使用有界 brk allocator；`calloc` 检查乘法溢出并清零内存，`realloc`
+  失败时保留原块，`free(NULL)` 无副作用。分配器不承诺线程安全、完整 coalescing 或
+  hosted allocator 行为。
 - Stdio：`stdin`、`stdout`、`stderr` 只是 fd `0`、`1`、`2` 的 opaque handle。
   `putchar`、`puts`、`printf` 和 `fprintf(stderr, ...)` 基于 fd/write，`snprintf`
   复用同一有界 formatter。formatter 支持既有最小格式、简单宽度、`%u`、`%p`、
@@ -152,9 +159,10 @@ runtime 边界内：
 - Smoke-only 探针：`/bin/smoke/args`、`/bin/smoke/env`、`/bin/smoke/out`、
   `/bin/smoke/errno`、`/bin/smoke/exit` 和 `/bin/smoke/libc_subset` 在启用
   `userland_smoke` 时分别覆盖参数传递、环境报告、stdout/stderr、wrapper 失败加
-  `errno`、请求的退出状态、细粒度 libc 头文件、`fprintf(stderr, ...)`、
-  `snprintf`/formatter 行为、字符串/内存边界、`strtol`/`atoi`、`calloc`/`realloc`、
-  `DIR*` wrapper 和有界堆行为。
+  `errno`、请求的退出状态、细粒度 libc 头文件、ASCII/C-locale `ctype`、有界
+  `time.h`、启用的 `assert`、`strtoul`、无隐藏状态 search helper、
+  `fprintf(stderr, ...)`、`snprintf`/formatter 行为、字符串/内存边界、
+  `strtol`/`atoi`、`calloc`/`realloc`、`DIR*` wrapper 和有界堆行为。
 
 该基线不新增 kernel syscall、不修改 `int 0x80` 寄存器 ABI、不改变 boot 或磁盘布局、
 不引入动态链接，也不声称提供 hosted libc 或完整 POSIX shell 行为。
@@ -187,8 +195,10 @@ uv run python tools/boot_debug.py run --emulator qemu --display none --expect-se
 `BIGOS_USERLAND_PASSED` 验证非交互运行时路径。简单 C 程序基线增加面向 smoke-only
 C 探针的行为断言：smoke 会观察它们的 stdout/stderr，验证参数和环境报告，验证失败
 wrapper 的 `errno` 翻译以及成功路径不改写 `errno`，观察请求的退出码探针，检查 cwd-relative
-open/stat/`..`、fork 继承、通过 `/bin/pwd` 观察 exec 保留、shell `cd` 和有界 libc subset
-探针，并通过 `/bin/sh` 运行探针以确认 shell 在外部程序非零退出后继续运行。
+open/stat/`..`、fork 继承、通过 `/bin/pwd` 观察 exec 保留、shell `cd`，并通过有界
+libc subset 探针覆盖 public headers、ctype、time、assert、无符号转换、无隐藏状态 search
+helper、formatter 行为、错误文本、目录 wrapper 和失败路径。它也会通过 `/bin/sh`
+运行探针以确认 shell 在外部程序非零退出后继续运行。
 交互控制台可用性还保留 default-init headless marker 断言（`BIGOS_USER_EXEC`），并增加
 可选的手工或 emulator-input 检查，用于观察文本 console 上的 prompt、输入回显、
 backspace feedback 和命令输出。若本地 display、ROM、keyboard input 或 injection 能力不可用，

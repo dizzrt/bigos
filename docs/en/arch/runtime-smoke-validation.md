@@ -43,7 +43,7 @@ Behavior-oriented validation distinguishes three entry classes:
 | `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | Second boot with the same `--persistent-image`: mount-existing and read synchronized `/rw` growth/truncate state after clean reboot. |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup endpoint accounting, blocking wakeup, EOF, and `EPIPE`. |
 | `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity current-runtime filesystem semantics across read-only exFAT, RAM-backed `/rw`, fd/VFS, metadata, cwd-relative paths, libc errno, and shell-visible tools; no reboot persistence. |
-| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, arg/env handoff, stdout/stderr, errno, `snprintf`/formatter, `strtol`/`atoi`, `calloc`/`realloc`, bounded `DIR*` wrappers, simple C program baseline probes, shell execution, fork/exec/wait, pipe, redirection, and bounded `/rw` runtime file operations. |
+| `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, arg/env handoff, stdout/stderr, errno/error text, ctype, bounded time/assert, `snprintf`/formatter, `strtol`/`strtoul`/`atoi`, stateless search helpers, `calloc`/`realloc`, bounded `DIR*` wrappers, simple C program baseline probes, shell execution, fork/exec/wait, pipe, redirection, and bounded `/rw` runtime file operations. |
 | `default-init` | _(none)_ | `BIGOS_USER_EXEC` | 40s | Default build with no smoke switch; normal boot packages PID-1 init, `/bin/sh`, and bounded `/bin/*`. |
 
 Each case enables only the listed smoke switch and explicitly disables the other smoke switches before building. Outside the runner, all runtime smoke options remain default-off unless a developer explicitly configures them with `xmake f ...=y`.
@@ -106,13 +106,16 @@ storage I/O or blocking pipe operations.
 Simple C program validation is layered into the default-off
 `userland-runtime` case. When `userland_smoke` is enabled, the build packages
 bounded `/bin/smoke/args`, `/bin/smoke/env`, `/bin/smoke/out`,
-`/bin/smoke/errno`, and `/bin/smoke/exit` programs through the same
-`crt0 + libc + -nostdlib -static` ELF64 path as `/bin/sh`, `/bin/echo`, and
-`/bin/cat`. These probes are not packaged in the normal image. The smoke
-observes program stdout/stderr, checks argument and environment reporting,
-checks a failing wrapper's `errno` translation, observes the requested exit-code
-probe, and feeds a deterministic command script into `/bin/sh` to confirm the
-shell continues after an external program returns a non-zero status. This
+`/bin/smoke/errno`, `/bin/smoke/exit`, and `/bin/smoke/libc_subset` programs
+through the same `crt0 + libc + -nostdlib -static` ELF64 path as `/bin/sh`,
+`/bin/echo`, and `/bin/cat`. These probes are not packaged in the normal image.
+The smoke observes program stdout/stderr, checks argument and environment
+reporting, checks a failing wrapper's `errno` translation, observes the
+requested exit-code probe, covers the portable libc subset through ctype, time,
+assert, unsigned conversion, stateless search, formatter/error text, and
+directory-wrapper assertions, and feeds a deterministic command script into
+`/bin/sh` to confirm the shell continues after an external program returns a
+non-zero status. This
 validation does not add a new kernel syscall, change the `int 0x80` ABI, change
 boot/disk layout, or make emulator-dependent smoke mandatory for default builds.
 

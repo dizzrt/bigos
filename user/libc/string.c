@@ -53,12 +53,49 @@ char *strchr(const char *s, int c) {
     }
 }
 
+char *strrchr(const char *s, int c) {
+    const char *last = NULL;
+    for (;; s++) {
+        if (*s == (char)c)
+            last = s;
+        if (*s == 0)
+            break;
+    }
+    return (char *)last;
+}
+
+char *strstr(const char *haystack, const char *needle) {
+    if (*needle == 0)
+        return (char *)haystack;
+    for (const char *h = haystack; *h != 0; h++) {
+        const char *a = h;
+        const char *b = needle;
+        while (*a != 0 && *b != 0 && *a == *b) {
+            a++;
+            b++;
+        }
+        if (*b == 0)
+            return (char *)h;
+    }
+    return NULL;
+}
+
 void *memcpy(void *dst, const void *src, size_t n) {
     unsigned char *d = (unsigned char *)dst;
     const unsigned char *s = (const unsigned char *)src;
     for (size_t i = 0; i < n; i++)
         d[i] = s[i];
     return dst;
+}
+
+void *memchr(const void *s, int c, size_t n) {
+    const unsigned char *p = (const unsigned char *)s;
+    unsigned char target = (unsigned char)c;
+    for (size_t i = 0; i < n; i++) {
+        if (p[i] == target)
+            return (void *)(p + i);
+    }
+    return NULL;
 }
 
 void *memset(void *dst, int c, size_t n) {

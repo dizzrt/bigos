@@ -33,6 +33,7 @@ static Block *g_free_list = NULL;
 
 #define BIGOS_LONG_MAX ((long)(((unsigned long)-1) >> 1))
 #define BIGOS_LONG_MIN (-BIGOS_LONG_MAX - 1)
+#define BIGOS_ULONG_MAX ((unsigned long)-1)
 
 static int is_space_char(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
@@ -184,6 +185,67 @@ long strtol(const char *nptr, char **endptr, int base) {
         return -(long)acc;
     }
     return (long)acc;
+}
+
+unsigned long strtoul(const char *nptr, char **endptr, int base) {
+    const char *s = nptr;
+    if (s == NULL) {
+        if (endptr != NULL)
+            *endptr = (char *)nptr;
+        errno = EINVAL;
+        return 0;
+    }
+    if (base != 0 && (base < 2 || base > 36)) {
+        if (endptr != NULL)
+            *endptr = (char *)nptr;
+        errno = EINVAL;
+        return 0;
+    }
+    while (is_space_char(*s))
+        s++;
+    int negative = 0;
+    if (*s == '+' || *s == '-') {
+        negative = *s == '-';
+        s++;
+    }
+    if ((base == 0 || base == 16) && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        base = 16;
+        s += 2;
+    } else if (base == 0) {
+        base = *s == '0' ? 8 : 10;
+    }
+
+    unsigned long acc = 0;
+    int any = 0;
+    int overflow = 0;
+    const char *last = s;
+    for (;;) {
+        int digit = digit_value(*s);
+        if (digit < 0 || digit >= base)
+            break;
+        any = 1;
+        last = s + 1;
+        if (acc > (BIGOS_ULONG_MAX - (unsigned long)digit) / (unsigned long)base) {
+            overflow = 1;
+        } else {
+            acc = acc * (unsigned long)base + (unsigned long)digit;
+        }
+        s++;
+    }
+    if (!any) {
+        if (endptr != NULL)
+            *endptr = (char *)nptr;
+        return 0;
+    }
+    if (endptr != NULL)
+        *endptr = (char *)last;
+    if (overflow) {
+        errno = ERANGE;
+        return BIGOS_ULONG_MAX;
+    }
+    if (negative)
+        return 0ul - acc;
+    return acc;
 }
 
 int atoi(const char *nptr) {
