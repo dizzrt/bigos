@@ -1,5 +1,6 @@
 #include <bigos/fs/bcache.h>
 
+#include <bigos/block_io.h>
 #include <bigos/memory.h>
 #include <bigos/sched.h>
 
@@ -33,9 +34,9 @@ namespace {
     bigos::bcache::Status write_back(bigos::bcache::BufferBlock *__slot) noexcept {
         if (!bigos::sched::can_block() || !bigos::sched::preemption_enabled())
             return bigos::bcache::Status::WouldBlock;
-        const driver::block::BlockStatus status = driver::block::write_sectors(
+        const bigos::block_io::Status status = bigos::block_io::write_sync(
             __slot->dev, __slot->block_no, 1, __slot->data, bigos::bcache::BLOCK_SIZE);
-        if (status != driver::block::BlockStatus::Success)
+        if (status != bigos::block_io::Status::Success)
             return bigos::bcache::Status::IoError;
         __slot->dirty = false;
         return bigos::bcache::Status::Success;
@@ -129,9 +130,9 @@ namespace bcache {
         }
 
         // Load the requested block into the victim slot.
-        const driver::block::BlockStatus read_status =
-            driver::block::read_sectors(__dev, __block_no, 1, victim->data, BLOCK_SIZE);
-        if (read_status != driver::block::BlockStatus::Success)
+        const bigos::block_io::Status read_status =
+            bigos::block_io::read_sync(__dev, __block_no, 1, victim->data, BLOCK_SIZE);
+        if (read_status != bigos::block_io::Status::Success)
             return nullptr;
 
         victim->dev = __dev;

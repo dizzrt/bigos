@@ -7,6 +7,7 @@
 #warning It is recommended to build with GCC
 #endif
 
+#include <bigos/block_io.h>
 #include <bigos/device.h>
 #include <bigos/memory.h>
 #include <bigos/proc.h>
@@ -290,6 +291,127 @@ namespace {
 
         bigos::serial_puts("BIGOS_USER_ELF_LOAD_PASSED\n");
         bigos::proc::run_user_process(&elf_process);
+    }
+}   // namespace
+#endif
+
+#ifdef BIGOS_BLOCK_IO_REQUEST_SMOKE
+namespace {
+    struct BlockIoSmokeContext {
+        uint8_t sector[driver::block::DEFAULT_SECTOR_SIZE];
+        uint32_t recursive_depth;
+        bool probe_queue_full;
+        bool saw_queue_full;
+        bool fail_write;
+    };
+
+    driver::block::BlockStatus block_io_smoke_read(driver::block::BlockDevice *__device, uint64_t __lba,
+        uint32_t __sector_count, void *__dst, size_t __dst_len) noexcept {
+        if (__device == nullptr || __device->context == nullptr || __lba != 0 || __sector_count != 1 ||
+            __dst_len < driver::block::DEFAULT_SECTOR_SIZE)
+            return driver::block::BlockStatus::InvalidArgument;
+        BlockIoSmokeContext *ctx = (BlockIoSmokeContext *)__device->context;
+        if (ctx->probe_queue_full) {
+            ctx->recursive_depth++;
+            uint8_t nested[driver::block::DEFAULT_SECTOR_SIZE] = {};
+            if (ctx->recursive_depth < bigos::block_io::QUEUE_CAPACITY_PER_DEVICE) {
+                (void)bigos::block_io::read_sync(__device, 0, 1, nested, sizeof(nested));
+            } else {
+                const bigos::block_io::Status status =
+                    bigos::block_io::read_sync(__device, 0, 1, nested, sizeof(nested));
+                if (status == bigos::block_io::Status::QueueFull)
+                    ctx->saw_queue_full = true;
+            }
+            ctx->recursive_depth--;
+        }
+        memcpy(__dst, ctx->sector, driver::block::DEFAULT_SECTOR_SIZE);
+        return driver::block::BlockStatus::Success;
+    }
+
+    driver::block::BlockStatus block_io_smoke_write(driver::block::BlockDevice *__device, uint64_t __lba,
+        uint32_t __sector_count, const void *__src, size_t __src_len) noexcept {
+        if (__device == nullptr || __device->context == nullptr || __lba != 0 || __sector_count != 1 ||
+            __src_len < driver::block::DEFAULT_SECTOR_SIZE)
+            return driver::block::BlockStatus::InvalidArgument;
+        BlockIoSmokeContext *ctx = (BlockIoSmokeContext *)__device->context;
+        if (ctx->fail_write)
+            return driver::block::BlockStatus::DeviceError;
+        memcpy(ctx->sector, __src, driver::block::DEFAULT_SECTOR_SIZE);
+        return driver::block::BlockStatus::Success;
+    }
+
+    void block_io_request_smoke() noexcept {
+        BlockIoSmokeContext ctx = {};
+        driver::block::BlockDevice device = {};
+        device.sector_size = driver::block::DEFAULT_SECTOR_SIZE;
+        device.total_sectors = 16;
+        device.context = &ctx;
+        device.read_impl = &block_io_smoke_read;
+        device.write_impl = &block_io_smoke_write;
+
+        uint8_t write_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
+        uint8_t read_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
+        write_buf[0] = 0x42;
+        if (bigos::block_io::write_sync(&device, 0, 1, write_buf, sizeof(write_buf)) !=
+            bigos::block_io::Status::Success) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED write\n");
+            return;
+        }
+        if (bigos::block_io::read_sync(&device, 0, 1, read_buf, sizeof(read_buf)) !=
+                bigos::block_io::Status::Success ||
+            read_buf[0] != 0x42) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED read\n");
+            return;
+        }
+        if (bigos::block_io::read_sync(nullptr, 0, 1, read_buf, sizeof(read_buf)) !=
+            bigos::block_io::Status::InvalidRequest) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED invalid\n");
+            return;
+        }
+        driver::block::BlockDevice not_ready = device;
+        not_ready.read_impl = nullptr;
+        if (bigos::block_io::read_sync(&not_ready, 0, 1, read_buf, sizeof(read_buf)) !=
+            bigos::block_io::Status::DeviceNotReady) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED not-ready\n");
+            return;
+        }
+        if (bigos::block_io::read_sync(&device, 0, 1, read_buf, 1) != bigos::block_io::Status::BufferTooSmall) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED buffer\n");
+            return;
+        }
+        if (bigos::block_io::read_sync(&device, device.total_sectors, 1, read_buf, sizeof(read_buf)) !=
+            bigos::block_io::Status::Overflow) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED range\n");
+            return;
+        }
+
+        driver::block::BlockDevice read_only = device;
+        read_only.write_impl = nullptr;
+        if (bigos::block_io::write_sync(&read_only, 0, 1, write_buf, sizeof(write_buf)) !=
+            bigos::block_io::Status::Unsupported) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED readonly\n");
+            return;
+        }
+
+        ctx.fail_write = true;
+        if (bigos::block_io::write_sync(&device, 0, 1, write_buf, sizeof(write_buf)) !=
+            bigos::block_io::Status::DeviceError) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED device-error\n");
+            return;
+        }
+        ctx.fail_write = false;
+
+        ctx.probe_queue_full = true;
+        ctx.saw_queue_full = false;
+        ctx.recursive_depth = 0;
+        if (bigos::block_io::read_sync(&device, 0, 1, read_buf, sizeof(read_buf)) !=
+                bigos::block_io::Status::Success ||
+            !ctx.saw_queue_full) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED queue-full\n");
+            return;
+        }
+
+        bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_PASSED\n");
     }
 }   // namespace
 #endif
@@ -1057,6 +1179,13 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&bigos::proc::signal_smoke_entry, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_SIGNAL_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_BLOCK_IO_REQUEST_SMOKE
+    // Validation-only one-shot over a fake block device. It exercises request
+    // validation, queue accounting, and status propagation without claiming
+    // async I/O or touching the real disk.
+    block_io_request_smoke();
 #endif
 
 #ifdef BIGOS_WRITABLE_FS_SMOKE

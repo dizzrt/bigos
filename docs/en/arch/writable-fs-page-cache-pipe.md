@@ -18,9 +18,9 @@ sector (512 bytes) and the capacity is a bounded compile-time constant
 `_GFM_PRE_PAGING`.
 
 - `get(dev, block_no)` returns a pinned (`ref_count`-incremented) block; a hit
-  returns without re-reading, a miss loads via `block::read_sectors`.
+  returns without re-reading, a miss loads through `bigos::block_io::read_sync`.
 - `put`, `mark_dirty`, `sync`, and `sync_all` release a reference, flag a dirty
-  block, and write dirty blocks back through `block::write_sectors`.
+  block, and write dirty blocks back through `bigos::block_io::write_sync`.
 - `sync_block(dev, block_no)` lets filesystem code flush selected dirty blocks
   in an explicit order. Missing or clean selected blocks are success; failed
   writes keep the cached block dirty or pending.
@@ -45,6 +45,22 @@ symmetric to `read_sectors`. It validates the sector count, source length, and
 LBA-range overflow before dispatching. The ATA PIO backend implements LBA48
 WRITE SECTORS EXT plus FLUSH CACHE EXT, reusing the existing BSY/DRDY/DRQ polling
 timing. A read-only device returns `Unsupported`, mapped to `-EROFS` upstream.
+
+## Block I/O Request Layer
+
+`bigos::block_io` adds a bounded synchronous request layer between normal
+storage consumers and the low-level block execution API. Requests record the
+target `BlockDevice`, read/write operation, LBA, sector count, kernel buffer,
+buffer length, queue slot, and final completion status. Each device has a fixed
+small queue; invalid requests, exhausted queues, preemption-disabled callers, and
+device-not-ready cases return deterministic request-layer statuses before any
+device I/O is issued.
+
+The current contract is synchronous only. It does not provide async callbacks,
+background writeback, DMA, multi-queue scheduling, SMP I/O dispatch, new storage
+drivers, user-visible device nodes, or a new syscall ABI. Low-level
+`block::read_sectors` and `block::write_sectors` remain the request layer's
+execution interface and tightly bounded hardware diagnostic boundary.
 
 ## Writable Filesystem (`bigfs`)
 

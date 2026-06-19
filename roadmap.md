@@ -221,9 +221,9 @@ no longer constrained to a single synchronous path.
 
 - [x] Task M3.1: a freestanding-safe device and driver registration/probe framework.
 - [x] 任务 M3.1：freestanding-safe 的设备与驱动注册/探测框架。
-- [ ] Task M3.2: a block-layer abstraction with request queueing and cache
+- [x] Task M3.2: a block-layer abstraction with request queueing and cache
   integration, leaving room for future async I/O.
-- [ ] 任务 M3.2：具备请求排队与缓存对接的块层抽象，为后续 async I/O 预留空间。
+- [x] 任务 M3.2：具备请求排队与缓存对接的块层抽象，为后续 async I/O 预留空间。
 - [ ] Task M3.3: a second block-device backend as a framework validation, without
   adding a new ISA.
 - [ ] 任务 M3.3：以第二个块设备后端作为框架验证，不接入新 ISA。

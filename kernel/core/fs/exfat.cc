@@ -1,4 +1,5 @@
 #include <bigos/fs/exfat.h>
+#include <bigos/block_io.h>
 #include <bigos/memory.h>
 #include <string.h>
 
@@ -49,14 +50,14 @@ namespace {
         return false;
     }
 
-    bigos::fs::FsStatus block_to_fs(driver::block::BlockStatus __status) noexcept {
-        return __status == driver::block::BlockStatus::Success ? bigos::fs::FsStatus::Success :
-                                                                 bigos::fs::FsStatus::BlockError;
+    bigos::fs::FsStatus block_to_fs(bigos::block_io::Status __status) noexcept {
+        return __status == bigos::block_io::Status::Success ? bigos::fs::FsStatus::Success :
+                                                              bigos::fs::FsStatus::BlockError;
     }
 
     bigos::fs::FsStatus read_sector(
         driver::block::BlockDevice *__device, uint64_t __lba, uint8_t *__buffer) noexcept {
-        return block_to_fs(driver::block::read_sectors(__device, __lba, 1, __buffer, SECTOR_SIZE));
+        return block_to_fs(bigos::block_io::read_sync(__device, __lba, 1, __buffer, SECTOR_SIZE));
     }
 
     bool cluster_valid(const bigos::fs::ExfatMount *__mount, uint32_t __cluster) noexcept {
@@ -88,7 +89,7 @@ namespace {
         bigos::fs::FsStatus status = cluster_lba(__mount, __cluster, &lba);
         if (status != bigos::fs::FsStatus::Success)
             return status;
-        return block_to_fs(driver::block::read_sectors(
+        return block_to_fs(bigos::block_io::read_sync(
             __mount->device, lba, __mount->sectors_per_cluster, __buffer, __mount->bytes_per_cluster));
     }
 

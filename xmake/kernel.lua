@@ -108,6 +108,10 @@ if has_config("fs_smoke") then
     add_defines("BIGOS_FS_SMOKE")
 end
 
+if has_config("block_io_request_smoke") then
+    add_defines("BIGOS_BLOCK_IO_REQUEST_SMOKE")
+end
+
 if has_config("demand_paging_smoke") then
     add_defines("BIGOS_DEMAND_PAGING_SMOKE")
 end

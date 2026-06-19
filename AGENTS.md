@@ -111,6 +111,7 @@ xmake f --user_vmem_smoke=y    # BIGOS_USER_VMEM_SMOKE -> BIGOS_USER_VMEM_SMOKE_
 xmake f --syscall_smoke=y      # BIGOS_SYSCALL_SMOKE -> BIGOS_SYSCALL_SMOKE_PASSED/FAILED
 xmake f --user_program_smoke=y # BIGOS_USER_PROGRAM_SMOKE -> BIGOS_USER_ENTER/EXIT
 xmake f --fs_smoke=y           # BIGOS_FS_SMOKE -> BIGOS_FS_EXFAT_READ_PASSED/FAILED
+xmake f --block_io_request_smoke=y # BIGOS_BLOCK_IO_REQUEST_SMOKE -> BIGOS_BLOCK_IO_REQUEST_PASSED/FAILED
 xmake f --user_elf_smoke=y     # BIGOS_USER_ELF_SMOKE -> BIGOS_USER_ENTER/EXIT
 xmake f --demand_paging_smoke=y # BIGOS_DEMAND_PAGING_SMOKE -> BIGOS_DEMAND_PAGING_PASSED/FAILED
 xmake f --fork_cow_smoke=y     # BIGOS_FORK_COW_SMOKE -> BIGOS_FORK_COW_PASSED/FAILED

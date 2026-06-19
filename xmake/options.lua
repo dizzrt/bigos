@@ -78,6 +78,12 @@ option("fs_smoke")
     set_description("enable validation-only kernel exFAT filesystem smoke marker")
 option_end()
 
+option("block_io_request_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only bounded block I/O request layer smoke marker")
+option_end()
+
 option("demand_paging_smoke")
     set_default(false)
     set_showmenu(true)

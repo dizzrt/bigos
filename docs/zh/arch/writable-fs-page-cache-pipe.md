@@ -15,9 +15,9 @@ CR3 约定均不变。
 `_GFM_PRE_PAGING` 一次性分配。
 
 - `get(dev, block_no)` 返回引用计数加一的块；命中直接返回不再读盘，未命中经
-  `block::read_sectors` 装入。
+  `bigos::block_io::read_sync` 装入。
 - `put`、`mark_dirty`、`sync`、`sync_all` 分别释放引用、标脏、经
-  `block::write_sectors` 回写脏块。
+  `bigos::block_io::write_sync` 回写脏块。
 - `sync_block(dev, block_no)` 允许文件系统按显式顺序回写选定的 dirty block。选定块
   未缓存或已经 clean 视为成功；写失败时对应缓存块保持 dirty 或 pending。
 - 写回（write-back）语义：写入只标脏，落盘点为 `fsync`、淘汰回写或 `sync_all`。
@@ -35,6 +35,18 @@ CR3 约定均不变。
 发起设备写前校验扇区数、源缓冲长度与 LBA 范围溢出。ATA PIO 后端实现 LBA48
 WRITE SECTORS EXT 加 FLUSH CACHE EXT，复用现有 BSY/DRDY/DRQ 轮询时序。只读设备返
 回 `Unsupported`，上层映射为 `-EROFS`。
+
+## 块 I/O 请求层
+
+`bigos::block_io` 在普通存储消费者和底层块设备执行 API 之间加入有界同步请求层。
+请求记录目标 `BlockDevice`、读写操作、LBA、扇区数、内核缓冲区、缓冲区长度、队列
+槽位与最终完成状态。每个设备拥有固定小队列；非法请求、队列耗尽、preemption-disabled
+调用者和设备未就绪会在发起设备 I/O 前返回确定性的请求层状态。
+
+当前契约仅支持同步完成。不提供 async callback、后台 writeback、DMA、多队列调度、
+SMP I/O dispatch、新存储驱动、用户可见设备节点或新的 syscall ABI。底层
+`block::read_sectors` 与 `block::write_sectors` 保留为请求层执行接口和严格受限的硬件
+诊断边界。
 
 ## 可写文件系统（`bigfs`）
 

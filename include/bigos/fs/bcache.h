@@ -44,7 +44,7 @@ namespace bcache {
 
     // get() returns a pinned (ref_count incremented) block for (dev, block_no).
     // On a hit it returns the cached block without re-reading. On a miss it
-    // selects a free or evictable slot, loads via block::read_sectors, marks it
+    // selects a free or evictable slot, loads via block_io::read_sync, marks it
     // valid and returns it. Eviction prefers an unreferenced clean block; the
     // only evictable candidate being dirty is written back first. When no slot
     // can be freed it returns nullptr (caller maps to -ENOMEM/-ENOSPC). Blockable
@@ -59,7 +59,7 @@ namespace bcache {
     // Marks a pinned block dirty so a later sync writes it back.
     void mark_dirty(BufferBlock *__block) noexcept;
 
-    // Writes a dirty block back through block::write_sectors and clears dirty on
+    // Writes a dirty block back through block_io::write_sync and clears dirty on
     // success. A clean block is a no-op success. On device error the block stays
     // dirty (no data loss) and IoError is returned. Blockable context only.
     Status sync(BufferBlock *__block) noexcept;

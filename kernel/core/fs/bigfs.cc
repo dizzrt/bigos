@@ -1,5 +1,6 @@
 #include <bigos/fs/bigfs.h>
 
+#include <bigos/block_io.h>
 #include <bigos/cred.h>
 #include <bigos/device.h>
 #include <bigos/fs/bcache.h>
@@ -875,9 +876,9 @@ namespace {
     Status format_current_device() noexcept {
         memset(g_zero_block, 0, sizeof(g_zero_block));
         for (uint32_t block = 0; block < bigos::bigfs::TOTAL_BLOCKS; block++) {
-            const driver::block::BlockStatus write_status =
-                driver::block::write_sectors(&g_device, block, 1, g_zero_block, sizeof(g_zero_block));
-            if (write_status != driver::block::BlockStatus::Success)
+            const bigos::block_io::Status write_status =
+                bigos::block_io::write_sync(&g_device, block, 1, g_zero_block, sizeof(g_zero_block));
+            if (write_status != bigos::block_io::Status::Success)
                 return Status::IoError;
         }
 

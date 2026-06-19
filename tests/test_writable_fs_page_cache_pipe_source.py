@@ -97,8 +97,8 @@ def test_buffer_cache_write_back_and_eviction_contract() -> None:
     assert 'write_back(dirty_lru)' in source
     # No evictable slot -> deterministic nullptr (caller maps to -ENOMEM).
     assert 'return nullptr;   // every slot is pinned' in source
-    # Device write failure keeps the block dirty (no data loss).
-    assert 'block::write_sectors(' in source
+    # Request-layer write failure keeps the block dirty (no data loss).
+    assert 'block_io::write_sync(' in source
     assert '!bigos::sched::can_block() || !bigos::sched::preemption_enabled()' in source
     assert 'Status sync_device(driver::block::BlockDevice *__dev) noexcept' in source
     assert 'slot->dev != __dev || !slot->dirty' in source
