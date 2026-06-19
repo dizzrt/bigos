@@ -103,8 +103,10 @@ Shell 有意保持很小：
   以及兼容用 umbrella 头 `libc.h`。Raw syscall primitive 需要显式包含
   `bigos_syscall.h`，不会从普通 umbrella 头导出。
 - 类型与常量：`size_t`、`ssize_t`、`off_t`、`pid_t`、`NULL`、已实现的
-  open flags、seek 常量、`WAIT_ANY`，以及与 `include/bigos/errno.h` 保持一致
-  的 errno 数值，包括用于 `getcwd` 小缓冲区的 `ERANGE`。
+  open flags、有界 fd-control 常量（`F_GETFD`、`F_SETFD`、`F_DUPFD`、
+  `FD_CLOEXEC`）、access mode bits、seek 常量、`WAIT_ANY`、`WNOHANG`，以及与
+  `include/bigos/errno.h` 保持一致的 errno 数值，包括用于 `getcwd` 小缓冲区的
+  `ERANGE`。
 - 文件元数据与目录 helper：`struct stat`、`S_ISDIR`、`S_ISREG` 和
   `struct bigos_dirent` 只描述当前有界文件/目录子集。`bigos_readdir` 读取有界批次；
   它仍是 BigOS-specific 批量 helper；`DIR`、`struct dirent`、`opendir`、`readdir`
@@ -112,7 +114,9 @@ Shell 有意保持很小：
   不承诺排序、跨调用快照、`telldir`、`seekdir`、`rewinddir`、symlink、目录 fd 语义或
   持久完整文件系统语义。
 - Syscall wrapper：内核负 errno 返回会翻译为用户态正 `errno`，并返回 `-1` 或
-  接口文档化的失败哨兵；成功 wrapper 不会清零或改写既有 `errno`。
+  接口文档化的失败哨兵；成功 wrapper 不会清零或改写既有 `errno`。`waitpid`、
+  `fcntl`、`access`、`stat`、`fstat`、`truncate` 和 `ftruncate` 等 POSIX-like
+  名称都是 BigOS 有界子集，不表示完整 POSIX 行为。
 - BigOS-specific helper：`wait_status`、`bigos_readdir`、`brk_raw`、
   `mmap_anon`、`time_now` 和 `get_tick` 是 public bounded ABI helper，因为当前
   shell、smoke、libc 或打包用户程序路径会使用它们。Raw `syscall0` 到 `syscall6`

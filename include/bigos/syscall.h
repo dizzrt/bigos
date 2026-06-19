@@ -34,7 +34,7 @@ namespace bigos::sys {
         SYS_WRITE = 2,          // fd, user buffer, bounded length -> deterministic write result
         SYS_EXIT = 3,           // exit code -> terminate current user process, does not return
         SYS_WAIT = 4,           // pid or WAIT_ANY, optional int* status -> child pid, or negative wait error
-        SYS_OPEN = 5,           // user path, read-only flags -> process-local fd
+        SYS_OPEN = 5,           // user path, bounded open flags -> process-local fd
         SYS_READ = 6,           // fd, user buffer, bounded length -> deterministic read result
         SYS_CLOSE = 7,          // fd -> close current process descriptor
         SYS_BRK = 8,            // requested break -> committed heap break or deterministic negative error
@@ -98,6 +98,10 @@ namespace bigos::sys {
         SYS_SETSID = 44,        // () -> new sid/pgid equal to current pid, or -EPERM/-ESRCH
         SYS_TCGETPGRP = 45,     // () -> default terminal foreground pgid, or deterministic errno
         SYS_TCSETPGRP = 46,     // (pgid) -> bind default terminal foreground pgid, or errno
+        SYS_WAITPID = 47,       // (pid/WAIT_ANY, optional int* status, options) -> child pid, 0 for WNOHANG miss, or errno
+        SYS_FCNTL = 48,         // bounded fd-control: F_GETFD/F_SETFD/F_DUPFD over process-local fd entries
+        SYS_ACCESS = 49,        // (path, mode) -> bounded path visibility/permission check through VFS metadata/open rules
+        SYS_TRUNCATE = 50,      // (path, length) -> bounded /rw regular-file truncate by path, or negative errno
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

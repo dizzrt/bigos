@@ -124,8 +124,10 @@ The user libc exposes a documented bounded subset for simple static C programs:
   the compatibility umbrella `libc.h`. Raw syscall primitives are opt-in through
   `bigos_syscall.h`, not exported by the ordinary umbrella header.
 - Types and constants: `size_t`, `ssize_t`, `off_t`, `pid_t`, `NULL`, the
-  implemented open flags, seek constants, `WAIT_ANY`, and errno values mirrored
-  from `include/bigos/errno.h`, including `ERANGE` for small `getcwd` buffers.
+  implemented open flags, bounded fd-control constants (`F_GETFD`, `F_SETFD`,
+  `F_DUPFD`, `FD_CLOEXEC`), access mode bits, seek constants, `WAIT_ANY`,
+  `WNOHANG`, and errno values mirrored from `include/bigos/errno.h`, including
+  `ERANGE` for small `getcwd` buffers.
 - File metadata and directory helpers: `struct stat`, `S_ISDIR`, `S_ISREG`, and
   `struct bigos_dirent` describe only the current bounded file/directory subset.
   `bigos_readdir` remains a BigOS-specific batched helper, while `DIR`,
@@ -136,7 +138,9 @@ The user libc exposes a documented bounded subset for simple static C programs:
   semantics.
 - Syscall wrappers: negative kernel errno returns become positive user `errno`
   and `-1` or the documented failure sentinel; successful wrappers do not clear
-  or rewrite an existing `errno` value.
+  or rewrite an existing `errno` value. POSIX-like names such as `waitpid`,
+  `fcntl`, `access`, `stat`, `fstat`, `truncate`, and `ftruncate` are BigOS
+  bounded subsets, not claims of complete POSIX behavior.
 - BigOS-specific helpers: `wait_status`, `bigos_readdir`, `brk_raw`,
   `mmap_anon`, `time_now`, and `get_tick` are public bounded ABI helpers because
   current shell, smoke, libc, or packaged user-program paths use them. Raw

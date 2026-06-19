@@ -95,6 +95,10 @@ def test_user_libc_syscall_and_errno_mirrors_match_kernel_headers() -> None:
     assert user_syscalls == kernel_syscalls
     assert user_errno == kernel_errno
     assert user_syscalls['SYS_EXECVE'] == 27
+    assert user_syscalls['SYS_WAITPID'] == 47
+    assert user_syscalls['SYS_FCNTL'] == 48
+    assert user_syscalls['SYS_ACCESS'] == 49
+    assert user_syscalls['SYS_TRUNCATE'] == 50
     assert user_errno['ENOENT'] == 2
     assert user_errno['E2BIG'] == 7
     assert user_errno['ENOEXEC'] == 8
@@ -182,6 +186,14 @@ def test_syscall_dispatch_reads_rax_and_routes_known_numbers() -> None:
     assert 'result = __detail::sys_write(__frame->rdi, __frame->rsi, __frame->rdx);' in syscall
     assert 'case SYS_EXIT:' in syscall
     assert 'bigos::proc::exit_current((int64_t)__frame->rdi);' in syscall
+    assert 'case SYS_WAITPID:' in syscall
+    assert 'sys_waitpid(__frame->rdi, __frame->rsi, __frame->rdx)' in syscall
+    assert 'case SYS_FCNTL:' in syscall
+    assert 'sys_fcntl(__frame->rdi, __frame->rsi, __frame->rdx)' in syscall
+    assert 'case SYS_ACCESS:' in syscall
+    assert 'sys_access(__frame->rdi, __frame->rsi)' in syscall
+    assert 'case SYS_TRUNCATE:' in syscall
+    assert 'sys_truncate(__frame->rdi, __frame->rsi)' in syscall
 
 
 def test_syscall_dispatch_unknown_number_returns_deterministic_error() -> None:

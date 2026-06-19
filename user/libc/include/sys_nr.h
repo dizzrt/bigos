@@ -55,5 +55,9 @@
 #define SYS_SETSID      44
 #define SYS_TCGETPGRP   45
 #define SYS_TCSETPGRP   46
+#define SYS_WAITPID     47
+#define SYS_FCNTL       48
+#define SYS_ACCESS      49
+#define SYS_TRUNCATE    50
 
 #endif /* _BIGOS_USER_SYS_H */

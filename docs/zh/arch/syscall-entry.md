@@ -47,8 +47,8 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_GET_TICK`（number=1）：返回 `bigos::timer::ticks()` 单调 tick，验证返回值寄存器路径。`timer::ticks()` 已通过 `include/bigos/timer.h` 稳定暴露，是 context-agnostic bounded read，故选用它而非 `SYS_DEBUG_NOOP`。
 - `SYS_WRITE`（number=2）：仅支持早期 console sink（当前固定 `fd=1`），在读取用户 buffer 前检查低半区范围、页表 present/user bit 和最大长度 `SYS_WRITE_MAX_LEN`，再把 bounded 内容输出到 serial/VGA，并返回确定性字节数或 `-bigos::EFAULT`。
 - `SYS_EXIT`（number=3）：记录当前用户进程 exit code，标记 terminated，恢复内核地址空间并转入 scheduler 的延后回收退出路径；该 syscall 不返回到已终止用户指令流。
-- `SYS_WAIT`（number=4）：在调用方可阻塞时等待子进程状态，可选地把有界 raw exit status 拷贝到用户 `int*`；不支持或不可阻塞上下文返回确定性 wait 错误。
-- `SYS_OPEN`（number=5）：复制有界 NUL 结尾用户 path，只接受 read-only flags，经 VFS 壳层 open，并返回 process-local fd。
+- `SYS_WAIT`（number=4）：保留旧的二参 raw wait 形态，支持 `WAIT_ANY` 或指定 child pid，并可选地把有界 raw exit status 拷贝到用户 `int*`。
+- `SYS_OPEN`（number=5）：复制有界 NUL 结尾用户 path，接受 VFS 已实现的有界 open flags（`O_RDONLY`/`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`），经 VFS 壳层 open，并返回 process-local fd。
 - `SYS_READ`（number=6）：验证用户目标 range，经进程 fd table 与 VFS file offset 读取到有界 kernel buffer，再 copy out，并返回 byte count。
 - `SYS_CLOSE`（number=7）：关闭 process-local fd 并 drop open-file reference。
 
@@ -80,6 +80,10 @@ errno，不改变 `int 0x80` 寄存器 ABI、syscall vector、IDT DPL 或 EOI �
 - `SYS_FTRUNCATE`（number=39）：使用 `rdi` = fd、`rsi` = 有界长度。它只接受可写
   `/rw` 常规文件，成功时更新 size metadata，让扩展范围读取为零，并把被截断尾部块
   安全释放给复用集合；目录、只读后端、过大长度、非法 fd 和不可阻塞上下文都会返回确定性负错误码。
+- `SYS_WAITPID`（number=47）：追加的有界 wait 变体。ABI：`rdi` = `WAIT_ANY` 或正 child pid，`rsi` = 可选用户 `int*` status 输出，`rdx` = options。仅支持 `options == 0` 与 `WNOHANG`；process-group selector、stopped/continued 状态、resource usage 与完整 POSIX job-control 语义仍不支持。`WNOHANG` 在存在匹配 child 但当前没有可回收 zombie 时返回 `0`。
+- `SYS_FCNTL`（number=48）：有界 fd-control 入口，支持 `F_GETFD`、带 `FD_CLOEXEC` 的 `F_SETFD` 和 `F_DUPFD`。`F_DUPFD` 返回不小于调用方最小值的最低可用 fd，并清除新 descriptor 的 close-on-exec。它不实现 record locking、nonblocking I/O、async I/O、descriptor passing 或完整 POSIX `fcntl(2)`。
+- `SYS_ACCESS`（number=49）：通过共享 VFS path resolution 与 metadata 执行有界路径可见性/权限检查。仅支持 `F_OK`、`R_OK`、`W_OK`、`X_OK` bit，unsupported bit 确定性失败，且不打开或发布 descriptor。
+- `SYS_TRUNCATE`（number=50）：按路径执行有界 truncate，语义与 `SYS_FTRUNCATE` 的可写 `/rw` regular-file 子集一致。只读后端目标、目录、缺失路径、非法路径、过大长度和不可阻塞上下文都会失败，且不发布部分 size 更新。
 
 这些 lifecycle syscall 是有界 BigOS 操作，不是完整 POSIX `munmap`、`mprotect` 或完整文件大小管理。它们不支持 VM 操作的任意字节粒度、`MAP_FIXED` 覆盖、shared writable mapping、file-backed writable upgrade、sparse-file API、journal、power-loss recovery、swap 或跨 CPU TLB shootdown。
 

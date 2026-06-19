@@ -94,6 +94,11 @@ def test_process_fd_table_lifecycle_and_helpers_are_growable() -> None:
     assert 'close_fd_current' in source
     assert 'close_all_fds(process);' in source
     assert 'free_fd_table(process);' in source
+    assert 'fcntl_fd_current' in header
+    assert 'FCNTL_F_GETFD = 1' in header
+    assert 'FCNTL_F_SETFD = 2' in header
+    assert 'FCNTL_F_DUPFD = 0' in header
+    assert 'FCNTL_FD_CLOEXEC = 1' in header
 
 
 def test_exec_and_reap_apply_fd_close_rules_from_safe_context() -> None:
@@ -130,11 +135,16 @@ def test_fd_syscalls_copy_user_memory_and_guard_blocking_context() -> None:
     assert 'bigos::vfs::init()' in syscall
     assert 'bigos::vfs::open(path, bigos::proc::current_cwd(), __flags, (uint32_t)__mode, uid, gid, &file)' in syscall
     assert 'bigos::proc::install_fd_current(file, false)' in syscall
+    assert 'bigos::proc::fcntl_fd_current((uint32_t)__fd, (int)__cmd, __arg)' in syscall
+    assert 'bigos::vfs::stat_absolute(resolved, &metadata)' in syscall
+    assert 'bigos::vfs::truncate(file, __length)' in syscall
     assert 'bigos::proc::read_fd_current' in syscall
     assert 'bigos::proc::copy_to_current_user_buffer' in syscall
     assert 'bigos::proc::close_fd_current' in syscall
     assert 'sys_stat(__frame->rdi, __frame->rsi)' in syscall
     assert 'sys_fstat(__frame->rdi, __frame->rsi)' in syscall
+    assert 'sys_access(__frame->rdi, __frame->rsi)' in syscall
+    assert 'sys_truncate(__frame->rdi, __frame->rsi)' in syscall
     assert 'sys_rename(__frame->rdi, __frame->rsi)' in syscall
     assert 'bigos::vfs::rename(old_path, new_path, bigos::proc::current_cwd(), uid, gid)' in syscall
     assert 'sizeof(bigos::Metadata)' in syscall

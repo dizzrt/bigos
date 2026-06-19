@@ -1,14 +1,16 @@
 /* BigOS bounded wait constants and wrapper declarations.
  *
- * wait()/waitpid() expose the bounded POSIX-like shape over the existing
- * SYS_WAIT ABI. Only options == 0 is supported: no WNOHANG, process groups,
- * job control, stopped/continued state, or complete POSIX status encoding. */
+ * wait()/waitpid() expose the bounded POSIX-like shape over the BigOS wait
+ * syscalls. Only WAIT_ANY, positive child pid selectors, and WNOHANG are
+ * supported: no process groups, job control, stopped/continued state, resource
+ * usage, or complete POSIX status encoding. */
 #ifndef _BIGOS_USER_SYS_WAIT_H
 #define _BIGOS_USER_SYS_WAIT_H
 
 #include <sys/types.h>
 
 #define WAIT_ANY 0xffffffffu
+#define WNOHANG  1
 
 #define WIFEXITED(status)   ((status) >= 0)
 #define WEXITSTATUS(status) (status)

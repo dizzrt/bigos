@@ -47,8 +47,8 @@ The mapping of syscall number, arguments, return value, and `InterruptFrame` fie
 - `SYS_GET_TICK` (number=1): returns `bigos::timer::ticks()` monotonic tick to validate the return-register path. `timer::ticks()` is stably exposed by `include/bigos/timer.h` and is a context-agnostic bounded read, so it is used instead of `SYS_DEBUG_NOOP`.
 - `SYS_WRITE` (number=2): supports only the early console sink (currently fixed `fd=1`). Before reading the user buffer, it checks low-half range, page-table present/user bits, and maximum length `SYS_WRITE_MAX_LEN`; then it writes bounded content to serial/VGA and returns a deterministic byte count or `-bigos::EFAULT`.
 - `SYS_EXIT` (number=3): records the current user process exit code, marks it terminated, restores the kernel address space, and enters the scheduler's deferred-reclamation exit path. This syscall does not return to terminated user instructions.
-- `SYS_WAIT` (number=4): waits for child process state when the caller can block, optionally copies the bounded raw exit status to a user `int*`, or returns the deterministic wait error for unsupported/nonblocking contexts.
-- `SYS_OPEN` (number=5): copies a bounded NUL-terminated user path, accepts only read-only flags, opens through the VFS shell, and returns a process-local fd.
+- `SYS_WAIT` (number=4): legacy raw wait shape for `WAIT_ANY` or a specific child pid with an optional user `int*` status output. It preserves the existing two-argument ABI.
+- `SYS_OPEN` (number=5): copies a bounded NUL-terminated user path, accepts the bounded open flags implemented by VFS (`O_RDONLY`/`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`), opens through the VFS shell, and returns a process-local fd.
 - `SYS_READ` (number=6): validates the user destination range, reads through the process fd table and VFS file offset into a bounded kernel buffer, copies out, and returns the byte count.
 - `SYS_CLOSE` (number=7): closes the process-local fd and drops the open-file reference.
 
@@ -118,6 +118,7 @@ multiple terminals, background jobs, or a complete POSIX process model.
   request publishes no partial VMA on failure. Covered pages materialize on first
   read access through the page/buffer cache; writes to the read-only pages,
   out-of-range access, and cache load from a non-blocking context are
+  deterministic user faults or syscall failures.
 - `SYS_UNMAP_ANON` (number=36): takes `rdi` = page-aligned user address and
   `rsi` = page-aligned non-zero length. It only accepts ranges fully covered by
   compatible private anonymous VMAs in the user low half. On success it removes
@@ -140,6 +141,25 @@ multiple terminals, background jobs, or a complete POSIX process model.
   makes extended ranges read as zero, releases truncated tail blocks for safe
   reuse, and rejects directories, read-only backends, oversized lengths, bad fds,
   and nonblocking context with deterministic negative errno values.
+- `SYS_WAITPID` (number=47): append-only bounded wait variant. ABI: `rdi` =
+  `WAIT_ANY` or a positive child pid, `rsi` = optional user `int*` status output,
+  and `rdx` = options. Only `options == 0` and `WNOHANG` are supported; process
+  group selectors, stopped/continued state, resource usage, and complete POSIX
+  job-control semantics remain unsupported. `WNOHANG` returns `0` when a matching
+  child exists but no matching zombie is currently reapable.
+- `SYS_FCNTL` (number=48): bounded fd-control entry for `F_GETFD`, `F_SETFD`
+  with `FD_CLOEXEC`, and `F_DUPFD`. `F_DUPFD` returns the lowest available fd at
+  or above the caller's minimum and clears close-on-exec on the new descriptor.
+  It does not implement record locking, nonblocking I/O, async I/O, descriptor
+  passing, or complete POSIX `fcntl(2)`.
+- `SYS_ACCESS` (number=49): bounded path visibility/permission check through
+  shared VFS path resolution and metadata. It supports only `F_OK`, `R_OK`,
+  `W_OK`, and `X_OK` bits, rejects unsupported bits deterministically, and does
+  not open or publish a descriptor.
+- `SYS_TRUNCATE` (number=50): bounded path truncate over the same writable `/rw`
+  regular-file semantics as `SYS_FTRUNCATE`. Read-only backend targets,
+  directories, missing paths, invalid paths, oversized lengths, and nonblocking
+  context fail without publishing a partial size update.
 
 These lifecycle calls are bounded BigOS operations, not full POSIX `munmap` or
 `mprotect` or full POSIX file-size management. They do not support arbitrary

@@ -310,6 +310,78 @@ namespace sys {
             return 0;
         }
 
+        static int64_t sys_truncate(uint64_t __path, uint64_t __length) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+            bigos::proc::Process *process = bigos::proc::current_process();
+            const uint32_t uid = process != nullptr ? process->uid : 0;
+            const uint32_t gid = process != nullptr ? process->gid : 0;
+            bigos::vfs::File *file = nullptr;
+            const bigos::vfs::Status open_status = bigos::vfs::open(
+                path, bigos::proc::current_cwd(), bigos::vfs::OPEN_WRONLY, 0, uid, gid, &file);
+            if (open_status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(open_status);
+            const bigos::vfs::Status trunc_status = bigos::vfs::truncate(file, __length);
+            bigos::vfs::release(file);
+            return vfs_status_to_syscall(trunc_status);
+        }
+
+        static bool access_permitted(const bigos::Metadata &__metadata, uint32_t __uid, uint32_t __gid,
+            uint64_t __mode, bigos::cred::Access __access, uint64_t __bit) noexcept {
+            return (__mode & __bit) == 0 ||
+                   bigos::cred::permits(__metadata.uid, __metadata.gid, __metadata.mode, __uid, __gid, __access);
+        }
+
+        static int64_t sys_access(uint64_t __path, uint64_t __mode) noexcept {
+            constexpr uint64_t ACCESS_X_OK = 1;
+            constexpr uint64_t ACCESS_W_OK = 2;
+            constexpr uint64_t ACCESS_R_OK = 4;
+            constexpr uint64_t ACCESS_SUPPORTED = ACCESS_X_OK | ACCESS_W_OK | ACCESS_R_OK;
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            if ((__mode & ~ACCESS_SUPPORTED) != 0)
+                return -bigos::EINVAL;
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+            char resolved[SYS_PATH_MAX_LEN + 1];
+            const bigos::vfs::Status resolve_status =
+                bigos::vfs::resolve_path(path, bigos::proc::current_cwd(), resolved, sizeof(resolved));
+            if (resolve_status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(resolve_status);
+            bigos::Metadata metadata = {};
+            const bigos::vfs::Status stat_status = bigos::vfs::stat_absolute(resolved, &metadata);
+            if (stat_status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(stat_status);
+            if ((__mode & ACCESS_W_OK) != 0 && !bigos::bigfs::owns_path(resolved))
+                return -bigos::EACCES;
+            bigos::proc::Process *process = bigos::proc::current_process();
+            const uint32_t uid = process != nullptr ? process->uid : 0;
+            const uint32_t gid = process != nullptr ? process->gid : 0;
+            if (!access_permitted(metadata, uid, gid, __mode, bigos::cred::Access::Read, ACCESS_R_OK) ||
+                !access_permitted(metadata, uid, gid, __mode, bigos::cred::Access::Write, ACCESS_W_OK) ||
+                !access_permitted(metadata, uid, gid, __mode, bigos::cred::Access::Execute, ACCESS_X_OK))
+                return -bigos::EACCES;
+            return 0;
+        }
+
         static int64_t sys_mkdir(uint64_t __path, uint64_t __mode) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
@@ -664,6 +736,30 @@ namespace sys {
             return waited_pid;
         }
 
+        static int64_t sys_waitpid(uint64_t __pid, uint64_t __status_out, uint64_t __options) noexcept {
+            if (__status_out != 0 && !bigos::proc::validate_user_io_buffer(__status_out, sizeof(int)))
+                return -bigos::EFAULT;
+
+            int64_t kernel_status = 0;
+            const int64_t waited_pid = bigos::proc::wait_current(
+                (uint32_t)__pid, __status_out != 0 ? &kernel_status : nullptr, (uint32_t)__options);
+            if (waited_pid <= 0)
+                return waited_pid;
+
+            if (__status_out != 0) {
+                const int user_status = (int)kernel_status;
+                if (!bigos::proc::copy_to_current_user_buffer(__status_out, &user_status, sizeof(user_status)))
+                    return -bigos::EFAULT;
+            }
+            return waited_pid;
+        }
+
+        static int64_t sys_fcntl(uint64_t __fd, uint64_t __cmd, uint64_t __arg) noexcept {
+            if (__cmd == (uint64_t)bigos::proc::FCNTL_F_DUPFD && !bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            return bigos::proc::fcntl_fd_current((uint32_t)__fd, (int)__cmd, __arg);
+        }
+
         // Copies a NULL-terminated user pointer array (argv/envp) plus each string
         // into the kernel-side storage backing an ExecArgs. The pointer array is
         // bounded by __max_count and each string by EXEC_MAX_STRING_BYTES; the
@@ -771,6 +867,12 @@ namespace sys {
             case SYS_WAIT:
                 result = __detail::sys_wait(__frame->rdi, __frame->rsi);
                 break;
+            case SYS_WAITPID:
+                result = __detail::sys_waitpid(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_FCNTL:
+                result = __detail::sys_fcntl(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
             case SYS_OPEN:
                 result = __detail::sys_open(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
@@ -809,6 +911,12 @@ namespace sys {
                 break;
             case SYS_FTRUNCATE:
                 result = __detail::sys_ftruncate(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_TRUNCATE:
+                result = __detail::sys_truncate(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_ACCESS:
+                result = __detail::sys_access(__frame->rdi, __frame->rsi);
                 break;
             case SYS_RENAME:
                 result = __detail::sys_rename(__frame->rdi, __frame->rsi);

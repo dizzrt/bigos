@@ -81,6 +81,11 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'int chdir(const char *path);' in unistd
     assert 'char *getcwd(char *buf, size_t size);' in unistd
     assert '#define O_CREAT' in fcntl
+    assert '#define F_DUPFD' in fcntl
+    assert '#define F_GETFD' in fcntl
+    assert '#define F_SETFD' in fcntl
+    assert '#define FD_CLOEXEC' in fcntl
+    assert 'int fcntl(int fd, int cmd, ...);' in fcntl
     assert 'struct bigos_dirent' in dirent
     assert 'ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries);' in dirent
     assert 'typedef unsigned int mode_t;' in types
@@ -93,6 +98,7 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert '#define WAIT_ANY' in wait
     assert 'pid_t wait(int *status);' in wait
     assert 'pid_t waitpid(pid_t pid, int *status, int options);' in wait
+    assert '#define WNOHANG' in wait
     assert 'pid_t wait_status(pid_t pid, int *status);' in wait
     assert '#define PROT_READ  1' in mman
     assert '#define MAP_FAILED ((void *)-1)' in mman
@@ -107,8 +113,18 @@ def test_user_libc_sync_wrapper_uses_bounded_syscall_and_errno() -> None:
     libc = read_source('user/libc/syscall.c')
 
     assert '#define SYS_SYNC        40' in sys_nr
+    assert '#define SYS_WAITPID     47' in sys_nr
+    assert '#define SYS_FCNTL       48' in sys_nr
+    assert '#define SYS_ACCESS      49' in sys_nr
+    assert '#define SYS_TRUNCATE    50' in sys_nr
     assert 'int sync(void)' in libc
     assert 'errno_translate(syscall0(SYS_SYNC))' in libc
+    assert 'int access(const char *path, int mode)' in libc
+    assert 'int fcntl(int fd, int cmd, ...)' in libc
+    assert 'syscall3(SYS_WAITPID' in libc
+    assert 'syscall3(SYS_FCNTL' in libc
+    assert 'syscall2(SYS_ACCESS' in libc
+    assert 'syscall2(SYS_TRUNCATE' in libc
 
 
 def test_bounded_path_tool_sources_use_libc_contracts() -> None:
@@ -187,6 +203,10 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'test_runtime_filesystem();' in smoke
     assert 'test_current_directory(envp);' in smoke
     assert 'test_wait_wrappers(envp);' in smoke
+    assert 'waitpid(pid, &status, WNOHANG)' in smoke
+    assert 'fcntl(ctl, F_SETFD, FD_CLOEXEC)' in smoke
+    assert 'fcntl(ctl, F_DUPFD, ctl + 1)' in smoke
+    assert 'access("/boot/user/init.elf", W_OK)' in smoke
     assert 'test_error_text();' in smoke
     assert 'test_signal_handler_return();' in smoke
     assert 'fstat(fd, &st)' in smoke

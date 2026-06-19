@@ -3176,6 +3176,48 @@ namespace bigos::proc {
         return (int64_t)__newfd;
     }
 
+    int64_t fcntl_fd_current(uint32_t __fd, int __cmd, uint64_t __arg) noexcept {
+        Process *process = current_process_slot();
+        if (process == nullptr || process->state != ProcessState::Running || __fd >= process->fd_capacity)
+            return -bigos::EBADF;
+        FdEntry *entry = &process->fd_table[__fd];
+        if (entry->file == nullptr)
+            return -bigos::EBADF;
+
+        switch (__cmd) {
+            case bigos::proc::FCNTL_F_GETFD:
+                return entry->close_on_exec ? bigos::proc::FCNTL_FD_CLOEXEC : 0;
+            case bigos::proc::FCNTL_F_SETFD:
+                if ((__arg & ~(uint64_t)bigos::proc::FCNTL_FD_CLOEXEC) != 0)
+                    return -bigos::EINVAL;
+                entry->close_on_exec = (__arg & bigos::proc::FCNTL_FD_CLOEXEC) != 0;
+                return 0;
+            case bigos::proc::FCNTL_F_DUPFD: {
+                if (__arg >= bigos::proc::MAX_FDS_SOFT_LIMIT)
+                    return -bigos::EINVAL;
+                bigos::vfs::File *file = entry->file;
+                const bool readable = entry->readable;
+                const uint32_t min_fd = (uint32_t)__arg;
+                uint32_t target_fd = min_fd;
+                while (target_fd < process->fd_capacity && process->fd_table[target_fd].file != nullptr)
+                    target_fd++;
+                if (target_fd >= bigos::proc::MAX_FDS_SOFT_LIMIT)
+                    return -bigos::EMFILE;
+                if (target_fd >= process->fd_capacity && !grow_fd_table(process, target_fd + 1))
+                    return -bigos::EMFILE;
+
+                bigos::vfs::retain(file);
+                FdEntry *target = &process->fd_table[target_fd];
+                target->file = file;
+                target->readable = readable;
+                target->close_on_exec = false;
+                return (int64_t)target_fd;
+            }
+            default:
+                return -bigos::EINVAL;
+        }
+    }
+
     void close_all_fds(Process *__process) noexcept {
         if (__process == nullptr)
             return;
@@ -3413,12 +3455,16 @@ namespace bigos::proc {
         return 0;
     }
 
-    int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept {
+    int64_t wait_current(uint32_t __pid, int64_t *__status, uint32_t __options) noexcept {
         Process *parent = current_process_slot();
         if (parent == nullptr)
             return -bigos::ECHILD;
         if (!bigos::sched::can_block())
             return -bigos::EWOULDBLOCK;
+        if ((__options & ~bigos::proc::WAIT_OPTION_WNOHANG) != 0)
+            return -bigos::EINVAL;
+        if (__pid == 0 || ((__pid & 0x80000000u) != 0 && __pid != WAIT_ANY))
+            return -bigos::EINVAL;
 
         Process *match = nullptr;
         for (;;) {
@@ -3443,6 +3489,8 @@ namespace bigos::proc {
                 break;
             if (!has_matching_child)
                 return -bigos::ECHILD;
+            if ((__options & bigos::proc::WAIT_OPTION_WNOHANG) != 0)
+                return 0;
 
             parent->parent_waiting = true;
             const int wait_result = bigos::sched::wait_queue_wait_until(&g_process_wait_queue, nullptr, nullptr, 0);
@@ -3460,6 +3508,10 @@ namespace bigos::proc {
         mark_reap_pending(match);
         reap_pending_processes();
         return (int64_t)waited_pid;
+    }
+
+    int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept {
+        return wait_current(__pid, __status, 0);
     }
 
     void reap_pending_processes() noexcept {

@@ -238,9 +238,9 @@ standard small programs can compile and run directly.
 - [x] Task M4.1: process group, session, and foreground terminal binding implemented
   on the existing terminal abstraction within its bounded contract.
 - [x] 任务 M4.1：在既有终端抽象的有界契约内，实现进程组、session 与前台终端绑定。
-- [ ] Task M4.2: syscall surface expansion covering wait variants and additional
+- [x] Task M4.2: syscall surface expansion covering wait variants and additional
   bounded file and process primitives.
-- [ ] 任务 M4.2：扩充 syscall 面，覆盖 wait 变体与更多有界文件/进程原语。
+- [x] 任务 M4.2：扩充 syscall 面，覆盖 wait 变体与更多有界文件/进程原语。
 - [ ] Task M4.3: libc subset maturity toward portable small programs while staying
   freestanding-safe.
 - [ ] 任务 M4.3：推进 libc 子集成熟度以支持可移植小程序，同时保持 freestanding-safe。

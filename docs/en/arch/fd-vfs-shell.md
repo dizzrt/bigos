@@ -38,6 +38,11 @@ and the minimal userland runtime.
   reference.
 - `read` and `close` reject out-of-range, unused, already-closed, and
   non-readable descriptors with a deterministic bad-fd error.
+- Bounded fd-control exposes per-descriptor close-on-exec state and `F_DUPFD`.
+  `F_GETFD` observes only the descriptor entry flag, `F_SETFD` accepts only
+  `FD_CLOEXEC`, and `F_DUPFD` duplicates the same open file object at the lowest
+  available fd greater than or equal to the requested minimum with close-on-exec
+  cleared.
 - `exec` preserves descriptors unless their internal `close_on_exec` bit is set;
   rollback leaves the old fd table untouched.
 - Each user `Process` also owns an inline bounded cwd string. It initializes to
@@ -61,6 +66,12 @@ and the minimal userland runtime.
   writable `/rw` regular file. Shrink preserves the retained prefix and releases
   tail blocks after publishing the new size; extend exposes zero-read bytes. It
   is not full POSIX `ftruncate(2)`.
+- `SYS_FCNTL = 48`: `rdi=fd`, `rsi=cmd`, `rdx=arg`, supports only
+  `F_GETFD`/`F_SETFD`/`F_DUPFD`.
+- `SYS_ACCESS = 49`: `rdi=path`, `rsi=mode`, uses the shared cwd-aware path
+  resolver and bounded metadata/access model without publishing an fd.
+- `SYS_TRUNCATE = 50`: `rdi=path`, `rsi=length`, applies bounded path truncate
+  to writable `/rw` regular files.
 - `SYS_CHDIR = 31`: `rdi=path`, resolves the target, verifies it is a directory,
   and commits the new cwd only on success.
 - `SYS_GETCWD = 32`: `rdi=user_buffer`, `rsi=len`, copies a NUL-terminated cwd
@@ -76,7 +87,8 @@ and the minimal userland runtime.
 
 - Source-level checks cover VFS root publication, cwd resolution, open
   rejection, fd capacity, bad fd and double-close behavior, EOF clamp, offset
-  advancement, metadata snapshots, exec close-on-exec handling, and safe reaper
+  advancement, metadata snapshots, fd-control close-on-exec/F_DUPFD behavior,
+  access/truncate syscall routing, exec close-on-exec handling, and safe reaper
   close-all.
 - The existing `fs_smoke` case now validates `/boot/fs_smoke.txt` through
   VFS open/read/release and emits the existing

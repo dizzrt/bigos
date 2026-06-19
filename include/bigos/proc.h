@@ -43,6 +43,11 @@ namespace bigos::proc {
     constexpr uint32_t MAX_VMAS = 16;
     constexpr uint32_t ROOT_PARENT_PID = 0;
     constexpr uint32_t WAIT_ANY = 0xffffffffu;
+    constexpr uint32_t WAIT_OPTION_WNOHANG = 1u;
+    constexpr int FCNTL_F_DUPFD = 0;
+    constexpr int FCNTL_F_GETFD = 1;
+    constexpr int FCNTL_F_SETFD = 2;
+    constexpr int FCNTL_FD_CLOEXEC = 1;
     constexpr uint32_t EXEC_MAX_ARGC = 8;
     constexpr uint32_t EXEC_MAX_ENVC = 8;
     constexpr uint64_t EXEC_MAX_STRING_BYTES = 256;
@@ -345,6 +350,7 @@ namespace bigos::proc {
     // the lowest free fd; dup2 closes an already-open newfd first then binds it.
     int64_t dup_fd_current(uint32_t __oldfd) noexcept;
     int64_t dup2_fd_current(uint32_t __oldfd, uint32_t __newfd) noexcept;
+    int64_t fcntl_fd_current(uint32_t __fd, int __cmd, uint64_t __arg) noexcept;
     int64_t close_fd_current(uint32_t __fd) noexcept;
     void close_all_fds(Process *__process) noexcept;
     void close_on_exec_fds(Process *__process) noexcept;
@@ -356,6 +362,7 @@ namespace bigos::proc {
     bool process_group_has_live_member(uint32_t __pgid) noexcept;
     int64_t signal_process_group_from_current(uint32_t __pgid, int __signo) noexcept;
     int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept;
+    int64_t wait_current(uint32_t __pid, int64_t *__status, uint32_t __options) noexcept;
     // Re-establishes the global ring3 context (current process, user CR3, TSS
     // rsp0) for __process after a blocking syscall may have switched to and from
     // another user kernel thread. Called at the syscall dispatch return boundary.

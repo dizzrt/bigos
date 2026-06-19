@@ -83,6 +83,8 @@ def test_wait_exit_zombie_reap_and_nonblocking_context_rules() -> None:
         'Zombie',
         'ReapPending',
         'int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept;',
+        'int64_t wait_current(uint32_t __pid, int64_t *__status, uint32_t __options) noexcept;',
+        'WAIT_OPTION_WNOHANG = 1u',
     ):
         assert token in proc_h
 
@@ -99,6 +101,11 @@ def test_wait_exit_zombie_reap_and_nonblocking_context_rules() -> None:
     assert 'bigos::sched::wait_queue_wait_until(&g_process_wait_queue' in proc
     assert 'mark_reap_pending(match);' in proc
     assert 'SYS_WAIT = 4' in syscall_h
+    assert 'SYS_WAITPID = 47' in syscall_h
     assert 'static int64_t sys_wait(uint64_t __pid, uint64_t __status_out) noexcept' in syscall
+    assert 'static int64_t sys_waitpid(uint64_t __pid, uint64_t __status_out, uint64_t __options) noexcept' in syscall
     assert 'bigos::proc::wait_current(' in syscall
+    assert '(__options & ~bigos::proc::WAIT_OPTION_WNOHANG) != 0' in proc
+    assert 'return 0;' in proc[proc.index('int64_t wait_current(uint32_t __pid, int64_t *__status, uint32_t __options) noexcept'):]
+    assert 'validate_user_io_buffer(__status_out, sizeof(int))' in syscall
     assert 'copy_to_current_user_buffer(__status_out, &user_status, sizeof(user_status))' in syscall

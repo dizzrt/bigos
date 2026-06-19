@@ -24,7 +24,8 @@
  *   - the bounded libc subset probe for fine-grained headers, fprintf(stderr),
  *     string/memory semantics, read-only environment, and allocator failure.
  *   - bounded signal termination, time/identity wrappers, process groups,
- *     sessions, and default terminal foreground binding.
+ *     sessions, default terminal foreground binding, WNOHANG wait checks,
+ *     bounded access(), fd close-on-exec flags, and F_DUPFD.
  */
 #include "libc.h"
 
@@ -462,6 +463,11 @@ static void test_runtime_filesystem(void) {
     if (fstat(fd, &st) != 0 || st.st_size != 10)
         fail("runtime-ftruncate-enospc-size");
     close(fd);
+    if (access("/rw/runtime_growth.txt", R_OK | W_OK) != 0)
+        fail("runtime-access-rw");
+    errno = 0;
+    if (access("/boot/user/init.elf", W_OK) != -1 || errno != EACCES)
+        fail("runtime-access-rofs-write");
     if (truncate("/rw/runtime_growth.txt", 1) != 0)
         fail("runtime-truncate-path");
     if (stat("/rw/runtime_growth.txt", &st) != 0 || st.st_size != 1)
@@ -469,6 +475,20 @@ static void test_runtime_filesystem(void) {
     errno = 0;
     if (truncate("/boot/user/init.elf", 0) != -1 || errno != EROFS)
         fail("runtime-truncate-rofs");
+    int ctl = open("/rw/runtime_growth.txt", O_RDONLY, 0);
+    if (ctl < 0)
+        fail("runtime-fcntl-open");
+    if (fcntl(ctl, F_GETFD) != 0)
+        fail("runtime-fcntl-get-clear");
+    if (fcntl(ctl, F_SETFD, FD_CLOEXEC) != 0 || fcntl(ctl, F_GETFD) != FD_CLOEXEC)
+        fail("runtime-fcntl-cloexec");
+    int dupfd = fcntl(ctl, F_DUPFD, ctl + 1);
+    if (dupfd <= ctl)
+        fail("runtime-fcntl-dupfd");
+    if (fcntl(dupfd, F_GETFD) != 0)
+        fail("runtime-fcntl-dupfd-clear");
+    close(dupfd);
+    close(ctl);
     int reuse = open("/rw/runtime_reuse_a.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (reuse < 0)
         fail("runtime-reuse-open-a");
@@ -793,16 +813,26 @@ static void test_time_identity(void) {
 
 static void test_wait_wrappers(char **envp) {
     (void)envp;
+    int hold[2];
+    if (pipe(hold) != 0)
+        fail("waitpid-wnohang-pipe");
     pid_t pid = fork();
     if (pid < 0)
         fail("waitpid-fork");
     if (pid == 0) {
+        close(hold[1]);
+        char ch;
+        read(hold[0], &ch, 1);
         exit(5);
     }
+    close(hold[0]);
     int status = -1;
     errno = 0;
-    if (waitpid(pid, &status, 1) != -1 || errno != EINVAL)
-        fail("waitpid-options");
+    if (waitpid(pid, &status, WNOHANG) != 0)
+        fail("waitpid-wnohang-miss");
+    if (write(hold[1], "x", 1) != 1)
+        fail("waitpid-wnohang-release");
+    close(hold[1]);
     if (wait(&status) != pid || status != 5)
         fail("wait-any-status");
 
@@ -814,6 +844,9 @@ static void test_wait_wrappers(char **envp) {
     status = -1;
     if (waitpid(pid, &status, 0) != pid || status != 6)
         fail("waitpid-status");
+    errno = 0;
+    if (waitpid(pid, &status, 2) != -1 || errno != EINVAL)
+        fail("waitpid-options");
 }
 
 static void test_process_session_terminal(void) {

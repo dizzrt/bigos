@@ -138,11 +138,14 @@ pid_t wait(int *status) {
 }
 
 pid_t waitpid(pid_t pid, int *status, int options) {
-    if (options != 0) {
+    if ((options & ~WNOHANG) != 0) {
         errno = EINVAL;
         return -1;
     }
-    return wait_status(pid, status);
+    if (pid == (pid_t)WAIT_ANY || pid > 0)
+        return (pid_t)errno_translate(syscall3(SYS_WAITPID, (long)(unsigned)pid, (long)status, (long)options));
+    errno = EINVAL;
+    return -1;
 }
 
 pid_t wait_status(pid_t pid, int *status) {
@@ -161,6 +164,17 @@ int dup2(int oldfd, int newfd) {
     return (int)errno_translate(syscall2(SYS_DUP2, (long)oldfd, (long)newfd));
 }
 
+int fcntl(int fd, int cmd, ...) {
+    __builtin_va_list ap;
+    long arg = 0;
+    if (cmd == F_DUPFD || cmd == F_SETFD) {
+        __builtin_va_start(ap, cmd);
+        arg = (long)__builtin_va_arg(ap, int);
+        __builtin_va_end(ap);
+    }
+    return (int)errno_translate(syscall3(SYS_FCNTL, (long)fd, (long)cmd, arg));
+}
+
 off_t lseek(int fd, off_t offset, int whence) {
     return (off_t)errno_translate(syscall3(SYS_LSEEK, (long)fd, (long)offset, (long)whence));
 }
@@ -171,6 +185,14 @@ int fsync(int fd) {
 
 int sync(void) {
     return (int)errno_translate(syscall0(SYS_SYNC));
+}
+
+int access(const char *path, int mode) {
+    if ((mode & ~(R_OK | W_OK | X_OK)) != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (int)errno_translate(syscall2(SYS_ACCESS, (long)path, (long)mode));
 }
 
 int ftruncate(int fd, off_t length) {
@@ -186,15 +208,7 @@ int truncate(const char *path, off_t length) {
         errno = EINVAL;
         return -1;
     }
-    int fd = open(path, O_WRONLY, 0);
-    if (fd < 0)
-        return -1;
-    const int rc = ftruncate(fd, length);
-    const int saved_errno = errno;
-    if (close(fd) != 0 && rc == 0)
-        return -1;
-    errno = saved_errno;
-    return rc;
+    return (int)errno_translate(syscall2(SYS_TRUNCATE, (long)path, (long)length));
 }
 
 int mkdir(const char *path, mode_t mode) {
