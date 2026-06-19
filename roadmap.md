@@ -219,8 +219,8 @@ no longer constrained to a single synchronous path.
 
 用户可见目标：内核具备可扩展设备模型，块 I/O 不再受限于单一同步路径。
 
-- [ ] Task M3.1: a freestanding-safe device and driver registration/probe framework.
-- [ ] 任务 M3.1：freestanding-safe 的设备与驱动注册/探测框架。
+- [x] Task M3.1: a freestanding-safe device and driver registration/probe framework.
+- [x] 任务 M3.1：freestanding-safe 的设备与驱动注册/探测框架。
 - [ ] Task M3.2: a block-layer abstraction with request queueing and cache
   integration, leaving room for future async I/O.
 - [ ] 任务 M3.2：具备请求排队与缓存对接的块层抽象，为后续 async I/O 预留空间。

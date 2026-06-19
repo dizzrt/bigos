@@ -1,10 +1,10 @@
 #include <bigos/fs/bigfs.h>
 
 #include <bigos/cred.h>
+#include <bigos/device.h>
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/memory.h>
-#include <drivers/block/ata_pio.h>
 #include <string.h>
 
 // Internal allocator flag: alloc_kernel_pages() only returns mapped, accessible
@@ -68,7 +68,6 @@ namespace {
 
     uint8_t *g_ram = nullptr;
     driver::block::BlockDevice g_device = {};
-    driver::block::AtaPioDevice g_persistent_ata = {};
     uint32_t g_open_refs[INODE_COUNT] = {};
     uint8_t g_write_staged[DIRECT_BLOCKS][BLOCK_SIZE] = {};
     bool g_initialized = false;
@@ -77,6 +76,7 @@ namespace {
     uint8_t g_validate_data_bitmap[BLOCK_SIZE] = {};
     uint8_t g_validate_data_owner[bigos::bigfs::DATA_BLOCK_COUNT] = {};
     DiskInode g_validate_inodes[INODE_COUNT] = {};
+    uint8_t g_zero_block[BLOCK_SIZE] = {};
 
     constexpr uint32_t METADATA_COMMIT_BLOCKS_MAX = 64;
     struct MetadataCommitPlan {
@@ -873,10 +873,10 @@ namespace {
     }
 
     Status format_current_device() noexcept {
-        uint8_t zero[BLOCK_SIZE] = {};
+        memset(g_zero_block, 0, sizeof(g_zero_block));
         for (uint32_t block = 0; block < bigos::bigfs::TOTAL_BLOCKS; block++) {
             const driver::block::BlockStatus write_status =
-                driver::block::write_sectors(&g_device, block, 1, zero, sizeof(zero));
+                driver::block::write_sectors(&g_device, block, 1, g_zero_block, sizeof(g_zero_block));
             if (write_status != driver::block::BlockStatus::Success)
                 return Status::IoError;
         }
@@ -920,9 +920,11 @@ namespace {
 
     bool publish_persistent_if_valid() noexcept {
 #ifdef BIGOS_PERSISTENT_WRITABLE_FS
-        driver::block::ata_pio_persistent_test_init(&g_persistent_ata);
-        g_device = g_persistent_ata.block;
-        g_device.context = &g_persistent_ata;
+        driver::block::BlockDevice *persistent_device =
+            bigos::device::block(bigos::device::DeviceRole::PersistentWritableBlock);
+        if (persistent_device == nullptr)
+            return false;
+        g_device = *persistent_device;
         g_device.total_sectors = bigos::bigfs::TOTAL_BLOCKS;
         if (!bigos::bcache::init())
             return false;
@@ -989,9 +991,11 @@ namespace bigfs {
             return Status::AccessDenied;
         if (g_initialized && bigos::bcache::invalidate_device(&g_device) != bigos::bcache::Status::Success)
             return Status::IoError;
-        driver::block::ata_pio_persistent_test_init(&g_persistent_ata);
-        g_device = g_persistent_ata.block;
-        g_device.context = &g_persistent_ata;
+        driver::block::BlockDevice *persistent_device =
+            bigos::device::block(bigos::device::DeviceRole::PersistentWritableBlock);
+        if (persistent_device == nullptr)
+            return Status::IoError;
+        g_device = *persistent_device;
         g_device.total_sectors = TOTAL_BLOCKS;
         if (!bigos::bcache::init())
             return Status::IoError;

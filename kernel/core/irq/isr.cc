@@ -1,12 +1,12 @@
 #include <irq/isr.h>
 
 #include <bigos/keyboard.h>
+#include <bigos/device.h>
 #include <bigos/io.h>
 #include <bigos/sched.h>
 #include <bigos/timer.h>
 #include <bigos/types.h>
 #include <drivers/irqchip/i8259.h>
-#include <drivers/timer/pit.h>
 
 NAMESPACE_BIGOS_BEG
 namespace irq::isr {
@@ -40,7 +40,7 @@ namespace irq::isr {
         }
 
         void init_isr_timer() {
-            driver::timer::pit::init_channel0();
+            bigos::device::init_pit_timer();
             register_isr(VECTOR_TIMER, &isr_timer);
             driver::irqchip::i8259::enable_irq(IRQ_LINE_TIMER);
         }

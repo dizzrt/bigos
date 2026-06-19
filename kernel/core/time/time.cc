@@ -1,8 +1,8 @@
 #include <bigos/time.h>
 
+#include <bigos/device.h>
 #include <bigos/io.h>
 #include <bigos/timer.h>
-#include <drivers/rtc/cmos_rtc.h>
 
 NAMESPACE_BIGOS_BEG
 namespace time {
@@ -43,7 +43,7 @@ namespace time {
         g_boot_tick = bigos::timer::ticks();
 
         driver::rtc::DateTime dt;
-        if (driver::rtc::read_time(&dt)) {
+        if (bigos::device::read_rtc_time(&dt)) {
             g_boot_unix_time = to_unix_seconds(dt);
         } else {
             // Deterministic degradation: fixed baseline + marker, never panic /

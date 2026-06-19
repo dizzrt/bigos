@@ -41,11 +41,11 @@ def test_vfs_init_mounts_exfat_without_publishing_partial_root() -> None:
     init_index = source.index('Status init() noexcept')
     publish_index = source.index('g_initialized = true;', init_index)
 
-    assert 'ata_pio_primary_master_init(&ata);' in source
-    assert 'find_exfat_partition(&ata.block, &partition)' in source
-    assert 'mount_exfat(&ata.block, &partition, &mount)' in source
-    assert 'g_ata = ata;' in source
-    assert 'mount.device = &g_ata.block;' in source
+    assert 'bigos::device::block(bigos::device::DeviceRole::BootBlock)' in source
+    assert 'find_exfat_partition(boot_device, &partition)' in source
+    assert 'mount_exfat(boot_device, &partition, &mount)' in source
+    assert 'ata_pio_primary_master_init' not in source
+    assert 'mount.device = boot_device;' in source
     assert publish_index > source.index('g_mount = mount;', init_index)
 
 

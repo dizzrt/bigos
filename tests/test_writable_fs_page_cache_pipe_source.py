@@ -148,7 +148,7 @@ def test_vfs_file_operations_gain_write_and_lseek() -> None:
     assert 'bool writable;' in header
     assert 'ReadOnlyFs' in header
     # Read-only exFAT backend leaves write/lseek null and is rejected with EROFS.
-    assert '{&exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir}' in source
+    assert '&exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir' in source
     assert 'return Status::ReadOnlyFs;' in source
     assert 'Status sync_writable_backend() noexcept' in header
     assert 'bigos::bigfs::fsync()' in source

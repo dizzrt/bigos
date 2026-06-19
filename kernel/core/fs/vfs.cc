@@ -1,10 +1,11 @@
 #include <bigos/fs/vfs.h>
 
 #include <bigos/cred.h>
+#include <bigos/device.h>
 #include <bigos/fs/bigfs.h>
 #include <bigos/fs/exfat.h>
 #include <bigos/memory.h>
-#include <drivers/block/ata_pio.h>
+#include <bigos/sched.h>
 #include <string.h>
 
 namespace {
@@ -20,7 +21,6 @@ namespace {
         uint32_t gid;
     };
 
-    driver::block::AtaPioDevice g_ata = {};
     bigos::fs::ExfatMount g_mount = {};
     bigos::vfs::Vnode g_root = {};
     bool g_initialized = false;
@@ -151,14 +151,14 @@ namespace {
         bigos::fs::DirectoryEntry local_entries[VFS_DIRENT_BATCH_MAX];
         size_t count = 0;
         uint64_t next_offset = __file->offset;
-        const bigos::fs::FsStatus status =
-            bigos::fs::readdir(&g_mount, &state->metadata, __file->offset, local_entries, __max_entries, &count, &next_offset);
+        const bigos::fs::FsStatus status = bigos::fs::readdir(
+            &g_mount, &state->metadata, __file->offset, local_entries, __max_entries, &count, &next_offset);
         if (status != bigos::fs::FsStatus::Success)
             return fs_to_vfs(status);
         for (size_t i = 0; i < count; i++) {
-            __entries[i].type = local_entries[i].type == bigos::fs::EXFAT_DIRENT_TYPE_DIRECTORY ?
-                                    bigos::vfs::DIRENT_TYPE_DIRECTORY :
-                                    bigos::vfs::DIRENT_TYPE_FILE;
+            __entries[i].type = local_entries[i].type == bigos::fs::EXFAT_DIRENT_TYPE_DIRECTORY
+                                    ? bigos::vfs::DIRENT_TYPE_DIRECTORY
+                                    : bigos::vfs::DIRENT_TYPE_FILE;
             memcpy(__entries[i].name, local_entries[i].name, sizeof(__entries[i].name));
         }
         __file->offset = next_offset;
@@ -167,8 +167,8 @@ namespace {
         return bigos::vfs::Status::Success;
     }
 
-    const bigos::vfs::FileOperations EXFAT_FILE_OPS =
-        {&exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir};
+    const bigos::vfs::FileOperations EXFAT_FILE_OPS = {
+        &exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir};
 
     bigos::vfs::FileIdentity exfat_identity(const bigos::fs::FileMetadata *__metadata) noexcept {
         bigos::vfs::FileIdentity identity = {bigos::vfs::FILE_BACKEND_EXFAT, 1, 0};
@@ -255,8 +255,7 @@ namespace {
         return bigos::vfs::Status::InvalidArgument;
     }
 
-    bigos::vfs::Status bigfs_read(
-        bigos::vfs::File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
+    bigos::vfs::Status bigfs_read(bigos::vfs::File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
         if (__bytes_read != nullptr)
             *__bytes_read = 0;
         if (__file == nullptr || __file->private_data == nullptr)
@@ -267,8 +266,7 @@ namespace {
             return bigos::vfs::Status::InvalidArgument;
         BigfsFileState *state = (BigfsFileState *)__file->private_data;
         size_t read = 0;
-        const bigos::bigfs::Status status =
-            bigos::bigfs::read(state->inode, __file->offset, __dst, __len, &read);
+        const bigos::bigfs::Status status = bigos::bigfs::read(state->inode, __file->offset, __dst, __len, &read);
         if (status != bigos::bigfs::Status::Success)
             return bigfs_to_vfs(status);
         __file->offset += read;
@@ -362,8 +360,8 @@ namespace {
         return bigos::vfs::Status::Success;
     }
 
-    const bigos::vfs::FileOperations BIGFS_FILE_OPS =
-        {&bigfs_read, &bigfs_close, &bigfs_write, nullptr, &bigfs_truncate, &bigfs_readdir};
+    const bigos::vfs::FileOperations BIGFS_FILE_OPS = {
+        &bigfs_read, &bigfs_close, &bigfs_write, nullptr, &bigfs_truncate, &bigfs_readdir};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG
@@ -418,22 +416,21 @@ namespace vfs {
         if (g_initialized)
             return Status::Success;
 
-        driver::block::AtaPioDevice ata = {};
-        driver::block::ata_pio_primary_master_init(&ata);
+        driver::block::BlockDevice *boot_device = bigos::device::block(bigos::device::DeviceRole::BootBlock);
+        if (boot_device == nullptr)
+            return Status::BlockError;
 
         bigos::fs::Partition partition = {};
-        bigos::fs::FsStatus status = bigos::fs::find_exfat_partition(&ata.block, &partition);
+        bigos::fs::FsStatus status = bigos::fs::find_exfat_partition(boot_device, &partition);
         if (status != bigos::fs::FsStatus::Success)
             return fs_to_vfs(status);
 
         bigos::fs::ExfatMount mount = {};
-        status = bigos::fs::mount_exfat(&ata.block, &partition, &mount);
+        status = bigos::fs::mount_exfat(boot_device, &partition, &mount);
         if (status != bigos::fs::FsStatus::Success)
             return fs_to_vfs(status);
 
-        g_ata = ata;
-        g_ata.block.context = &g_ata;
-        mount.device = &g_ata.block;
+        mount.device = boot_device;
         g_mount = mount;
         g_root.size = g_mount.bytes_per_cluster;
         g_root.is_directory = true;
@@ -441,7 +438,8 @@ namespace vfs {
         g_initialized = true;
         // Best-effort publish of the writable bigfs mount on a RAM-backed device.
         // Its failure must not affect the read-only exFAT path (decision 9).
-        (void)bigos::bigfs::init();
+        if (bigos::sched::can_block())
+            (void)bigos::bigfs::init();
         return Status::Success;
     }
 
@@ -551,6 +549,8 @@ namespace vfs {
 
         // Writable bigfs mount.
         if (bigos::bigfs::owns_path(__path)) {
+            if (!bigos::bigfs::initialized() && (!bigos::sched::can_block() || !bigos::bigfs::init()))
+                return Status::WouldBlock;
             uint32_t inode = 0;
             uint64_t size = 0;
             bool is_dir = false;
@@ -906,8 +906,8 @@ namespace vfs {
         return bigfs_to_vfs(bigos::bigfs::rename(__old_path, __new_path, __uid, __gid));
     }
 
-    Status rename(const char *__old_path, const char *__new_path, const char *__cwd, uint32_t __uid,
-        uint32_t __gid) noexcept {
+    Status rename(
+        const char *__old_path, const char *__new_path, const char *__cwd, uint32_t __uid, uint32_t __gid) noexcept {
         char old_resolved[MAX_PATH_LEN + 1];
         char new_resolved[MAX_PATH_LEN + 1];
         Status status = resolve_path(__old_path, __cwd, old_resolved, sizeof(old_resolved));

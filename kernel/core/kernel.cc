@@ -7,8 +7,7 @@
 #warning It is recommended to build with GCC
 #endif
 
-#include <drivers/video/vga.h>
-
+#include <bigos/device.h>
 #include <bigos/memory.h>
 #include <bigos/proc.h>
 #include <bigos/sched.h>
@@ -21,11 +20,12 @@
 #include <bigos/fs/vfs.h>
 #include <bigos/io.h>
 #include <ktl/buffer.h>
+#include <drivers/video/vga.h>
+#include <string.h>
 #if defined(BIGOS_WRITABLE_FS_SMOKE) || defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE)
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/bigfs.h>
 #include <bigos/cred.h>
-#include <string.h>
 #endif
 #ifdef BIGOS_PIPE_SMOKE
 #include <bigos/ipc/pipe.h>
@@ -1007,6 +1007,8 @@ void kernel(const BootInfoHeader *boot_info) {
     bigos::serial_init();
 
     bigos::init_mem(boot_info);
+    bigos::device::init();
+    (void)bigos::device::probe_all(bigos::device::ProbeContext::KernelInit);
 #ifdef BIGOS_MM_SELF_TEST
     bigos::mm::self_test();
 #endif

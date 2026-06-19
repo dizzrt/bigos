@@ -1,5 +1,5 @@
 #include <bigos/console.h>
-#include <drivers/video/vga.h>
+#include <bigos/device.h>
 
 namespace bigos::terminal {
     namespace {
@@ -18,7 +18,7 @@ namespace bigos::terminal {
         if (!g_console_ready)
             return;
 
-        driver::video::vga::write(ch);
+        bigos::device::write_video_text(ch);
     }
 
     void console_write(const char *s) noexcept {

@@ -1,7 +1,7 @@
 #include <stdarg.h>
 #include <string.h>
+#include <bigos/device.h>
 #include <bigos/io.h>
-#include <drivers/video/vga.h>
 #include <bigos/utils.h>
 
 #define COM1_PORT 0x3f8
@@ -57,11 +57,11 @@ void bigos::serial_puts(const char *s) {
 }
 
 void bigos::kput(char c) {
-    driver::video::vga::write(c);
+    bigos::device::write_video_text(c);
 }
 
 void bigos::kputs(const char *s) {
-    driver::video::vga::write(s);
+    bigos::device::write_video_text(s);
 }
 
 static void emit_buffer(const char *buffer, bool dual) {

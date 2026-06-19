@@ -65,7 +65,7 @@ def test_wall_clock_module_api_and_conversion() -> None:
     # current time = baseline + elapsed ticks / TIMER_HZ, read-only arithmetic.
     assert 'g_boot_unix_time + (int64_t)(elapsed / bigos::timer::TIMER_HZ)' in time_cc
     # init reads the RTC once and records the boot tick.
-    assert 'driver::rtc::read_time(&dt)' in time_cc
+    assert 'bigos::device::read_rtc_time(&dt)' in time_cc
     assert 'g_boot_tick = bigos::timer::ticks();' in time_cc
 
 

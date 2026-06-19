@@ -144,12 +144,12 @@ def test_console_api_wraps_vga_without_serial_mirroring() -> None:
 
     assert 'void console_put(char ch) noexcept;' in console_h
     assert 'void console_write(const char *s) noexcept;' in console_h
-    assert 'driver::video::vga::write(ch);' in console
+    assert 'bigos::device::write_video_text(ch);' in console
     assert 'serial_puts' not in console
     assert "if (__ch == '\\r')" in vga
     assert "if (__ch == '\\b')" in vga
     assert 'void bigos::kput(char c)' in io
-    assert 'driver::video::vga::write(c);' in io
+    assert 'bigos::device::write_video_text(c);' in io
 
 
 def test_default_user_stdout_and_stderr_reach_visible_console() -> None:

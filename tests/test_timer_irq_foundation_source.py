@@ -44,7 +44,7 @@ def test_timer_irq0_handler_is_registered_before_unmask() -> None:
     assert 'IRQ_LINE_TIMER = 0' in interrupt_h
     assert 'VECTOR_TIMER = I8259_MASTER_VECTOR_BASE + IRQ_LINE_TIMER' in interrupt_h
 
-    pit_index = isr.index('driver::timer::pit::init_channel0();')
+    pit_index = isr.index('bigos::device::init_pit_timer();')
     register_index = isr.index('register_isr(VECTOR_TIMER, &isr_timer);')
     unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_TIMER);')
     keyboard_register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
@@ -117,7 +117,7 @@ def test_timer_self_test_and_irq_enable_boundaries() -> None:
     self_test_index = kernel.index('bigos::mm::self_test();')
     init_irq_index = kernel.index('bigos::irq::initIRQ();')
     enable_irq_index = kernel.index('bigos::irq::enableIRQ();')
-    timer_init_index = isr.index('driver::timer::pit::init_channel0();')
+    timer_init_index = isr.index('bigos::device::init_pit_timer();')
 
     assert self_test_index < init_irq_index < enable_irq_index
     assert timer_init_index < isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_TIMER);')
