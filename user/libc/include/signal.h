@@ -2,12 +2,13 @@
  *
  * This is a minimal POSIX-like surface backed by the existing BigOS signal
  * syscalls. It intentionally omits siginfo, alternate stacks, realtime signals,
- * queued delivery, process groups, job control, and complete POSIX semantics. */
+ * queued delivery, complete job control, termios, and complete POSIX semantics. */
 #ifndef _BIGOS_USER_SIGNAL_H
 #define _BIGOS_USER_SIGNAL_H
 
 #include <sys/types.h>
 
+#define SIGINT 2
 #define SIGKILL 9
 #define SIGUSR1 10
 #define SIGSEGV 11

@@ -183,6 +183,12 @@ namespace bigos::proc {
         uint32_t gid;
         uint32_t euid;
         uint32_t egid;
+        // Bounded BigOS process ownership. pgid/sid are numeric only: no
+        // separate session/group objects are allocated, and terminal state never
+        // stores Process pointers. Non-fork creation initializes both to pid;
+        // fork inherits them; exec preserves them.
+        uint32_t pgid;
+        uint32_t sid;
         // Process creation wall-clock timestamp (Unix epoch seconds) taken at
         // init/ELF/fork creation time. exec does NOT refresh it (exec is not a
         // new process). Signed per the wall-clock API convention.
@@ -342,6 +348,13 @@ namespace bigos::proc {
     int64_t close_fd_current(uint32_t __fd) noexcept;
     void close_all_fds(Process *__process) noexcept;
     void close_on_exec_fds(Process *__process) noexcept;
+    int64_t getpgid_current(uint32_t __pid) noexcept;
+    int64_t getsid_current(uint32_t __pid) noexcept;
+    int64_t setpgid_current(uint32_t __pid, uint32_t __pgid) noexcept;
+    int64_t setsid_current() noexcept;
+    bool process_group_exists_in_session(uint32_t __pgid, uint32_t __sid) noexcept;
+    bool process_group_has_live_member(uint32_t __pgid) noexcept;
+    int64_t signal_process_group_from_current(uint32_t __pgid, int __signo) noexcept;
     int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept;
     // Re-establishes the global ring3 context (current process, user CR3, TSS
     // rsp0) for __process after a blocking syscall may have switched to and from

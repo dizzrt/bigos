@@ -4,9 +4,7 @@
 父子关系、wait/exit/fault/reap 状态转换、bounded exec 镜像加载边界，以及可复现
 验证要求。该能力不引入 SMP、POSIX 权限、命名空间、进程组、session、动态链接、
 demand paging、fd/VFS、writable filesystem 或用户态 libc。
-
 ## Requirements
-
 ### Requirement: 常规进程核心可构建
 
 BigOS SHALL provide a normal process lifecycle core that is buildable outside smoke-only user-program configurations. The core SHALL define process identity, lifecycle state, parent/child ownership, process table membership, address-space ownership, kernel execution context ownership, and exit status without requiring `user_program_smoke` or `user_elf_smoke` to be enabled.
@@ -271,7 +269,6 @@ BigOS SHALL extend the normal process lifecycle core so each user process owns b
 - **THEN** cwd resources MUST be released exactly once at a safe teardown boundary
 - **AND** release MUST NOT occur from IRQ context, an active current process stack teardown path, or a preemption-disabled nonblocking region
 
-
 ### Requirement: 进程生命周期验证可复现
 
 BigOS SHALL provide reproducible validation for process lifecycle behavior, including source-level checks, normal build gating, smoke consumers, wait/exit behavior, exec argument bounds, and safe teardown evidence. Validation SHALL record unavailable toolchain or emulator dependencies explicitly.
@@ -372,3 +369,26 @@ BigOS SHALL 在子进程进入 zombie（退出或被信号终止）时，向其�
 - **THEN** BigOS MUST 在其父进程 pending 位图置位 `SIGCHLD`
 - **AND** 该置位 MUST NOT 分配内存，MUST NOT 改变现有 `wait` 唤醒与 reaper 回收行为
 - **AND** 父进程未注册 `SIGCHLD` handler 时该信号 MUST 按默认 Ignore 处理而不改变父进程行为
+
+### Requirement: 进程生命周期维护 process group 和 session 状态
+
+BigOS SHALL 在进程创建、镜像替换、退出、等待和 reap 生命周期中维护 `pgid` 与 `sid` 状态。该状态 MUST 与现有 PID registry、wait/reap 和安全 teardown 规则一致，MUST NOT 引入命名空间、完整 POSIX 权限、SMP 迁移或完整 job-control 生命周期。
+
+#### Scenario: 创建和 fork 初始化归属
+
+- **WHEN** 内核创建初始用户进程或用户进程通过 `fork` 创建子进程
+- **THEN** 新进程 MUST 获得确定性的 `pgid` 与 `sid`
+- **AND** `fork` 子进程 MUST 继承父进程当前归属，除非后续通过支持的控制接口显式变更
+
+#### Scenario: exec 不重置归属
+
+- **WHEN** 进程通过 `execve` 成功替换镜像
+- **THEN** 该进程的 `pid`、`pgid` 与 `sid` MUST 保持不变
+- **AND** 新镜像 MUST 可通过支持的查询 wrapper 观察同一归属
+
+#### Scenario: teardown 不留下悬垂 foreground 引用
+
+- **WHEN** process group 中的进程退出并完成 wait/reap
+- **THEN** 进程 registry 和默认终端 foreground binding MUST 不再依赖已释放进程对象
+- **AND** 后续查询、设置或 shell 恢复 MUST 返回确定性结果而不是访问释放内存
+

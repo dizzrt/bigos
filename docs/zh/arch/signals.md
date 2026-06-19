@@ -2,20 +2,21 @@
 
 本阶段在既有进程模型（fork/COW）、身份/权限原语、`int 0x80` syscall 入口与受
 保护的 IRQ-return 重调度钩子之上，新增一个最小但正确的 POSIX 信号模型。它刻意
-保持小：固定的非实时信号编号、每进程内联信号状态、单一 IRQ-return 投递点与四个
-新增 syscall。不引入实时信号、作业控制、SMP 或用户态 libc。
+保持小：固定的非实时信号编号、每进程内联信号状态、单一 IRQ-return 投递点，以及
+面向默认终端 interrupt-like input 的有界 process-group 投递。不引入实时信号、完整
+作业控制、`termios`、SMP 或完整 POSIX libc。
 
 ## 信号编号集合与默认动作
 
 `include/bigos/signal.h` 定义一组固定的非实时信号编号，复用 POSIX/Linux 惯用值：
-`SIGKILL = 9`、`SIGUSR1 = 10`、`SIGSEGV = 11`、`SIGUSR2 = 12`、`SIGTERM = 15`、
-`SIGCHLD = 17`。合法编号为 `1..SIG_MAX`（`SIG_MAX = 31`），因此每个信号映射到每
+`SIGINT = 2`、`SIGKILL = 9`、`SIGUSR1 = 10`、`SIGSEGV = 11`、`SIGUSR2 = 12`、
+`SIGTERM = 15`、`SIGCHLD = 17`。合法编号为 `1..SIG_MAX`（`SIG_MAX = 31`），因此每个信号映射到每
 进程 `uint64_t` 位图（`SigSet`）中的单个位 `1ull << (signo - 1)`。位图宽度与最高
 信号号一致且 `<= 64`。
 
 每个信号有确定性默认动作：
 
-- Terminate：`SIGKILL`、`SIGTERM`、`SIGSEGV`、`SIGUSR1`、`SIGUSR2` 及其余无特殊
+- Terminate：`SIGINT`、`SIGKILL`、`SIGTERM`、`SIGSEGV`、`SIGUSR1`、`SIGUSR2` 及其余无特殊
   默认的编号的默认动作。
 - Ignore：`SIGCHLD` 的默认动作。
 
@@ -51,6 +52,10 @@
 -> `-ESRCH`），强制 `cred::may_signal(actor, target)`（拒绝 -> `-EPERM`，不改目标
 pending），随后才调用 `signal::kill`（非法信号 -> `-EINVAL`，成功 -> 0）。
 `cred::may_signal` 判定逻辑不变（root 放行、否则身份匹配、空输入拒绝）。
+
+默认终端在非 IRQ 上下文消费 interrupt-like input 时，也可以把有界 `SIGINT` 投递给
+当前数值型 foreground process group。Keyboard IRQ 只入队输入并唤醒 waiter；
+process-group 遍历、权限检查与 pending bit 更新均在普通用户进程 syscall 上下文完成。
 
 ## IRQ-return 到用户态边界的投递
 

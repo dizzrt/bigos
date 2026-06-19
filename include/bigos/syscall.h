@@ -92,6 +92,12 @@ namespace bigos::sys {
                                 // Bounded BigOS subset: not full POSIX sync(2),
                                 // fdatasync, async flush, crash recovery, or
                                 // broad mount namespace synchronization.
+        SYS_GETPGID = 41,       // (pid or 0=current) -> process group id, or -ESRCH
+        SYS_GETSID = 42,        // (pid or 0=current) -> session id, or -ESRCH
+        SYS_SETPGID = 43,       // (pid or 0=current, pgid or 0=pid) -> 0 or deterministic errno
+        SYS_SETSID = 44,        // () -> new sid/pgid equal to current pid, or -EPERM/-ESRCH
+        SYS_TCGETPGRP = 45,     // () -> default terminal foreground pgid, or deterministic errno
+        SYS_TCSETPGRP = 46,     // (pgid) -> bind default terminal foreground pgid, or errno
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

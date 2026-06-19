@@ -64,6 +64,14 @@ an EOI:
 - `SYS_GETUID` (number=14) / `SYS_GETGID` (number=15): return the current process
   `uid` / `gid`.
 
+Process group/session and default-terminal foreground controls are appended at
+numbers 41..46: `SYS_GETPGID`, `SYS_GETSID`, `SYS_SETPGID`, `SYS_SETSID`,
+`SYS_TCGETPGRP`, and `SYS_TCSETPGRP`. They operate only on the bounded single
+default terminal model, return deterministic POSIX-style negative errno, and do
+not change the `int 0x80` register ABI, syscall vector, IDT DPL, or EOI rules.
+They are not complete POSIX job control, `tcsetpgrp(3)` semantics, `termios`,
+multiple terminals, background jobs, or a complete POSIX process model.
+
 `SYS_KILL` (16), `SYS_SIGACTION` (17), `SYS_SIGPROCMASK` (18), `SYS_SIGRETURN`
 (19), `SYS_LSEEK` (20), `SYS_PIPE` (21), `SYS_DUP` (22), `SYS_DUP2` (23),
 `SYS_FSYNC` (24), `SYS_MKDIR` (25), and `SYS_UNLINK` (26) follow.
@@ -151,7 +159,7 @@ remain responsible for translating negative kernel returns into positive
 
 ## Validation: Default-Off Build Switches And Deterministic Markers
 
-The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. Additional default-off smokes cover the flat first user program, filesystem-backed user ELF, demand paging, the bounded read-only file-backed mapping (`xmake f --file_backed_mapping_smoke=y`, marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`), anonymous map/unmap/protect lifecycle (`xmake f --anonymous_lifecycle_smoke=y`, marker `BIGOS_ANON_LIFECYCLE_PASSED`/`FAILED`), fork/COW, time/identity, signals, writable FS, pipes, and userland runtime. Normal boot now packages `/boot/user/init.elf`, enters resident PID-1 init, and starts `/bin/sh`; default headless validation observes `BIGOS_USER_EXEC`.
+The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. Additional default-off smokes cover the flat first user program, filesystem-backed user ELF, demand paging, the bounded read-only file-backed mapping (`xmake f --file_backed_mapping_smoke=y`, marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`), anonymous map/unmap/protect lifecycle (`xmake f --anonymous_lifecycle_smoke=y`, marker `BIGOS_ANON_LIFECYCLE_PASSED`/`FAILED`), fork/COW, time/identity, signals, writable FS, pipes, and userland runtime. The userland runtime smoke also asserts representative process-group/session and foreground-terminal wrapper behavior. Normal boot now packages `/boot/user/init.elf`, enters resident PID-1 init, and starts `/bin/sh`; default headless validation observes `BIGOS_USER_EXEC`.
 
 ## Non-Goals For This Stage
 

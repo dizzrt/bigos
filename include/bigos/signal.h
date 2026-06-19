@@ -17,6 +17,7 @@ namespace bigos::signal {
     // the highest supported number MUST stay <= 64. Repeated delivery of the
     // same signal before it is taken merges into one pending bit (no realtime
     // queuing). The values reuse the conventional POSIX/Linux numbers.
+    constexpr int SIGINT = 2;     // terminal interrupt-like input
     constexpr int SIGKILL = 9;    // uncatchable, unblockable terminate
     constexpr int SIGUSR1 = 10;   // default terminate, user-defined
     constexpr int SIGSEGV = 11;   // default terminate

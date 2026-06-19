@@ -58,6 +58,13 @@ syscall number、参数、返回值与 `InterruptFrame` 字段的对应关系（
 - `SYS_GETPID`（number=12）/ `SYS_GETPPID`（number=13）：返回当前进程的 `pid` / `parent_pid`。
 - `SYS_GETUID`（number=14）/ `SYS_GETGID`（number=15）：返回当前进程的 `uid` / `gid`。
 
+Process group/session 与默认终端 foreground 控制追加在 number 41..46：
+`SYS_GETPGID`、`SYS_GETSID`、`SYS_SETPGID`、`SYS_SETSID`、`SYS_TCGETPGRP` 和
+`SYS_TCSETPGRP`。它们只作用于单一默认终端的有界模型，返回确定性的 POSIX 风格负
+errno，不改变 `int 0x80` 寄存器 ABI、syscall vector、IDT DPL 或 EOI 规则。它们不
+表示完整 POSIX job control、`tcsetpgrp(3)` 语义、`termios`、多终端、后台作业或完
+整 POSIX 进程模型。
+
 其后是 `SYS_KILL`（16）、`SYS_SIGACTION`（17）、`SYS_SIGPROCMASK`（18）、`SYS_SIGRETURN`（19）、`SYS_LSEEK`（20）、`SYS_PIPE`（21）、`SYS_DUP`（22）、`SYS_DUP2`（23）、`SYS_FSYNC`（24）、`SYS_MKDIR`（25）、`SYS_UNLINK`（26）。
 
 - `SYS_EXECVE`（number=27）：以 append-only 方式把内核内已有的当前进程镜像替换路径（`exec_current_from_elf_image` + 只读 VFS 读路径）暴露给 CPL3。ABI：`rdi` = 用户 `path`，`rsi` = `argv`（NULL 结尾用户指针数组），`rdx` = `envp`。path 受 `SYS_PATH_MAX_LEN` 约束，argv/envp 向量受 `EXEC_MAX_ARGC` / `EXEC_MAX_ENVC` / `EXEC_MAX_STRING_BYTES` 约束；所有用户缓冲先经 VMA-backed 校验拷入再使用。成功时以新 ELF64 `ET_EXEC` 镜像替换当前进程地址空间并进入新程序入口，因此不返回调用点。失败时返回确定性负 errno（`-ENOENT`、`-EACCES`、`-ENOEXEC`、`-E2BIG`、`-EFAULT`、`-ENOMEM`、`-EWOULDBLOCK`、`-EIO`），调用镜像可继续执行。与其他 fd/VFS syscall 一样，它在分配或进入同步存储 IO 前检查 `sched::can_block()` 守卫；不改动任何既有 syscall 号、寄存器约定、`VECTOR_SYSCALL` / DPL 布局或「syscall 不发 EOI」规则。
@@ -82,7 +89,7 @@ syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU excep
 
 ## 验证：默认关闭构建开关 + 确定性 marker
 
-默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）继续从 ring0 验证 `SYS_DEBUG_WRITE`、`SYS_GET_TICK` 和未知 number。额外默认关闭的 smoke 覆盖 flat 首个用户程序、filesystem-backed user ELF、demand paging、有界只读 file-backed 映射（`xmake f --file_backed_mapping_smoke=y`，marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`）、anonymous map/unmap/protect lifecycle（`xmake f --anonymous_lifecycle_smoke=y`，marker `BIGOS_ANON_LIFECYCLE_PASSED`/`FAILED`）、fork/COW、time/identity、signals、writable FS、pipes 和 userland runtime。普通启动现在会打包 `/boot/user/init.elf`，进入常驻 PID-1 init，并启动 `/bin/sh`；默认 headless 验证观察 `BIGOS_USER_EXEC`。
+默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）继续从 ring0 验证 `SYS_DEBUG_WRITE`、`SYS_GET_TICK` 和未知 number。额外默认关闭的 smoke 覆盖 flat 首个用户程序、filesystem-backed user ELF、demand paging、有界只读 file-backed 映射（`xmake f --file_backed_mapping_smoke=y`，marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`）、anonymous map/unmap/protect lifecycle（`xmake f --anonymous_lifecycle_smoke=y`，marker `BIGOS_ANON_LIFECYCLE_PASSED`/`FAILED`）、fork/COW、time/identity、signals、writable FS、pipes 和 userland runtime。userland runtime smoke 也断言代表性的 process-group/session 与 foreground-terminal wrapper 行为。普通启动现在会打包 `/boot/user/init.elf`，进入常驻 PID-1 init，并启动 `/bin/sh`；默认 headless 验证观察 `BIGOS_USER_EXEC`。
 
 ## 本阶段非目标
 

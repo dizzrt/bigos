@@ -333,6 +333,46 @@ pid_t getppid(void) {
     return (pid_t)errno_translate(syscall0(SYS_GETPPID));
 }
 
+pid_t getpgrp(void) {
+    return getpgid(0);
+}
+
+pid_t getpgid(pid_t pid) {
+    return (pid_t)errno_translate(syscall1(SYS_GETPGID, (long)pid));
+}
+
+pid_t getsid(pid_t pid) {
+    return (pid_t)errno_translate(syscall1(SYS_GETSID, (long)pid));
+}
+
+int setpgid(pid_t pid, pid_t pgid) {
+    if (pid < 0 || pgid < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (int)errno_translate(syscall2(SYS_SETPGID, (long)pid, (long)pgid));
+}
+
+pid_t setsid(void) {
+    return (pid_t)errno_translate(syscall0(SYS_SETSID));
+}
+
+pid_t tcgetpgrp(int fd) {
+    if (fd != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (pid_t)errno_translate(syscall0(SYS_TCGETPGRP));
+}
+
+int tcsetpgrp(int fd, pid_t pgid) {
+    if (fd != 0 || pgid <= 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (int)errno_translate(syscall1(SYS_TCSETPGRP, (long)pgid));
+}
+
 int getuid(void) {
     return (int)errno_translate(syscall0(SYS_GETUID));
 }

@@ -10,6 +10,7 @@
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
 #include <bigos/time.h>
+#include <bigos/tty.h>
 #include <irq/interrupt.h>
 
 #include "../../mm/buddy.h"
@@ -955,6 +956,10 @@ namespace {
         __process->first_child_pid = 0;
         __process->next_sibling_pid = 0;
         __process->next_reap_pid = 0;
+        if (__process->pgid == 0)
+            __process->pgid = pid;
+        if (__process->sid == 0)
+            __process->sid = pid;
         __process->table_published = true;
         __process->wait_status_consumed = false;
         __process->parent_waiting = false;
@@ -1006,12 +1011,15 @@ namespace {
         if (g_process_count > 0)
             g_process_count--;
 
+        bigos::terminal::invalidate_foreground_pgid(__process->pgid);
         __process->table_published = false;
         __process->pid = 0;
         __process->parent_pid = 0;
         __process->first_child_pid = 0;
         __process->next_sibling_pid = 0;
         __process->next_reap_pid = 0;
+        __process->pgid = 0;
+        __process->sid = 0;
     }
 
     struct Elf64Header {
@@ -1814,6 +1822,8 @@ namespace bigos::proc {
         __process->gid = bigos::cred::ROOT_UID;
         __process->euid = bigos::cred::ROOT_UID;
         __process->egid = bigos::cred::ROOT_UID;
+        __process->pgid = 0;
+        __process->sid = 0;
         __process->start_unix_time = bigos::time::current_unix_time();
         init_cwd(__process);
         bigos::signal::init_state(__process);
@@ -2016,6 +2026,8 @@ namespace bigos::proc {
         __process->gid = bigos::cred::ROOT_UID;
         __process->euid = bigos::cred::ROOT_UID;
         __process->egid = bigos::cred::ROOT_UID;
+        __process->pgid = 0;
+        __process->sid = 0;
         __process->start_unix_time = bigos::time::current_unix_time();
         init_cwd(__process);
         bigos::signal::init_state(__process);
@@ -2933,6 +2945,8 @@ namespace bigos::proc {
         child->gid = parent->gid;
         child->euid = parent->euid;
         child->egid = parent->egid;
+        child->pgid = parent->pgid;
+        child->sid = parent->sid;
         child->start_unix_time = bigos::time::current_unix_time();
         memcpy(child->cwd, parent->cwd, sizeof(child->cwd));
         child->cwd_deleted = parent->cwd_deleted;
@@ -3269,6 +3283,134 @@ namespace bigos::proc {
         set_current_process_slot(nullptr);
         bigos::sched::set_current_user_process(nullptr);
         bigos::sched::thread_exit();
+    }
+
+    namespace {
+        bool process_is_controllable(const Process *process) noexcept {
+            return process != nullptr && process->table_published && process->pid != 0 &&
+                   process->state != ProcessState::Terminated && process->state != ProcessState::Faulted &&
+                   process->state != ProcessState::Zombie && process->state != ProcessState::ReapPending &&
+                   process->state != ProcessState::Reaped;
+        }
+
+        bool is_child_of(const Process *parent, uint32_t child_pid) noexcept {
+            if (parent == nullptr || child_pid == 0)
+                return false;
+            uint32_t pid = parent->first_child_pid;
+            while (pid != 0) {
+                Process *child = lookup_process(pid);
+                if (child == nullptr)
+                    return false;
+                if (child->pid == child_pid)
+                    return true;
+                pid = child->next_sibling_pid;
+            }
+            return false;
+        }
+    }   // namespace
+
+    int64_t getpgid_current(uint32_t __pid) noexcept {
+        const Process *actor = current_process_slot();
+        if (actor == nullptr)
+            return -bigos::ESRCH;
+        const uint32_t pid = __pid == 0 ? actor->pid : __pid;
+        const Process *target = lookup_process(pid);
+        if (!process_is_controllable(target))
+            return -bigos::ESRCH;
+        return (int64_t)target->pgid;
+    }
+
+    int64_t getsid_current(uint32_t __pid) noexcept {
+        const Process *actor = current_process_slot();
+        if (actor == nullptr)
+            return -bigos::ESRCH;
+        const uint32_t pid = __pid == 0 ? actor->pid : __pid;
+        const Process *target = lookup_process(pid);
+        if (!process_is_controllable(target))
+            return -bigos::ESRCH;
+        return (int64_t)target->sid;
+    }
+
+    bool process_group_exists_in_session(uint32_t __pgid, uint32_t __sid) noexcept {
+        if (__pgid == 0 || __sid == 0)
+            return false;
+        for (Process *process = g_process_list_head; process != nullptr; process = process->reg_next) {
+            if (process_is_controllable(process) && process->pgid == __pgid && process->sid == __sid)
+                return true;
+        }
+        return false;
+    }
+
+    bool process_group_has_live_member(uint32_t __pgid) noexcept {
+        if (__pgid == 0)
+            return false;
+        for (Process *process = g_process_list_head; process != nullptr; process = process->reg_next) {
+            if (process_is_controllable(process) && process->pgid == __pgid)
+                return true;
+        }
+        return false;
+    }
+
+    int64_t setpgid_current(uint32_t __pid, uint32_t __pgid) noexcept {
+        Process *actor = current_process_slot();
+        if (actor == nullptr)
+            return -bigos::ESRCH;
+
+        const uint32_t target_pid = __pid == 0 ? actor->pid : __pid;
+        Process *target = lookup_process(target_pid);
+        if (!process_is_controllable(target))
+            return -bigos::ESRCH;
+        if (target != actor && !is_child_of(actor, target_pid))
+            return -bigos::EPERM;
+        if (target->sid != actor->sid)
+            return -bigos::EPERM;
+
+        const uint32_t pgid = __pgid == 0 ? target->pid : __pgid;
+        if (pgid == 0 || pgid == WAIT_ANY)
+            return -bigos::EINVAL;
+        if (target->pid == target->sid && pgid != target->pid)
+            return -bigos::EPERM;
+        if (pgid != target->pid && !process_group_exists_in_session(pgid, actor->sid))
+            return -bigos::EPERM;
+
+        target->pgid = pgid;
+        return 0;
+    }
+
+    int64_t setsid_current() noexcept {
+        Process *process = current_process_slot();
+        if (!process_is_controllable(process))
+            return -bigos::ESRCH;
+        if (process->pgid == process->pid)
+            return -bigos::EPERM;
+        process->sid = process->pid;
+        process->pgid = process->pid;
+        return (int64_t)process->sid;
+    }
+
+    int64_t signal_process_group_from_current(uint32_t __pgid, int __signo) noexcept {
+        Process *actor = current_process_slot();
+        if (actor == nullptr)
+            return -bigos::ESRCH;
+        if (__pgid == 0)
+            return -bigos::EINVAL;
+        int64_t delivered = 0;
+        bool denied = false;
+        for (Process *target = g_process_list_head; target != nullptr; target = target->reg_next) {
+            if (!process_is_controllable(target) || target->pgid != __pgid)
+                continue;
+            if (!bigos::cred::may_signal(actor, target)) {
+                denied = true;
+                continue;
+            }
+            const int64_t result = bigos::signal::kill(target, __signo);
+            if (result != 0)
+                return result;
+            delivered++;
+        }
+        if (delivered == 0)
+            return denied ? -bigos::EPERM : -bigos::ESRCH;
+        return 0;
     }
 
     int64_t wait_current(uint32_t __pid, int64_t *__status) noexcept {

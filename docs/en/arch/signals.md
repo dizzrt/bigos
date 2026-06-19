@@ -4,21 +4,22 @@ This stage adds a minimal, correct POSIX signal model on top of the existing
 process model (fork/COW), the identity/permission primitives, the `int 0x80`
 syscall entry, and the guarded IRQ-return reschedule hook. It is intentionally
 small: fixed non-realtime signal numbers, per-process inline signal state, a
-single IRQ-return delivery point, and four new syscalls. It does not introduce
-realtime signals, job control, SMP, or a user-space libc.
+single IRQ-return delivery point, and bounded process-group delivery for default
+terminal interrupt-like input. It does not introduce realtime signals, complete
+job control, `termios`, SMP, or a complete POSIX libc.
 
 ## Signal Numbers And Default Actions
 
 `include/bigos/signal.h` defines a fixed set of non-realtime signal numbers that
-reuse the conventional POSIX/Linux values: `SIGKILL = 9`, `SIGUSR1 = 10`,
-`SIGSEGV = 11`, `SIGUSR2 = 12`, `SIGTERM = 15`, `SIGCHLD = 17`. Valid numbers are
-`1..SIG_MAX` with `SIG_MAX = 31`, so every signal maps to a single bit
+reuse the conventional POSIX/Linux values: `SIGINT = 2`, `SIGKILL = 9`,
+`SIGUSR1 = 10`, `SIGSEGV = 11`, `SIGUSR2 = 12`, `SIGTERM = 15`, `SIGCHLD = 17`.
+Valid numbers are `1..SIG_MAX` with `SIG_MAX = 31`, so every signal maps to a single bit
 `1ull << (signo - 1)` inside a per-process `uint64_t` bitmap (`SigSet`). The
 bitmap width and the highest signal number agree and stay `<= 64`.
 
 Each signal has a deterministic default action:
 
-- Terminate: the default for `SIGKILL`, `SIGTERM`, `SIGSEGV`, `SIGUSR1`,
+- Terminate: the default for `SIGINT`, `SIGKILL`, `SIGTERM`, `SIGSEGV`, `SIGUSR1`,
   `SIGUSR2`, and any other number with no special default.
 - Ignore: the default for `SIGCHLD`.
 
@@ -65,6 +66,12 @@ PID (absent target -> `-ESRCH`), enforces `cred::may_signal(actor, target)`
 `signal::kill` (invalid signal -> `-EINVAL`, success -> 0). The `cred::may_signal`
 decision logic is unchanged (root allowed, otherwise identity match, null
 inputs rejected).
+
+The default terminal may also target the current numeric foreground process
+group with bounded `SIGINT` when interrupt-like input is consumed outside IRQ
+context. The keyboard IRQ only enqueues input and wakes a waiter; process-group
+traversal, permission checks, and pending-bit updates happen in ordinary
+user-process syscall context.
 
 ## Delivery At The IRQ-Return-To-User Boundary
 

@@ -2,7 +2,9 @@
  *
  * These wrappers use the BigOS int 0x80 ABI and POSIX-style errno convention.
  * The header intentionally omits broad POSIX process, terminal, and filesystem
- * APIs that are not implemented by the current bounded userland. */
+ * APIs that are not implemented by the current bounded userland. Process
+ * group/session and terminal foreground helpers are BigOS bounded subsets, not
+ * complete POSIX job-control or termios support. */
 #ifndef _BIGOS_USER_UNISTD_H
 #define _BIGOS_USER_UNISTD_H
 
@@ -42,6 +44,13 @@ int bigos_munmap_anon(void *addr, size_t len);
 int bigos_mprotect_anon(void *addr, size_t len, long prot);
 pid_t getpid(void);
 pid_t getppid(void);
+pid_t getpgrp(void);
+pid_t getpgid(pid_t pid);
+pid_t getsid(pid_t pid);
+int setpgid(pid_t pid, pid_t pgid);
+pid_t setsid(void);
+pid_t tcgetpgrp(int fd);
+int tcsetpgrp(int fd, pid_t pgid);
 int getuid(void);
 int getgid(void);
 int kill(pid_t pid, int signo);

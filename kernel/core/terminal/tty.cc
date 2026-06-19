@@ -1,7 +1,10 @@
 #include <bigos/console.h>
+#include <bigos/errno.h>
 #include <bigos/io.h>
 #include <bigos/keyboard.h>
+#include <bigos/proc.h>
 #include <bigos/sched.h>
+#include <bigos/signal.h>
 #include <bigos/tty.h>
 
 namespace bigos::terminal {
@@ -15,6 +18,7 @@ namespace bigos::terminal {
 
         InputRing g_input;
         sched::WaitQueue g_input_wait;
+        uint32_t g_foreground_pgid = 0;
 
         size_t next_index(size_t index) noexcept {
             return (index + 1) % TTY_INPUT_CAPACITY;
@@ -61,6 +65,8 @@ namespace bigos::terminal {
                 case TerminalControl::EofLike:
                     return ConsumeResult::Eof;
                 case TerminalControl::InterruptLike:
+                    if (g_foreground_pgid != 0)
+                        (void)bigos::proc::signal_process_group_from_current(g_foreground_pgid, bigos::signal::SIGINT);
                     *out = 0x03;
                     return ConsumeResult::Character;
                 case TerminalControl::Unsupported:
@@ -78,6 +84,7 @@ namespace bigos::terminal {
         g_input.head = 0;
         g_input.tail = 0;
         g_input.dropped = 0;
+        g_foreground_pgid = 0;
         sched::init_wait_queue(&g_input_wait);
         init_console();
         input::init_keyboard_decoder();
@@ -106,6 +113,29 @@ namespace bigos::terminal {
         if (byte < ' ' || byte == 0x7f)
             return TerminalControl::Unsupported;
         return TerminalControl::None;
+    }
+
+    uint32_t foreground_pgid() noexcept {
+        if (g_foreground_pgid != 0 && !bigos::proc::process_group_has_live_member(g_foreground_pgid))
+            g_foreground_pgid = 0;
+        return g_foreground_pgid;
+    }
+
+    int64_t set_foreground_pgid(uint32_t pgid) noexcept {
+        if (pgid == 0)
+            return -bigos::EINVAL;
+        bigos::proc::Process *process = bigos::proc::current_process();
+        if (process == nullptr)
+            return -bigos::ESRCH;
+        if (!bigos::proc::process_group_exists_in_session(pgid, process->sid))
+            return -bigos::ESRCH;
+        g_foreground_pgid = pgid;
+        return 0;
+    }
+
+    void invalidate_foreground_pgid(uint32_t pgid) noexcept {
+        if (pgid != 0 && g_foreground_pgid == pgid && !bigos::proc::process_group_has_live_member(pgid))
+            g_foreground_pgid = 0;
     }
 
     bool enqueue_input(char ch) noexcept {

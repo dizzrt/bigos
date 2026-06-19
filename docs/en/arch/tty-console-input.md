@@ -90,9 +90,21 @@ The default interactive shell path intentionally stays below POSIX terminal scop
 
 - Keyboard IRQ1 only decodes and enqueues fixed-size input records, then performs the bounded TTY wakeup.
 - Printable input, newline feedback, backspace feedback, EOF-like exit, interrupt-like line cancellation, and unsupported-control no-op behavior are produced by the non-interrupt terminal or shell consumer after `read(0, ...)` returns.
+- The default terminal keeps one numeric foreground `pgid`. It is queried and
+  changed only from ordinary syscall/user-process context; IRQ1 never performs
+  process-group traversal, shell policy, allocation, blocking, or filesystem I/O.
+- Interrupt-like input still returns the bounded `0x03` byte to the consumer and
+  also attempts bounded `SIGINT` delivery to the current foreground group. If the
+  foreground group is missing or empty, the result is deterministic no-op/error
+  handling, never a dangling process-object dereference.
 - `/bin/sh` shows its deterministic `$ ` prompt only when fd `0` and fd `1` are still bound to the default console fast paths; pipes or redirected files suppress the prompt.
 - stdout and stderr are visible on VGA text mode through fd `1` and fd `2` when those descriptors are not redirected.
 
 ## Non-Goals
 
-This path does not implement multiple TTYs, full ANSI/VT terminal behavior, command history, termios, job control, terminal process groups, USB HID, APIC/IOAPIC, SMP, or internationalized keyboard layouts. The minimal fd integration covers only the default console fast paths for bounded userland and does not introduce `/dev/tty`, a general character-device filesystem, terminal signals, cancellation, async I/O, or full POSIX terminal reads.
+This path does not implement multiple TTYs, full ANSI/VT terminal behavior,
+command history, termios, complete job control, background read/write control,
+USB HID, APIC/IOAPIC, SMP, or internationalized keyboard layouts. The minimal fd
+integration covers only the default console fast paths for bounded userland and
+does not introduce `/dev/tty`, a general character-device filesystem, async I/O,
+or full POSIX terminal reads.

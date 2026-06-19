@@ -559,6 +559,31 @@ namespace sys {
             return process != nullptr ? (int64_t)process->gid : -bigos::EINVAL;
         }
 
+        static int64_t sys_getpgid(uint64_t __pid) noexcept {
+            return bigos::proc::getpgid_current((uint32_t)__pid);
+        }
+
+        static int64_t sys_getsid(uint64_t __pid) noexcept {
+            return bigos::proc::getsid_current((uint32_t)__pid);
+        }
+
+        static int64_t sys_setpgid(uint64_t __pid, uint64_t __pgid) noexcept {
+            return bigos::proc::setpgid_current((uint32_t)__pid, (uint32_t)__pgid);
+        }
+
+        static int64_t sys_setsid() noexcept {
+            return bigos::proc::setsid_current();
+        }
+
+        static int64_t sys_tcgetpgrp() noexcept {
+            const uint32_t pgid = bigos::terminal::foreground_pgid();
+            return pgid != 0 ? (int64_t)pgid : -bigos::ESRCH;
+        }
+
+        static int64_t sys_tcsetpgrp(uint64_t __pgid) noexcept {
+            return bigos::terminal::set_foreground_pgid((uint32_t)__pgid);
+        }
+
         // sys_kill: deliver signo to the target pid after enforcing the
         // cred::may_signal decision (the single permission enforcement point).
         // Target lookup precedes the permission check: an absent target is
@@ -850,6 +875,24 @@ namespace sys {
                 break;
             case SYS_GETGID:
                 result = __detail::sys_getgid();
+                break;
+            case SYS_GETPGID:
+                result = __detail::sys_getpgid(__frame->rdi);
+                break;
+            case SYS_GETSID:
+                result = __detail::sys_getsid(__frame->rdi);
+                break;
+            case SYS_SETPGID:
+                result = __detail::sys_setpgid(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_SETSID:
+                result = __detail::sys_setsid();
+                break;
+            case SYS_TCGETPGRP:
+                result = __detail::sys_tcgetpgrp();
+                break;
+            case SYS_TCSETPGRP:
+                result = __detail::sys_tcsetpgrp(__frame->rdi);
                 break;
             case SYS_KILL:
                 result = __detail::sys_kill(__frame->rdi, __frame->rsi);

@@ -35,6 +35,9 @@ namespace bigos::terminal {
     void init_tty() noexcept;
 
     TerminalControl classify_control_char(char ch) noexcept;
+    uint32_t foreground_pgid() noexcept;
+    int64_t set_foreground_pgid(uint32_t pgid) noexcept;
+    void invalidate_foreground_pgid(uint32_t pgid) noexcept;
 
     // IRQ-context producer API. Returns false when the fixed input buffer is full.
     bool enqueue_input(char ch) noexcept;

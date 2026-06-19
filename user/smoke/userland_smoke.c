@@ -23,7 +23,8 @@
  *     redirection, a single pipe, and deterministic failure recovery.
  *   - the bounded libc subset probe for fine-grained headers, fprintf(stderr),
  *     string/memory semantics, read-only environment, and allocator failure.
- *   - bounded signal termination plus time and identity wrappers.
+ *   - bounded signal termination, time/identity wrappers, process groups,
+ *     sessions, and default terminal foreground binding.
  */
 #include "libc.h"
 
@@ -815,6 +816,74 @@ static void test_wait_wrappers(char **envp) {
         fail("waitpid-status");
 }
 
+static void test_process_session_terminal(void) {
+    pid_t self = getpid();
+    pid_t pgid = getpgrp();
+    pid_t sid = getsid(0);
+    if (self <= 0 || pgid <= 0 || sid <= 0)
+        fail("session-self");
+    if (getpgid(self) != pgid || getsid(self) != sid)
+        fail("session-query");
+    errno = 0;
+    if (getpgid(999999) != -1 || errno != ESRCH)
+        fail("session-missing-pid");
+    errno = 0;
+    if (setpgid(-1, 0) != -1 || errno != EINVAL)
+        fail("session-negative-pid");
+
+    int fds[2];
+    if (pipe(fds) != 0)
+        fail("session-pipe");
+    pid_t pid = fork();
+    if (pid < 0)
+        fail("session-fork");
+    if (pid == 0) {
+        close(fds[1]);
+        char ch = 0;
+        if (read(fds[0], &ch, 1) != 1)
+            exit(31);
+        close(fds[0]);
+        if (getpgrp() != getpid())
+            exit(32);
+        if (getsid(0) != sid)
+            exit(33);
+        exit(0);
+    }
+    close(fds[0]);
+    if (setpgid(pid, pid) != 0)
+        fail("session-setpgid-child");
+    if (getpgid(pid) != pid)
+        fail("session-child-pgid");
+    if (tcsetpgrp(0, pid) != 0)
+        fail("session-tcsetpgrp-child");
+    if (tcgetpgrp(0) != pid)
+        fail("session-tcgetpgrp-child");
+    write_all_or_exit(fds[1], "x");
+    close(fds[1]);
+    int status = -1;
+    if (wait_status(pid, &status) != pid || status != 0)
+        fail("session-child-status");
+    if (tcsetpgrp(0, pgid) != 0)
+        fail("session-tcsetpgrp-restore");
+    if (tcgetpgrp(0) != pgid)
+        fail("session-tcgetpgrp-restore");
+
+    pid = fork();
+    if (pid < 0)
+        fail("setsid-fork");
+    if (pid == 0) {
+        pid_t child = getpid();
+        if (setsid() != child)
+            exit(41);
+        if (getpgrp() != child || getsid(0) != child)
+            exit(42);
+        exit(0);
+    }
+    status = -1;
+    if (wait_status(pid, &status) != pid || status != 0)
+        fail("setsid-child-status");
+}
+
 static void test_error_text(void) {
     if (strcmp(strerror(ENOENT), "No such file or directory") != 0)
         fail("strerror-known");
@@ -996,6 +1065,7 @@ int main(int argc, char **argv, char **envp) {
     test_current_directory(envp);
     test_time_identity();
     test_wait_wrappers(envp);
+    test_process_session_terminal();
     test_error_text();
     test_signal_handler_return();
     test_smoke_programs(envp);

@@ -235,9 +235,9 @@ standard small programs can compile and run directly.
 
 用户可见目标：shell 支持作业控制类交互，更多标准小程序可直接编译运行。
 
-- [ ] Task M4.1: process group, session, and foreground terminal binding implemented
+- [x] Task M4.1: process group, session, and foreground terminal binding implemented
   on the existing terminal abstraction within its bounded contract.
-- [ ] 任务 M4.1：在既有终端抽象的有界契约内，实现进程组、session 与前台终端绑定。
+- [x] 任务 M4.1：在既有终端抽象的有界契约内，实现进程组、session 与前台终端绑定。
 - [ ] Task M4.2: syscall surface expansion covering wait variants and additional
   bounded file and process primitives.
 - [ ] 任务 M4.2：扩充 syscall 面，覆盖 wait 变体与更多有界文件/进程原语。

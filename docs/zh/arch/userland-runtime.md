@@ -82,14 +82,17 @@ Shell 有意保持很小：
 - 命令查找：包含 `/` 的路径直接执行；其他命令按 `PATH` 尝试，默认回退 `/bin`。
 - 执行方式：外部命令通过 `fork` + `execve` + `wait` 运行。
 - 管道：支持一个 `a | b` 单级管道。
+- 前台控制：运行外部命令或单级管道前，shell 会把子进程或管道放入有界 process
+  group，把单一默认终端 foreground group 绑定到该组，等待完成后恢复 shell 自身
+  process group。这只是 BigOS 的 foreground-command 子集。
 - 重定向：每条命令最多一个输入 `< file` 和一个输出 `> file`。
 - cwd 行为：包含 `/` 的相对命令路径、重定向路径和 `/bin/pwd` 等小工具都使用内核 cwd 契约。
 - 输出：builtin、子进程 stdout 和确定性的可恢复错误都使用现有 fd/syscall 路径；未重定向时，默认 fd `1` 与 fd `2` 会到达可见 console。
 - 容量：行长、参数数量、PATH 候选数量与路径长度都在 `user/sh/sh.c` 中有固定上限。
 
-本阶段不实现作业控制、后台进程、glob、变量展开、shell 脚本、子 shell、终端进程组、
-termios、完整目录 API、symlink、持久完整可写文件系统、广泛 file-backed `mmap`、完整
-FILE API、动态链接或完整 POSIX libc。
+本阶段不实现完整作业控制、后台进程、`fg`/`bg`、job table、glob、变量展开、shell
+脚本、子 shell、`termios`、多终端、完整目录 API、symlink、持久完整可写文件系统、
+广泛 file-backed `mmap`、完整 FILE API、动态链接、SMP 或完整 POSIX libc。
 
 ## 最小 libc 子集
 

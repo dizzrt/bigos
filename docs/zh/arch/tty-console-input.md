@@ -90,9 +90,11 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 - Keyboard IRQ1 只解码并入队固定大小 input record，然后执行 bounded TTY wakeup。
 - Printable input、newline feedback、backspace feedback、EOF-like exit、interrupt-like line cancellation 和 unsupported-control no-op 行为由 `read(0, ...)` 返回后的非中断 terminal 或 shell consumer 产生。
+- 默认终端保存一个数值型 foreground `pgid`。查询和变更只在普通 syscall/用户进程上下文执行；IRQ1 不遍历 process group、不执行 shell 策略、不分配、不阻塞，也不做文件系统 I/O。
+- Interrupt-like input 仍向 consumer 返回有界 `0x03` byte，并尝试向当前 foreground group 进行有界 `SIGINT` 投递。foreground group 缺失或为空时只产生确定性 no-op/错误结果，不解引用悬垂进程对象。
 - `/bin/sh` 只在 fd `0` 与 fd `1` 仍绑定到默认 console fast path 时显示确定性的 `$ ` prompt；pipe 或重定向文件会抑制 prompt。
 - 当 fd `1` 与 fd `2` 未被重定向时，stdout 和 stderr 会通过 VGA text mode 可见。
 
 ## 非目标
 
-该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、termios、job control、terminal process group、USB HID、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、terminal signal、取消语义、async I/O 或完整 POSIX terminal read。
+该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、termios、完整 job control、后台读写控制、USB HID、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。

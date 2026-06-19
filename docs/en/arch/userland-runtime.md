@@ -96,6 +96,10 @@ The shell is intentionally small:
   against `PATH`, with `/bin` as the default.
 - Execution: external commands run via `fork` + `execve` + `wait`.
 - Pipes: one `a | b` stage.
+- Foreground control: before running an external command or one-stage pipe, the
+  shell places the child process or pipeline in a bounded process group, binds
+  the single default terminal foreground group to it, waits, and then restores
+  the shell process group. This is only BigOS foreground-command behavior.
 - Redirection: one input `< file` and one output `> file` per command.
 - Cwd behavior: relative command paths containing `/`, redirection paths, and
   small tools such as `/bin/pwd` use the kernel cwd contract.
@@ -105,10 +109,11 @@ The shell is intentionally small:
 - Capacity: line length, argument count, PATH candidates, and path lengths are
   fixed upper bounds in `user/sh/sh.c`.
 
-This does not implement job control, background processes, globbing, variable
-expansion, shell scripts, sub-shells, terminal process groups, termios, a full
-directory API, symlinks, a persistent full writable filesystem, broad
-file-backed `mmap`, a full FILE API, dynamic linking, or a complete POSIX libc.
+This does not implement complete job control, background processes, `fg`/`bg`,
+job tables, globbing, variable expansion, shell scripts, sub-shells, `termios`,
+multiple terminals, a full directory API, symlinks, a persistent full writable
+filesystem, broad file-backed `mmap`, a full FILE API, dynamic linking, SMP, or
+a complete POSIX libc.
 
 ## Minimal libc Subset
 

@@ -49,5 +49,11 @@
 #define SYS_RMDIR       38
 #define SYS_FTRUNCATE   39
 #define SYS_SYNC        40
+#define SYS_GETPGID     41
+#define SYS_GETSID      42
+#define SYS_SETPGID     43
+#define SYS_SETSID      44
+#define SYS_TCGETPGRP   45
+#define SYS_TCSETPGRP   46
 
 #endif /* _BIGOS_USER_SYS_H */

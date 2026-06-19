@@ -7,8 +7,9 @@
  *   - a single-stage pipe a | b,
  *   - basic > / < redirection.
  * All capacities are bounded and over-limit input is a deterministic error that
- * returns to the read loop instead of crashing. No job control, variable
- * expansion, globbing, or scripting control flow. */
+ * returns to the read loop instead of crashing. Foreground process groups are
+ * a bounded BigOS subset only: no background jobs, fg/bg job table, termios,
+ * variable expansion, globbing, or scripting control flow. */
 #include "libc.h"
 
 #define SH_MAX_LINE     256
@@ -18,6 +19,8 @@
 #define SH_READ_LINE_TOO_LONG  (-1)
 #define SH_READ_LINE_EOF       (-2)
 #define SH_READ_LINE_INTERRUPT (-3)
+
+static void sh_errno_error(const char *prefix, const char *detail, int err);
 
 static int fd_has_installed_file(int fd) {
     int dup_fd = dup(fd);
@@ -30,6 +33,35 @@ static int fd_has_installed_file(int fd) {
 
 static int is_interactive_session(void) {
     return !fd_has_installed_file(0) && !fd_has_installed_file(1);
+}
+
+static void install_shell_signal_policy(void) {
+    struct sigaction act;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+    act.sa_handler = SIG_IGN;
+    sigaction(SIGINT, &act, NULL);
+}
+
+static void restore_child_signal_policy(void) {
+    struct sigaction act;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+    act.sa_handler = SIG_DFL;
+    sigaction(SIGINT, &act, NULL);
+}
+
+static void setup_shell_foreground(void) {
+    (void)setsid();
+    pid_t pgid = getpgrp();
+    if (pgid > 0 && tcsetpgrp(0, pgid) != 0)
+        sh_errno_error("sh: foreground setup failed", NULL, errno);
+}
+
+static void restore_shell_foreground(void) {
+    pid_t pgid = getpgrp();
+    if (pgid > 0 && tcsetpgrp(0, pgid) != 0)
+        sh_errno_error("sh: foreground restore failed", NULL, errno);
 }
 
 static void write_all(int fd, const char *s) {
@@ -221,9 +253,12 @@ static int run_external(char **argv, int in_fd, int out_fd) {
     pid_t pid = fork();
     if (pid < 0) {
         sh_error("sh: fork failed", NULL);
+        restore_shell_foreground();
         return 126;
     }
     if (pid == 0) {
+        restore_child_signal_policy();
+        (void)setpgid(0, 0);
         if (in_fd >= 0) {
             if (dup2(in_fd, 0) < 0)
                 exit(126);
@@ -248,11 +283,17 @@ static int run_external(char **argv, int in_fd, int out_fd) {
             sh_error("sh: command not found: ", argv[0]);
         exit(rc < 0 ? 126 : 127);
     }
+    if (setpgid(pid, pid) != 0)
+        sh_errno_error("sh: setpgid failed", argv[0], errno);
+    if (tcsetpgrp(0, pid) != 0)
+        sh_errno_error("sh: foreground command setup failed", argv[0], errno);
     int status = 126;
     if (wait_status(pid, &status) != pid) {
         sh_error("sh: wait failed", NULL);
+        restore_shell_foreground();
         return 126;
     }
+    restore_shell_foreground();
     if (status != 0)
         sh_error("sh: command failed: ", argv[0]);
     return status;
@@ -350,6 +391,10 @@ static int contains_unsupported_token(int argc, char **argv) {
             sh_error("sh: unsupported syntax: ", argv[i]);
             return 1;
         }
+    }
+    if (argc > 0 && (strcmp(argv[0], "fg") == 0 || strcmp(argv[0], "bg") == 0)) {
+        sh_error("sh: unsupported job control: ", argv[0]);
+        return 1;
     }
     return 0;
 }
@@ -528,6 +573,7 @@ static int run_pipe(char **left, char **right) {
         close(fds[0]);
         close(fds[1]);
         sh_error("sh: pipe fd setup failed", NULL);
+        restore_shell_foreground();
         return 126;
     }
 
@@ -538,9 +584,12 @@ static int run_pipe(char **left, char **right) {
             close(fds[0]);
             close(fds[1]);
             sh_error("sh: fork failed", NULL);
+            restore_shell_foreground();
             return 126;
         }
         if (lpid == 0) {
+            restore_child_signal_policy();
+            (void)setpgid(0, 0);
             if (dup2(fds[1], 1) < 0)
                 exit(126);
             close(fds[0]);
@@ -569,9 +618,12 @@ static int run_pipe(char **left, char **right) {
         if (lpid > 0)
             wait_status(lpid, NULL);
         sh_error("sh: fork failed", NULL);
+        restore_shell_foreground();
         return 126;
     }
     if (rpid == 0) {
+        restore_child_signal_policy();
+        (void)setpgid(0, lpid > 0 ? lpid : 0);
         if (dup2(fds[0], 0) < 0)
             exit(126);
         close(fds[0]);
@@ -592,13 +644,24 @@ static int run_pipe(char **left, char **right) {
         exit(rc < 0 ? 126 : 127);
     }
 
+    const pid_t foreground_pgid = lpid > 0 ? lpid : rpid;
+    if (lpid > 0 && setpgid(lpid, foreground_pgid) != 0)
+        sh_errno_error("sh: pipe setpgid failed", left[0], errno);
+    if (setpgid(rpid, foreground_pgid) != 0)
+        sh_errno_error("sh: pipe setpgid failed", right[0], errno);
+    if (tcsetpgrp(0, foreground_pgid) != 0)
+        sh_errno_error("sh: pipe foreground setup failed", NULL, errno);
+
     if (is_echo_builtin(left)) {
         close(fds[0]);
         (void)write_echo_to_fd(fds[1], left);
         close(fds[1]);
         int right_status = 126;
-        if (wait_status(rpid, &right_status) != rpid)
+        if (wait_status(rpid, &right_status) != rpid) {
+            restore_shell_foreground();
             return 126;
+        }
+        restore_shell_foreground();
         return right_status;
     }
 
@@ -607,8 +670,11 @@ static int run_pipe(char **left, char **right) {
     int ignored_status = 0;
     int right_status = 126;
     wait_status(lpid, &ignored_status);
-    if (wait_status(rpid, &right_status) != rpid)
+    if (wait_status(rpid, &right_status) != rpid) {
+        restore_shell_foreground();
         return 126;
+    }
+    restore_shell_foreground();
     return right_status;
 }
 
@@ -619,6 +685,8 @@ int main(int argc, char **argv, char **envp) {
     char line[SH_MAX_LINE];
     char *args[SH_MAX_ARGC + 1];
     int last_status = 0;
+    install_shell_signal_policy();
+    setup_shell_foreground();
 
     for (;;) {
         int interactive = is_interactive_session();
