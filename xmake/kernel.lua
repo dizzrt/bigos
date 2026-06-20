@@ -37,6 +37,7 @@ add_asflags(
 
 add_files("$(projectdir)/kernel/core/*.cc")
 add_files("$(projectdir)/kernel/core/bigos/**.cc")
+add_files("$(projectdir)/kernel/core/bigos/**.s")
 add_files("$(projectdir)/kernel/core/irq/**.cc")
 add_files("$(projectdir)/kernel/core/irq/**.s")
 add_files("$(projectdir)/kernel/core/sched/**.cc")
@@ -66,6 +67,10 @@ end
 
 if has_config("timer_smoke") then
     add_defines("BIGOS_TIMER_SMOKE")
+end
+
+if has_config("ap_startup_percpu_timers") then
+    add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
 end
 
 if has_config("keyboard_smoke") then

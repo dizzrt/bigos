@@ -24,6 +24,12 @@ option("timer_smoke")
     set_description("enable validation-only timer IRQ smoke marker")
 option_end()
 
+option("ap_startup_percpu_timers")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable bounded AP startup / per-CPU APIC timer baseline")
+option_end()
+
 option("keyboard_smoke")
     set_default(false)
     set_showmenu(true)

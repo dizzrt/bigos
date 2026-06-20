@@ -1,6 +1,7 @@
 #ifndef _BIG_USER_MODE_H
 #define _BIG_USER_MODE_H
 
+#include <bigos/percpu.h>
 #include <bigos/types.h>
 
 namespace bigos::irq {
@@ -16,7 +17,9 @@ namespace bigos::arch::x86 {
     constexpr uint16_t TSS_SELECTOR = 0x30;
 
     void init_user_mode() noexcept;
+    void init_cpu_mode(bigos::cpu::CpuId __cpu_id) noexcept;
     void set_tss_rsp0(uint64_t __rsp0) noexcept;
+    void set_cpu_tss_rsp0(bigos::cpu::CpuId __cpu_id, uint64_t __rsp0) noexcept;
     [[noreturn]] void enter_user_mode(uint64_t __rip, uint64_t __rsp) noexcept;
     // Resumes ring3 from a fully saved InterruptFrame (used by a forked child's
     // first entry). The frame register state is restored verbatim, so the child

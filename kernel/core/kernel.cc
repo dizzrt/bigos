@@ -7,9 +7,11 @@
 #warning It is recommended to build with GCC
 #endif
 
+#include <arch/x86/ap_startup.h>
 #include <bigos/block_io.h>
 #include <bigos/device.h>
 #include <bigos/memory.h>
+#include <bigos/percpu.h>
 #include <bigos/proc.h>
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
@@ -23,8 +25,8 @@
 #include <ktl/buffer.h>
 #include <drivers/block/ram_block_device.h>
 #include <drivers/video/vga.h>
-#include <string.h>
-#if defined(BIGOS_BLOCK_IO_REQUEST_SMOKE) || defined(BIGOS_WRITABLE_FS_SMOKE) || \
+
+#if defined(BIGOS_BLOCK_IO_REQUEST_SMOKE) || defined(BIGOS_WRITABLE_FS_SMOKE) ||                                       \
     defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE)
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/bigfs.h>
@@ -323,9 +325,8 @@ namespace {
         if (ctx->probe_queue_full) {
             ctx->recursive_depth++;
             if (ctx->recursive_depth == 1 && ctx->peer_device != nullptr) {
-                if (bigos::block_io::read_sync(
-                        ctx->peer_device, 0, 1, g_block_io_smoke_peer_buf, sizeof(g_block_io_smoke_peer_buf)) ==
-                    bigos::block_io::Status::Success)
+                if (bigos::block_io::read_sync(ctx->peer_device, 0, 1, g_block_io_smoke_peer_buf,
+                        sizeof(g_block_io_smoke_peer_buf)) == bigos::block_io::Status::Success)
                     ctx->peer_accepted_under_pressure = true;
             }
             if (ctx->recursive_depth < bigos::block_io::QUEUE_CAPACITY_PER_DEVICE) {
@@ -388,11 +389,9 @@ namespace {
         block->data[0] = 0xcc;
         bigos::bcache::mark_dirty(block);
         driver::block::ram_block_set_write_fault(ram, true);
-        const bool failed_dirty =
-            bigos::bcache::sync(block) == bigos::bcache::Status::IoError && block->dirty;
+        const bool failed_dirty = bigos::bcache::sync(block) == bigos::bcache::Status::IoError && block->dirty;
         driver::block::ram_block_set_write_fault(ram, false);
-        const bool recovered =
-            bigos::bcache::sync(block) == bigos::bcache::Status::Success && !block->dirty;
+        const bool recovered = bigos::bcache::sync(block) == bigos::bcache::Status::Success && !block->dirty;
         bigos::bcache::put(block);
         return failed_dirty && recovered;
     }
@@ -445,8 +444,8 @@ namespace {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED buffer\n");
             return;
         }
-        if (bigos::block_io::read_sync(&device, device.total_sectors, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
-            bigos::block_io::Status::Overflow) {
+        if (bigos::block_io::read_sync(&device, device.total_sectors, 1, read_buf,
+                driver::block::DEFAULT_SECTOR_SIZE) != bigos::block_io::Status::Overflow) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED range\n");
             return;
         }
@@ -474,15 +473,13 @@ namespace {
 
         write_buf[0] = 0x71;
         write_buf[1] = 0x17;
-        if (bigos::block_io::write_role_sync(
-                bigos::device::DeviceRole::RamValidationBlock, 2, 1, write_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
-            bigos::block_io::Status::Success) {
+        if (bigos::block_io::write_role_sync(bigos::device::DeviceRole::RamValidationBlock, 2, 1, write_buf,
+                driver::block::DEFAULT_SECTOR_SIZE) != bigos::block_io::Status::Success) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-write\n");
             return;
         }
-        if (bigos::block_io::read_role_sync(
-                bigos::device::DeviceRole::RamValidationBlock, 2, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
-                bigos::block_io::Status::Success ||
+        if (bigos::block_io::read_role_sync(bigos::device::DeviceRole::RamValidationBlock, 2, 1, read_buf,
+                driver::block::DEFAULT_SECTOR_SIZE) != bigos::block_io::Status::Success ||
             read_buf[0] != 0x71 || read_buf[1] != 0x17) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-read\n");
             return;
@@ -493,21 +490,19 @@ namespace {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-buffer\n");
             return;
         }
-        if (bigos::block_io::read_role_sync(
-                bigos::device::DeviceRole::RamValidationBlock, 2, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
-                bigos::block_io::Status::Success ||
+        if (bigos::block_io::read_role_sync(bigos::device::DeviceRole::RamValidationBlock, 2, 1, read_buf,
+                driver::block::DEFAULT_SECTOR_SIZE) != bigos::block_io::Status::Success ||
             read_buf[0] != 0x71) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-unchanged\n");
             return;
         }
-        if (bigos::block_io::read_role_sync(bigos::device::DeviceRole::RamValidationBlock, ram_device->total_sectors,
-                1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) != bigos::block_io::Status::Overflow) {
+        if (bigos::block_io::read_role_sync(bigos::device::DeviceRole::RamValidationBlock, ram_device->total_sectors, 1,
+                read_buf, driver::block::DEFAULT_SECTOR_SIZE) != bigos::block_io::Status::Overflow) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-range\n");
             return;
         }
-        if (bigos::block_io::read_role_sync(
-                bigos::device::DeviceRole::VgaText, 0, 1, read_buf, driver::block::DEFAULT_SECTOR_SIZE) !=
-            bigos::block_io::Status::DeviceNotReady) {
+        if (bigos::block_io::read_role_sync(bigos::device::DeviceRole::VgaText, 0, 1, read_buf,
+                driver::block::DEFAULT_SECTOR_SIZE) != bigos::block_io::Status::DeviceNotReady) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED role-not-ready\n");
             return;
         }
@@ -665,9 +660,8 @@ namespace {
         uint32_t inode = 0;
         uint64_t size = 0;
         bool is_dir = false;
-        bigos::bigfs::Status s =
-            bigos::bigfs::open(
-                path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid, &inode, &size, &is_dir);
+        bigos::bigfs::Status s = bigos::bigfs::open(
+            path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid, &inode, &size, &is_dir);
         if (s != bigos::bigfs::Status::Success) {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED create\n");
             return;
@@ -708,8 +702,8 @@ namespace {
         // from a non-owner whose other bits grant no write access.
         const char *priv_path = "/rw/priv.txt";
         uint32_t priv_inode = 0;
-        s = bigos::bigfs::open(priv_path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0600, uid, gid, &priv_inode,
-            &size, &is_dir);
+        s = bigos::bigfs::open(
+            priv_path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0600, uid, gid, &priv_inode, &size, &is_dir);
         if (s != bigos::bigfs::Status::Success) {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED priv-create\n");
             return;
@@ -744,8 +738,8 @@ namespace {
             return;
         }
         uint32_t tree_a = 0;
-        s = bigos::bigfs::open("/rw/tree/sub/a.txt", bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid,
-            gid, &tree_a, &size, &is_dir);
+        s = bigos::bigfs::open("/rw/tree/sub/a.txt", bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid,
+            &tree_a, &size, &is_dir);
         if (s != bigos::bigfs::Status::Success) {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-create-a\n");
             return;
@@ -757,8 +751,8 @@ namespace {
             return;
         }
         uint32_t tree_b = 0;
-        s = bigos::bigfs::open("/rw/tree/sub/b.txt", bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid,
-            gid, &tree_b, &size, &is_dir);
+        s = bigos::bigfs::open("/rw/tree/sub/b.txt", bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT, 0644, uid, gid,
+            &tree_b, &size, &is_dir);
         if (s != bigos::bigfs::Status::Success) {
             bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED tree-create-b\n");
             return;
@@ -788,8 +782,7 @@ namespace {
                 found_a = true;
             if (entries[i].type == bigos::vfs::DIRENT_TYPE_FILE && wfs_bytes_equal(entries[i].name, "b.txt", 5))
                 found_b = true;
-            if (entries[i].type == bigos::vfs::DIRENT_TYPE_DIRECTORY &&
-                wfs_bytes_equal(entries[i].name, "empty", 5))
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_DIRECTORY && wfs_bytes_equal(entries[i].name, "empty", 5))
                 found_empty = true;
         }
         if (s != bigos::bigfs::Status::Success || !found_a || !found_b || !found_empty) {
@@ -850,9 +843,9 @@ namespace {
         uint32_t inode = 0;
         uint64_t size = 0;
         bool is_dir = false;
-        bigos::bigfs::Status status = bigos::bigfs::open(
-            __path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT | bigos::vfs::OPEN_TRUNC, 0644, uid, gid, &inode,
-            &size, &is_dir);
+        bigos::bigfs::Status status =
+            bigos::bigfs::open(__path, bigos::vfs::OPEN_WRONLY | bigos::vfs::OPEN_CREAT | bigos::vfs::OPEN_TRUNC, 0644,
+                uid, gid, &inode, &size, &is_dir);
         if (status != bigos::bigfs::Status::Success || is_dir)
             return false;
         size_t written = 0;
@@ -941,8 +934,7 @@ namespace {
             return false;
         bigos::bigfs::close_inode(inode);
 
-        status =
-            bigos::bigfs::open("/rw/persist-trunc", bigos::vfs::OPEN_RDONLY, 0, uid, gid, &inode, &size, &is_dir);
+        status = bigos::bigfs::open("/rw/persist-trunc", bigos::vfs::OPEN_RDONLY, 0, uid, gid, &inode, &size, &is_dir);
         if (status != bigos::bigfs::Status::Success || is_dir || size != 10)
             return false;
         status = bigos::bigfs::read(inode, 0, buf, 2, &read);
@@ -1015,7 +1007,8 @@ namespace {
         if (!found_renamed)
             return false;
 
-        status = bigos::bigfs::open(tree_sub_path, bigos::vfs::OPEN_RDONLY, 0644, uid, gid, &dir_inode, &dir_size, &is_dir);
+        status =
+            bigos::bigfs::open(tree_sub_path, bigos::vfs::OPEN_RDONLY, 0644, uid, gid, &dir_inode, &dir_size, &is_dir);
         if (status != bigos::bigfs::Status::Success || !is_dir)
             return false;
         for (size_t i = 0; i < 4; i++)
@@ -1034,8 +1027,7 @@ namespace {
                 found_a = true;
             if (entries[i].type == bigos::vfs::DIRENT_TYPE_FILE && pfs_bytes_equal(entries[i].name, "b.txt", 5))
                 found_b = true;
-            if (entries[i].type == bigos::vfs::DIRENT_TYPE_DIRECTORY &&
-                pfs_bytes_equal(entries[i].name, "empty", 5))
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_DIRECTORY && pfs_bytes_equal(entries[i].name, "empty", 5))
                 found_empty = true;
         }
         if (!found_a || !found_b || found_empty)
@@ -1254,7 +1246,9 @@ void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
     bigos::serial_init();
 
+    bigos::cpu::init_bootstrap_cpu();
     bigos::init_mem(boot_info);
+    (void)bigos::arch::x86::ap_startup::prepare_trampoline_region();
     bigos::device::init();
     (void)bigos::device::probe_all(bigos::device::ProbeContext::KernelInit);
 #ifdef BIGOS_MM_SELF_TEST
@@ -1267,6 +1261,10 @@ void kernel(const BootInfoHeader *boot_info) {
 #endif
     bigos::terminal::init_tty();
     bigos::irq::initIRQ();
+#ifdef BIGOS_AP_STARTUP_PERCPU_TIMERS
+    bigos::cpu::init_topology_from_mp();
+    (void)bigos::arch::x86::ap_startup::start_application_processors();
+#endif
 #ifdef BIGOS_PAGE_FAULT_SMOKE
     bigos::irq::triggerPageFaultForValidation();
 #endif

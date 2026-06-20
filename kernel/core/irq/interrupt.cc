@@ -1,5 +1,6 @@
 #include <bigos/io.h>
 #include <bigos/panic.h>
+#include <bigos/percpu.h>
 #include <bigos/sched.h>
 #include <bigos/syscall.h>
 #ifdef BIGOS_USER_PROCESS
@@ -9,6 +10,7 @@
 #endif
 
 #include <drivers/irqchip/i8259.h>
+#include <drivers/irqchip/lapic.h>
 #include <irq/isr.h>
 #include <irq/interrupt.h>
 
@@ -94,6 +96,10 @@ namespace irq {
             kprintf("BIGOS_UNHANDLED_IRQ vector=%x irq=%x\n", (uint32_t)__frame->vector, (uint32_t)irq_line);
         }
 
+        static void default_lapic_irq_handler(InterruptFrame *__frame) noexcept {
+            kprintf("BIGOS_UNHANDLED_LAPIC_IRQ vector=%x\n", (uint32_t)__frame->vector);
+        }
+
         static void unknown_vector_handler(InterruptFrame *__frame) noexcept {
             kprintf("BIGOS_UNKNOWN_VECTOR vector=%x error=%llx rip=%llx\n", (uint32_t)__frame->vector,
                 __frame->error_code, __frame->rip);
@@ -105,6 +111,10 @@ namespace irq {
 
         static bool is_i8259_external_irq(uint64_t __vector) noexcept {
             return __vector >= I8259_MASTER_VECTOR_BASE && __vector <= I8259_VECTOR_LAST;
+        }
+
+        static bool is_lapic_external_irq(uint64_t __vector) noexcept {
+            return __vector == VECTOR_LAPIC_TIMER;
         }
 
         static bool is_syscall_vector(uint64_t __vector) noexcept {
@@ -213,6 +223,31 @@ namespace irq {
                 }
             }
 #endif
+            return;
+        }
+
+        if (__detail::is_lapic_external_irq(__frame->vector)) {
+            const bool bootstrap_cpu = bigos::cpu::is_bootstrap_cpu();
+            if (bootstrap_cpu) {
+                __detail::NonblockingContextGuard nonblocking_guard;
+                IRQHandler handler = __detail::isr_list[__frame->vector];
+                if (handler == nullptr)
+                    handler = &__detail::default_lapic_irq_handler;
+
+                // LAPIC-backed interrupts own LAPIC EOI here. This keeps the
+                // APIC path separate from legacy i8259 EOI and syscall/no-EOI
+                // dispatch while preserving the scheduler IRQ-return boundary.
+                handler(__frame);
+                driver::irqchip::lapic::send_eoi();
+            } else {
+                IRQHandler handler = __detail::isr_list[__frame->vector];
+                if (handler == nullptr)
+                    handler = &__detail::default_lapic_irq_handler;
+                handler(__frame);
+                driver::irqchip::lapic::send_eoi();
+            }
+            if (bootstrap_cpu)
+                bigos::sched::maybe_preempt_on_irq_return(__frame);
             return;
         }
 

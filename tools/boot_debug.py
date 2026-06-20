@@ -1070,6 +1070,7 @@ def render_bochsrc(
     vgaromimage: str | None,
     serial_log: Path | None,
     display: str,
+    cpu_count: int,
     extra_lines: Sequence[str],
     persistent_image: Path | None = None,
 ) -> None:
@@ -1082,7 +1083,7 @@ def render_bochsrc(
     cylinders, heads, sectors_per_track = disk_geometry(image_size)
     lines = [
         'memory: host=32, guest=32',
-        f'cpu: model={DEFAULT_CPU_MODEL}, count=1',
+        f'cpu: model={DEFAULT_CPU_MODEL}, count={cpu_count}',
         f'display_library: {"nogui" if display == "none" else display}',
         'boot: disk',
         'ata0: enabled=1, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14',
@@ -1152,17 +1153,41 @@ def stop_process_group(process: subprocess.Popen[str]) -> None:
     process.wait(timeout=5)
 
 
-def launch_bochs(bochsrc: Path) -> None:
-    run_command(
-        'bochs launch',
-        ['bochs', '-unlock', '-f', str(bochsrc), '-q'],
-        PROJECT_ROOT,
-        capture_output=True,
-        allow_result=is_bochs_user_shutdown,
+def bochs_smp_rejection_message(cpu_count: int, output: str) -> str | None:
+    if cpu_count <= 1:
+        return None
+    if "numerical parameter 'n_processors'" not in output:
+        return None
+    return (
+        f'this Bochs binary rejected --bochs-cpus {cpu_count}; it appears to be built with a single-CPU limit. '
+        'Use a Bochs build configured with SMP support, or use QEMU for this multi-core smoke path, for example '
+        '--emulator qemu --qemu-extra "-cpu max -smp 2".'
     )
 
 
-def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: str, timeout_seconds: float) -> None:
+def launch_bochs(bochsrc: Path, cpu_count: int) -> None:
+    printable = f'bochs -unlock -f {bochsrc} -q'
+    log_stage(f'bochs launch: {printable}')
+    result = subprocess.run(
+        ['bochs', '-unlock', '-f', str(bochsrc), '-q'],
+        cwd=PROJECT_ROOT,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if result.stdout:
+        print(result.stdout, end='' if result.stdout.endswith('\n') else '\n')
+    if result.returncode != 0 and not is_bochs_user_shutdown(result):
+        smp_message = bochs_smp_rejection_message(cpu_count, result.stdout or '')
+        if smp_message is not None:
+            raise StageError('bochs launch', smp_message)
+        raise StageError('bochs launch', f'command failed with exit code {result.returncode}: {printable}')
+
+
+def launch_bochs_until_serial_marker(
+    bochsrc: Path, serial_log: Path, marker: str, timeout_seconds: float, cpu_count: int
+) -> None:
     if serial_log.exists():
         serial_log.unlink()
 
@@ -1186,6 +1211,9 @@ def launch_bochs_until_serial_marker(bochsrc: Path, serial_log: Path, marker: st
 
             if process.poll() is not None:
                 output = process.stdout.read() if process.stdout is not None else ''
+                smp_message = bochs_smp_rejection_message(cpu_count, output)
+                if smp_message is not None:
+                    raise StageError('bochs smoke', smp_message)
                 raise StageError('bochs smoke', f'Bochs exited before marker {marker!r}\n{output}')
 
             time.sleep(0.1)
@@ -1406,6 +1434,8 @@ def run(args: argparse.Namespace) -> int:
         ovmf_code = resolve_ovmf_path(args.ovmf_code, 'BIGOS_OVMF_CODE', 'code')
         ovmf_template = resolve_ovmf_path(args.ovmf_vars_template, 'BIGOS_OVMF_VARS', 'vars')
         ovmf_vars = prepare_uefi_vars(ovmf_template, Path(args.ovmf_vars_output).resolve())
+    if is_bochs_backend(emulator) and (args.bochs_cpus < 1 or args.bochs_cpus > 8):
+        raise StageError('argument validation', '--bochs-cpus must be between 1 and 8')
 
     check_tools(emulator, need_emulator=should_launch, need_build=not args.skip_build, boot_mode=boot_mode)
     if not args.skip_build:
@@ -1435,6 +1465,7 @@ def run(args: argparse.Namespace) -> int:
                 args.vgaromimage,
                 serial_log,
                 display,
+                args.bochs_cpus,
                 bochs_extra,
                 persistent_image=persistent_image,
             )
@@ -1444,6 +1475,7 @@ def run(args: argparse.Namespace) -> int:
     print(f'emulator: {emulator}')
     if is_bochs_backend(emulator):
         print(f'bochsrc: {bochsrc_path}')
+        print(f'bochs_cpus: {args.bochs_cpus}')
     if serial_log:
         print(f'serial_log: {serial_log}')
     if persistent_image is not None:
@@ -1481,9 +1513,9 @@ def run(args: argparse.Namespace) -> int:
         if is_bochs_backend(emulator):
             cleanup_image_lock(image_path)
             if marker and serial_log:
-                launch_bochs_until_serial_marker(bochsrc_path, serial_log, marker, args.smoke_timeout)
+                launch_bochs_until_serial_marker(bochsrc_path, serial_log, marker, args.smoke_timeout, args.bochs_cpus)
             else:
-                launch_bochs(bochsrc_path)
+                launch_bochs(bochsrc_path, args.bochs_cpus)
         else:
             assert serial_log is not None
             serial_log.parent.mkdir(parents=True, exist_ok=True)
@@ -1891,6 +1923,12 @@ def make_parser() -> argparse.ArgumentParser:
     run_parser.add_argument('--bochsrc', help='custom Bochs config to use instead of generating one')
     run_parser.add_argument('--romimage', help='optional Bochs BIOS ROM path for generated config')
     run_parser.add_argument('--vgaromimage', help='optional Bochs VGA BIOS ROM path for generated config')
+    run_parser.add_argument(
+        '--bochs-cpus',
+        type=int,
+        default=1,
+        help='CPU count for generated Bochs config; defaults to 1, supports 1..8',
+    )
     run_parser.add_argument(
         '--skip-build',
         action='store_true',

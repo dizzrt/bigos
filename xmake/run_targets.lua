@@ -13,9 +13,7 @@ local function run_boot_debug(emulator, serial_log, target_args, process, base_a
     local proc = process.openv("python3", args)
     local _, status = proc:wait()
     proc:close()
-    if status ~= 0 then
-        error(string.format("boot_debug.py failed with exit code %d", status))
-    end
+    return status == 0
 end
 
 target("bochs")
@@ -25,7 +23,7 @@ target("bochs")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
-        run_boot_debug("bochs", "build/test/bochs.serial.log", option.get("arguments") or {}, process)
+        return run_boot_debug("bochs", "build/test/bochs.serial.log", option.get("arguments") or {}, process)
     end)
 
 target("qemu")
@@ -35,7 +33,7 @@ target("qemu")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
-        run_boot_debug("qemu", "build/test/qemu.serial.log", option.get("arguments") or {}, process)
+        return run_boot_debug("qemu", "build/test/qemu.serial.log", option.get("arguments") or {}, process)
     end)
 
 target("qemu-gdb")
@@ -45,7 +43,7 @@ target("qemu-gdb")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
-        run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log", option.get("arguments") or {}, process)
+        return run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log", option.get("arguments") or {}, process)
     end)
 
 target("qemu-uefi")
@@ -55,7 +53,7 @@ target("qemu-uefi")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
-        run_boot_debug(
+        return run_boot_debug(
             "qemu",
             "build/test/qemu-uefi.serial.log",
             option.get("arguments") or {},

@@ -1,4 +1,5 @@
 #include <arch/x86/boot/boot_info.h>
+#include <arch/x86/ap_startup.h>
 #include <bigos/io.h>   // remove later
 #include <bigos/panic.h>
 #include <irq/interrupt.h>
@@ -17,6 +18,10 @@
 #define DMA_LIMIT    0x1000000ul
 #define DMA32_LIMIT  0x100000000ul
 #define LOWEST_LIMIT 0x200000ul   // lowest 2MB reserved
+
+static_assert(bigos::arch::x86::ap_startup::RESERVED_PHYS >= 0x7000u);
+static_assert(bigos::arch::x86::ap_startup::RESERVED_PHYS + bigos::arch::x86::ap_startup::RESERVED_SIZE <=
+              LOWEST_LIMIT);
 
 // kernel size in bytes
 static uint32_t gKernelSize;

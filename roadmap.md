@@ -252,8 +252,8 @@ scales with core count.
 
 用户可见目标：内核跨多核调度，吞吐随核数提升。
 
-- [ ] Task M5.1: application processor startup with LAPIC/IOAPIC and per-CPU timers.
-- [ ] 任务 M5.1：AP 启动，配合 LAPIC/IOAPIC 与 per-CPU 定时器。
+- [x] Task M5.1: application processor startup with LAPIC/IOAPIC and per-CPU timers.
+- [x] 任务 M5.1：AP 启动，配合 LAPIC/IOAPIC 与 per-CPU 定时器。
 - [ ] Task M5.2: per-CPU run queues with cross-CPU scheduling and wakeups.
 - [ ] 任务 M5.2：per-CPU run queue，支持跨核调度与唤醒。
 - [ ] Task M5.3: activation of IRQ-safe locking, IPI delivery, and cross-CPU TLB

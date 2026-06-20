@@ -13,6 +13,7 @@ namespace timer::pit {
     constexpr uint8_t CHANNEL0_RATE_COMMAND = 0x36;
 
     void init_channel0() noexcept;
+    uint16_t read_channel0_counter() noexcept;
 }   // namespace timer::pit
 NAMESPACE_DRIVER_END
 
