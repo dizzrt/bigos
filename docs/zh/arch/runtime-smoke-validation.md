@@ -28,6 +28,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `timer-irq` | `--timer_smoke=y` | `BIGOS_TIMER_IRQ` | 10s | PIC/PIT IRQ0 marker 路径。 |
 | `scheduler` | `--scheduler_smoke=y` | `BIGOS_SCHED_THREAD_B` | 10s | 协作式内核线程 context switch 路径。 |
 | `scheduler-semantics` | `--scheduler_semantics_smoke=y` | `BIGOS_SCHED_SEMANTICS_PASSED` | 15s | Time slice 到期、preemption-disable 延迟与 guarded IRQ-return reschedule。 |
+| `scheduler-smp` | `--scheduler_smp_smoke=y` | `BIGOS_SCHED_SMP_PASSED` | 20s | Per-CPU run queue 上的一个 BSP worker 和一个 AP-placed worker；不声明 generic IPI、TLB shootdown、CPU hotplug 或完整 APIC interrupt migration。 |
 | `blocking-primitives` | `--blocking_smoke=y` | `BIGOS_BLOCKING_SMOKE_PASSED` | 15s | Synthetic TTY producer 加 wait queue wakeup 与 timeout sleep。 |
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` 最小 syscall ABI 路径。 |
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO 加只读 exFAT backend 上的 VFS open/read/release 路径。 |
@@ -77,6 +78,8 @@ source-level、build、headless 检查以及剩余 console-usability 风险。
 `blocking-primitives` case 在最终 pass marker 前还会输出 `BIGOS_BLOCKING_WAIT_BLOCKED`、`BIGOS_BLOCKING_WAKE_SENT`、`BIGOS_BLOCKING_WAIT_RESUMED`、`BIGOS_BLOCKING_TIMEOUT_BLOCKED` 与 `BIGOS_BLOCKING_TIMEOUT_EXPIRED` 中间 marker。它使用 synthetic TTY producer，因此 QEMU headless 自动验证不依赖手工键盘输入；若执行可选手工键盘验证，需要单独记录。
 
 `scheduler-semantics` case 在最终 pass marker 前还会输出 `BIGOS_SCHED_SEMANTICS_START`、`BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED` 与 `BIGOS_SCHED_SEMANTICS_PREEMPTED` 中间 marker。它验证 time-slice expiry 与 timer-driven IRQ-return reschedule，不会启用 memory、filesystem、user-program、user-ELF 或 broad smoke 选项。由于该 case 涉及 IRQ/timer/context-switch 行为，validation notes 需要记录 QEMU headless 串口日志，以及 Bochs 或 QEMU+Bochs 交叉验证是执行还是跳过。
+
+`scheduler-smp` case 会在最终 pass marker 前输出 `BIGOS_AP_ONLINE`、`BIGOS_AP_LOCAL_TIMER`、`BIGOS_SCHED_SMP_BSP_THREAD` 与 `BIGOS_SCHED_SMP_AP_THREAD`。矩阵为该 case 注入 QEMU `-cpu max -smp 2`；若 QEMU、APIC、cross-binutils、Bochs 多核支持、display 或 ROM 配置不可用，验证记录必须明确 skipped 或 blocked 证据和残余风险。
 
 process lifecycle core 现在会在 normal build 中编译。用户程序 smoke case 验证默认关闭的
 entry thread 与 marker 行为；source-level checks 覆盖 PID 唯一性、有界进程表容量失败、

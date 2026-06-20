@@ -48,6 +48,12 @@ option("scheduler_semantics_smoke")
     set_description("enable validation-only timer preemption scheduler semantics smoke")
 option_end()
 
+option("scheduler_smp_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only multi-core scheduler smoke")
+option_end()
+
 option("blocking_smoke")
     set_default(false)
     set_showmenu(true)

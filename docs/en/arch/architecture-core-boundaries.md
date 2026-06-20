@@ -94,19 +94,21 @@ separate change declares and validates the behavior change:
 
 ## SMP Preparation Boundary
 
-The current SMP-ready boundary is a bootstrap-CPU contract, not real SMP
-execution. CPU-local accessors may describe current thread, current process,
-active address-space root, IRQ-visible nesting, preemption-disable depth, and
-pending reschedule state, but every default path resolves to CPU 0 and fails
-closed for unsupported non-bootstrap CPU targets.
+The current SMP-ready boundary includes AP startup, per-CPU local timer state,
+and bounded per-CPU scheduler domains. CPU-local accessors describe current
+thread, current process, active address-space root, IRQ-visible nesting,
+preemption-disable depth, and pending reschedule state for each online CPU that
+has been initialized as schedulable.
 
-- Scheduler ownership remains single-core: ready queues, wait queues, sleep
-  lists, the idle thread, and reschedule intent belong to the bootstrap
-  scheduler domain. There is no cross-CPU run queue, migration, load balancing,
-  remote wakeup, or IPI nudging.
+- Scheduler ownership is explicit per CPU: ready queues, wait queues, sleep
+  lists, the idle thread, terminated list, and reschedule intent belong to the
+  owning scheduler domain. Initial placement and wakeup may enqueue work on a
+  remote online CPU through the scheduler boundary, publish runnable state first,
+  then set reschedule pending and send a scheduler nudge.
 - IRQ routing remains on the existing IDT/i8259/PIT/keyboard/syscall model.
   Exception and external IRQ paths are non-blocking; `int 0x80` keeps the
-  existing syscall ABI and does not send an i8259 EOI.
+  existing syscall ABI and does not send an i8259 EOI. LAPIC timer and scheduler
+  nudge interrupts use LAPIC EOI; the nudge is not generic IPI routing.
 - TLB invalidation is expressed through a boundary that carries address-space
   root, virtual page or range, target CPU mask, and completion requirement. The
   single-core implementation accepts only the bootstrap CPU target and completes
@@ -114,9 +116,9 @@ closed for unsupported non-bootstrap CPU targets.
 - Shared scheduler state, IRQ-visible state, and page-table updates publish under
   interrupt-disabled sections or the selected local boundary before becoming
   visible to handlers, fault paths, or future remote CPUs.
-- LAPIC, IOAPIC, per-CPU timers, AP startup, SIPI trampolines, IPI delivery,
-  shootdown acknowledgements, CPU hotplug, NUMA, RCU, and true parallel
-  scheduling remain future dependencies.
+- Generic IPI routing, TLB shootdown acknowledgements, CPU hotplug, NUMA, RCU,
+  full APIC external interrupt migration, and broad load balancing remain future
+  dependencies.
 
 ## Review Checklist
 

@@ -28,6 +28,7 @@ Behavior-oriented validation distinguishes three entry classes:
 | `timer-irq` | `--timer_smoke=y` | `BIGOS_TIMER_IRQ` | 10s | PIC/PIT IRQ0 marker path. |
 | `scheduler` | `--scheduler_smoke=y` | `BIGOS_SCHED_THREAD_B` | 10s | Cooperative kernel-thread context switch path. |
 | `scheduler-semantics` | `--scheduler_semantics_smoke=y` | `BIGOS_SCHED_SEMANTICS_PASSED` | 15s | Timer slice expiry, preemption-disable deferral, and guarded IRQ-return reschedule. |
+| `scheduler-smp` | `--scheduler_smp_smoke=y` | `BIGOS_SCHED_SMP_PASSED` | 20s | Per-CPU run queues with one BSP worker and one AP-placed worker; not generic IPI, TLB shootdown, CPU hotplug, or full APIC interrupt migration. |
 | `blocking-primitives` | `--blocking_smoke=y` | `BIGOS_BLOCKING_SMOKE_PASSED` | 15s | Synthetic TTY producer plus wait queue wakeup and timeout sleep. |
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` minimal syscall ABI path. |
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO plus VFS open/read/release over the read-only exFAT backend. |
@@ -84,6 +85,8 @@ console-usability risk.
 The `blocking-primitives` case emits intermediate markers `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, and `BIGOS_BLOCKING_TIMEOUT_EXPIRED` before the final pass marker. It uses a synthetic TTY producer, so automated QEMU headless validation does not require manual keyboard input; optional manual keyboard validation should be recorded separately when performed.
 
 The `scheduler-semantics` case emits intermediate markers `BIGOS_SCHED_SEMANTICS_START`, `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED`, and `BIGOS_SCHED_SEMANTICS_PREEMPTED` before the final pass marker. It exercises time-slice expiry and timer-driven IRQ-return reschedule without enabling memory, filesystem, user-program, user-ELF, or broad smoke options. Because it touches IRQ/timer/context-switch behavior, validation notes should record QEMU headless serial logs and whether Bochs or QEMU+Bochs cross-validation was executed or skipped.
+
+The `scheduler-smp` case emits `BIGOS_AP_ONLINE`, `BIGOS_AP_LOCAL_TIMER`, `BIGOS_SCHED_SMP_BSP_THREAD`, and `BIGOS_SCHED_SMP_AP_THREAD` before the final pass marker. The matrix injects QEMU `-cpu max -smp 2` for this case and records skipped or blocked evidence explicitly when QEMU, APIC, cross-binutils, Bochs multi-core support, display, or ROM configuration is unavailable.
 
 The process lifecycle core now compiles in normal builds. User-program smoke
 cases validate smoke-only entry threads and marker behavior, while source-level

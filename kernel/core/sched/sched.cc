@@ -7,6 +7,7 @@
 #ifdef BIGOS_USER_PROCESS
 #include <bigos/proc.h>
 #endif
+#include <drivers/irqchip/lapic.h>
 #include <irq/interrupt.h>
 
 // Internal allocator flag: alloc_kernel_pages() only returns mapped, accessible
@@ -42,6 +43,8 @@ namespace sched {
             // Intrusive run-queue node; lifetime owned by this TCB so the run
             // queue never allocates in IRQ context.
             TCB *rq_next;
+            bool on_run_queue;
+            cpu::CpuId owner_cpu;
             // Intrusive wait/sleep nodes. A thread may belong to at most one
             // explicit wait queue and one timeout tracking list at a time.
             TCB *wait_next;
@@ -67,17 +70,21 @@ namespace sched {
             void *user_process;
         };
 
-        // Bootstrap-CPU scheduler state. This is the single-core implementation
-        // slot behind the CPU-local access boundary; it is not SMP-safe global
-        // state and must not be shared by APs, remote wakeups, or load balancing.
+        struct SchedulerSpinLock {
+            volatile uint32_t value;
+        };
+
         struct SchedulerCpuState {
+            cpu::CpuId cpu_id;
+            SchedulerSpinLock lock;
             TCB *current;
             TCB *idle;
             TCB *run_head;
             TCB *run_tail;
             TCB *sleep_head;
             TCB *terminated_head;
-            ThreadId next_id;
+            volatile uint32_t run_queue_depth;
+            bool initialized;
             bool scheduler_started;
             volatile uint32_t nonblocking_depth;
             volatile uint32_t scheduler_critical_depth;
@@ -89,34 +96,32 @@ namespace sched {
             volatile uint64_t irq_return_preemptions;
         };
 
-        SchedulerCpuState g_boot_cpu_sched = {
-            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, INVALID_THREAD_ID + 1, false,
-            0,       0,       0,       0,       false,   0,       0,                     0,
+        SchedulerCpuState g_domains[cpu::MAX_CPUS];
+        TCB g_idle_tcbs[cpu::MAX_CPUS];
+        volatile ThreadId g_next_id = INVALID_THREAD_ID + 1;
+
+        void spin_lock(SchedulerSpinLock *__lock) noexcept {
+            while (__atomic_exchange_n(&__lock->value, 1u, __ATOMIC_ACQUIRE) != 0u) {
+                while (__atomic_load_n(&__lock->value, __ATOMIC_RELAXED) != 0u)
+                    asm volatile("pause" ::: "memory");
+            }
+        }
+
+        void spin_unlock(SchedulerSpinLock *__lock) noexcept {
+            __atomic_store_n(&__lock->value, 0u, __ATOMIC_RELEASE);
+        }
+
+        struct SpinGuard {
+            SchedulerSpinLock *lock;
+            explicit SpinGuard(SchedulerSpinLock *__lock) noexcept : lock(__lock) {
+                spin_lock(lock);
+            }
+            SpinGuard(const SpinGuard &) = delete;
+            SpinGuard &operator=(const SpinGuard &) = delete;
+            ~SpinGuard() noexcept {
+                spin_unlock(lock);
+            }
         };
-
-        TCB *&g_current = g_boot_cpu_sched.current;
-        TCB *&g_idle = g_boot_cpu_sched.idle;
-        TCB *&g_run_head = g_boot_cpu_sched.run_head;
-        TCB *&g_run_tail = g_boot_cpu_sched.run_tail;
-        TCB *&g_sleep_head = g_boot_cpu_sched.sleep_head;
-        TCB *&g_terminated_head = g_boot_cpu_sched.terminated_head;
-        ThreadId &g_next_id = g_boot_cpu_sched.next_id;
-        bool &g_scheduler_started = g_boot_cpu_sched.scheduler_started;
-        volatile uint32_t &g_nonblocking_depth = g_boot_cpu_sched.nonblocking_depth;
-        volatile uint32_t &g_scheduler_critical_depth = g_boot_cpu_sched.scheduler_critical_depth;
-        volatile uint32_t &g_preemption_disable_depth = g_boot_cpu_sched.preemption_disable_depth;
-
-        // Bounded reschedule intent recorded by the timer IRQ. The intent is
-        // consumed only at explicit scheduler-owned safe boundaries.
-        volatile uint64_t &g_reschedule_intent = g_boot_cpu_sched.reschedule_intent;
-        volatile bool &g_reschedule_pending = g_boot_cpu_sched.reschedule_pending;
-        volatile uint64_t &g_slice_expired_events = g_boot_cpu_sched.slice_expired_events;
-        volatile uint64_t &g_deferred_preemption_events = g_boot_cpu_sched.deferred_preemption_events;
-        volatile uint64_t &g_irq_return_preemptions = g_boot_cpu_sched.irq_return_preemptions;
-
-        // The boot/main thread storage. After start() the boot context becomes
-        // the scheduler-owned idle thread and reuses its existing kernel stack.
-        TCB g_boot_tcb;
 
         uint64_t read_rflags() noexcept {
             uint64_t flags;
@@ -129,40 +134,101 @@ namespace sched {
             return (read_rflags() & RFLAGS_IF) != 0;
         }
 
+        SchedulerCpuState *domain_for_cpu(cpu::CpuId __id) noexcept {
+            if (__id >= cpu::MAX_CPUS)
+                return nullptr;
+            return &g_domains[__id];
+        }
+
+        SchedulerCpuState *current_domain() noexcept {
+            SchedulerCpuState *domain = domain_for_cpu(cpu::current_cpu_id());
+            if (domain == nullptr || !domain->initialized)
+                domain = domain_for_cpu(cpu::BOOTSTRAP_CPU_ID);
+            return domain;
+        }
+
+        bool init_domain(cpu::CpuId __id) noexcept {
+            if (!cpu::cpu_id_supported(__id))
+                return false;
+            SchedulerCpuState *domain = domain_for_cpu(__id);
+            if (domain == nullptr)
+                return false;
+
+            SpinGuard guard(&domain->lock);
+            if (domain->initialized)
+                return true;
+
+            domain->cpu_id = __id;
+            domain->current = nullptr;
+            domain->idle = nullptr;
+            domain->run_head = nullptr;
+            domain->run_tail = nullptr;
+            domain->sleep_head = nullptr;
+            domain->terminated_head = nullptr;
+            domain->run_queue_depth = 0;
+            domain->scheduler_started = false;
+            domain->nonblocking_depth = 0;
+            domain->scheduler_critical_depth = 0;
+            domain->preemption_disable_depth = 0;
+            domain->reschedule_intent = 0;
+            domain->reschedule_pending = false;
+            domain->slice_expired_events = 0;
+            domain->deferred_preemption_events = 0;
+            domain->irq_return_preemptions = 0;
+            domain->initialized = true;
+            return true;
+        }
+
+        bool ensure_current_domain() noexcept {
+            return init_domain(cpu::current_cpu_id());
+        }
+
+        bool cpu_schedulable(cpu::CpuId __id) noexcept {
+            SchedulerCpuState *domain = domain_for_cpu(__id);
+            return domain != nullptr && domain->initialized && cpu::cpu_online(__id);
+        }
+
+        ThreadId allocate_thread_id() noexcept {
+            return __atomic_fetch_add(&g_next_id, 1u, __ATOMIC_RELAXED);
+        }
+
         void enter_scheduler_critical() noexcept {
-            ++g_preemption_disable_depth;
-            ++g_scheduler_critical_depth;
-            bigos::cpu::set_preemption_disable_depth(g_preemption_disable_depth);
+            SchedulerCpuState *domain = current_domain();
+            ++domain->preemption_disable_depth;
+            ++domain->scheduler_critical_depth;
+            bigos::cpu::set_preemption_disable_depth(domain->preemption_disable_depth);
         }
 
         void leave_scheduler_critical() noexcept {
-            if (g_scheduler_critical_depth > 0)
-                --g_scheduler_critical_depth;
-            if (g_preemption_disable_depth > 0)
-                --g_preemption_disable_depth;
-            bigos::cpu::set_preemption_disable_depth(g_preemption_disable_depth);
+            SchedulerCpuState *domain = current_domain();
+            if (domain->scheduler_critical_depth > 0)
+                --domain->scheduler_critical_depth;
+            if (domain->preemption_disable_depth > 0)
+                --domain->preemption_disable_depth;
+            bigos::cpu::set_preemption_disable_depth(domain->preemption_disable_depth);
         }
 
-        void request_reschedule() noexcept {
-            ++g_reschedule_intent;
-            g_reschedule_pending = true;
-            bigos::cpu::set_reschedule_pending(true);
-            if (g_preemption_disable_depth > 0)
-                ++g_deferred_preemption_events;
+        void request_reschedule_locked(SchedulerCpuState *__domain) noexcept {
+            ++__domain->reschedule_intent;
+            __domain->reschedule_pending = true;
+            cpu::state_for(__domain->cpu_id).reschedule_pending = true;
+            if (__domain->preemption_disable_depth > 0)
+                ++__domain->deferred_preemption_events;
         }
 
-        void set_current(TCB *__t) noexcept {
-            g_current = __t;
-            bigos::cpu::set_current_thread(__t);
+        void set_current(SchedulerCpuState *__domain, TCB *__t) noexcept {
+            __domain->current = __t;
+            cpu::LocalState &local = cpu::state_for(__domain->cpu_id);
+            local.current_thread = __t;
         }
 
-        void set_reschedule_pending(bool __pending) noexcept {
-            g_reschedule_pending = __pending;
-            bigos::cpu::set_reschedule_pending(__pending);
+        void set_reschedule_pending(SchedulerCpuState *__domain, bool __pending) noexcept {
+            __domain->reschedule_pending = __pending;
+            cpu::state_for(__domain->cpu_id).reschedule_pending = __pending;
         }
 
-        bool has_runnable_peer() noexcept {
-            TCB *cur = g_run_head;
+        bool has_runnable_peer(SchedulerCpuState *__domain) noexcept {
+            TCB *cur = __domain->run_head;
             while (cur != nullptr) {
                 if (cur->state == ThreadState::Runnable)
                     return true;
@@ -172,11 +238,13 @@ namespace sched {
         }
 
         bool is_ordinary_running_thread(TCB *__t) noexcept {
-            return __t != nullptr && __t != g_idle && __t->state == ThreadState::Running;
+            SchedulerCpuState *domain = current_domain();
+            return __t != nullptr && __t != domain->idle && __t->state == ThreadState::Running;
         }
 
         void refresh_time_slice(TCB *__t) noexcept {
-            if (__t != nullptr && __t != g_idle)
+            SchedulerCpuState *domain = __t != nullptr ? domain_for_cpu(__t->owner_cpu) : nullptr;
+            if (__t != nullptr && (domain == nullptr || __t != domain->idle))
                 __t->time_slice_remaining = DEFAULT_TIME_SLICE_TICKS;
         }
 
@@ -187,8 +255,9 @@ namespace sched {
         // process active. A no-op for kernel threads (user_process == nullptr).
         void restore_user_context_on_resume() noexcept {
 #ifdef BIGOS_USER_PROCESS
-            if (g_current != nullptr && g_current->user_process != nullptr)
-                bigos::proc::restore_current_user_context((bigos::proc::Process *)g_current->user_process);
+            SchedulerCpuState *domain = current_domain();
+            if (domain->current != nullptr && domain->current->user_process != nullptr)
+                bigos::proc::restore_current_user_context((bigos::proc::Process *)domain->current->user_process);
 #endif
         }
 
@@ -215,35 +284,53 @@ namespace sched {
         }
 
         bool can_preempt_from_irq_return(const irq::InterruptFrame *__frame) noexcept {
-            return arch_context::is_kernel_irq_return_context(__frame) && g_scheduler_started &&
-                   is_ordinary_running_thread(g_current) && g_reschedule_pending && g_preemption_disable_depth == 0 &&
-                   g_scheduler_critical_depth == 0 && g_nonblocking_depth <= 1 && has_runnable_peer();
+            SchedulerCpuState *domain = current_domain();
+            return domain != nullptr && arch_context::is_kernel_irq_return_context(__frame) && domain->scheduler_started &&
+                   is_ordinary_running_thread(domain->current) && domain->reschedule_pending &&
+                   domain->preemption_disable_depth == 0 && domain->scheduler_critical_depth == 0 &&
+                   domain->nonblocking_depth <= 1 && has_runnable_peer(domain);
         }
 
-        void rq_push(TCB *__t) noexcept {
-            if (__t == nullptr || __t->state != ThreadState::Runnable)
+        void rq_push(SchedulerCpuState *__domain, TCB *__t) noexcept {
+            if (__domain == nullptr || __t == nullptr || __t->state != ThreadState::Runnable || __t->on_run_queue)
                 return;
             __t->rq_next = nullptr;
-            if (g_run_tail == nullptr) {
-                g_run_head = __t;
-                g_run_tail = __t;
+            __t->owner_cpu = __domain->cpu_id;
+            __t->on_run_queue = true;
+            if (__domain->run_tail == nullptr) {
+                __domain->run_head = __t;
+                __domain->run_tail = __t;
             } else {
-                g_run_tail->rq_next = __t;
-                g_run_tail = __t;
+                __domain->run_tail->rq_next = __t;
+                __domain->run_tail = __t;
             }
+            ++__domain->run_queue_depth;
         }
 
-        TCB *rq_pop() noexcept {
-            while (g_run_head != nullptr) {
-                TCB *t = g_run_head;
-                g_run_head = t->rq_next;
-                if (g_run_head == nullptr)
-                    g_run_tail = nullptr;
+        TCB *rq_pop(SchedulerCpuState *__domain) noexcept {
+            while (__domain != nullptr && __domain->run_head != nullptr) {
+                TCB *t = __domain->run_head;
+                __domain->run_head = t->rq_next;
+                if (__domain->run_head == nullptr)
+                    __domain->run_tail = nullptr;
                 t->rq_next = nullptr;
+                t->on_run_queue = false;
+                if (__domain->run_queue_depth > 0)
+                    --__domain->run_queue_depth;
                 if (t->state == ThreadState::Runnable)
                     return t;
             }
             return nullptr;
+        }
+
+        void wait_queue_lock(WaitQueue *__queue) noexcept {
+            if (__queue != nullptr)
+                spin_lock((SchedulerSpinLock *)&__queue->lock);
+        }
+
+        void wait_queue_unlock(WaitQueue *__queue) noexcept {
+            if (__queue != nullptr)
+                spin_unlock((SchedulerSpinLock *)&__queue->lock);
         }
 
         void wait_queue_push_locked(WaitQueue *__queue, TCB *__t) noexcept {
@@ -284,18 +371,18 @@ namespace sched {
             __t->wait_next = nullptr;
         }
 
-        void sleep_push_locked(TCB *__t) noexcept {
-            __t->sleep_next = g_sleep_head;
-            g_sleep_head = __t;
+        void sleep_push_locked(SchedulerCpuState *__domain, TCB *__t) noexcept {
+            __t->sleep_next = __domain->sleep_head;
+            __domain->sleep_head = __t;
         }
 
-        void sleep_remove_locked(TCB *__t) noexcept {
+        void sleep_remove_locked(SchedulerCpuState *__domain, TCB *__t) noexcept {
             TCB *prev = nullptr;
-            TCB *cur = g_sleep_head;
+            TCB *cur = __domain->sleep_head;
             while (cur != nullptr) {
                 if (cur == __t) {
                     if (prev == nullptr)
-                        g_sleep_head = cur->sleep_next;
+                        __domain->sleep_head = cur->sleep_next;
                     else
                         prev->sleep_next = cur->sleep_next;
                     cur->sleep_next = nullptr;
@@ -307,33 +394,45 @@ namespace sched {
             __t->sleep_next = nullptr;
         }
 
-        bool wake_thread_locked(TCB *__t, int __result) noexcept {
+        bool wake_thread_locked(SchedulerCpuState *__domain, TCB *__t, int __result) noexcept {
             if (__t == nullptr || __t->state == ThreadState::Terminated || __t->state == ThreadState::Runnable ||
                 __t->state == ThreadState::Running || __t->state == ThreadState::Idle)
                 return false;
 
             wait_queue_remove_locked(__t);
-            sleep_remove_locked(__t);
+            sleep_remove_locked(__domain, __t);
             __t->wait_result = __result;
             __t->state = ThreadState::Runnable;
             refresh_time_slice(__t);
-            rq_push(__t);
+            rq_push(__domain, __t);
+            request_reschedule_locked(__domain);
             return true;
         }
 
-        void schedule_blocked_current_locked(TCB *__prev) noexcept {
-            TCB *next = rq_pop();
+        void schedule_blocked_current_locked(SchedulerCpuState *__domain, TCB *__prev) noexcept {
+            TCB *next = rq_pop(__domain);
             if (next == nullptr)
-                next = g_idle;
+                next = __domain->idle;
             else {
                 next->state = ThreadState::Running;
                 refresh_time_slice(next);
             }
 
-            set_current(next);
+            set_current(__domain, next);
+            set_reschedule_pending(__domain, false);
+            spin_unlock(&__domain->lock);
             prepare_address_space_before_switch(next);
             arch_context::switch_kernel_context(&__prev->saved_sp, next->saved_sp);
             restore_user_context_on_resume();
+        }
+
+        void nudge_cpu(cpu::CpuId __target_cpu) noexcept {
+            if (__target_cpu == cpu::current_cpu_id() || !cpu_schedulable(__target_cpu))
+                return;
+            const cpu::CpuSlot &slot = cpu::slot_for(__target_cpu);
+            if (slot.apic_id == cpu::INVALID_APIC_ID)
+                return;
+            (void)driver::irqchip::lapic::send_fixed_ipi(slot.apic_id, irq::VECTOR_SCHED_NUDGE);
         }
 
         // New-thread startup path. Entered for the first time through the prepared
@@ -341,232 +440,295 @@ namespace sched {
         // masked from the switching thread, so enable them before running entry.
         extern "C" void thread_trampoline() noexcept {
             bigos::irq::enableIRQ();
-            TCB *self = g_current;
+            TCB *self = current_domain()->current;
             self->entry(self->arg);
             sched::thread_exit();
         }
     }   // namespace __detail
 
-    ThreadId create_kernel_thread(ThreadEntry __entry, void *__arg) noexcept {
-        if (__entry == nullptr)
-            return INVALID_THREAD_ID;
+    namespace __detail {
+        cpu::CpuId select_placement_cpu() noexcept {
+            (void)ensure_current_domain();
+            const cpu::CpuId current = cpu::current_cpu_id();
+            cpu::CpuId best = cpu_schedulable(current) ? current : cpu::BOOTSTRAP_CPU_ID;
+            uint32_t best_depth = 0xffffffffu;
 
-        // Non-interrupt context only: ordinary allocator under the phase 3
-        // contract. Never reached from any IRQ handler.
-        __detail::TCB *tcb = (__detail::TCB *)kmalloc(sizeof(__detail::TCB));
-        if (tcb == nullptr)
-            return INVALID_THREAD_ID;
+            SchedulerCpuState *current_domain = domain_for_cpu(current);
+            if (current_domain != nullptr && current_domain->initialized) {
+                const uint32_t local_depth = __atomic_load_n(&current_domain->run_queue_depth, __ATOMIC_RELAXED);
+                if (cpu_schedulable(current) && local_depth <= 3)
+                    return current;
+                best_depth = local_depth;
+            }
 
-        void *stack_base = alloc_kernel_pages(__detail::KERNEL_THREAD_STACK_PAGES, _GFM_PRE_PAGING);
-        if (stack_base == nullptr) {
-            // Failure path must not violate the phase 3 allocator contract: free
-            // only what this path allocated, in non-interrupt context.
-            bigos::free(tcb);
-            return INVALID_THREAD_ID;
+            for (cpu::CpuId id = 0; id < cpu::MAX_CPUS; id++) {
+                SchedulerCpuState *domain = domain_for_cpu(id);
+                if (domain == nullptr || !cpu_schedulable(id))
+                    continue;
+                const uint32_t depth = __atomic_load_n(&domain->run_queue_depth, __ATOMIC_RELAXED);
+                if (depth < best_depth || (depth == best_depth && id < best)) {
+                    best = id;
+                    best_depth = depth;
+                }
+            }
+            return best;
         }
 
-        tcb->id = __detail::g_next_id++;
-        tcb->state = ThreadState::Runnable;
-        tcb->stack_base = stack_base;
-        tcb->stack_pages = __detail::KERNEL_THREAD_STACK_PAGES;
-        tcb->entry = __entry;
-        tcb->arg = __arg;
-        tcb->rq_next = nullptr;
-        tcb->wait_next = nullptr;
-        tcb->wait_queue = nullptr;
-        tcb->sleep_next = nullptr;
-        tcb->deadline_tick = 0;
-        tcb->wait_result = WAIT_OK;
-        tcb->time_slice_remaining = __detail::DEFAULT_TIME_SLICE_TICKS;
-        tcb->static_priority = __detail::DEFAULT_STATIC_PRIORITY;
-        tcb->policy_slot = __detail::DEFAULT_POLICY_SLOT;
-        tcb->term_next = nullptr;
-        tcb->user_process = nullptr;
+        ThreadId create_kernel_thread_target(ThreadEntry __entry, void *__arg, cpu::CpuId __target_cpu) noexcept {
+            if (__entry == nullptr)
+                return INVALID_THREAD_ID;
+            if (!init_domain(cpu::BOOTSTRAP_CPU_ID) || !cpu_schedulable(__target_cpu))
+                return INVALID_THREAD_ID;
 
-        // Build the initial stack frame so the first switch_context resume lands
-        // in thread_trampoline with a 16-byte-aligned System V frame. Layout from
-        // saved_sp upward: r15, r14, r13, r12, rbx, rbp, return-address, pad.
-        const uint64_t stack_top = (uint64_t)stack_base + (uint64_t)__detail::KERNEL_THREAD_STACK_PAGES * PAGE_SIZE;
-        uint64_t *sp = (uint64_t *)stack_top;
-        sp -= 8;
-        sp[0] = 0;                                        // r15
-        sp[1] = 0;                                        // r14
-        sp[2] = 0;                                        // r13
-        sp[3] = 0;                                        // r12
-        sp[4] = 0;                                        // rbx
-        sp[5] = 0;                                        // rbp
-        sp[6] = (uint64_t)&__detail::thread_trampoline;   // return address
-        sp[7] = 0;                                        // alignment padding
-        tcb->saved_sp = (uint64_t)sp;
+            // Non-interrupt context only: ordinary allocator under the phase 3
+            // contract. Never reached from any IRQ handler.
+            TCB *tcb = (TCB *)kmalloc(sizeof(TCB));
+            if (tcb == nullptr)
+                return INVALID_THREAD_ID;
 
-        bigos::irq::disableIRQ();
-        __detail::enter_scheduler_critical();
-        __detail::rq_push(tcb);
-        __detail::leave_scheduler_critical();
-        bigos::irq::enableIRQ();
+            void *stack_base = alloc_kernel_pages(KERNEL_THREAD_STACK_PAGES, _GFM_PRE_PAGING);
+            if (stack_base == nullptr) {
+                // Failure path must not violate the phase 3 allocator contract:
+                // free only what this path allocated, in non-interrupt context.
+                bigos::free(tcb);
+                return INVALID_THREAD_ID;
+            }
 
-        return tcb->id;
+            tcb->id = allocate_thread_id();
+            tcb->state = ThreadState::Runnable;
+            tcb->saved_sp = 0;
+            tcb->stack_base = stack_base;
+            tcb->stack_pages = KERNEL_THREAD_STACK_PAGES;
+            tcb->entry = __entry;
+            tcb->arg = __arg;
+            tcb->rq_next = nullptr;
+            tcb->on_run_queue = false;
+            tcb->owner_cpu = __target_cpu;
+            tcb->wait_next = nullptr;
+            tcb->wait_queue = nullptr;
+            tcb->sleep_next = nullptr;
+            tcb->deadline_tick = 0;
+            tcb->wait_result = WAIT_OK;
+            tcb->time_slice_remaining = DEFAULT_TIME_SLICE_TICKS;
+            tcb->static_priority = DEFAULT_STATIC_PRIORITY;
+            tcb->policy_slot = DEFAULT_POLICY_SLOT;
+            tcb->term_next = nullptr;
+            tcb->user_process = nullptr;
+
+            // Build the initial stack frame so the first switch_context resume lands
+            // in thread_trampoline with a 16-byte-aligned System V frame. Layout from
+            // saved_sp upward: r15, r14, r13, r12, rbx, rbp, return-address, pad.
+            const uint64_t stack_top = (uint64_t)stack_base + (uint64_t)KERNEL_THREAD_STACK_PAGES * PAGE_SIZE;
+            uint64_t *sp = (uint64_t *)stack_top;
+            sp -= 8;
+            sp[0] = 0;                                      // r15
+            sp[1] = 0;                                      // r14
+            sp[2] = 0;                                      // r13
+            sp[3] = 0;                                      // r12
+            sp[4] = 0;                                      // rbx
+            sp[5] = 0;                                      // rbp
+            sp[6] = (uint64_t)&thread_trampoline;           // return address
+            sp[7] = 0;                                      // alignment padding
+            tcb->saved_sp = (uint64_t)sp;
+
+            SchedulerCpuState *target = domain_for_cpu(__target_cpu);
+            bigos::irq::InterruptGuard irq_guard;
+            spin_lock(&target->lock);
+            rq_push(target, tcb);
+            request_reschedule_locked(target);
+            spin_unlock(&target->lock);
+            nudge_cpu(__target_cpu);
+            return tcb->id;
+        }
+    }   // namespace __detail
+
+    ThreadId create_kernel_thread(ThreadEntry __entry, void *__arg) noexcept {
+        return __detail::create_kernel_thread_target(__entry, __arg, __detail::select_placement_cpu());
+    }
+
+    ThreadId create_kernel_thread_on_cpu(ThreadEntry __entry, void *__arg, cpu::CpuId __target_cpu) noexcept {
+        return __detail::create_kernel_thread_target(__entry, __arg, __target_cpu);
     }
 
     void yield() noexcept {
         bigos::irq::disableIRQ();
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::spin_lock(&domain->lock);
         __detail::enter_scheduler_critical();
 
-        __detail::TCB *prev = __detail::g_current;
-        __detail::TCB *next = __detail::rq_pop();
+        __detail::TCB *prev = domain->current;
+        __detail::TCB *next = __detail::rq_pop(domain);
 
         if (next == nullptr) {
-            // No peer runnable thread: keep running the current thread (or idle)
-            // without corrupting the run queue.
             __detail::leave_scheduler_critical();
+            __detail::spin_unlock(&domain->lock);
             bigos::irq::enableIRQ();
             return;
         }
 
-        if (prev->state == ThreadState::Running) {
+        if (prev != nullptr && prev->state == ThreadState::Running) {
             prev->state = ThreadState::Runnable;
-            __detail::rq_push(prev);
+            __detail::rq_push(domain, prev);
         }
 
         next->state = ThreadState::Running;
         __detail::refresh_time_slice(next);
-        __detail::set_reschedule_pending(false);
-        __detail::set_current(next);
+        __detail::set_reschedule_pending(domain, false);
+        __detail::set_current(domain, next);
         __detail::leave_scheduler_critical();
+        __detail::spin_unlock(&domain->lock);
         __detail::prepare_address_space_before_switch(next);
         arch_context::switch_kernel_context(&prev->saved_sp, next->saved_sp);
 
-        // Resumed: the thread that switched back to us left interrupts masked.
         __detail::restore_user_context_on_resume();
         bigos::irq::enableIRQ();
     }
 
     void set_current_user_process(void *__process) noexcept {
         bigos::irq::InterruptGuard guard;
-        if (__detail::g_current != nullptr)
-            __detail::g_current->user_process = __process;
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::SpinGuard lock(&domain->lock);
+        if (domain->current != nullptr)
+            domain->current->user_process = __process;
     }
 
     void thread_exit() noexcept {
         bigos::irq::disableIRQ();
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::spin_lock(&domain->lock);
         __detail::enter_scheduler_critical();
-        __detail::TCB *prev = __detail::g_current;
-        __detail::wait_queue_remove_locked(prev);
-        __detail::sleep_remove_locked(prev);
+        __detail::TCB *prev = domain->current;
+        if (prev->wait_queue != nullptr) {
+            WaitQueue *queue = prev->wait_queue;
+            __detail::wait_queue_lock(queue);
+            __detail::wait_queue_remove_locked(prev);
+            __detail::wait_queue_unlock(queue);
+        }
+        __detail::sleep_remove_locked(domain, prev);
         prev->state = ThreadState::Terminated;
         // Remove from runnable scheduling and retain on the terminated list.
         // The current TCB and kernel stack are NOT freed on this exit stack;
         // safe reclamation is deferred to a later lifecycle change.
-        prev->term_next = __detail::g_terminated_head;
-        __detail::g_terminated_head = prev;
+        prev->term_next = domain->terminated_head;
+        domain->terminated_head = prev;
 
-        __detail::TCB *next = __detail::rq_pop();
+        __detail::TCB *next = __detail::rq_pop(domain);
         if (next == nullptr)
-            next = __detail::g_idle;
+            next = domain->idle;
         else {
             next->state = ThreadState::Running;
             __detail::refresh_time_slice(next);
         }
 
-        // Terminated threads are never resumed. Do not leave saved_sp pointing
-        // into the exit stack, because the process reaper may free that stack
-        // after the parent observes the wait status.
         uint64_t discarded_sp = 0;
         prev->saved_sp = 0;
 
-        __detail::set_current(next);
+        __detail::set_current(domain, next);
         __detail::leave_scheduler_critical();
+        __detail::spin_unlock(&domain->lock);
         __detail::prepare_address_space_before_switch(next);
         arch_context::switch_kernel_context(&discarded_sp, next->saved_sp);
 
-        // Unreachable: a terminated thread is never scheduled again.
         for (;;)
             asm volatile("hlt");
     }
 
+    bool init_current_cpu_domain() noexcept {
+        return __detail::init_domain(cpu::current_cpu_id());
+    }
+
     void start() noexcept {
-        // Adopt the boot/main execution context as the scheduler-owned idle
-        // thread, reusing the existing boot kernel stack. Must run with maskable
-        // interrupts enabled so timer IRQ0 can wake the idle hlt.
-        __detail::g_boot_tcb.id = __detail::g_next_id++;
-        __detail::g_boot_tcb.state = ThreadState::Idle;
-        __detail::g_boot_tcb.saved_sp = 0;
-        __detail::g_boot_tcb.stack_base = nullptr;
-        __detail::g_boot_tcb.stack_pages = 0;
-        __detail::g_boot_tcb.entry = nullptr;
-        __detail::g_boot_tcb.arg = nullptr;
-        __detail::g_boot_tcb.rq_next = nullptr;
-        __detail::g_boot_tcb.wait_next = nullptr;
-        __detail::g_boot_tcb.wait_queue = nullptr;
-        __detail::g_boot_tcb.sleep_next = nullptr;
-        __detail::g_boot_tcb.deadline_tick = 0;
-        __detail::g_boot_tcb.wait_result = WAIT_OK;
-        __detail::g_boot_tcb.time_slice_remaining = 0;
-        __detail::g_boot_tcb.static_priority = __detail::DEFAULT_STATIC_PRIORITY;
-        __detail::g_boot_tcb.policy_slot = __detail::DEFAULT_POLICY_SLOT;
-        __detail::g_boot_tcb.term_next = nullptr;
-        __detail::g_boot_tcb.user_process = nullptr;
+        const cpu::CpuId cpu_id = cpu::current_cpu_id();
+        (void)__detail::init_domain(cpu_id);
+        __detail::SchedulerCpuState *domain = __detail::domain_for_cpu(cpu_id);
+        __detail::TCB *idle = &__detail::g_idle_tcbs[cpu_id];
 
-        __detail::g_idle = &__detail::g_boot_tcb;
-        __detail::set_current(&__detail::g_boot_tcb);
-        __detail::g_scheduler_started = true;
+        idle->id = __detail::allocate_thread_id();
+        idle->state = ThreadState::Idle;
+        idle->saved_sp = 0;
+        idle->stack_base = nullptr;
+        idle->stack_pages = 0;
+        idle->entry = nullptr;
+        idle->arg = nullptr;
+        idle->rq_next = nullptr;
+        idle->on_run_queue = false;
+        idle->owner_cpu = cpu_id;
+        idle->wait_next = nullptr;
+        idle->wait_queue = nullptr;
+        idle->sleep_next = nullptr;
+        idle->deadline_tick = 0;
+        idle->wait_result = WAIT_OK;
+        idle->time_slice_remaining = 0;
+        idle->static_priority = __detail::DEFAULT_STATIC_PRIORITY;
+        idle->policy_slot = __detail::DEFAULT_POLICY_SLOT;
+        idle->term_next = nullptr;
+        idle->user_process = nullptr;
 
-        // Idle thread owns halt behavior: run any runnable thread, otherwise
-        // hlt until an IRQ wakes the CPU, then re-evaluate.
+        {
+            bigos::irq::InterruptGuard guard;
+            __detail::SpinGuard lock(&domain->lock);
+            domain->idle = idle;
+            __detail::set_current(domain, idle);
+            domain->scheduler_started = true;
+        }
+
+        // Idle thread owns halt behavior for each CPU: run local work, otherwise
+        // hlt until a timer or scheduler nudge wakes this CPU, then re-evaluate.
         for (;;) {
             sched::yield();
 #ifdef BIGOS_USER_PROCESS
-            bigos::proc::reap_pending_processes();
+            if (cpu::is_bootstrap_cpu())
+                bigos::proc::reap_pending_processes();
 #endif
             asm volatile("hlt");
         }
     }
 
     bool can_block() noexcept {
-        return __detail::g_scheduler_started && __detail::g_current != nullptr &&
-               __detail::g_current != __detail::g_idle && __detail::g_current->state == ThreadState::Running &&
-               __detail::g_nonblocking_depth == 0 && __detail::g_scheduler_critical_depth == 0 &&
-               __detail::interrupts_enabled();
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        return domain->scheduler_started && domain->current != nullptr && domain->current != domain->idle &&
+               domain->current->state == ThreadState::Running && domain->nonblocking_depth == 0 &&
+               domain->scheduler_critical_depth == 0 && __detail::interrupts_enabled();
     }
 
     bool can_allocate_in_fault() noexcept {
-        // Weaker than can_block(): the CPU page-fault path runs under the
-        // nonblocking guard with IF=0 but its frame allocation never blocks.
-        // Require only an ordinary running kernel thread (not idle) after start
-        // and no scheduler critical section; ignore the nonblocking depth and IF.
-        return __detail::g_scheduler_started && __detail::g_current != nullptr &&
-               __detail::g_current != __detail::g_idle && __detail::g_current->state == ThreadState::Running &&
-               __detail::g_scheduler_critical_depth == 0;
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        return domain->scheduler_started && domain->current != nullptr && domain->current != domain->idle &&
+               domain->current->state == ThreadState::Running && domain->scheduler_critical_depth == 0;
     }
 
     void enter_nonblocking_context() noexcept {
-        ++__detail::g_nonblocking_depth;
-        bigos::cpu::set_nonblocking_depth(__detail::g_nonblocking_depth);
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        ++domain->nonblocking_depth;
+        bigos::cpu::set_nonblocking_depth(domain->nonblocking_depth);
     }
 
     void leave_nonblocking_context() noexcept {
-        if (__detail::g_nonblocking_depth > 0)
-            --__detail::g_nonblocking_depth;
-        bigos::cpu::set_nonblocking_depth(__detail::g_nonblocking_depth);
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        if (domain->nonblocking_depth > 0)
+            --domain->nonblocking_depth;
+        bigos::cpu::set_nonblocking_depth(domain->nonblocking_depth);
     }
 
     void disable_preemption() noexcept {
-        ++__detail::g_preemption_disable_depth;
-        bigos::cpu::set_preemption_disable_depth(__detail::g_preemption_disable_depth);
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        ++domain->preemption_disable_depth;
+        bigos::cpu::set_preemption_disable_depth(domain->preemption_disable_depth);
     }
 
     void enable_preemption() noexcept {
-        if (__detail::g_preemption_disable_depth > 0)
-            --__detail::g_preemption_disable_depth;
-        bigos::cpu::set_preemption_disable_depth(__detail::g_preemption_disable_depth);
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        if (domain->preemption_disable_depth > 0)
+            --domain->preemption_disable_depth;
+        bigos::cpu::set_preemption_disable_depth(domain->preemption_disable_depth);
     }
 
     bool preemption_enabled() noexcept {
-        return __detail::g_preemption_disable_depth == 0;
+        return __detail::current_domain()->preemption_disable_depth == 0;
     }
 
     bool reschedule_pending() noexcept {
-        return __detail::g_reschedule_pending;
+        return __detail::current_domain()->reschedule_pending;
     }
 
     void init_wait_queue(WaitQueue *__queue) noexcept {
@@ -574,6 +736,7 @@ namespace sched {
             return;
         __queue->head = nullptr;
         __queue->tail = nullptr;
+        __queue->lock = 0;
     }
 
     bool wait_queue_empty(const WaitQueue *__queue) noexcept {
@@ -588,28 +751,34 @@ namespace sched {
             return WAIT_BLOCK_FORBIDDEN;
 
         bigos::irq::disableIRQ();
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::spin_lock(&domain->lock);
         __detail::enter_scheduler_critical();
+        __detail::wait_queue_lock(__queue);
 
         if (__predicate != nullptr && __predicate(__arg)) {
+            __detail::wait_queue_unlock(__queue);
             __detail::leave_scheduler_critical();
+            __detail::spin_unlock(&domain->lock);
             bigos::irq::enableIRQ();
             return WAIT_OK;
         }
 
-        __detail::TCB *self = __detail::g_current;
+        __detail::TCB *self = domain->current;
         self->wait_result = WAIT_OK;
         __detail::wait_queue_push_locked(__queue, self);
         if (__timeout_ticks > 0) {
             self->deadline_tick = timer::ticks() + __timeout_ticks;
             self->state = ThreadState::Sleeping;
-            __detail::sleep_push_locked(self);
+            __detail::sleep_push_locked(domain, self);
         } else {
             self->deadline_tick = 0;
             self->state = ThreadState::Blocked;
         }
 
         __detail::leave_scheduler_critical();
-        __detail::schedule_blocked_current_locked(self);
+        __detail::wait_queue_unlock(__queue);
+        __detail::schedule_blocked_current_locked(domain, self);
 
         // Resumed by wakeup or timeout. The switcher left IRQs masked.
         bigos::irq::enableIRQ();
@@ -621,17 +790,25 @@ namespace sched {
             return 0;
 
         bigos::irq::InterruptGuard guard;
-        __detail::enter_scheduler_critical();
-
+        __detail::wait_queue_lock(__queue);
         __detail::TCB *t = (__detail::TCB *)__queue->head;
         while (t != nullptr && t->state == ThreadState::Terminated) {
             __detail::TCB *next = t->wait_next;
             __detail::wait_queue_remove_locked(t);
             t = next;
         }
-
-        const uint32_t woke = __detail::wake_thread_locked(t, WAIT_OK) ? 1u : 0u;
-        __detail::leave_scheduler_critical();
+        __detail::SchedulerCpuState *domain = t != nullptr ? __detail::domain_for_cpu(t->owner_cpu) : nullptr;
+        if (domain == nullptr) {
+            __detail::wait_queue_unlock(__queue);
+            return 0;
+        }
+        __detail::spin_lock(&domain->lock);
+        const uint32_t woke = __detail::wake_thread_locked(domain, t, WAIT_OK) ? 1u : 0u;
+        const cpu::CpuId target_cpu = domain->cpu_id;
+        __detail::spin_unlock(&domain->lock);
+        __detail::wait_queue_unlock(__queue);
+        if (woke != 0)
+            __detail::nudge_cpu(target_cpu);
         return woke;
     }
 
@@ -640,18 +817,27 @@ namespace sched {
             return 0;
 
         bigos::irq::InterruptGuard guard;
-        __detail::enter_scheduler_critical();
-
+        __detail::wait_queue_lock(__queue);
         uint32_t count = 0;
         while (__queue->head != nullptr) {
             __detail::TCB *t = (__detail::TCB *)__queue->head;
-            if (__detail::wake_thread_locked(t, WAIT_OK))
-                ++count;
-            else
+            __detail::SchedulerCpuState *domain = __detail::domain_for_cpu(t->owner_cpu);
+            if (domain == nullptr) {
                 __detail::wait_queue_remove_locked(t);
+                continue;
+            }
+            __detail::spin_lock(&domain->lock);
+            const bool woke = __detail::wake_thread_locked(domain, t, WAIT_OK);
+            const cpu::CpuId target_cpu = domain->cpu_id;
+            __detail::spin_unlock(&domain->lock);
+            if (woke) {
+                ++count;
+                __detail::nudge_cpu(target_cpu);
+            } else {
+                __detail::wait_queue_remove_locked(t);
+            }
         }
-
-        __detail::leave_scheduler_critical();
+        __detail::wait_queue_unlock(__queue);
         return count;
     }
 
@@ -662,16 +848,18 @@ namespace sched {
             return WAIT_BLOCK_FORBIDDEN;
 
         bigos::irq::disableIRQ();
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::spin_lock(&domain->lock);
         __detail::enter_scheduler_critical();
 
-        __detail::TCB *self = __detail::g_current;
+        __detail::TCB *self = domain->current;
         self->wait_result = WAIT_TIMEOUT;
         self->deadline_tick = timer::ticks() + __ticks;
         self->state = ThreadState::Sleeping;
-        __detail::sleep_push_locked(self);
+        __detail::sleep_push_locked(domain, self);
 
         __detail::leave_scheduler_critical();
-        __detail::schedule_blocked_current_locked(self);
+        __detail::schedule_blocked_current_locked(domain, self);
 
         bigos::irq::enableIRQ();
         return self->wait_result;
@@ -681,25 +869,29 @@ namespace sched {
         if (!__detail::can_preempt_from_irq_return(__frame))
             return;
 
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::spin_lock(&domain->lock);
         __detail::enter_scheduler_critical();
-        __detail::TCB *prev = __detail::g_current;
-        __detail::TCB *next = __detail::rq_pop();
+        __detail::TCB *prev = domain->current;
+        __detail::TCB *next = __detail::rq_pop(domain);
         if (next == nullptr) {
             __detail::leave_scheduler_critical();
+            __detail::spin_unlock(&domain->lock);
             return;
         }
 
         if (prev->state == ThreadState::Running) {
             prev->state = ThreadState::Runnable;
-            __detail::rq_push(prev);
+            __detail::rq_push(domain, prev);
         }
 
         next->state = ThreadState::Running;
         __detail::refresh_time_slice(next);
-        __detail::set_current(next);
-        __detail::set_reschedule_pending(false);
-        ++__detail::g_irq_return_preemptions;
+        __detail::set_current(domain, next);
+        __detail::set_reschedule_pending(domain, false);
+        ++domain->irq_return_preemptions;
         __detail::leave_scheduler_critical();
+        __detail::spin_unlock(&domain->lock);
 
         arch_context::switch_kernel_context(&prev->saved_sp, next->saved_sp);
         __detail::restore_user_context_on_resume();
@@ -708,24 +900,33 @@ namespace sched {
     void on_timer_tick() noexcept {
         // IRQ-context-safe and bounded: no allocation, no IO, no blocking, and
         // no direct thread switch. Context switching is deferred to explicit
-        // scheduler-owned return boundaries after EOI. Slice expiry updates
-        // g_reschedule_intent through request_reschedule().
+        // scheduler-owned return boundaries after EOI.
         const timer::tick_t now = timer::ticks();
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        if (domain == nullptr || !domain->initialized)
+            return;
+
+        __detail::spin_lock(&domain->lock);
         __detail::TCB *prev = nullptr;
-        __detail::TCB *cur = __detail::g_sleep_head;
+        __detail::TCB *cur = domain->sleep_head;
         while (cur != nullptr) {
             __detail::TCB *next = cur->sleep_next;
             if (now >= cur->deadline_tick) {
                 if (prev == nullptr)
-                    __detail::g_sleep_head = next;
+                    domain->sleep_head = next;
                 else
                     prev->sleep_next = next;
                 cur->sleep_next = nullptr;
-                __detail::wait_queue_remove_locked(cur);
+                if (cur->wait_queue != nullptr) {
+                    __detail::wait_queue_lock(cur->wait_queue);
+                    __detail::wait_queue_remove_locked(cur);
+                    __detail::wait_queue_unlock(cur->wait_queue);
+                }
                 if (cur->state == ThreadState::Sleeping) {
                     cur->wait_result = WAIT_TIMEOUT;
                     cur->state = ThreadState::Runnable;
-                    __detail::rq_push(cur);
+                    __detail::rq_push(domain, cur);
+                    __detail::request_reschedule_locked(domain);
                 }
             } else {
                 prev = cur;
@@ -733,17 +934,28 @@ namespace sched {
             cur = next;
         }
 
-        __detail::TCB *current = __detail::g_current;
-        if (!__detail::is_ordinary_running_thread(current))
+        __detail::TCB *current = domain->current;
+        if (!__detail::is_ordinary_running_thread(current)) {
+            __detail::spin_unlock(&domain->lock);
             return;
+        }
 
         if (current->time_slice_remaining > 0)
             --current->time_slice_remaining;
 
         if (current->time_slice_remaining == 0) {
-            ++__detail::g_slice_expired_events;
-            __detail::request_reschedule();
+            ++domain->slice_expired_events;
+            __detail::request_reschedule_locked(domain);
         }
+        __detail::spin_unlock(&domain->lock);
+    }
+
+    void on_scheduler_nudge() noexcept {
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        if (domain == nullptr || !domain->initialized)
+            return;
+        __detail::SpinGuard lock(&domain->lock);
+        __detail::request_reschedule_locked(domain);
     }
 }   // namespace sched
 NAMESPACE_BIGOS_END

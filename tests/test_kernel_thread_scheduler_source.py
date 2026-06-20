@@ -37,9 +37,9 @@ def test_thread_and_sched_headers_declare_bounded_state_and_context_contracts() 
     assert 'void start() noexcept;' in sched_h
     assert 'void on_timer_tick() noexcept;' in sched_h
 
-    # Non-interrupt-context and single-core annotations.
+    # Non-interrupt-context and bounded per-CPU annotations.
     assert 'Non-interrupt-context only' in sched_h
-    assert 'Single-core only' in sched_h or 'single-core' in sched_h.lower()
+    assert 'CPU-owned' in sched_h or 'CPU-local' in sched_h
     assert 'IRQ-context-safe' in sched_h
 
 
@@ -48,7 +48,7 @@ def test_default_kernel_thread_stack_is_one_page_without_build_switch() -> None:
     xmake = read_source('xmake.lua')
 
     assert 'KERNEL_THREAD_STACK_PAGES = 1' in sched
-    assert 'alloc_kernel_pages(__detail::KERNEL_THREAD_STACK_PAGES, _GFM_PRE_PAGING)' in sched
+    assert 'alloc_kernel_pages(KERNEL_THREAD_STACK_PAGES, _GFM_PRE_PAGING)' in sched
     assert 'stack_base' in sched and 'stack_pages' in sched
 
     # No build switch changes the default thread stack page count.
@@ -63,7 +63,7 @@ def test_terminated_threads_defer_reclamation() -> None:
     exit_body = sched[exit_start:exit_end]
 
     assert 'ThreadState::Terminated' in exit_body
-    assert 'g_terminated_head' in exit_body
+    assert 'domain->terminated_head' in exit_body
     # The exit path must NOT free the current TCB or stack on the exit stack.
     assert 'free(' not in exit_body
     assert 'free_pages' not in exit_body
@@ -105,7 +105,8 @@ def test_context_switch_symbol_saves_callee_saved_set() -> None:
     assert 'ret' in switch_s
 
     # C++ side declares the helper and a scheduler-owned trampoline entry.
-    assert 'extern "C" void switch_context(uint64_t *__old_sp, uint64_t __new_sp) noexcept;' in sched
+    arch_context = read_source('kernel/core/sched/arch_context.cc')
+    assert 'extern "C" void switch_context(uint64_t *__old_sp, uint64_t __new_sp) noexcept;' in arch_context
     assert 'thread_trampoline' in sched
     assert 'self->entry(self->arg);' in sched
     assert 'sched::thread_exit();' in sched
@@ -122,16 +123,16 @@ def test_cooperative_switch_does_not_touch_interrupt_frame_abi() -> None:
     assert 'iretq' in interrupt_s
 
 
-def test_yield_is_round_robin_single_core() -> None:
+def test_yield_is_round_robin_cpu_local() -> None:
     sched = read_source('kernel/core/sched/sched.cc')
 
     yield_start = sched.index('void yield()')
     yield_end = sched.index('void thread_exit()')
     yield_body = sched[yield_start:yield_end]
 
-    assert 'rq_pop()' in yield_body
-    assert 'rq_push(prev)' in yield_body
-    assert 'switch_context(&prev->saved_sp, next->saved_sp)' in yield_body
+    assert 'rq_pop(domain)' in yield_body
+    assert 'rq_push(domain, prev)' in yield_body
+    assert 'switch_kernel_context(&prev->saved_sp, next->saved_sp)' in yield_body
     # No peer: keep running without corrupting the queue.
     assert 'if (next == nullptr)' in yield_body
 
@@ -140,7 +141,7 @@ def test_yield_is_round_robin_single_core() -> None:
     exit_body = sched[exit_start:exit_end]
     assert 'uint64_t discarded_sp = 0;' in exit_body
     assert 'prev->saved_sp = 0;' in exit_body
-    assert 'switch_context(&discarded_sp, next->saved_sp)' in exit_body
+    assert 'switch_kernel_context(&discarded_sp, next->saved_sp)' in exit_body
 
 
 def test_context_switch_prepares_next_address_space_before_loading_stack() -> None:
@@ -162,13 +163,13 @@ def test_context_switch_prepares_next_address_space_before_loading_stack() -> No
     ):
         body = sched[sched.index(start_token) : sched.index(end_token)]
         prepare_index = body.index('prepare_address_space_before_switch(next);')
-        switch_index = body.index('switch_context(')
+        switch_index = body.index('switch_kernel_context(')
         assert prepare_index < switch_index
 
     prepare_body = proc[proc.index('void prepare_context_switch_to') : proc.index('Process *find_process')]
     assert 'restore_current_user_context(__next_process);' in prepare_body
     assert 'current->kernel_address_space_root' in prepare_body
-    assert 'activate_address_space_root(current->kernel_address_space_root)' in prepare_body
+    assert 'activate_kernel_address_space(current->kernel_address_space_root)' in prepare_body
 
 
 def test_idle_thread_replaces_naked_kernel_halt_loop() -> None:
@@ -215,7 +216,8 @@ def test_timer_irq_records_bounded_intent_without_preemption() -> None:
     # The hook only records bounded intent; no switch/alloc/io in IRQ context.
     hook_start = sched.index('void on_timer_tick()')
     hook_body = sched[hook_start:]
-    assert 'g_reschedule_intent' in hook_body
+    assert 'reschedule_intent' in sched
+    assert 'request_reschedule_locked(domain)' in hook_body
     for token in ('switch_context', 'kmalloc', 'alloc_kernel_pages', 'free(', 'yield()'):
         assert token not in hook_body
 
@@ -279,8 +281,8 @@ def test_blocking_primitives_are_intrusive_and_context_guarded() -> None:
         assert token in sched
 
     assert 'bool can_block() noexcept' in sched_h
-    assert 'g_nonblocking_depth' in sched
-    assert 'g_scheduler_critical_depth' in sched
+    assert 'nonblocking_depth' in sched
+    assert 'scheduler_critical_depth' in sched
     assert 'interrupts_enabled()' in sched
     assert 'NonblockingContextGuard nonblocking_guard' in interrupt
 
@@ -298,12 +300,13 @@ def test_wait_queue_wakeup_and_timeout_paths_are_allocation_free() -> None:
     assert 'wait_queue_push_locked(__queue, self);' in wait_body
     assert 'ThreadState::Blocked' in wait_body
     assert 'ThreadState::Sleeping' in wait_body
-    assert 'sleep_push_locked(self);' in wait_body
-    assert 'schedule_blocked_current_locked(self);' in wait_body
-    assert 'wake_thread_locked(t, WAIT_OK)' in wake_body
+    assert 'sleep_push_locked(domain, self);' in wait_body
+    assert 'schedule_blocked_current_locked(domain, self);' in wait_body
+    assert 'wake_thread_locked(domain, t, WAIT_OK)' in wake_body
     assert 'wait_queue_remove_locked(cur);' in tick_body
     assert 'cur->wait_result = WAIT_TIMEOUT;' in tick_body
     assert 'cur->state = ThreadState::Runnable;' in tick_body
+    assert 'rq_push(domain, cur);' in tick_body
 
     for body in (wait_body, wake_body, tick_body):
         for token in ('kmalloc', 'alloc_kernel_pages', 'free(', 'kprintf', 'serial_puts', 'mdelay'):

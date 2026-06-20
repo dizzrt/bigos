@@ -1,6 +1,6 @@
-# 内核线程与单核调度器
+# 内核线程与 per-CPU 调度器
 
-BigOS 仍保持最小内核线程模型的单核边界，但把调度器从纯协作式 round-robin 扩展为 bounded timer-driven semantics。普通内核线程仍使用相同 TCB、run queue、idle ownership 与 cooperative switch frame；PIT IRQ0 现在可以让 time slice 到期并请求受 guard 保护的 IRQ-return switch。
+BigOS 仍保持最小内核线程模型的 bounded 边界，但调度器现在为每个 online CPU 拥有一个 run queue domain。普通内核线程仍使用相同 TCB 与 cooperative switch frame；每个 CPU 自己拥有 current thread、idle thread、runnable queue、sleep list、terminated list、reschedule state 与 time-slice accounting。PIT 或 LAPIC timer interrupt 可以让本 CPU time slice 到期，并请求受 guard 保护的 IRQ-return switch。
 
 ## 范围
 
@@ -8,24 +8,25 @@ BigOS 仍保持最小内核线程模型的单核边界，但把调度器从纯�
 - 通过 `bigos::arch_context::switch_kernel_context()` 提供 scheduler-facing
   kernel context-switch boundary。当前实现进入 x86_64 `switch_context` assembly
   primitive，保存/恢复 System V callee-saved 寄存器（rbp、rbx、r12-r15）与栈指针。
-- 提供单核 round-robin `yield()`、`sched::start()` 入口与 scheduler-owned idle 线程。
+- 提供 CPU-local round-robin `yield()`、`sched::start()` 入口与 scheduler-owned idle 线程。
 - 用 idle 线程替代 `kernel()` 尾部裸 `hlt` loop。
-- timer IRQ0 通过 bounded、IRQ-context-safe 的 `sched::on_timer_tick()` 统计普通线程 time slice、记录 reschedule intent 并唤醒到期 sleeper。
+- CPU-local timer interrupt 通过 bounded、IRQ-context-safe 的 `sched::on_timer_tick()` 统计普通线程 time slice、记录 reschedule intent 并唤醒到期 sleeper。
 - 只允许外部 IRQ 在注册 handler 完成、单次 i8259 EOI 已发送、且 scheduler preemption guard 允许后，于 IRQ return 边界切换线程。
+- 通过 `create_kernel_thread()` 提供 bounded 初始 placement，并通过 `create_kernel_thread_on_cpu()` 提供显式目标 CPU placement。remote enqueue 先在目标 CPU scheduler lock 下发布 runnable state，再设置目标 CPU reschedule flag 并发送 scheduler nudge。
 
 ## 非目标与边界
 
-- **单核**：没有 SMP balancing、per-CPU run queue、IPI、affinity 或跨 CPU 同步。
+- **仅限 scheduler SMP**：支持 per-CPU run queue 与 scheduler nudge，但不支持 CPU hotplug、NUMA、affinity API、work stealing、CFS、实时调度、POSIX scheduling policy、generic IPI routing、TLB shootdown 或完整 APIC default interrupt delivery。
 - **无完整优先级调度器**：调度器只记录 bounded priority/policy metadata，默认选择策略仍是确定性的单核 round-robin。
 - **Bounded process 与 syscall integration**：timer preemption 不创建用户可见的 POSIX scheduling policy。后续 process/fd/VFS syscall 可以在普通进程 syscall 上下文中使用 `sched::can_block()`，但只限同一个单核 blocking contract。
-- **bounded timer-driven scheduler semantics 阻塞边界**：wait queue 与 tick-based sleep 仍是单核内核线程原语。仍没有 CFS、实时调度、POSIX blocking IO policy、SMP、用户可见 cancellation 或 signal 语义。
+- **bounded timer-driven scheduler semantics 阻塞边界**：wait queue 与 tick-based sleep 仍是内核线程原语。它们可以通过 waiter-owned CPU scheduler domain 唤醒，但仍不提供 POSIX blocking IO policy、用户可见 cancellation 或 signal 语义。
 - 不改变 boot 固定地址、higher-half base、kernel load base、BootInfo ABI、direct map、`KVMEM_BASE`、IDT vector 分配或 `InterruptFrame` ABI。
 
 ## 线程模型与状态
 
 每个内核线程由一个 TCB 表示，记录稳定 thread ID、`ThreadState`、saved stack pointer（cooperative context 指针）、内核栈 base/size、入口函数与参数、bounded time-slice state，以及预留的 priority/policy metadata。`ThreadState` 包含 `Runnable`、`Running`、`Idle`、`Blocked`、`Sleeping` 和 `Terminated`。`Blocked` 与 `Sleeping` 只是 bounded non-runnable 内核等待状态，不暗示 POSIX blocking IO、用户 wait queue、进程归属、取消策略或 SMP 迁移。
 
-run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表，节点（`rq_next`、`wait_next`、`sleep_next`、`term_next`）由 TCB 自身持有，生命周期与 TCB 绑定。因此调度路径不依赖普通 heap 容器，也不会在 IRQ handler 中分配队列节点。同一线程最多同时属于一个显式 wait queue 和一个 timeout tracking list。
+run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表，节点（`rq_next`、`wait_next`、`sleep_next`、`term_next`）由 TCB 自身持有，生命周期与 TCB 绑定。因此调度路径不依赖普通 heap 容器，也不会在 IRQ handler 中分配队列节点。同一线程最多同时属于一个 CPU run queue、一个显式 wait queue 和一个 timeout tracking list。
 
 ## 阻塞上下文契约
 
@@ -37,9 +38,9 @@ run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表�
 
 `sched::WaitQueue` 是由调用方持有的 head/tail 小对象，其成员指向 scheduler-owned TCB。`sched::wait_queue_wait_until()` 会在 IRQ disabled 状态下检查可选 predicate，先记录 queue membership，再把当前线程切换为 `Blocked` 或 `Sleeping`，随后协作式切换到其他 runnable 线程或 idle 线程。predicate 检查避免 empty-buffer check 与入队之间漏掉 producer wakeup。
 
-`sched::wake_one()` 和 `sched::wake_all()` 不分配内存，可从 bounded IRQ-safe producer 路径调用。wakeup 会把选中 waiter 从 wait queue 和 timeout tracking 中各移除一次，将其改回 `Runnable`，并追加到 run queue，等待后续 cooperative 或 guarded IRQ-return scheduling point。
+`sched::wake_one()` 和 `sched::wake_all()` 不分配内存，可从 bounded IRQ-safe producer 路径调用。wakeup 会把选中 waiter 从 wait queue 和 timeout tracking 中各移除一次，将其改回 `Runnable`，并追加到 waiter-owned CPU run queue，等待后续 cooperative 或 guarded IRQ-return scheduling point。目标 CPU 是远端时，scheduler 会先设置该 CPU 的 reschedule-pending state，再发送 scheduler nudge。
 
-`sched::sleep_for()` 与 `timer::sleep_for()` 使用现有 monotonic PIT tick，让当前线程阻塞到 deadline 到期。到期 sleeper 由 `sched::on_timer_tick()` 通过 bounded intrusive list 扫描唤醒；IRQ 路径不分配、不释放、不阻塞、不 bulk 输出、不访问 filesystem，也不切换线程。
+`sched::sleep_for()` 与 `timer::sleep_for()` 使用现有 monotonic tick，让当前线程阻塞到 deadline 到期。到期 sleeper 由当前 CPU 的 `sched::on_timer_tick()` 通过 bounded intrusive list 扫描唤醒；IRQ 路径不分配、不释放、不阻塞、不 bulk 输出、不访问 filesystem，也不切换线程。
 
 ## Allocator 上下文契约
 
@@ -65,9 +66,9 @@ scheduler-owned bridge，在 EOI 之后保存被中断线程的当前内核栈 c
 
 ## 调度策略与 Idle
 
-`yield()` 是单核 round-robin 协作切换：若存在至少一个其他可运行线程，则把当前线程放回 run queue 尾部并切换到下一个 runnable 线程；被选中的普通线程获得固定 bounded time slice。blocked、sleeping、idle 和 terminated 线程不会参与普通 runnable 选择。若没有其他可运行线程，则继续运行当前线程或 idle，不破坏 run queue。
+`yield()` 是 CPU-local round-robin 协作切换：若当前 CPU run queue 中存在至少一个其他可运行线程，则把当前线程放回该 run queue 尾部并切换到下一个 runnable 线程；被选中的普通线程获得固定 bounded time slice。blocked、sleeping、idle 和 terminated 线程不会参与普通 runnable 选择。若本地没有其他可运行线程，则继续运行当前线程或 idle，不破坏 run queue。
 
-`sched::start()` 把 boot/main 执行上下文收编为 scheduler-owned idle 线程，复用现有 boot 栈，然后进入 idle 循环：先 `yield()` 运行可运行线程，否则执行 `hlt` 等待 IRQ 唤醒后重新评估。idle 的 `hlt` 必须在 IRQ enabled 状态下运行，因此 `start()` 在 `irq::enableIRQ()` 之后调用，timer IRQ0 才能唤醒 CPU。
+`sched::start()` 把调用 CPU 的执行上下文收编为该 CPU 的 scheduler-owned idle 线程。BSP 复用现有 boot 栈；AP 在 AP-local scheduler domain 初始化后复用 startup stack。idle 循环先 `yield()` 运行本地可运行线程，否则执行 `hlt` 等待 timer 或 scheduler nudge 唤醒后重新评估。idle 的 `hlt` 必须在 IRQ enabled 状态下运行。
 
 ## 线程退出与延后回收
 
@@ -75,12 +76,12 @@ scheduler-owned bridge，在 EOI 之后保存被中断线程的当前内核栈 c
 
 ## Timer 与 IRQ 边界
 
-timer IRQ0 handler 继续通过 `bigos::timer::on_tick()` 推进 tick，然后调用 bounded、IRQ-context-safe 的 `bigos::sched::on_timer_tick()`。scheduler hook 会递减当前普通线程 time slice，在到期时记录 pending reschedule intent，并通过 allocation-free intrusive state 唤醒到期 sleeper；它不分配、不释放、不阻塞、不 bulk 输出，也不直接从 timer handler 切换线程。
+BSP timer 路径继续通过 `bigos::timer::on_tick()` 推进全局 tick，然后调用 bounded、IRQ-context-safe 的 `bigos::sched::on_timer_tick()`。AP local timer handler 在记录 CPU-local tick 后调用同一个 scheduler hook 做 AP-local time-slice accounting。scheduler hook 会递减当前普通线程 time slice，在到期时记录 CPU-local pending reschedule intent，并通过 allocation-free intrusive state 唤醒本 CPU 到期 sleeper；它不分配、不释放、不阻塞、不 bulk 输出，也不直接从 timer handler 切换线程。
 
 外部 IRQ dispatch 继续集中拥有 EOI。注册 handler 返回后，`irq_dispatch` 发送恰好一次
 i8259 EOI，然后调用 `sched::maybe_preempt_on_irq_return()`。该 bridge 只在 preemption
 enabled、`bigos::arch_context` 判断为 kernel IRQ-return context、当前线程仍是普通
-running 线程、且存在 runnable peer 时切换。CPU exception 与 `int 0x80` syscall 从不进入
+running 线程、且存在 runnable peer 时切换。LAPIC timer 与 scheduler-nudge interrupt 使用 LAPIC EOI 并进入同一个 bridge；scheduler nudge 只表示重新观察调度状态，不是 TLB shootdown、CPU hotplug、generic IPI routing 或完整 APIC interrupt migration。CPU exception 与 `int 0x80` syscall 从不进入
 该 bridge，不发送 i8259 EOI，也不接入 sleep/process-lifecycle recovery 路径。
 
 ## 验证 Smoke
@@ -90,3 +91,5 @@ running 线程、且存在 runnable peer 时切换。CPU exception 与 `int 0x80
 `blocking_smoke` 也默认关闭。启用 `BIGOS_BLOCKING_SMOKE` 时，`kernel()` 创建一个 blocking reader 和一个 synthetic TTY producer。smoke 输出 `BIGOS_BLOCKING_WAIT_BLOCKED`、`BIGOS_BLOCKING_WAKE_SENT`、`BIGOS_BLOCKING_WAIT_RESUMED`、`BIGOS_BLOCKING_TIMEOUT_BLOCKED`、`BIGOS_BLOCKING_TIMEOUT_EXPIRED` 与 `BIGOS_BLOCKING_SMOKE_PASSED`，在不依赖手工键盘输入的情况下验证 wait queue wakeup、timeout sleep 和 cooperative resume。
 
 `scheduler_semantics_smoke` 默认关闭。启用 `BIGOS_SCHEDULER_SEMANTICS_SMOKE` 时，`kernel()` 创建两个普通内核线程。第一个线程在 preemption disabled 且 timer ticks 继续推进时观察 `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED`；第二个线程只有在 timer-driven IRQ-return preemption 真正运行它时才能输出 `BIGOS_SCHED_SEMANTICS_PREEMPTED` 与 `BIGOS_SCHED_SEMANTICS_PASSED`。这些 marker 与 cooperative `scheduler_smoke` marker 区分开。
+
+`scheduler_smp_smoke` 默认关闭，并隐式启用 AP startup/per-CPU timer baseline。启用 `BIGOS_SCHEDULER_SMP_SMOKE` 时，`kernel()` 创建一个 BSP worker 和一个显式投递到 AP 的 worker。只有普通 scheduler work 在超过一个 online CPU 上运行时，smoke 才输出 `BIGOS_SCHED_SMP_BSP_THREAD`、`BIGOS_SCHED_SMP_AP_THREAD` 与 `BIGOS_SCHED_SMP_PASSED`。该 smoke 不验证 CPU hotplug、NUMA、TLB shootdown、generic IPI routing 或完整 APIC external interrupt migration。

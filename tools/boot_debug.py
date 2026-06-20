@@ -174,6 +174,7 @@ class RuntimeSmokeCase:
     risk_area: str
     validation_markers: tuple[str, ...] = ()
     proc_boundary: str = ''
+    qemu_extra: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,7 @@ SMOKE_OPTIONS = (
     'keyboard_smoke',
     'scheduler_smoke',
     'scheduler_semantics_smoke',
+    'scheduler_smp_smoke',
     'blocking_smoke',
     'user_vmem_smoke',
     'syscall_smoke',
@@ -256,6 +258,26 @@ RUNTIME_SMOKE_MATRIX = (
             'BIGOS_SCHED_SEMANTICS_PREEMPTED',
             'BIGOS_SCHED_SEMANTICS_PASSED',
         ),
+    ),
+    RuntimeSmokeCase(
+        case_id='scheduler-smp',
+        title='Multi-core scheduler',
+        switches=('scheduler_smp_smoke',),
+        expected_marker='BIGOS_SCHED_SMP_PASSED',
+        timeout_seconds=20.0,
+        risk_area='per-CPU run queues, AP local timer scheduling, and scheduler nudge wakeup',
+        validation_markers=(
+            'BIGOS_AP_ONLINE',
+            'BIGOS_AP_LOCAL_TIMER',
+            'BIGOS_SCHED_SMP_BSP_THREAD',
+            'BIGOS_SCHED_SMP_AP_THREAD',
+            'BIGOS_SCHED_SMP_PASSED',
+        ),
+        proc_boundary=(
+            'default-off multi-core kernel-thread smoke; validates bounded scheduler work on BSP and one AP, '
+            'not CPU hotplug, TLB shootdown, NUMA, or complete APIC external interrupt migration'
+        ),
+        qemu_extra=('-cpu', 'max', '-smp', '2'),
     ),
     RuntimeSmokeCase(
         case_id='blocking-primitives',
@@ -1606,7 +1628,7 @@ def runtime_smoke_run_args(
         expect_serial_marker=case.expected_marker,
         smoke_timeout=case.timeout_seconds,
         bochs_extra=[],
-        qemu_extra=[],
+        qemu_extra=list(case.qemu_extra),
         no_launch=False,
     )
 

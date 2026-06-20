@@ -114,7 +114,7 @@ namespace irq {
         }
 
         static bool is_lapic_external_irq(uint64_t __vector) noexcept {
-            return __vector == VECTOR_LAPIC_TIMER;
+            return __vector == VECTOR_LAPIC_TIMER || __vector == VECTOR_SCHED_NUDGE;
         }
 
         static bool is_syscall_vector(uint64_t __vector) noexcept {
@@ -227,8 +227,7 @@ namespace irq {
         }
 
         if (__detail::is_lapic_external_irq(__frame->vector)) {
-            const bool bootstrap_cpu = bigos::cpu::is_bootstrap_cpu();
-            if (bootstrap_cpu) {
+            {
                 __detail::NonblockingContextGuard nonblocking_guard;
                 IRQHandler handler = __detail::isr_list[__frame->vector];
                 if (handler == nullptr)
@@ -239,15 +238,8 @@ namespace irq {
                 // dispatch while preserving the scheduler IRQ-return boundary.
                 handler(__frame);
                 driver::irqchip::lapic::send_eoi();
-            } else {
-                IRQHandler handler = __detail::isr_list[__frame->vector];
-                if (handler == nullptr)
-                    handler = &__detail::default_lapic_irq_handler;
-                handler(__frame);
-                driver::irqchip::lapic::send_eoi();
             }
-            if (bootstrap_cpu)
-                bigos::sched::maybe_preempt_on_irq_return(__frame);
+            bigos::sched::maybe_preempt_on_irq_return(__frame);
             return;
         }
 

@@ -247,6 +247,10 @@ namespace irqchip::lapic {
             write(REG_EOI, 0);
     }
 
+    bool send_fixed_ipi(uint32_t __apic_id, uint8_t __vector) noexcept {
+        return send_ipi(__apic_id, __vector);
+    }
+
     bool send_init(uint32_t __apic_id) noexcept {
         return send_ipi(__apic_id, ICR_DELIVERY_INIT | ICR_LEVEL_ASSERT | ICR_TRIGGER_LEVEL);
     }

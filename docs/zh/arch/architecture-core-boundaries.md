@@ -80,24 +80,26 @@ runtime parity、non-x86 backend、SMP、宽泛设备模型、动态链接或完
 
 ## SMP 准备边界
 
-当前 SMP-ready 边界是 bootstrap CPU 契约，不是真实 SMP 执行。CPU-local accessor
-可以描述当前线程、当前进程、active address-space root、IRQ 可见 nesting、
-preemption-disable depth 和 pending reschedule state，但默认路径都解析到 CPU 0，
-并对不支持的非 bootstrap CPU target fail closed。
+当前 SMP-ready 边界包含 AP startup、per-CPU local timer state 与 bounded per-CPU
+scheduler domain。CPU-local accessor 可以描述每个已初始化为 schedulable 的 online
+CPU 的当前线程、当前进程、active address-space root、IRQ 可见 nesting、
+preemption-disable depth 和 pending reschedule state。
 
-- Scheduler ownership 仍是单核：ready queue、wait queue、sleep list、idle thread
-  和 reschedule intent 属于 bootstrap scheduler domain。不提供 cross-CPU run
-  queue、migration、load balancing、remote wakeup 或 IPI nudging。
+- Scheduler ownership 显式归属到每个 CPU：ready queue、wait queue、sleep list、idle
+  thread、terminated list 和 reschedule intent 属于 owning scheduler domain。初始
+  placement 与 wakeup 可以通过 scheduler boundary 向远端 online CPU enqueue work，
+  并按先发布 runnable state、再设置 reschedule pending、最后发送 scheduler nudge 的顺序执行。
 - IRQ routing 仍使用现有 IDT/i8259/PIT/keyboard/syscall 模型。Exception 和 external
   IRQ 路径保持 non-blocking；`int 0x80` 保留现有 syscall ABI，且不发送 i8259 EOI。
+  LAPIC timer 与 scheduler nudge interrupt 使用 LAPIC EOI；nudge 不是 generic IPI routing。
 - TLB invalidation 通过携带 address-space root、virtual page 或 range、target CPU
   mask 和 completion requirement 的边界表达。单核实现只接受 bootstrap CPU target，
   并通过本地 `invlpg` 或 CR3 reload 完成。
 - Shared scheduler state、IRQ-visible state 和 page-table update 在对 handler、fault
   path 或未来 remote CPU 可见前，必须通过 interrupt-disabled section 或所选本地边界
   完成发布。
-- LAPIC、IOAPIC、per-CPU timer、AP startup、SIPI trampoline、IPI delivery、
-  shootdown acknowledgement、CPU hotplug、NUMA、RCU 和真实并行调度仍是后续依赖。
+- Generic IPI routing、TLB shootdown acknowledgement、CPU hotplug、NUMA、RCU、
+  完整 APIC external interrupt migration 和广义 load balancing 仍是后续依赖。
 
 ## Review Checklist
 

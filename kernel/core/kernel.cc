@@ -104,6 +104,46 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_SCHEDULER_SMP_SMOKE
+namespace {
+    constexpr bigos::timer::tick_t SCHED_SMP_TIMEOUT_TICKS = 40;
+    volatile bool g_sched_smp_bsp_ran = false;
+    volatile bool g_sched_smp_ap_ran = false;
+
+    void scheduler_smp_bsp_worker(void *) noexcept {
+        g_sched_smp_bsp_ran = bigos::cpu::current_cpu_id() == bigos::cpu::BOOTSTRAP_CPU_ID;
+        if (g_sched_smp_bsp_ran)
+            bigos::serial_puts("BIGOS_SCHED_SMP_BSP_THREAD\n");
+
+        const bigos::timer::tick_t start = bigos::timer::ticks();
+        while (!g_sched_smp_ap_ran && bigos::timer::ticks() - start < SCHED_SMP_TIMEOUT_TICKS)
+            bigos::sched::yield();
+
+        if (g_sched_smp_bsp_ran && g_sched_smp_ap_ran)
+            bigos::serial_puts("BIGOS_SCHED_SMP_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_SCHED_SMP_FAILED timeout\n");
+    }
+
+    void scheduler_smp_ap_worker(void *) noexcept {
+        if (bigos::cpu::current_cpu_id() != bigos::cpu::BOOTSTRAP_CPU_ID) {
+            g_sched_smp_ap_ran = true;
+            bigos::serial_puts("BIGOS_SCHED_SMP_AP_THREAD\n");
+        } else {
+            bigos::serial_puts("BIGOS_SCHED_SMP_FAILED placement\n");
+        }
+    }
+
+    bigos::cpu::CpuId scheduler_smp_target_cpu() noexcept {
+        for (bigos::cpu::CpuId id = 1; id < bigos::cpu::MAX_CPUS; id++) {
+            if (bigos::cpu::cpu_id_supported(id) && bigos::cpu::cpu_online(id))
+                return id;
+        }
+        return bigos::cpu::MAX_CPUS;
+    }
+}   // namespace
+#endif
+
 #ifdef BIGOS_BLOCKING_SMOKE
 namespace {
     constexpr char BLOCKING_SMOKE_CHAR = 'Z';
@@ -1337,6 +1377,17 @@ void kernel(const BootInfoHeader *boot_info) {
 #ifdef BIGOS_SCHEDULER_SEMANTICS_SMOKE
     bigos::sched::create_kernel_thread(&scheduler_semantics_worker_a, nullptr);
     bigos::sched::create_kernel_thread(&scheduler_semantics_worker_b, nullptr);
+#endif
+#ifdef BIGOS_SCHEDULER_SMP_SMOKE
+    const bigos::cpu::CpuId scheduler_smp_cpu = scheduler_smp_target_cpu();
+    if (scheduler_smp_cpu < bigos::cpu::MAX_CPUS) {
+        bigos::sched::create_kernel_thread(&scheduler_smp_bsp_worker, nullptr);
+        if (bigos::sched::create_kernel_thread_on_cpu(&scheduler_smp_ap_worker, nullptr, scheduler_smp_cpu) ==
+            bigos::sched::INVALID_THREAD_ID)
+            bigos::serial_puts("BIGOS_SCHED_SMP_FAILED thread\n");
+    } else {
+        bigos::serial_puts("BIGOS_SCHED_SMP_FAILED cpu\n");
+    }
 #endif
 #ifdef BIGOS_BLOCKING_SMOKE
     bigos::sched::create_kernel_thread(&blocking_smoke_reader, nullptr);

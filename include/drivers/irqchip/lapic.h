@@ -20,6 +20,7 @@ namespace irqchip::lapic {
     uint32_t id() noexcept;
     uint64_t base_phys() noexcept;
     void send_eoi() noexcept;
+    bool send_fixed_ipi(uint32_t __apic_id, uint8_t __vector) noexcept;
     bool send_init(uint32_t __apic_id) noexcept;
     bool send_sipi(uint32_t __apic_id, uint8_t __vector) noexcept;
     bool calibrate_timer_with_pit(uint32_t *__initial_count) noexcept;

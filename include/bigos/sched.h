@@ -2,6 +2,7 @@
 #define _BIG_SCHED_H
 
 #include <bigos/types.h>
+#include <bigos/percpu.h>
 #include <bigos/thread.h>
 #include <bigos/timer.h>
 
@@ -20,14 +21,16 @@ namespace sched {
 
     using WaitPredicate = bool (*)(void *__arg) noexcept;
 
-    // Intrusive single-core wait queue. The opaque links point at scheduler-owned
+    // Intrusive scheduler wait queue. The opaque links point at scheduler-owned
     // TCBs; callers own only the queue head/tail storage and never allocate nodes
-    // on the sleep/wakeup fast path. SMP-preparation boundary: waiters and
-    // producers belong to the bootstrap scheduler domain only; cross-CPU wake,
-    // remote enqueue, and IPI nudging are intentionally unsupported.
+    // on the sleep/wakeup fast path. The scheduler serializes queue membership
+    // with an IRQ-safe lock and re-enqueues woken threads through their CPU-owned
+    // scheduler domain. This is a scheduler wait/wakeup boundary only; it is not
+    // a generic SMP synchronization primitive.
     struct WaitQueue {
         void *head;
         void *tail;
+        volatile uint32_t lock;
     };
 
     // Create a kernel thread.
@@ -35,12 +38,13 @@ namespace sched {
     // Non-interrupt-context only. This path allocates a thread control block and
     // a kernel stack through the ordinary phase 3 allocator contract, so it MUST
     // NOT be called from any IRQ handler, the timer on_tick() path, irq_dispatch,
-    // or any CPU exception handler. Single-core only: there is no SMP placement,
-    // affinity, per-CPU run queue, or cross-CPU migration.
+    // or any CPU exception handler. The default placement prefers the calling CPU
+    // and may fall back to the shortest online/schedulable CPU-owned run queue.
     //
     // Returns the new thread id on success, or INVALID_THREAD_ID on failure.
     // The created thread starts in the Runnable state.
     ThreadId create_kernel_thread(ThreadEntry __entry, void *__arg) noexcept;
+    ThreadId create_kernel_thread_on_cpu(ThreadEntry __entry, void *__arg, cpu::CpuId __target_cpu) noexcept;
 
     // Cooperative yield. Non-interrupt-context only.
     //
@@ -65,13 +69,19 @@ namespace sched {
     // bigos::proc::Process* to avoid a scheduler dependency on the proc layout.
     void set_current_user_process(void *__process) noexcept;
 
+    // Initialize the calling CPU's scheduler domain. AP startup uses this before
+    // publishing the AP as schedulable; BSP-only configurations lazily initialize
+    // the bootstrap domain before the first thread is created.
+    bool init_current_cpu_domain() noexcept;
+
     // Enter the scheduler. Non-interrupt-context only.
     //
     // Adopts the current boot/main execution context as a scheduler thread,
-    // registers the scheduler-owned idle thread, and begins running threads. Must
-    // be called with maskable interrupts enabled so timer IRQ0 can wake the idle
-    // thread's hlt. This is single-core only and does not return to its caller in
-    // the normal sense; the boot thread becomes a scheduled thread.
+    // registers the scheduler-owned idle thread, and begins running the calling
+    // CPU's run queue. Must be called with maskable interrupts enabled so a timer
+    // or scheduler nudge can wake the idle thread's hlt. This does not return to
+    // its caller in the normal sense; the calling context becomes that CPU's idle
+    // thread.
     void start() noexcept;
 
     // Context guard used by blocking APIs. Blocking is allowed only from ordinary
@@ -103,9 +113,10 @@ namespace sched {
     int wait_queue_wait_until(WaitQueue *__queue, WaitPredicate __predicate, void *__arg,
                               timer::tick_t __timeout_ticks = 0) noexcept;
 
-    // Allocation-free wakeups. IRQ handlers may call these bounded helpers, but
-    // they only make waiters runnable on the bootstrap run queue for a later
-    // cooperative scheduling point. They do not perform remote CPU wakeups.
+    // Allocation-free wakeups. IRQ handlers may call these bounded helpers. They
+    // make waiters runnable on the waiter-owned scheduler domain and may request
+    // a scheduler nudge when the target CPU is remote. The nudge is scoped only
+    // to reschedule observation, not generic IPI or TLB shootdown semantics.
     uint32_t wake_one(WaitQueue *__queue) noexcept;
     uint32_t wake_all(WaitQueue *__queue) noexcept;
 
@@ -115,11 +126,15 @@ namespace sched {
 
     // IRQ-context-safe bounded scheduler tick hook.
     //
-    // Called from the timer IRQ0 path after on_tick(). It performs bounded
-    // time-slice accounting, records bootstrap-CPU reschedule intent, and wakes
-    // sleepers. It MUST NOT allocate, free, block, do bulk IO, switch threads
-    // directly, or assume a per-CPU timer/IPI exists.
+    // Called from each valid CPU-local timer path after the timer owner updates
+    // any global tick source. It performs bounded time-slice accounting, records
+    // CPU-local reschedule intent, and wakes that CPU's sleepers. It MUST NOT
+    // allocate, free, block, do bulk IO, or switch threads directly.
     void on_timer_tick() noexcept;
+
+    // Scheduler-owned IPI/nudge ISR hook. It only asks the current CPU to
+    // observe its run queue at the normal IRQ-return scheduling boundary.
+    void on_scheduler_nudge() noexcept;
 
     // External IRQ-return bridge. irq_dispatch calls this only after the
     // registered handler completes and the single i8259 EOI has been sent.

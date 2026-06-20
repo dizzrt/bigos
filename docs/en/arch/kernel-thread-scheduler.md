@@ -1,6 +1,6 @@
-# Kernel Threads And Single-Core Scheduler
+# Kernel Threads And Per-CPU Scheduler
 
-BigOS keeps the minimal kernel-thread model single-core, but extends the scheduler from purely cooperative round-robin to bounded timer-driven semantics. Ordinary kernel threads still use the same TCB, run queue, idle ownership, and cooperative switch frame; PIT IRQ0 may now expire a time slice and request a guarded IRQ-return switch.
+BigOS keeps the minimal kernel-thread model bounded, but the scheduler now owns one run queue domain per online CPU. Ordinary kernel threads still use the same TCB and cooperative switch frame; each CPU owns its current thread, idle thread, runnable queue, sleep list, terminated list, reschedule state, and time-slice accounting. PIT or LAPIC timer interrupts may expire a local time slice and request a guarded IRQ-return switch for that CPU.
 
 ## Scope
 
@@ -9,30 +9,28 @@ BigOS keeps the minimal kernel-thread model single-core, but extends the schedul
   `bigos::arch_context::switch_kernel_context()`. The current implementation
   enters the x86_64 `switch_context` assembly primitive, which saves/restores
   System V callee-saved registers (`rbp`, `rbx`, `r12`-`r15`) and stack pointer.
-- Provide single-core round-robin `yield()`, `sched::start()` entry, and scheduler-owned idle thread.
+- Provide CPU-local round-robin `yield()`, `sched::start()` entry, and scheduler-owned idle thread.
 - Replace the bare `hlt` loop at the end of `kernel()` with the idle thread.
-- Let timer IRQ0 account ordinary thread time slices, record reschedule intent, and wake expired sleepers through bounded, IRQ-context-safe `sched::on_timer_tick()`.
+- Let CPU-local timer interrupts account ordinary thread time slices, record reschedule intent, and wake expired sleepers through bounded, IRQ-context-safe `sched::on_timer_tick()`.
 - Allow external IRQ return to switch threads only after the registered handler finishes, the single i8259 EOI is sent, and scheduler preemption guards approve the boundary.
+- Provide bounded initial placement through `create_kernel_thread()` and explicit CPU placement through `create_kernel_thread_on_cpu()`. Remote enqueue publishes runnable state under the target CPU scheduler lock before setting the target reschedule flag and sending the scheduler nudge.
 
 ## Non-Goals And Boundaries
 
-- **Single-core**: no SMP balancing, per-CPU run queues, IPI, affinity, or cross-CPU synchronization.
+- **Limited scheduler SMP only**: per-CPU run queues and scheduler nudge are supported, but there is no CPU hotplug, NUMA, affinity API, work stealing, CFS, real-time scheduling, POSIX scheduling policy, generic IPI routing, TLB shootdown, or complete APIC default interrupt delivery.
 - **No full priority scheduler**: the scheduler records bounded priority/policy metadata only. Default selection remains deterministic single-core round-robin.
 - **Bounded process and syscall integration**: timer preemption does not create
   user-visible POSIX scheduling policy. Later process/fd/VFS syscalls may use
   `sched::can_block()` from ordinary process syscall contexts, but only inside
   the same single-core blocking contract.
-- **bounded timer-driven scheduler semantics blocking boundary**: wait queues and tick-based sleep remain
-  single-core kernel-thread primitives. There is still no CFS, real-time
-  scheduling, POSIX blocking IO policy, SMP, or user-visible cancellation and
-  signal semantics.
+- **bounded timer-driven scheduler semantics blocking boundary**: wait queues and tick-based sleep remain kernel-thread primitives. They can wake through the waiter-owned CPU scheduler domain, but they still do not provide POSIX blocking IO policy, user-visible cancellation, or signal semantics.
 - Does not change fixed boot addresses, higher-half base, kernel load base, BootInfo ABI, direct map, `KVMEM_BASE`, IDT vector allocation, or `InterruptFrame` ABI.
 
 ## Thread Model And State
 
 Each kernel thread is represented by a TCB that records a stable thread ID, `ThreadState`, saved stack pointer (cooperative context pointer), kernel stack base/size, entry function, argument, bounded time-slice state, and reserved priority/policy metadata. `ThreadState` includes `Runnable`, `Running`, `Idle`, `Blocked`, `Sleeping`, and `Terminated`. `Blocked` and `Sleeping` are bounded non-runnable kernel wait states only; they do not imply POSIX blocking IO, user wait queues, process ownership, cancellation policy, or SMP migration.
 
-The run queue, wait queues, sleep list, and terminated list are intrusive lists. Their nodes (`rq_next`, `wait_next`, `sleep_next`, `term_next`) are owned by the TCB itself and share its lifetime. The scheduler path therefore does not depend on ordinary heap containers and does not allocate queue nodes in IRQ handlers. A thread may belong to at most one explicit wait queue and one timeout tracking list at a time.
+The run queue, wait queues, sleep list, and terminated list are intrusive lists. Their nodes (`rq_next`, `wait_next`, `sleep_next`, `term_next`) are owned by the TCB itself and share its lifetime. The scheduler path therefore does not depend on ordinary heap containers and does not allocate queue nodes in IRQ handlers. A thread may belong to at most one CPU run queue, one explicit wait queue, and one timeout tracking list at a time.
 
 ## Blocking Context Contract
 
@@ -44,9 +42,9 @@ The run queue, wait queues, sleep list, and terminated list are intrusive lists.
 
 `sched::WaitQueue` is a small owner-supplied head/tail object whose members point at scheduler-owned TCBs. `sched::wait_queue_wait_until()` checks an optional predicate with IRQs disabled, records queue membership before transitioning the current thread to `Blocked` or `Sleeping`, and switches cooperatively to another runnable thread or the idle thread. This predicate check avoids a missed wakeup between an empty-buffer check and enqueue.
 
-`sched::wake_one()` and `sched::wake_all()` are allocation-free and may be called from bounded IRQ-safe producer paths. Wakeup removes the selected waiter from its wait queue and timeout tracking exactly once, changes it back to `Runnable`, and appends it to the run queue for a later cooperative or guarded IRQ-return scheduling point.
+`sched::wake_one()` and `sched::wake_all()` are allocation-free and may be called from bounded IRQ-safe producer paths. Wakeup removes the selected waiter from its wait queue and timeout tracking exactly once, changes it back to `Runnable`, and appends it to the waiter-owned CPU run queue for a later cooperative or guarded IRQ-return scheduling point. When the target CPU is remote, the scheduler sets that CPU's reschedule-pending state before sending the scheduler nudge.
 
-`sched::sleep_for()` and `timer::sleep_for()` use the existing monotonic PIT tick to block the current thread until a deadline expires. Expired sleepers are scanned by `sched::on_timer_tick()` through a bounded intrusive list; the IRQ path does not allocate, free, block, print bulk output, access filesystem services, or switch threads.
+`sched::sleep_for()` and `timer::sleep_for()` use the existing monotonic tick to block the current thread until a deadline expires. Expired sleepers are scanned by the current CPU's `sched::on_timer_tick()` through a bounded intrusive list; the IRQ path does not allocate, free, block, print bulk output, access filesystem services, or switch threads.
 
 ## Allocator Context Contract
 
@@ -74,9 +72,9 @@ Callers execute `cli` before `switch_context`, and each resume point executes `s
 
 ## Scheduling Policy And Idle
 
-`yield()` is a single-core round-robin cooperative switch. If another runnable thread exists, the current thread is pushed to the tail of the run queue and the next runnable thread is selected. A selected ordinary thread receives a fixed bounded time slice. Blocked, sleeping, idle, and terminated threads are not eligible for normal runnable selection. If no other runnable thread exists, the current thread or idle keeps running without corrupting the run queue.
+`yield()` is a CPU-local round-robin cooperative switch. If another runnable thread exists on the current CPU run queue, the current thread is pushed to the tail of that run queue and the next runnable thread is selected. A selected ordinary thread receives a fixed bounded time slice. Blocked, sleeping, idle, and terminated threads are not eligible for normal runnable selection. If no other runnable thread exists locally, the current thread or idle keeps running without corrupting the run queue.
 
-`sched::start()` adopts the boot/main execution context as the scheduler-owned idle thread, reusing the existing boot stack. It then enters an idle loop: first `yield()` to runnable threads, otherwise execute `hlt` and wait for an IRQ before reevaluating. Idle `hlt` must run with IRQs enabled, so `start()` is called after `irq::enableIRQ()`, allowing timer IRQ0 to wake the CPU.
+`sched::start()` adopts the calling CPU execution context as that CPU's scheduler-owned idle thread. The BSP reuses the existing boot stack, and each AP reuses its startup stack after AP-local scheduler domain initialization. The idle loop first `yield()`s to local runnable threads, otherwise executes `hlt` and waits for a timer or scheduler nudge before reevaluating. Idle `hlt` must run with IRQs enabled.
 
 ## Thread Exit And Deferred Reclamation
 
@@ -84,14 +82,14 @@ Callers execute `cli` before `switch_context`, and each resume point executes `s
 
 ## Timer And IRQ Boundary
 
-The timer IRQ0 handler continues to advance ticks through `bigos::timer::on_tick()`, then calls bounded IRQ-context-safe `bigos::sched::on_timer_tick()`. The scheduler hook decrements the current ordinary thread's time slice, records pending reschedule intent on expiry, and wakes expired sleepers through allocation-free intrusive state; it does not allocate, free, block, print bulk output, or switch directly from the timer handler.
+The BSP timer path continues to advance global ticks through `bigos::timer::on_tick()`, then calls bounded IRQ-context-safe `bigos::sched::on_timer_tick()`. AP local timer handlers call the same scheduler hook for AP-local time-slice accounting after recording their CPU-local tick. The hook decrements the current ordinary thread's time slice, records CPU-local pending reschedule intent on expiry, and wakes that CPU's expired sleepers through allocation-free intrusive state; it does not allocate, free, block, print bulk output, or switch directly from the timer handler.
 
 External IRQ dispatch keeps centralized EOI ownership. After a registered
 handler returns, `irq_dispatch` sends exactly one i8259 EOI, then calls
 `sched::maybe_preempt_on_irq_return()`. That bridge switches only when
 preemption is enabled, `bigos::arch_context` reports a kernel IRQ-return
 context, the current thread is still ordinary/running, and a runnable peer
-exists. CPU exceptions and `int 0x80` syscalls never enter the bridge, send no
+exists. LAPIC timer and scheduler-nudge interrupts use LAPIC EOI and the same bridge; the scheduler nudge is only a reschedule observation mechanism and is not TLB shootdown, CPU hotplug, generic IPI routing, or complete APIC interrupt migration. CPU exceptions and `int 0x80` syscalls never enter the bridge, send no
 i8259 EOI, and remain outside sleep/process-lifecycle recovery paths.
 
 ## Validation Smoke
@@ -101,3 +99,5 @@ i8259 EOI, and remain outside sleep/process-lifecycle recovery paths.
 `blocking_smoke` is also default off. When `BIGOS_BLOCKING_SMOKE` is enabled, `kernel()` creates a blocking reader and a synthetic TTY producer. The smoke emits `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, `BIGOS_BLOCKING_TIMEOUT_EXPIRED`, and `BIGOS_BLOCKING_SMOKE_PASSED` to validate wait queue wakeup, timeout sleep, and cooperative resume without manual keyboard input.
 
 `scheduler_semantics_smoke` is default off. When `BIGOS_SCHEDULER_SEMANTICS_SMOKE` is enabled, `kernel()` creates two ordinary kernel threads. The first observes `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED` while preemption is disabled and timer ticks continue; the second can emit `BIGOS_SCHED_SEMANTICS_PREEMPTED` and `BIGOS_SCHED_SEMANTICS_PASSED` only if timer-driven IRQ-return preemption runs it. These markers are distinct from the cooperative `scheduler_smoke` markers.
+
+`scheduler_smp_smoke` is default off and implicitly enables the AP startup/per-CPU timer baseline. When `BIGOS_SCHEDULER_SMP_SMOKE` is enabled, `kernel()` creates one BSP worker and one explicitly AP-placed worker. The smoke emits `BIGOS_SCHED_SMP_BSP_THREAD`, `BIGOS_SCHED_SMP_AP_THREAD`, and `BIGOS_SCHED_SMP_PASSED` only when ordinary scheduler work runs on more than one online CPU. This does not validate CPU hotplug, NUMA, TLB shootdown, generic IPI routing, or complete APIC external interrupt migration.

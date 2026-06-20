@@ -26,6 +26,7 @@ namespace irq::isr {
                     g_ap_timer_marker_emitted[cpu_id] = true;
                     serial_puts("BIGOS_AP_LOCAL_TIMER\n");
                 }
+                bigos::sched::on_timer_tick();
                 return;
             }
 
@@ -50,6 +51,11 @@ namespace irq::isr {
             (void)__frame;
             const uint8_t scancode = inb(PS2_KEYBOARD_DATA_PORT);
             bigos::input::handle_keyboard_scancode(scancode);
+        }
+
+        implement_isr(scheduler_nudge) {
+            (void)__frame;
+            bigos::sched::on_scheduler_nudge();
         }
 
         void init_isr_timer() {
@@ -91,6 +97,7 @@ namespace irq::isr {
 
     void init_isr() noexcept {
         __detail::init_isr_timer();
+        register_isr(VECTOR_SCHED_NUDGE, &__detail::isr_scheduler_nudge);
         __detail::init_isr_keyboard();
     }
 }   // namespace irq::isr

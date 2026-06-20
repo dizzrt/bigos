@@ -2,6 +2,7 @@
 #include <bigos/io.h>
 #include <bigos/memory.h>
 #include <bigos/percpu.h>
+#include <bigos/sched.h>
 #include <bigos/user_mode.h>
 #include <drivers/irqchip/lapic.h>
 #include <irq/interrupt.h>
@@ -285,6 +286,15 @@ extern "C" [[noreturn]] void bigos_x86_ap_kernel_entry(
     bigos::serial_puts("BIGOS_AP_LOCAL_STATE_READY\n");
 
     (void)bigos::arch::x86::ap_startup::init_local_timer_for_cpu(cpu_id);
+
+    if (!bigos::sched::init_current_cpu_domain()) {
+        __mailbox->ack_state = ACK_INVALID_CPU;
+        park_ap(false);
+    }
+    bigos::serial_puts("BIGOS_AP_SCHED_READY\n");
+
     __mailbox->ack_state = ACK_ONLINE;
-    park_ap(true);
+    bigos::irq::enableIRQ();
+    bigos::sched::start();
+    park_ap(false);
 }

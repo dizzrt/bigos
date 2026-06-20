@@ -73,6 +73,11 @@ if has_config("ap_startup_percpu_timers") then
     add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
 end
 
+if has_config("scheduler_smp_smoke") then
+    add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
+    add_defines("BIGOS_SCHEDULER_SMP_SMOKE")
+end
+
 if has_config("keyboard_smoke") then
     add_defines("BIGOS_KEYBOARD_SMOKE")
 end
