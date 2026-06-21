@@ -157,6 +157,7 @@ namespace bigos::proc {
         uint32_t first_child_pid;
         uint32_t next_sibling_pid;
         uint32_t next_reap_pid;
+        bigos::mm::MmContext *mm_context;
         uint64_t address_space_root;
         uint64_t kernel_address_space_root;
         uint64_t entry;

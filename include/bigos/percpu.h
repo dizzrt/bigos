@@ -59,6 +59,7 @@ namespace cpu {
         CpuId id;
         void *current_thread;
         void *current_process;
+        void *current_mm_context;
         uint64_t current_address_space_root;
         uint32_t irq_nesting_depth;
         uint32_t nonblocking_depth;
@@ -106,6 +107,7 @@ namespace cpu {
 
     void set_current_thread(void *__t) noexcept;
     void set_current_process(void *__process) noexcept;
+    void set_current_mm_context(void *__mm_context) noexcept;
     void set_current_address_space_root(uint64_t __root_phys) noexcept;
     void set_irq_nesting_depth(uint32_t __depth) noexcept;
     void set_nonblocking_depth(uint32_t __depth) noexcept;

@@ -30,6 +30,7 @@ namespace irq {
     constexpr uint8_t VECTOR_KEYBOARD = I8259_MASTER_VECTOR_BASE + IRQ_LINE_KEYBOARD;
     constexpr uint8_t VECTOR_LAPIC_TIMER = 0xef;
     constexpr uint8_t VECTOR_SCHED_NUDGE = 0xee;
+    constexpr uint8_t VECTOR_TLB_SHOOTDOWN = 0xed;
 
     // Software-interrupt syscall entry vector. The default-off first user program
     // raises only this IDT gate to DPL=3 so CPL3 can trigger `int 0x80`; exception

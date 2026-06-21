@@ -114,7 +114,8 @@ namespace irq {
         }
 
         static bool is_lapic_external_irq(uint64_t __vector) noexcept {
-            return __vector == VECTOR_LAPIC_TIMER || __vector == VECTOR_SCHED_NUDGE;
+            return __vector == VECTOR_LAPIC_TIMER || __vector == VECTOR_SCHED_NUDGE ||
+                   __vector == VECTOR_TLB_SHOOTDOWN;
         }
 
         static bool is_syscall_vector(uint64_t __vector) noexcept {

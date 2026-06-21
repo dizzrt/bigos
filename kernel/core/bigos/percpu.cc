@@ -709,6 +709,10 @@ namespace cpu {
         current_state().current_process = __process;
     }
 
+    void set_current_mm_context(void *__mm_context) noexcept {
+        current_state().current_mm_context = __mm_context;
+    }
+
     void set_current_address_space_root(uint64_t __root_phys) noexcept {
         current_state().current_address_space_root = __root_phys;
     }

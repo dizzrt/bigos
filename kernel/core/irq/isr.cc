@@ -5,6 +5,7 @@
 #include <bigos/io.h>
 #include <bigos/percpu.h>
 #include <bigos/sched.h>
+#include <bigos/smp_ipi.h>
 #include <bigos/timer.h>
 #include <bigos/types.h>
 #include <drivers/irqchip/i8259.h>
@@ -54,8 +55,11 @@ namespace irq::isr {
         }
 
         implement_isr(scheduler_nudge) {
-            (void)__frame;
-            bigos::sched::on_scheduler_nudge();
+            bigos::smp::handle_scheduler_nudge_ipi(__frame);
+        }
+
+        implement_isr(tlb_shootdown) {
+            bigos::smp::handle_tlb_shootdown_ipi(__frame);
         }
 
         void init_isr_timer() {
@@ -98,6 +102,7 @@ namespace irq::isr {
     void init_isr() noexcept {
         __detail::init_isr_timer();
         register_isr(VECTOR_SCHED_NUDGE, &__detail::isr_scheduler_nudge);
+        register_isr(VECTOR_TLB_SHOOTDOWN, &__detail::isr_tlb_shootdown);
         __detail::init_isr_keyboard();
     }
 }   // namespace irq::isr

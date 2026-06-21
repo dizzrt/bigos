@@ -4,6 +4,7 @@
 #include <bigos/io.h>
 #include <bigos/memory.h>
 #include <bigos/percpu.h>
+#include <bigos/smp_ipi.h>
 #ifdef BIGOS_USER_PROCESS
 #include <bigos/proc.h>
 #endif
@@ -429,10 +430,7 @@ namespace sched {
         void nudge_cpu(cpu::CpuId __target_cpu) noexcept {
             if (__target_cpu == cpu::current_cpu_id() || !cpu_schedulable(__target_cpu))
                 return;
-            const cpu::CpuSlot &slot = cpu::slot_for(__target_cpu);
-            if (slot.apic_id == cpu::INVALID_APIC_ID)
-                return;
-            (void)driver::irqchip::lapic::send_fixed_ipi(slot.apic_id, irq::VECTOR_SCHED_NUDGE);
+            (void)smp::send_ipi(__target_cpu, smp::IpiType::SchedulerNudge);
         }
 
         // New-thread startup path. Entered for the first time through the prepared

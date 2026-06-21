@@ -256,9 +256,9 @@ scales with core count.
 - [x] 任务 M5.1：AP 启动，配合 LAPIC/IOAPIC 与 per-CPU 定时器。
 - [x] Task M5.2: per-CPU run queues with cross-CPU scheduling and wakeups.
 - [x] 任务 M5.2：per-CPU run queue，支持跨核调度与唤醒。
-- [ ] Task M5.3: activation of IRQ-safe locking, IPI delivery, and cross-CPU TLB
+- [x] Task M5.3: activation of IRQ-safe locking, IPI delivery, and cross-CPU TLB
   shootdown, fulfilling the SMP preparation contracts.
-- [ ] 任务 M5.3：启用 IRQ-safe 锁、IPI 投递与跨核 TLB shootdown，兑现 SMP 准备契约。
+- [x] 任务 M5.3：启用 IRQ-safe 锁、IPI 投递与跨核 TLB shootdown，兑现 SMP 准备契约。
 - [ ] Task M5.4: APIC-backed default interrupt delivery and review of any
   user-visible ABI changes.
 - [ ] 任务 M5.4：APIC-backed 默认中断投递，并评审任何用户可见 ABI 变化。

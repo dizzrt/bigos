@@ -144,6 +144,97 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_TLB_SHOOTDOWN_SMOKE
+namespace {
+    constexpr uint32_t TLB_SHOOTDOWN_SMOKE_TIMEOUT_ITERATIONS = 2000000;
+    volatile bool g_tlb_shootdown_smoke_ap_entered = false;
+    volatile bool g_tlb_shootdown_smoke_ap_release = false;
+    bigos::mm::MmContext *g_tlb_shootdown_smoke_context = nullptr;
+
+    bigos::cpu::CpuId tlb_shootdown_smoke_target_cpu() noexcept {
+        for (bigos::cpu::CpuId id = 1; id < bigos::cpu::MAX_CPUS; id++) {
+            if (bigos::cpu::cpu_id_supported(id) && bigos::cpu::cpu_online(id))
+                return id;
+        }
+        return bigos::cpu::MAX_CPUS;
+    }
+
+    void tlb_shootdown_smoke_ap_worker(void *) noexcept {
+        if (g_tlb_shootdown_smoke_context == nullptr ||
+            !bigos::mm::enter_mm_context(g_tlb_shootdown_smoke_context)) {
+            bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED ap-enter\n");
+            return;
+        }
+
+        g_tlb_shootdown_smoke_ap_entered = true;
+        bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_AP_RESIDENT\n");
+        while (!g_tlb_shootdown_smoke_ap_release)
+            asm volatile("pause" ::: "memory");
+        bigos::mm::leave_current_mm_context();
+    }
+
+    void tlb_shootdown_smoke_bsp_worker(void *) noexcept {
+        const bigos::cpu::CpuId target_cpu = tlb_shootdown_smoke_target_cpu();
+        if (target_cpu >= bigos::cpu::MAX_CPUS) {
+            bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_SKIPPED cpu\n");
+            return;
+        }
+
+        const uint64_t root = bigos::mm::derive_user_address_space_root();
+        if (root == bigos::mm::INVALID_PHYS_ADDR) {
+            bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED root\n");
+            return;
+        }
+        g_tlb_shootdown_smoke_context = bigos::mm::create_mm_context(root);
+        if (g_tlb_shootdown_smoke_context == nullptr) {
+            (void)bigos::mm::teardown_user_address_space(root);
+            bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED context\n");
+            return;
+        }
+
+        if (bigos::sched::create_kernel_thread_on_cpu(&tlb_shootdown_smoke_ap_worker, nullptr, target_cpu) ==
+            bigos::sched::INVALID_THREAD_ID) {
+            bigos::mm::release_mm_context(g_tlb_shootdown_smoke_context);
+            g_tlb_shootdown_smoke_context = nullptr;
+            (void)bigos::mm::teardown_user_address_space(root);
+            bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED thread\n");
+            return;
+        }
+
+        uint32_t wait = 0;
+        while (!g_tlb_shootdown_smoke_ap_entered && wait++ < TLB_SHOOTDOWN_SMOKE_TIMEOUT_ITERATIONS)
+            bigos::sched::yield();
+        if (!g_tlb_shootdown_smoke_ap_entered) {
+            bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED resident-timeout\n");
+            return;
+        }
+
+        bigos::mm::TlbInvalidationRequest request = {
+            bigos::mm::TlbInvalidationScope::AddressSpace,
+            bigos::mm::TlbInvalidationReason::Generic,
+            bigos::mm::mm_context_root(g_tlb_shootdown_smoke_context),
+            0,
+            0,
+            0,
+            true,
+            g_tlb_shootdown_smoke_context,
+        };
+        bigos::mm::invalidate_tlb(request);
+        bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_PASSED\n");
+
+        g_tlb_shootdown_smoke_ap_release = true;
+        wait = 0;
+        while (bigos::mm::mm_context_active_cpu_mask(g_tlb_shootdown_smoke_context) != 0 &&
+               wait++ < TLB_SHOOTDOWN_SMOKE_TIMEOUT_ITERATIONS)
+            bigos::sched::yield();
+        bigos::mm::mark_mm_context_dying(g_tlb_shootdown_smoke_context);
+        (void)bigos::mm::teardown_user_address_space(root);
+        bigos::mm::release_mm_context(g_tlb_shootdown_smoke_context);
+        g_tlb_shootdown_smoke_context = nullptr;
+    }
+}   // namespace
+#endif
+
 #ifdef BIGOS_BLOCKING_SMOKE
 namespace {
     constexpr char BLOCKING_SMOKE_CHAR = 'Z';
@@ -1388,6 +1479,11 @@ void kernel(const BootInfoHeader *boot_info) {
     } else {
         bigos::serial_puts("BIGOS_SCHED_SMP_FAILED cpu\n");
     }
+#endif
+#ifdef BIGOS_TLB_SHOOTDOWN_SMOKE
+    if (bigos::sched::create_kernel_thread(&tlb_shootdown_smoke_bsp_worker, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED thread\n");
 #endif
 #ifdef BIGOS_BLOCKING_SMOKE
     bigos::sched::create_kernel_thread(&blocking_smoke_reader, nullptr);

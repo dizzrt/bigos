@@ -78,6 +78,11 @@ if has_config("scheduler_smp_smoke") then
     add_defines("BIGOS_SCHEDULER_SMP_SMOKE")
 end
 
+if has_config("tlb_shootdown_smoke") then
+    add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
+    add_defines("BIGOS_TLB_SHOOTDOWN_SMOKE")
+end
+
 if has_config("keyboard_smoke") then
     add_defines("BIGOS_KEYBOARD_SMOKE")
 end

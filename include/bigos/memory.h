@@ -29,6 +29,15 @@ namespace mm {
     constexpr uintptr_t KDIRECT_LEN = 0x400000000000ul;
     constexpr uint64_t INVALID_PHYS_ADDR = ~0ull;
 
+    struct MmContext {
+        uint64_t root_phys;
+        volatile uint32_t lock;
+        volatile uint32_t refcount;
+        volatile uint64_t active_cpu_mask;
+        volatile uint64_t shootdown_generation;
+        bool dying;
+    };
+
     struct SlabAllocatorStats;
 
     // Explicit page-table entry attributes for the map/unmap primitive.
@@ -65,16 +74,38 @@ namespace mm {
         AddressSpace,
     };
 
+    enum class TlbInvalidationReason : uint8_t {
+        Generic,
+        Unmap,
+        Protect,
+        Cow,
+        Teardown,
+    };
+
     struct TlbInvalidationRequest {
         TlbInvalidationScope scope;
+        TlbInvalidationReason reason;
         uint64_t address_space_root;
         uint64_t start_vaddr;
         uint64_t length;
         uint64_t target_cpu_mask;
         bool require_completion;
+        MmContext *mm_context;
     };
 
     constexpr uint64_t TLB_TARGET_BOOTSTRAP_CPU = 1ull;
+
+    _attr_nodiscard_ MmContext *create_mm_context(uint64_t __root_phys) noexcept;
+    void retain_mm_context(MmContext *__context) noexcept;
+    void release_mm_context(MmContext *__context) noexcept;
+    void mark_mm_context_dying(MmContext *__context) noexcept;
+    _attr_nodiscard_ uint64_t mm_context_root(const MmContext *__context) noexcept;
+    _attr_nodiscard_ uint64_t mm_context_active_cpu_mask(const MmContext *__context) noexcept;
+    _attr_nodiscard_ uint64_t mm_context_shootdown_generation(const MmContext *__context) noexcept;
+    _attr_nodiscard_ bool enter_mm_context(MmContext *__context) noexcept;
+    void leave_current_mm_context() noexcept;
+    _attr_nodiscard_ uint64_t mm_context_target_mask(const MmContext *__context) noexcept;
+    void handle_tlb_shootdown_ipi() noexcept;
 
     // Non-interrupt-context-only page-table primitives. They write the active
     // kernel address space through the recursive self-mapping and mask same-CPU

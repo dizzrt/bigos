@@ -54,6 +54,12 @@ option("scheduler_smp_smoke")
     set_description("enable validation-only multi-core scheduler smoke")
 option_end()
 
+option("tlb_shootdown_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only SMP IPI / TLB shootdown smoke markers")
+option_end()
+
 option("blocking_smoke")
     set_default(false)
     set_showmenu(true)

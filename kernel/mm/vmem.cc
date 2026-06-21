@@ -8,6 +8,7 @@
 #include "buddy.h"
 #include "memdef.h"
 #include <bigos/memory.h>
+#include <bigos/smp_ipi.h>
 #include <irq/interrupt.h>
 
 #define KVMEM_LEN        0x10000000000ul
@@ -47,6 +48,21 @@
 
 static bigos::mm::VMem kvmem;
 
+struct TlbShootdownSlot {
+    volatile uint32_t lock;
+    volatile bool active;
+    bigos::mm::TlbInvalidationScope scope;
+    uint64_t address_space_root;
+    uint64_t start_vaddr;
+    uint64_t length;
+    uint64_t target_cpu_mask;
+    volatile uint64_t ack_cpu_mask;
+    uint64_t generation;
+};
+
+static TlbShootdownSlot g_tlb_shootdown_slot = {};
+static constexpr uint32_t TLB_SHOOTDOWN_TIMEOUT_ITERATIONS = 1000000;
+
 static_assert(bigos::mm::KDIRECT_BASE >= SELF_MAPPING_BASE + SELF_MAPPING_LEN);
 static_assert(bigos::mm::KDIRECT_BASE >= KVMEM_BASE + KVMEM_LEN);
 static_assert(bigos::mm::KDIRECT_BASE + bigos::mm::KDIRECT_LEN <= KERNEL_HIGHER_HALF_BASE);
@@ -69,6 +85,7 @@ static inline void reload_local_cr3() noexcept {
 static inline void invalidate_active_tlb_page(uint64_t __root_phys, uint64_t __vaddr) noexcept {
     bigos::mm::TlbInvalidationRequest request = {
         bigos::mm::TlbInvalidationScope::Page,
+        bigos::mm::TlbInvalidationReason::Generic,
         __root_phys & PAGING_DESCRIPTOR_ADDR_MASK,
         __vaddr,
         PAGE_SIZE,
@@ -242,6 +259,45 @@ static uint64_t align_up_page(uint64_t __value) noexcept {
 
 static uint64_t align_down_page(uint64_t __value) noexcept {
     return __value & ~(PAGE_SIZE - 1);
+}
+
+static void shootdown_lock(volatile uint32_t *__lock) noexcept {
+    while (__atomic_exchange_n(__lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
+        while (__atomic_load_n(__lock, __ATOMIC_RELAXED) != 0u)
+            asm volatile("pause" ::: "memory");
+    }
+}
+
+static void shootdown_unlock(volatile uint32_t *__lock) noexcept {
+    __atomic_store_n(__lock, 0u, __ATOMIC_RELEASE);
+}
+
+static void perform_local_tlb_invalidation(
+    bigos::mm::TlbInvalidationScope __scope, uint64_t __start_vaddr, uint64_t __length) noexcept {
+    if (__scope == bigos::mm::TlbInvalidationScope::AddressSpace) {
+        reload_local_cr3();
+        return;
+    }
+
+    uint64_t len = __length == 0 ? PAGE_SIZE : __length;
+    uint64_t vaddr = align_down_page(__start_vaddr);
+    const uint64_t end = align_up_page(__start_vaddr + len);
+    while (vaddr < end) {
+        local_invlpg(vaddr);
+        if (__scope == bigos::mm::TlbInvalidationScope::Page)
+            break;
+        vaddr += PAGE_SIZE;
+    }
+}
+
+static bool wait_for_tlb_shootdown_ack(uint64_t __target_mask) noexcept {
+    for (uint32_t i = 0; i < TLB_SHOOTDOWN_TIMEOUT_ITERATIONS; i++) {
+        const uint64_t ack = __atomic_load_n(&g_tlb_shootdown_slot.ack_cpu_mask, __ATOMIC_ACQUIRE);
+        if ((ack & __target_mask) == __target_mask)
+            return true;
+        asm volatile("pause" ::: "memory");
+    }
+    return false;
 }
 
 static void direct_map_panic(const char *__message) noexcept {
@@ -908,29 +964,66 @@ static void init_direct_map_v1(const BootInfo *__info) noexcept {
 NAMESPACE_BIGOS_BEG
 namespace mm {
     void invalidate_tlb(const TlbInvalidationRequest &__request) noexcept {
-        if (__request.target_cpu_mask != TLB_TARGET_BOOTSTRAP_CPU || !bigos::cpu::is_bootstrap_cpu())
-            bigos::kpanic(bigos::PanicCode::Generic, "mm-tlb", "unsupported TLB shootdown target\n");
-
         // Order page-table writes before the local invalidation completion point.
         asm volatile("" ::: "memory");
 
-        if (__request.scope == TlbInvalidationScope::AddressSpace) {
-            reload_local_cr3();
-            return;
-        }
+        const uint64_t current_bit = 1ull << bigos::cpu::current_cpu_id();
+        uint64_t target_mask = __request.target_cpu_mask;
+        if (__request.mm_context != nullptr)
+            target_mask |= mm_context_target_mask(__request.mm_context);
+        if (target_mask == 0)
+            target_mask = current_bit;
 
-        uint64_t len = __request.length == 0 ? PAGE_SIZE : __request.length;
-        uint64_t vaddr = align_down_page(__request.start_vaddr);
-        const uint64_t end = align_up_page(__request.start_vaddr + len);
-        while (vaddr < end) {
-            local_invlpg(vaddr);
-            if (__request.scope == TlbInvalidationScope::Page)
-                break;
-            vaddr += PAGE_SIZE;
+        if ((target_mask & current_bit) != 0)
+            perform_local_tlb_invalidation(__request.scope, __request.start_vaddr, __request.length);
+
+        const uint64_t remote_mask = target_mask & ~current_bit;
+        if (remote_mask != 0) {
+            shootdown_lock(&g_tlb_shootdown_slot.lock);
+            g_tlb_shootdown_slot.scope = __request.scope;
+            g_tlb_shootdown_slot.address_space_root = __request.address_space_root & PAGING_DESCRIPTOR_ADDR_MASK;
+            g_tlb_shootdown_slot.start_vaddr = __request.start_vaddr;
+            g_tlb_shootdown_slot.length = __request.length;
+            g_tlb_shootdown_slot.target_cpu_mask = remote_mask;
+            g_tlb_shootdown_slot.ack_cpu_mask = 0;
+            g_tlb_shootdown_slot.generation++;
+            __atomic_store_n(&g_tlb_shootdown_slot.active, true, __ATOMIC_RELEASE);
+
+            bigos::smp::IpiDeliveryResult failure = {};
+            const uint64_t delivered =
+                bigos::smp::send_ipi_mask(remote_mask, bigos::smp::IpiType::TlbShootdown, &failure);
+            if (delivered != remote_mask) {
+                __atomic_store_n(&g_tlb_shootdown_slot.active, false, __ATOMIC_RELEASE);
+                shootdown_unlock(&g_tlb_shootdown_slot.lock);
+                bigos::kpanic(bigos::PanicCode::Generic, "mm-tlb", "TLB shootdown IPI delivery failed\n");
+            }
+            if (__request.require_completion && !wait_for_tlb_shootdown_ack(remote_mask)) {
+                __atomic_store_n(&g_tlb_shootdown_slot.active, false, __ATOMIC_RELEASE);
+                shootdown_unlock(&g_tlb_shootdown_slot.lock);
+                bigos::kpanic(bigos::PanicCode::Generic, "mm-tlb", "TLB shootdown ack timeout\n");
+            }
+            __atomic_store_n(&g_tlb_shootdown_slot.active, false, __ATOMIC_RELEASE);
+            shootdown_unlock(&g_tlb_shootdown_slot.lock);
+#ifdef BIGOS_TLB_SHOOTDOWN_SMOKE
+            bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_COMPLETE\n");
+#endif
         }
 
         if (__request.require_completion)
             asm volatile("" ::: "memory");
+    }
+
+    void handle_tlb_shootdown_ipi() noexcept {
+        if (!__atomic_load_n(&g_tlb_shootdown_slot.active, __ATOMIC_ACQUIRE))
+            return;
+        const uint64_t bit = 1ull << bigos::cpu::current_cpu_id();
+        const uint64_t target = __atomic_load_n(&g_tlb_shootdown_slot.target_cpu_mask, __ATOMIC_ACQUIRE);
+        if ((target & bit) == 0)
+            return;
+
+        perform_local_tlb_invalidation(
+            g_tlb_shootdown_slot.scope, g_tlb_shootdown_slot.start_vaddr, g_tlb_shootdown_slot.length);
+        __atomic_fetch_or(&g_tlb_shootdown_slot.ack_cpu_mask, bit, __ATOMIC_ACQ_REL);
     }
 
     namespace __detail {
