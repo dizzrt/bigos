@@ -12,27 +12,29 @@ implementation, validation, or change-tracking documents.
 
 Project goal: grow BigOS from the current x86_64 research kernel toward a more
 general-purpose, multi-architecture kernel with explicitly bounded POSIX-like
-compatibility subsets. The current runnable implementation remains x86_64-only
-with the existing legacy boot/storage path as the default baseline and a
-runnable x86_64 UEFI boot backend spike available as a non-parity backend.
+compatibility subsets. The current runnable implementation remains x86_64-only,
+now multi-core capable, with the existing Legacy BIOS boot/storage path as the
+default baseline and a runnable x86_64 UEFI boot backend spike available as a
+non-parity backend.
 
 项目目标：将 BigOS 从当前 x86_64 研究内核逐步推进为更通用、支持多架构，并具备明确有界
-POSIX-like 兼容子集的内核。当前可运行实现仍是 x86_64-only，现有 legacy boot/storage
-路径仍是默认基线，同时已有一个不具备运行时等价能力的 x86_64 UEFI boot backend spike。
+POSIX-like 兼容子集的内核。当前可运行实现仍是 x86_64-only，现已具备多核能力，现有
+Legacy BIOS boot/storage 路径仍是默认基线，同时已有一个不具备运行时等价能力的 x86_64
+UEFI boot backend spike。
 
 ## Current Implementation Summary / 当前实现概述
 
-BigOS currently provides a smoke-tested, single-core, mostly synchronous kernel
-with a bounded userland. At a high level, the implemented baseline includes:
+BigOS currently provides a smoke-tested, multi-core capable kernel with a
+bounded userland. At a high level, the implemented baseline includes:
 
-BigOS 当前提供一个经过 smoke 验证、单核、以同步为主、具备有界用户态的内核。从高层看，
+BigOS 当前提供一个经过 smoke 验证、具备多核能力、具备有界用户态的内核。从高层看，
 当前已实现基线包括：
 
 - A working x86_64 boot and kernel runtime foundation with text/serial output,
   interrupt/exception/syscall dispatch, basic timers, keyboard input, and a
-  single-core scheduler.
+  multi-core scheduler.
 - 可工作的 x86_64 启动与内核运行基础，包括文本/串口输出、中断/异常/syscall 分发、
-  基础计时、键盘输入和单核调度。
+  基础计时、键盘输入和多核调度。
 - Kernel memory management covering physical allocation, slab-style allocation,
   kernel virtual memory, direct mapping, user address-space management, and
   bounded user fault handling.
@@ -73,13 +75,19 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
   additional architectures are not yet runtime-parity backends.
 - 当前可运行 backend：x86_64 与现有 Legacy BIOS 风格启动流程仍是默认基线，另有
   x86_64 UEFI boot backend spike；UEFI 和其他架构尚不具备运行时等价能力。
-- Execution model: single-core, mostly synchronous, bounded userland, no SMP.
-- 执行模型：单核、以同步为主、有界用户态、无 SMP。
+- Execution model: multi-core capable with per-CPU scheduling and cross-CPU
+  coordination, mostly synchronous I/O, bounded userland.
+- 执行模型：具备多核能力，支持 per-CPU 调度与跨核协同，I/O 以同步为主，有界用户态。
 - Userland: minimal static user programs and a bounded interactive console path,
   no dynamic linking/shared libraries, no job control, no terminal process
   groups, no complete POSIX libc.
 - 用户态：最小静态用户程序与有界交互式控制台路径，无动态链接/共享库、无作业控制、
   无终端进程组、无完整 POSIX libc。
+- Display: a single text-only console on the Legacy BIOS VGA text path with
+  bounded scrollback; no graphical framebuffer rendering and no non-ASCII glyph
+  rendering yet.
+- 显示：仅有 Legacy BIOS VGA 文本路径上的单一文本控制台，具备有界 scrollback；尚无
+  图形 framebuffer 渲染，也尚无非 ASCII 字形渲染。
 - Source organization: kernel implementation and freestanding userland are
   separate top-level domains; future planning should preserve that boundary.
 - 源码组织：内核实现与 freestanding 用户态是分离的顶层域；后续规划应保持这一边界。
@@ -90,27 +98,29 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
 - 内存/文件模型：bounded anonymous demand paging/COW、有界可写运行期存储，以及有界
   persistent clean-sync `/rw` 存储，但无广泛 file-backed `mmap`、无完整 POSIX filesystem、
   无 journaling 或 crash recovery、无 async I/O、无广泛存储/设备支持。
-- Boot/backends: the UEFI backend is a completed x86_64 boot spike, while
-  storage, device, ISA backends, and UEFI runtime parity remain future or
-  parallel-track items.
-- 启动/backend：UEFI backend 已完成 x86_64 boot spike；storage、device、ISA
-  backend 以及 UEFI 运行时等价能力仍是后续或并行轨道事项。
+- Boot/backends: the UEFI backend is a completed x86_64 boot spike not yet at
+  runtime parity; promoting it to the default backend is planned mainline work,
+  while storage, device, and ISA backends remain future or parallel-track items.
+- 启动/backend：UEFI backend 已完成 x86_64 boot spike，但尚未达到运行时等价；将其提升为
+  默认 backend 是已规划的主线工作，而 storage、device、ISA backend 仍是后续或并行轨道事项。
 
 ## Completed Capability Baseline / 已完成能力基线
 
-the relevant capabilities through 44 are complete and now form a compressed minimal usable
+The kernel foundation, bounded userland, filesystem/path layer, and the M1–M5
+mainline milestones are complete and now form a compressed minimal usable
 system baseline. The completed work can be treated as the foundation for future
 planning rather than as individual future-stage items.
 
-TTY console input capability0 到persistent clean-sync `/rw` storage 已完成，并共同形成压缩后的最小可用系统基线。后续规划应将这些工作视为
-基础能力，而不是继续把它们作为未来阶段逐项展开。
+内核基础、有界用户态、文件系统/路径层，以及 M1–M5 主线里程碑均已完成，并共同形成压缩后
+的最小可用系统基线。后续规划应将这些工作视为基础能力，而不是继续把它们作为未来阶段
+逐项展开。
 
 - Kernel foundation: x86_64 legacy boot, text/serial output,
-  interrupt/exception/syscall dispatch, timer and keyboard input, single-core
+  interrupt/exception/syscall dispatch, timer and keyboard input, multi-core
   scheduling, kernel memory management, user address spaces, and bounded user
   fault handling.
 - 内核基础：x86_64 legacy boot、文本/串口输出、中断/异常/syscall 分发、计时器与键盘输入、
-  单核调度、内存管理、用户地址空间和有界用户 fault 处理。
+  多核调度、内存管理、用户地址空间和有界用户 fault 处理。
 - User-visible system baseline: resident init, interactive shell, static user
   programs, bounded libc-style support, process lifecycle, `exec`/`fork`/COW,
   wait/exit behavior, signals, time and identity primitives, fd-based I/O,
@@ -125,13 +135,20 @@ TTY console input capability0 到persistent clean-sync `/rw` storage 已完成�
 - 文件系统与路径基线：只读启动资产、有界可写运行时存储、有界 persistent clean-sync `/rw`
   存储、受限 rename、page/buffer cache、文件与目录 metadata、每进程 current directory、
   相对路径解析和小型打包路径工具。
+- Mainline M1–M5 capabilities: file-backed read mapping and a bounded anonymous
+  mapping lifecycle, a writable directory tree with stable file growth and
+  metadata consistency, a device/driver framework with a queued block I/O layer
+  and a second block backend, a bounded process/session/terminal and syscall/libc
+  subset, and real multi-core execution with per-CPU run queues, typed IPI
+  delivery, cross-CPU TLB shootdown, and APIC-backed interrupt delivery.
+- 主线 M1–M5 能力：file-backed 读映射与有界匿名映射生命周期；具备稳定文件增长与元数据
+  一致性的可写目录树；具备排队块 I/O 层与第二块设备后端的设备/驱动框架；有界进程/会话/
+  终端与 syscall/libc 子集；以及具备 per-CPU run queue、类型化 IPI 投递、跨核 TLB
+  shootdown 与 APIC-backed 中断投递的真实多核执行。
 - Expansion foundations: the runnable x86_64 UEFI boot backend spike, initial
-  x86_64/core decoupling, terminal preparation, and SMP preparation contracts
-  for locking, per-CPU state, interrupt routing, TLB invalidation, and memory
-  ordering.
-- 扩展基础：可运行的 x86_64 UEFI boot backend spike、初步 x86_64/core 解耦、终端能力准备，
-  以及围绕 locking、per-CPU state、中断路由、TLB invalidation 和 memory ordering 的 SMP
-  准备契约。
+  x86_64/core decoupling, and terminal preparation.
+- 扩展基础：可运行的 x86_64 UEFI boot backend spike、初步 x86_64/core 解耦，以及终端能力
+  准备。
 
 ## Future Mainline / 后续主线
 
@@ -144,35 +161,38 @@ user-visible capability goal.
 多个扩展方向可以并行推进，但每个主线阶段仍应有清晰的用户可见能力目标。
 
 Completed stages are intentionally compressed into the completed capability
-baseline above. the relevant capabilities through 44 should no longer be treated as separate
+baseline above. The M1–M5 milestones should no longer be treated as separate
 future-planning items; their outcomes are now part of the current bounded
-userland, filesystem, process, VM, and persistent storage baseline.
+userland, filesystem, process, VM, multi-core, and persistent storage baseline.
 
-已完成阶段已在上方“已完成能力基线”中压缩归纳。bounded POSIX-like surface 到persistent clean-sync `/rw` storage 不应再作为独立的
-未来规划项展开；其结果现在属于当前有界用户态、文件系统、进程、VM 与持久存储基线的一部分。
+已完成阶段已在上方“已完成能力基线”中压缩归纳。M1–M5 里程碑不应再作为独立的未来规划项
+展开；其结果现在属于当前有界用户态、文件系统、进程、VM、多核与持久存储基线的一部分。
 
 ### Mainline Strategy / 主线策略
 
-The next phase follows a capability-first strategy: keep the single-core
-x86_64 kernel as the delivery target and grow user-visible maturity first, then
-sequence real multi-core execution as the final milestone once the affected
-subsystems have matured. New SMP-sensitive code added along the way should be
-designed against the existing SMP preparation boundaries so the later
-multi-core milestone is a controlled activation rather than a broad retrofit.
+The next phase keeps x86_64 as the delivery target and grows user-visible
+maturity in dependency order: first modernize the boot backend and display
+subsystem, then consolidate the freshly landed multi-core base, then move I/O
+toward asynchronous and interrupt-driven paths so modern storage and networking
+can build on a correct foundation, and finally mature the userland. New code
+added along the way should respect the existing boot, memory, interrupt, and
+multi-core boundaries so each milestone stays a controlled extension rather than
+a broad retrofit.
 
-下一阶段采用功能优先策略：保持单核 x86_64 内核为交付目标，先推进用户可见的成熟度，
-再将真正的多核执行安排为最后一个里程碑，待相关子系统成熟后启用。沿途新增的 SMP 敏感
-代码应按既有 SMP 准备边界设计，使后续多核里程碑成为受控启用，而非大范围 retrofit。
+下一阶段保持 x86_64 为交付目标，并按依赖顺序推进用户可见成熟度：先现代化启动 backend
+与显示子系统，再巩固刚落地的多核基线，随后将 I/O 推向异步与中断驱动路径，使现代存储与
+网络能够构建在正确的基础之上，最后完善用户态。沿途新增代码应尊重既有启动、内存、中断
+与多核边界，使每个里程碑成为受控扩展，而非大范围 retrofit。
 
-The mainline is organized into five milestones (M1–M5) on top of the completed
-capability baseline. Each milestone lists its tasks. M1 and M2 are high
-priority, M3 and M4 are medium priority, and M5 is the sequenced closing
-milestone.
+The mainline extends with seven sequenced milestones (M6–M12) on top of the
+completed capability baseline. Each milestone has a clear user-visible goal and
+lists its tasks; they are pursued in M6–M12 order, where later milestones depend
+on earlier ones.
 
-主线在已完成能力基线之上划分为五个里程碑（M1–M5），每个里程碑列出其任务。M1 与 M2 为高
-优先级，M3 与 M4 为中优先级，M5 为时序靠后的收尾里程碑。
+主线在已完成能力基线之上扩展为七个有序里程碑（M6–M12）。每个里程碑都有清晰的用户可见
+目标并列出其任务；它们按 M6–M12 的顺序推进，后续里程碑依赖在先的里程碑。
 
-### Milestone M1 — Address Space And mmap Maturity (High Priority) / 里程碑 M1 — 地址空间与 mmap 完善（高优先级）
+### Milestone M1 — Address Space And mmap Maturity / 里程碑 M1 — 地址空间与 mmap 完善
 
 User-visible goal: user programs can map files and larger anonymous regions,
 enabling more capable programs.
@@ -192,7 +212,7 @@ enabling more capable programs.
 - [x] 任务 M1.3：共享只读映射，使多进程可共享只读 text 与数据页，TLB 失效通过既有 SMP 准备
   失效边界表达。
 
-### Milestone M2 — Real Writable Filesystem (High Priority) / 里程碑 M2 — 真实可写文件系统（高优先级）
+### Milestone M2 — Real Writable Filesystem / 里程碑 M2 — 真实可写文件系统
 
 User-visible goal: the shell can create and remove directories and reliably
 persist multiple files beyond the current clean-sync boundary.
@@ -212,7 +232,7 @@ persist multiple files beyond the current clean-sync boundary.
   durably reaches the backing store.
 - [x] 任务 M2.4：打通经 page/buffer cache 的回写路径，使同步操作可靠落盘。
 
-### Milestone M3 — Block Layer And Device Framework (Medium Priority) / 里程碑 M3 — 块层与设备框架（中优先级）
+### Milestone M3 — Block Layer And Device Framework / 里程碑 M3 — 块层与设备框架
 
 User-visible goal: the kernel gains an extensible device model and block I/O is
 no longer constrained to a single synchronous path.
@@ -228,7 +248,7 @@ no longer constrained to a single synchronous path.
   adding a new ISA.
 - [x] 任务 M3.3：以第二个块设备后端作为框架验证，不接入新 ISA。
 
-### Milestone M4 — Process POSIX Subset And libc Maturity (Medium Priority) / 里程碑 M4 — 进程 POSIX 子集与 libc 成熟（中优先级）
+### Milestone M4 — Process POSIX Subset And libc Maturity / 里程碑 M4 — 进程 POSIX 子集与 libc 成熟
 
 User-visible goal: the shell supports job-control-like interaction and more
 standard small programs can compile and run directly.
@@ -245,7 +265,7 @@ standard small programs can compile and run directly.
   freestanding-safe.
 - [x] 任务 M4.3：推进 libc 子集成熟度以支持可移植小程序，同时保持 freestanding-safe。
 
-### Milestone M5 — Real Multi-Core Execution (Closing Milestone) / 里程碑 M5 — 真实多核执行（收尾里程碑）
+### Milestone M5 — Real Multi-Core Execution / 里程碑 M5 — 真实多核执行
 
 User-visible goal: the kernel schedules across multiple cores and throughput
 scales with core count.
@@ -263,11 +283,146 @@ scales with core count.
   user-visible ABI changes.
 - [x] 任务 M5.4：APIC-backed 默认中断投递，并评审任何用户可见 ABI 变化。
 
+### Milestone M6 — UEFI As The Primary Boot Backend / 里程碑 M6 — UEFI 成为主启动 backend
+
+User-visible goal: BigOS boots by default through UEFI to the same bounded
+userland, while the Legacy BIOS path remains a runnable cross-validation backend.
+
+用户可见目标：BigOS 默认通过 UEFI 启动并到达相同的有界用户态，同时 Legacy BIOS 路径仍
+作为可运行的交叉验证 backend 保留。
+
+- [ ] Task M6.1: promote the UEFI backend from a non-parity spike to the default
+  runnable boot backend, reaching the existing bounded userland baseline.
+- [ ] 任务 M6.1：将 UEFI backend 从不具备运行时等价的 spike 提升为默认可运行启动 backend，
+  到达现有有界用户态基线。
+- [ ] Task M6.2: keep the Legacy BIOS boot and storage path runnable and unchanged
+  as a downgraded cross-validation backend, without removing it.
+- [ ] 任务 M6.2：保持 Legacy BIOS 启动与存储路径可运行且不变，作为降级的交叉验证 backend
+  保留，不删除。
+- [ ] Task M6.3: align default build, run, and headless smoke validation so the
+  existing user-visible boot behavior is reproduced through the UEFI path.
+- [ ] 任务 M6.3：对齐默认构建、运行与 headless smoke 验证，使现有用户可见启动行为可通过
+  UEFI 路径复现。
+
+### Milestone M7 — Framebuffer Console And Unicode Text / 里程碑 M7 — Framebuffer 控制台与 Unicode 文本
+
+User-visible goal: under UEFI the console renders text as bitmap glyphs on a
+graphical framebuffer and can display non-ASCII characters such as CJK, while the
+Legacy text console remains as a fallback.
+
+用户可见目标：在 UEFI 下控制台以点阵字形在图形 framebuffer 上渲染文本，并可显示 CJK 等
+非 ASCII 字符，同时保留 Legacy 文本控制台作为回退。
+
+- [ ] Task M7.1: obtain a linear framebuffer through firmware graphics output and
+  pass framebuffer geometry and a font asset to the kernel through the boot
+  handoff so they are available early.
+- [ ] 任务 M7.1：通过固件图形输出获取线性 framebuffer，并经启动握手把 framebuffer 几何信息
+  与字体资产早期传给内核。
+- [ ] Task M7.2: a build-time font asset pipeline that converts the bundled bitmap
+  font into a compact in-kernel glyph lookup covering half-width and full-width
+  glyphs.
+- [ ] 任务 M7.2：构建期字体资产管线，将随附点阵字体转换为紧凑的内核内字形查找，覆盖半宽与
+  全宽字形。
+- [ ] Task M7.3: a framebuffer text console backend that renders glyphs, a software
+  cursor, and scrolling behind the existing console output interface so upper
+  console/scrollback state stays reusable.
+- [ ] 任务 M7.3：framebuffer 文本控制台后端，在既有控制台输出接口之后渲染字形、软件光标与
+  滚动，使上层 console/scrollback 状态可复用。
+- [ ] Task M7.4: upgrade the console text model to UTF-8 decoding, codepoint-based
+  cells, and double-width cell handling so non-ASCII text can be displayed; the
+  Legacy text backend degrades non-ASCII codepoints deterministically.
+- [ ] 任务 M7.4：将控制台文本模型升级为 UTF-8 解码、基于 codepoint 的 cell 与双宽 cell
+  处理以显示非 ASCII 文本；Legacy 文本后端对非 ASCII codepoint 做确定性降级显示。
+
+### Milestone M8 — Multi-Core Hardening / 里程碑 M8 — 多核加固
+
+User-visible goal: the freshly landed multi-core base is trusted under
+concurrency stress before further subsystems build on it.
+
+用户可见目标：在更多子系统构建于其上之前，让刚落地的多核基线在并发压力下可被信任。
+
+- [ ] Task M8.1: concurrency stress and regression validation for multi-core
+  scheduling, cross-CPU wakeups, IPI delivery, and TLB shootdown completion.
+- [ ] 任务 M8.1：针对多核调度、跨核唤醒、IPI 投递与 TLB shootdown 完成的并发压力与回归验证。
+- [ ] Task M8.2: audit and harden shared-state locking and ordering across affected
+  scheduler, memory, and interrupt paths.
+- [ ] 任务 M8.2：审查并加固受影响的调度、内存与中断路径上的共享状态加锁与顺序。
+- [ ] Task M8.3: strengthen deterministic diagnostics and fail-closed behavior for
+  multi-core fault and timeout conditions.
+- [ ] 任务 M8.3：增强多核故障与超时条件下的确定性诊断与 fail-closed 行为。
+
+### Milestone M9 — Asynchronous And Interrupt-Driven I/O / 里程碑 M9 — 异步与中断驱动 I/O
+
+User-visible goal: block I/O no longer blocks on synchronous polling, enabling
+correct modern storage and networking on top.
+
+用户可见目标：块 I/O 不再依赖同步轮询，使其上的现代存储与网络能够正确构建。
+
+- [ ] Task M9.1: an interrupt-driven I/O completion model integrated with the
+  existing block request layer and scheduler wakeups.
+- [ ] 任务 M9.1：与既有块请求层和调度唤醒集成的中断驱动 I/O 完成模型。
+- [ ] Task M9.2: convert the existing block path off synchronous polling within
+  bounded semantics, preserving current cache and writeback behavior.
+- [ ] 任务 M9.2：在有界语义内将现有块路径从同步轮询切换走，保持当前缓存与回写行为。
+- [ ] Task M9.3: bounded asynchronous request lifecycle and diagnostics that remain
+  IRQ-safe and freestanding-safe.
+- [ ] 任务 M9.3：保持 IRQ-safe 与 freestanding-safe 的有界异步请求生命周期与诊断。
+
+### Milestone M10 — Modern Storage Drivers / 里程碑 M10 — 现代存储驱动
+
+User-visible goal: BigOS drives a modern storage device through the device and
+async I/O framework, validating them with real hardware-style backends.
+
+用户可见目标：BigOS 通过设备与异步 I/O 框架驱动现代存储设备，以真实硬件风格后端验证它们。
+
+- [ ] Task M10.1: a modern block-storage driver such as virtio-blk or NVMe built on
+  the device framework and async I/O completion model.
+- [ ] 任务 M10.1：基于设备框架与异步 I/O 完成模型构建现代块存储驱动，如 virtio-blk 或 NVMe。
+- [ ] Task M10.2: integrate the new storage backend with the block layer, cache,
+  and writeback path within bounded semantics.
+- [ ] 任务 M10.2：在有界语义内将新存储后端与块层、缓存和回写路径集成。
+- [ ] Task M10.3: storage driver validation through the emulator path without adding
+  a new ISA.
+- [ ] 任务 M10.3：通过仿真器路径验证存储驱动，不接入新 ISA。
+
+### Milestone M11 — Networking Stack / 里程碑 M11 — 网络栈
+
+User-visible goal: user programs can perform basic network communication through
+a minimal socket interface.
+
+用户可见目标：用户程序可通过最小 socket 接口进行基础网络通信。
+
+- [ ] Task M11.1: a network device driver such as virtio-net on the device and
+  interrupt-driven I/O framework.
+- [ ] 任务 M11.1：基于设备与中断驱动 I/O 框架的网络设备驱动，如 virtio-net。
+- [ ] Task M11.2: a bounded network protocol path sufficient for basic
+  communication, without claiming a complete network stack.
+- [ ] 任务 M11.2：足以支撑基础通信的有界网络协议路径，不声称完整网络栈。
+- [ ] Task M11.3: a minimal user-visible socket interface integrated with the
+  existing fd/syscall path within bounded semantics.
+- [ ] 任务 M11.3：在有界语义内与既有 fd/syscall 路径集成的最小用户可见 socket 接口。
+
+### Milestone M12 — Userland Maturity / 里程碑 M12 — 用户态成熟度
+
+User-visible goal: BigOS feels more like a usable system, with more standard
+programs and a richer userland.
+
+用户可见目标：BigOS 更像一个可用系统，支持更多标准程序与更丰富的用户态。
+
+- [ ] Task M12.1: dynamic linking and shared library support within bounded
+  freestanding-safe semantics.
+- [ ] 任务 M12.1：在有界 freestanding-safe 语义内支持动态链接与共享库。
+- [ ] Task M12.2: a more complete libc subset toward portable standard small
+  programs.
+- [ ] 任务 M12.2：更完整的 libc 子集，支撑可移植的标准小程序。
+- [ ] Task M12.3: a broader set of bounded core userland utilities.
+- [ ] 任务 M12.3：更广的一组有界核心用户态工具程序。
+
 ### Parallel Foundations / 并行基础方向
 
-- Backend work may continue for UEFI runtime parity and future backend cleanup,
-  but the short-term plan does not add a new ISA.
-- backend 工作可以继续推进 UEFI 运行时等价和后续 backend 清理，但短期计划不接入新 ISA。
+- Backend and cleanup work may continue alongside the mainline, but the
+  short-term plan does not add a new ISA.
+- backend 与清理工作可与主线并行推进，但短期计划不接入新 ISA。
 - All x86_64 work should avoid spreading architecture-specific assumptions into
   process, filesystem, userland ABI, and generic kernel policy.
 - 所有 x86_64 工作都应避免把 architecture-specific 假设扩散到进程、文件系统、用户态 ABI 和通用
