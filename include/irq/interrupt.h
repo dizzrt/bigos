@@ -40,6 +40,15 @@ namespace irq {
     struct InterruptFrame;
     typedef void (*IRQHandler)(InterruptFrame *__frame);
 
+    enum class VectorOwner : uint8_t {
+        Unknown,
+        CpuException,
+        Syscall,
+        Pic,
+        Lapic,
+        ApicSpurious,
+    };
+
     namespace __detail {
         struct INTRAttributes {
             uint16_t ist : 3;
@@ -57,6 +66,8 @@ namespace irq {
 
         void initIDT() noexcept;
         void setISRHandler(uint64_t __vector, IRQHandler __handler) noexcept;
+        void setVectorOwner(uint64_t __vector, VectorOwner __owner) noexcept;
+        void setApicDefaultDeliveryActive(bool __active) noexcept;
     }   // namespace __detail
 
     struct INTRDescriptor {
@@ -158,6 +169,8 @@ namespace irq {
     };
 
     void initIRQ() noexcept;
+    bool apic_default_delivery_active() noexcept;
+    const char *vector_owner_name(VectorOwner __owner) noexcept;
     void triggerPageFaultForValidation() noexcept;
 }   // namespace irq
 NAMESPACE_BIGOS_END

@@ -17,6 +17,7 @@ namespace irq::isr {
     }   // namespace __detail
 
     void register_isr(uint64_t __vector, IRQHandler __isr) noexcept;
+    void register_isr(uint64_t __vector, IRQHandler __isr, VectorOwner __owner) noexcept;
     void init_isr() noexcept;
 }   // namespace irq::isr
 NAMESPACE_BIGOS_END

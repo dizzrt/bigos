@@ -27,7 +27,7 @@ def test_exception_dispatch_does_not_send_pic_eoi() -> None:
     assert 'I8259_EOI' not in interrupt_s
 
     exception_start = interrupt_cc.index('if (__detail::is_cpu_exception(__frame->vector))')
-    external_start = interrupt_cc.index('if (__detail::is_i8259_external_irq(__frame->vector))')
+    external_start = interrupt_cc.index('if (__detail::is_pic_external_irq(__frame->vector))')
     exception_body = interrupt_cc[exception_start:external_start]
 
     assert 'send_eoi' not in exception_body
@@ -55,7 +55,7 @@ def test_i8259_spurious_irq7_is_checked_before_default_handler() -> None:
 def test_irq_return_preemption_runs_after_nonblocking_guard_scope() -> None:
     interrupt = read_source('kernel/core/irq/interrupt.cc')
 
-    external_start = interrupt.index('if (__detail::is_i8259_external_irq(__frame->vector))')
+    external_start = interrupt.index('if (__detail::is_pic_external_irq(__frame->vector))')
     syscall_start = interrupt.index('if (__detail::is_syscall_vector(__frame->vector))')
     external_body = interrupt[external_start:syscall_start]
 
@@ -71,7 +71,7 @@ def test_keyboard_irq_handler_is_registered_before_unmask() -> None:
     isr = read_source('kernel/core/irq/isr.cc')
     xmake = read_source('xmake.lua')
 
-    register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
+    register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard, VectorOwner::Pic);')
     unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);')
 
     # default interactive userland baseline: keyboard IRQ1 is unmasked unconditionally (no BIGOS_KEYBOARD_SMOKE
@@ -103,7 +103,7 @@ def test_page_fault_handler_is_diagnostic_only() -> None:
     interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     handler_start = interrupt.index('static bool page_fault_handler')
-    handler_end = interrupt.index('static void default_external_irq_handler')
+    handler_end = interrupt.index('static void default_pic_irq_handler')
     handler_body = interrupt[handler_start:handler_end]
 
     assert 'read_cr2()' in handler_body

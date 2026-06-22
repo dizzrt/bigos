@@ -11,6 +11,8 @@ namespace irqchip::ioapic {
         constexpr uint8_t REG_VERSION = 0x01;
         constexpr uint8_t REG_REDIRECTION_BASE = 0x10;
         constexpr uint64_t REDIR_MASKED = 1ull << 16;
+        constexpr uint64_t REDIR_POLARITY_LOW = 1ull << 13;
+        constexpr uint64_t REDIR_TRIGGER_LEVEL = 1ull << 15;
         constexpr uint8_t MAX_ISA_IRQ = 15;
         constexpr bigos::mm::PageAttr MMIO_PAGE_ATTR =
             bigos::mm::page_attr::KERNEL_DEFAULT | bigos::mm::page_attr::NO_EXECUTE | (1ull << 3) | (1ull << 4);
@@ -71,22 +73,38 @@ namespace irqchip::ioapic {
         return read(REG_VERSION);
     }
 
-    bool route_irq(uint8_t __irq, uint8_t __vector, uint32_t __destination_apic_id, bool __masked) noexcept {
-        if (g_mmio == nullptr || __irq > MAX_ISA_IRQ) {
+    bool route_irq(const RedirectionConfig &__config) noexcept {
+        if (g_mmio == nullptr || __config.irq > MAX_ISA_IRQ || __config.vector < 0x20) {
             g_status = Status::InvalidInput;
             return false;
         }
 
-        uint64_t entry = __vector;
-        if (__masked)
+        uint64_t entry = __config.vector;
+        if (__config.masked)
             entry |= REDIR_MASKED;
-        entry |= (uint64_t)(__destination_apic_id & 0xffu) << 56;
+        if (__config.polarity == Polarity::ActiveLow)
+            entry |= REDIR_POLARITY_LOW;
+        if (__config.trigger == TriggerMode::Level)
+            entry |= REDIR_TRIGGER_LEVEL;
+        entry |= (uint64_t)(__config.destination_apic_id & 0xffu) << 56;
 
-        const uint8_t reg = REG_REDIRECTION_BASE + __irq * 2;
+        const uint8_t reg = REG_REDIRECTION_BASE + __config.irq * 2;
         write(reg, (uint32_t)entry);
         write(reg + 1, (uint32_t)(entry >> 32));
         g_status = Status::Ready;
         return true;
+    }
+
+    bool route_irq(uint8_t __irq, uint8_t __vector, uint32_t __destination_apic_id, bool __masked) noexcept {
+        const RedirectionConfig config = {
+            __irq,
+            __vector,
+            __destination_apic_id,
+            __masked,
+            TriggerMode::Edge,
+            Polarity::ActiveHigh,
+        };
+        return route_irq(config);
     }
 }   // namespace irqchip::ioapic
 NAMESPACE_DRIVER_END

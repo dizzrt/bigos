@@ -89,17 +89,18 @@ preemption-disable depth 和 pending reschedule state。
   thread、terminated list 和 reschedule intent 属于 owning scheduler domain。初始
   placement 与 wakeup 可以通过 scheduler boundary 向远端 online CPU enqueue work，
   并按先发布 runnable state、再设置 reschedule pending、最后发送 scheduler nudge 的顺序执行。
-- IRQ routing 仍使用现有 IDT/i8259/PIT/keyboard/syscall 模型。Exception 和 external
-  IRQ 路径保持 non-blocking；`int 0x80` 保留现有 syscall ABI，且不发送 i8259 EOI。
-  LAPIC timer 与 scheduler nudge interrupt 使用 LAPIC EOI；nudge 不是 generic IPI routing。
+- IRQ routing 使用显式 vector ownership。CPU exception 与 `int 0x80` 不发送 irqchip
+  EOI，PIC fallback IRQ 发送 i8259 EOI，APIC-owned local timer、IPI 和已支持的
+  IOAPIC external IRQ 发送 LAPIC EOI。APIC default delivery active 时，scheduler
+  tick 归 LAPIC timer，keyboard/input IRQ 通过 IOAPIC 路由到已初始化且 online 的 BSP。
 - TLB invalidation 通过携带 address-space root、virtual page 或 range、target CPU
   mask 和 completion requirement 的边界表达。单核实现只接受 bootstrap CPU target，
   并通过本地 `invlpg` 或 CR3 reload 完成。
 - Shared scheduler state、IRQ-visible state 和 page-table update 在对 handler、fault
   path 或未来 remote CPU 可见前，必须通过 interrupt-disabled section 或所选本地边界
   完成发布。
-- Generic IPI routing、TLB shootdown acknowledgement、CPU hotplug、NUMA、RCU、
-  完整 APIC external interrupt migration 和广义 load balancing 仍是后续依赖。
+- CPU hotplug、NUMA、RCU、MSI/MSI-X、广义 IRQ affinity/load balancing，以及
+  非 x86_64 interrupt backend parity 仍是后续依赖。
 
 ## Review Checklist
 

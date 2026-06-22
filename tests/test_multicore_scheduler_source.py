@@ -28,8 +28,9 @@ def test_remote_enqueue_publication_precedes_scheduler_nudge() -> None:
     create_body = sched[sched.index('ThreadId create_kernel_thread_target') : sched.index('void yield()')]
     assert create_body.index('rq_push(target, tcb);') < create_body.index('request_reschedule_locked(target);')
     assert create_body.index('request_reschedule_locked(target);') < create_body.index('nudge_cpu(__target_cpu);')
-    assert 'driver::irqchip::lapic::send_fixed_ipi' in sched
-    assert 'irq::VECTOR_SCHED_NUDGE' in sched
+    assert 'smp::send_ipi(__target_cpu, smp::IpiType::SchedulerNudge)' in sched
+    assert 'driver::irqchip::lapic::send_fixed_ipi' in read_source('kernel/core/bigos/smp_ipi.cc')
+    assert 'irq::VECTOR_SCHED_NUDGE' in read_source('kernel/core/bigos/smp_ipi.cc')
 
 
 def test_scheduler_nudge_vector_is_lapic_scoped_not_generic_ipi() -> None:
@@ -39,9 +40,10 @@ def test_scheduler_nudge_vector_is_lapic_scoped_not_generic_ipi() -> None:
     lapic_h = read_source('include/drivers/irqchip/lapic.h')
 
     assert 'VECTOR_SCHED_NUDGE' in interrupt_h
-    assert 'VECTOR_LAPIC_TIMER || __vector == VECTOR_SCHED_NUDGE' in interrupt
-    assert 'register_isr(VECTOR_SCHED_NUDGE, &__detail::isr_scheduler_nudge)' in isr
-    assert 'bigos::sched::on_scheduler_nudge();' in isr
+    assert 'vector_owners[__vector] == VectorOwner::Lapic' in interrupt
+    assert 'register_isr(VECTOR_SCHED_NUDGE, &__detail::isr_scheduler_nudge, VectorOwner::Lapic)' in isr
+    assert 'bigos::smp::handle_scheduler_nudge_ipi(__frame);' in isr
+    assert 'sched::on_scheduler_nudge();' in read_source('kernel/core/bigos/smp_ipi.cc')
     assert 'send_fixed_ipi' in lapic_h
 
 

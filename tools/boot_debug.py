@@ -280,6 +280,25 @@ RUNTIME_SMOKE_MATRIX = (
         qemu_extra=('-cpu', 'max', '-smp', '2'),
     ),
     RuntimeSmokeCase(
+        case_id='apic-default-interrupt-delivery',
+        title='APIC default interrupt delivery',
+        switches=('scheduler_smp_smoke',),
+        expected_marker='BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE',
+        timeout_seconds=20.0,
+        risk_area='LAPIC timer ownership, IOAPIC keyboard routing, APIC EOI ownership, and BSP target selection',
+        validation_markers=(
+            'BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE',
+            'BIGOS_AP_ONLINE',
+            'BIGOS_AP_LOCAL_TIMER',
+            'BIGOS_SCHED_SMP_PASSED',
+        ),
+        proc_boundary=(
+            'default-off APIC/SMP smoke; validates supported APIC-backed timer and keyboard routing setup, '
+            'not CPU hotplug, NUMA, MSI/MSI-X, complete IRQ affinity, or non-x86_64 backends'
+        ),
+        qemu_extra=('-cpu', 'max', '-smp', '2'),
+    ),
+    RuntimeSmokeCase(
         case_id='blocking-primitives',
         title='Blocking primitives',
         switches=('blocking_smoke',),
@@ -1620,6 +1639,7 @@ def runtime_smoke_run_args(
         emulator='qemu',
         display='none',
         keep_image=True,
+        persistent_image=None,
         bochsrc=None,
         romimage=None,
         vgaromimage=None,

@@ -101,7 +101,7 @@ def test_generated_bochsrc_is_sanitized(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
     bochsrc = tmp_path / 'bochsrc.bxrc'
 
-    boot_debug.render_bochsrc(image, bochsrc, None, None, None, 'sdl2', [])
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, 'sdl2', 1, [])
 
     contents = bochsrc.read_text(encoding='utf-8')
     assert f'path="{image}"' in contents
@@ -117,7 +117,7 @@ def test_generated_bochsrc_defaults_to_sdl2_display(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
     bochsrc = tmp_path / 'bochsrc.bxrc'
 
-    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', None), [])
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', None), 1, [])
 
     contents = bochsrc.read_text(encoding='utf-8')
     assert 'display_library: sdl2' in contents
@@ -127,7 +127,7 @@ def test_generated_bochsrc_can_select_sdl2_display_explicitly(tmp_path: Path) ->
     image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
     bochsrc = tmp_path / 'bochsrc.bxrc'
 
-    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', 'sdl2'), [])
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', 'sdl2'), 1, [])
 
     contents = bochsrc.read_text(encoding='utf-8')
     assert 'display_library: sdl2' in contents
@@ -137,7 +137,7 @@ def test_generated_bochsrc_can_select_no_gui_display(tmp_path: Path) -> None:
     image = write_bytes(tmp_path / 'os.raw', bytes(boot_debug.DEFAULT_IMAGE_SIZE))
     bochsrc = tmp_path / 'bochsrc.bxrc'
 
-    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', 'none'), [])
+    boot_debug.render_bochsrc(image, bochsrc, None, None, None, boot_debug.resolve_display('bochs', 'none'), 1, [])
 
     contents = bochsrc.read_text(encoding='utf-8')
     assert 'display_library: nogui' in contents
@@ -154,6 +154,7 @@ def test_bochs_extra_can_override_generated_display(tmp_path: Path) -> None:
         None,
         None,
         boot_debug.resolve_display('bochs', 'sdl2'),
+            1,
         ['display_library: nogui'],
     )
 
@@ -169,7 +170,7 @@ def test_qemu_command_uses_legacy_bios_ide_disk_and_headless_serial(tmp_path: Pa
 
     assert command[0] == 'qemu-system-x86_64'
     assert '-drive' in command
-    assert f'file={image},format=raw,if=ide' in command
+    assert f'file={image},format=raw,if=ide,index=0' in command
     assert command[command.index('-boot') + 1] == 'c'
     assert command[command.index('-serial') + 1] == f'file:{serial_log}'
     assert command[command.index('-display') + 1] == 'none'
@@ -317,6 +318,7 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
         'memory-self-test',
         'timer-irq',
         'scheduler',
+        'apic-default-interrupt-delivery',
         'blocking-primitives',
         'syscall',
         'filesystem-read',
@@ -340,6 +342,18 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
     assert 'kernel/core/proc/**' in boot_debug.case_by_id('filesystem-user-elf').proc_boundary
     assert 'synthetic TTY producer' in boot_debug.case_by_id('blocking-primitives').proc_boundary
     assert 'BIGOS_BLOCKING_TIMEOUT_EXPIRED' in boot_debug.case_by_id('blocking-primitives').validation_markers
+    apic_case = boot_debug.case_by_id('apic-default-interrupt-delivery')
+    assert apic_case.qemu_extra == ('-cpu', 'max', '-smp', '2')
+    assert 'BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE' in apic_case.validation_markers
+    assert 'MSI/MSI-X' in apic_case.proc_boundary
+    run_args = boot_debug.runtime_smoke_run_args(
+        apic_case,
+        boot_debug.DEFAULT_IMAGE,
+        boot_debug.DEFAULT_SERIAL_LOG,
+        '64M',
+    )
+    assert hasattr(run_args, 'persistent_image')
+    assert run_args.persistent_image is None
 
 
 def test_default_init_case_uses_marker_behavior_assertion_without_smoke_switch() -> None:

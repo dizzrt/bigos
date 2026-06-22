@@ -259,9 +259,9 @@ scales with core count.
 - [x] Task M5.3: activation of IRQ-safe locking, IPI delivery, and cross-CPU TLB
   shootdown, fulfilling the SMP preparation contracts.
 - [x] 任务 M5.3：启用 IRQ-safe 锁、IPI 投递与跨核 TLB shootdown，兑现 SMP 准备契约。
-- [ ] Task M5.4: APIC-backed default interrupt delivery and review of any
+- [x] Task M5.4: APIC-backed default interrupt delivery and review of any
   user-visible ABI changes.
-- [ ] 任务 M5.4：APIC-backed 默认中断投递，并评审任何用户可见 ABI 变化。
+- [x] 任务 M5.4：APIC-backed 默认中断投递，并评审任何用户可见 ABI 变化。
 
 ### Parallel Foundations / 并行基础方向
 

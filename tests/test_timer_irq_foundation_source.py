@@ -45,9 +45,9 @@ def test_timer_irq0_handler_is_registered_before_unmask() -> None:
     assert 'VECTOR_TIMER = I8259_MASTER_VECTOR_BASE + IRQ_LINE_TIMER' in interrupt_h
 
     pit_index = isr.index('bigos::device::init_pit_timer();')
-    register_index = isr.index('register_isr(VECTOR_TIMER, &isr_timer);')
+    register_index = isr.index('register_isr(VECTOR_TIMER, &isr_timer, VectorOwner::Pic);')
     unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_TIMER);')
-    keyboard_register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
+    keyboard_register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard, VectorOwner::Pic);')
     keyboard_unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);')
 
     assert pit_index < register_index < unmask_index
@@ -205,7 +205,7 @@ def test_isr_abi_invariants_are_preserved() -> None:
     # External IRQ sends exactly one EOI after the handler returns; CPU
     # exceptions send none.
     exception_start = interrupt_cc.index('is_cpu_exception(__frame->vector)')
-    exception_end = interrupt_cc.index('is_i8259_external_irq(__frame->vector)')
+    exception_end = interrupt_cc.index('is_pic_external_irq(__frame->vector)')
     exception_block = interrupt_cc[exception_start:exception_end]
     assert 'send_eoi' not in exception_block
     assert interrupt_cc.count('driver::irqchip::i8259::send_eoi') == 1

@@ -1391,10 +1391,15 @@ void kernel(const BootInfoHeader *boot_info) {
     bigos::mm::user_vmem_smoke();
 #endif
     bigos::terminal::init_tty();
-    bigos::irq::initIRQ();
 #ifdef BIGOS_AP_STARTUP_PERCPU_TIMERS
     bigos::cpu::init_topology_from_mp();
-    (void)bigos::arch::x86::ap_startup::start_application_processors();
+#endif
+    bigos::irq::initIRQ();
+#ifdef BIGOS_AP_STARTUP_PERCPU_TIMERS
+    if (bigos::irq::apic_default_delivery_active())
+        (void)bigos::arch::x86::ap_startup::start_application_processors();
+    else
+        bigos::serial_puts("BIGOS_APIC_DEFAULT_BSP_ONLY_FALLBACK\n");
 #endif
 #ifdef BIGOS_PAGE_FAULT_SMOKE
     bigos::irq::triggerPageFaultForValidation();

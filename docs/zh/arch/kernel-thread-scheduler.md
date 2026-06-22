@@ -16,7 +16,7 @@ BigOS 仍保持最小内核线程模型的 bounded 边界，但调度器现在�
 
 ## 非目标与边界
 
-- **仅限 scheduler SMP**：支持 per-CPU run queue 与 scheduler nudge，但不支持 CPU hotplug、NUMA、affinity API、work stealing、CFS、实时调度、POSIX scheduling policy、generic IPI routing、TLB shootdown 或完整 APIC default interrupt delivery。
+- **仅限 scheduler SMP**：支持 per-CPU run queue、scheduler nudge、LAPIC timer ownership，以及已支持 timer/keyboard IRQ source 的 bounded APIC default delivery；不支持 CPU hotplug、NUMA、完整 IRQ affinity API、work stealing、CFS、实时调度、POSIX scheduling policy、generic device IRQ balancing 或 MSI/MSI-X。
 - **无完整优先级调度器**：调度器只记录 bounded priority/policy metadata，默认选择策略仍是确定性的单核 round-robin。
 - **Bounded process 与 syscall integration**：timer preemption 不创建用户可见的 POSIX scheduling policy。后续 process/fd/VFS syscall 可以在普通进程 syscall 上下文中使用 `sched::can_block()`，但只限同一个单核 blocking contract。
 - **bounded timer-driven scheduler semantics 阻塞边界**：wait queue 与 tick-based sleep 仍是内核线程原语。它们可以通过 waiter-owned CPU scheduler domain 唤醒，但仍不提供 POSIX blocking IO policy、用户可见 cancellation 或 signal 语义。
@@ -79,10 +79,14 @@ scheduler-owned bridge，在 EOI 之后保存被中断线程的当前内核栈 c
 BSP timer 路径继续通过 `bigos::timer::on_tick()` 推进全局 tick，然后调用 bounded、IRQ-context-safe 的 `bigos::sched::on_timer_tick()`。AP local timer handler 在记录 CPU-local tick 后调用同一个 scheduler hook 做 AP-local time-slice accounting。scheduler hook 会递减当前普通线程 time slice，在到期时记录 CPU-local pending reschedule intent，并通过 allocation-free intrusive state 唤醒本 CPU 到期 sleeper；它不分配、不释放、不阻塞、不 bulk 输出，也不直接从 timer handler 切换线程。
 
 外部 IRQ dispatch 继续集中拥有 EOI。注册 handler 返回后，`irq_dispatch` 发送恰好一次
-i8259 EOI，然后调用 `sched::maybe_preempt_on_irq_return()`。该 bridge 只在 preemption
-enabled、`bigos::arch_context` 判断为 kernel IRQ-return context、当前线程仍是普通
-running 线程、且存在 runnable peer 时切换。LAPIC timer 与 scheduler-nudge interrupt 使用 LAPIC EOI 并进入同一个 bridge；scheduler nudge 只表示重新观察调度状态，不是 TLB shootdown、CPU hotplug、generic IPI routing 或完整 APIC interrupt migration。CPU exception 与 `int 0x80` syscall 从不进入
-该 bridge，不发送 i8259 EOI，也不接入 sleep/process-lifecycle recovery 路径。
+owner-specific EOI，然后调用 `sched::maybe_preempt_on_irq_return()`。PIC fallback IRQ
+发送 i8259 EOI；LAPIC timer、scheduler-nudge IPI、TLB-shootdown IPI 和已支持的
+IOAPIC external IRQ 发送 LAPIC EOI。该 bridge 只在 preemption enabled、
+`bigos::arch_context` 判断为 kernel IRQ-return context、当前线程仍是普通 running
+线程、且存在 runnable peer 时切换。scheduler nudge 只表示重新观察调度状态，不是 CPU
+hotplug、generic device IRQ balancing 或 MSI/MSI-X。CPU exception 与 `int 0x80`
+syscall 从不进入该 bridge，不发送 irqchip EOI，也不接入 sleep/process-lifecycle
+recovery 路径。
 
 ## 验证 Smoke
 
@@ -92,4 +96,4 @@ running 线程、且存在 runnable peer 时切换。LAPIC timer 与 scheduler-n
 
 `scheduler_semantics_smoke` 默认关闭。启用 `BIGOS_SCHEDULER_SEMANTICS_SMOKE` 时，`kernel()` 创建两个普通内核线程。第一个线程在 preemption disabled 且 timer ticks 继续推进时观察 `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED`；第二个线程只有在 timer-driven IRQ-return preemption 真正运行它时才能输出 `BIGOS_SCHED_SEMANTICS_PREEMPTED` 与 `BIGOS_SCHED_SEMANTICS_PASSED`。这些 marker 与 cooperative `scheduler_smoke` marker 区分开。
 
-`scheduler_smp_smoke` 默认关闭，并隐式启用 AP startup/per-CPU timer baseline。启用 `BIGOS_SCHEDULER_SMP_SMOKE` 时，`kernel()` 创建一个 BSP worker 和一个显式投递到 AP 的 worker。只有普通 scheduler work 在超过一个 online CPU 上运行时，smoke 才输出 `BIGOS_SCHED_SMP_BSP_THREAD`、`BIGOS_SCHED_SMP_AP_THREAD` 与 `BIGOS_SCHED_SMP_PASSED`。该 smoke 不验证 CPU hotplug、NUMA、TLB shootdown、generic IPI routing 或完整 APIC external interrupt migration。
+`scheduler_smp_smoke` 默认关闭，并隐式启用 AP startup/per-CPU timer baseline 与 bounded APIC default delivery gate。启用 `BIGOS_SCHEDULER_SMP_SMOKE` 时，`kernel()` 创建一个 BSP worker 和一个显式投递到 AP 的 worker。只有 APIC-backed timer/keyboard routing active 且普通 scheduler work 在超过一个 online CPU 上运行时，smoke 才输出 `BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE`、`BIGOS_SCHED_SMP_BSP_THREAD`、`BIGOS_SCHED_SMP_AP_THREAD` 与 `BIGOS_SCHED_SMP_PASSED`。该 smoke 不验证 CPU hotplug、NUMA、generic device IRQ balancing、MSI/MSI-X 或完整 IRQ affinity。

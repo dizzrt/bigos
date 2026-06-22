@@ -1,6 +1,6 @@
 # 中断与异常基础设施
 
-BigOS 早期 x86_64 中断路径当前只覆盖单核、Legacy BIOS、i8259 PIC 和 Bochs 验证场景。该基础设施用于让 CPU exception、外部 IRQ 和最小 keyboard smoke 可诊断，不代表已经具备调度器、完整输入子系统、用户态或缺页恢复能力。
+BigOS x86_64 中断路径覆盖 CPU exception、`int 0x80` syscall gate、PIC fallback IRQ，以及 APIC-owned local timer/IPI/已支持的 IOAPIC external IRQ。该基础设施用于保持 dispatch 与 EOI ownership 可诊断，不代表已经具备完整输入子系统、CPU hotplug、NUMA、MSI/MSI-X、完整 IRQ affinity 或非 x86_64 interrupt backend parity。
 
 ## 初始化顺序
 
@@ -49,14 +49,15 @@ foundation 阶段的 `InterruptFrame.rsp` 是 ring-0 interrupt entry 可计算�
 
 ## Dispatch 策略
 
-`irq_dispatch()` 按 vector 范围分流：
+`irq_dispatch()` 按显式 ownership 分流：
 
-- `0x00..0x1f`：CPU exception，不发送 PIC EOI。
-- `0x20..0x2f`：remapped i8259 external IRQ，handler 返回后发送 EOI。
-- `0x80`：software-interrupt syscall entry，不发送 PIC EOI。
-- 其他 vector：输出 deterministic unknown-vector 诊断并返回。
+- CPU exception ownership：不发送 irqchip EOI。
+- PIC fallback IRQ ownership：handler 返回后发送一次 i8259 EOI。
+- LAPIC/APIC ownership：local timer、IPI 与已支持的 IOAPIC external IRQ 在 handler 返回后发送一次 LAPIC EOI。
+- Syscall ownership：vector `0x80` 是 software-interrupt syscall entry，不发送 irqchip EOI。
+- Unknown 或 unsupported ownership：输出包含 vector 与已知 owner 分类的 deterministic 诊断。
 
-未注册 external IRQ 会走安全默认 handler，输出 vector/IRQ line 后发送 EOI，避免 PIC 卡住。
+未注册但已拥有 owner 的 IRQ 会走安全默认 handler，输出 vector 与 owner class，再由 owner-specific EOI 路径完成。
 
 ## Page Fault
 
@@ -66,9 +67,9 @@ foundation 阶段的 `InterruptFrame.rsp` 是 ring-0 interrupt entry 可计算�
 
 ## Keyboard IRQ1 输入交接
 
-keyboard IRQ1 现在用于受控输入 handoff，而不是在 ISR 中直接输出 smoke marker。初始化会先通过 `terminal::init_tty()` 准备 input ring、console flag 和 keyboard decoder state，再由 `irq::initIRQ()` 注册 vector `0x21` handler。默认 boot 仍保持 i8259 IRQ line 1 masked；需要人工验证键盘 IRQ 时，通过 `xmake f --keyboard_smoke=y` 显式 unmask IRQ1。
+keyboard IRQ1 现在用于受控输入 handoff，而不是在 ISR 中直接输出 smoke marker。初始化会先通过 `terminal::init_tty()` 准备 input ring、console flag 和 keyboard decoder state，再由 `irq::initIRQ()` 注册 vector `0x21` handler。APIC default-delivery 配置下，该 handler 属于 IOAPIC/LAPIC 路径并投递到已初始化且 online 的 BSP；BSP-only fallback 下，该 handler 属于 PIC 路径，并在 handler 注册后 unmask IRQ1。
 
-handler 只读取 PS/2 data port `0x60` 的一个 scancode byte，执行 bounded set-1 decode，并把受支持字符交给 TTY fixed-capacity input buffer。handler 不直接发送 i8259 EOI、不调用 `kprintf()`/`kput()`、不写 VGA/serial、不调用 `kmalloc()`/`free()`/`alloc_kernel_pages()`/`free_pages()`/global `new/delete`、不阻塞、不调用 `mdelay()`，也不依赖 filesystem、scheduler、syscall、用户态或 TTY consumer progress。EOI 仍由 external IRQ dispatch 在 handler 返回后统一发送一次。
+handler 只读取 PS/2 data port `0x60` 的一个 scancode byte，执行 bounded set-1 decode，并把受支持字符交给 TTY fixed-capacity input buffer。handler 不直接发送 EOI、不调用 `kprintf()`/`kput()`、不写 VGA/serial、不调用 `kmalloc()`/`free()`/`alloc_kernel_pages()`/`free_pages()`/global `new/delete`、不阻塞、不调用 `mdelay()`，也不依赖 filesystem、scheduler、syscall、用户态或 TTY consumer progress。EOI 由 external IRQ dispatch 在 handler 返回后按 owner-specific 路径发送一次。
 
 本路径不是完整输入子系统；多 TTY、阻塞读、shell、用户态输入和完整 keyboard layout 留给后续阶段。
 

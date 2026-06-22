@@ -82,7 +82,7 @@ optional syscall / scheduler / user-program smoke
 sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 ```
 
-`serial_init()` 在普通 boot path 中显式完成 early COM1 bring-up，使默认 serial marker 不再依赖 `mm_self_test()` 等间接初始化路径。`terminal::init_tty()` 初始化 input ring、console ready flag 和 keyboard decoder state。`irq::initIRQ()` 随后初始化 IDT/PIC 并注册 timer/keyboard handler。PIC 初始化默认 mask 所有 IRQ line；timer IRQ0 仍在 timer init 中 unmask，keyboard IRQ1 在 handler 注册后为默认交互 shell 路径 unmask。自动化 headless 验证仍不要求手工键盘输入。
+`serial_init()` 在普通 boot path 中显式完成 early COM1 bring-up，使默认 serial marker 不再依赖 `mm_self_test()` 等间接初始化路径。`terminal::init_tty()` 初始化 input ring、console ready flag 和 keyboard decoder state。`irq::initIRQ()` 随后初始化 IDT/PIC 并注册 timer/keyboard handler。PIC 初始化默认 mask 所有 IRQ line。APIC default-delivery 配置下，keyboard IRQ1 通过 IOAPIC 路由到已初始化且 online 的 BSP，并以 LAPIC EOI 完成；文档化 BSP-only fallback 下，keyboard IRQ1 在 handler 注册后走 PIC path unmask。自动化 headless 验证仍不要求手工键盘输入。
 
 ## 最小交互 Console
 

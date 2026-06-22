@@ -25,6 +25,8 @@ namespace irq {
 
         INTRDescriptor kernel_idt[IRQ_COUNT];
         IRQHandler isr_list[IRQ_COUNT];
+        VectorOwner vector_owners[IRQ_COUNT];
+        bool g_apic_default_delivery_active = false;
 
 #ifdef BIGOS_USER_PROCESS
         static uint64_t *iret_tail(InterruptFrame *__frame) noexcept {
@@ -91,35 +93,41 @@ namespace irq {
             return false;
         }
 
-        static void default_external_irq_handler(InterruptFrame *__frame) noexcept {
+        static void default_pic_irq_handler(InterruptFrame *__frame) noexcept {
             const uint8_t irq_line = (uint8_t)(__frame->vector - I8259_MASTER_VECTOR_BASE);
             kprintf("BIGOS_UNHANDLED_IRQ vector=%x irq=%x\n", (uint32_t)__frame->vector, (uint32_t)irq_line);
         }
 
-        static void default_lapic_irq_handler(InterruptFrame *__frame) noexcept {
-            kprintf("BIGOS_UNHANDLED_LAPIC_IRQ vector=%x\n", (uint32_t)__frame->vector);
+        static void default_apic_irq_handler(InterruptFrame *__frame) noexcept {
+            kprintf("BIGOS_UNHANDLED_APIC_IRQ vector=%x owner=%s\n", (uint32_t)__frame->vector,
+                vector_owner_name(vector_owners[__frame->vector]));
         }
 
         static void unknown_vector_handler(InterruptFrame *__frame) noexcept {
-            kprintf("BIGOS_UNKNOWN_VECTOR vector=%x error=%llx rip=%llx\n", (uint32_t)__frame->vector,
-                __frame->error_code, __frame->rip);
+            const VectorOwner owner =
+                __frame->vector < IRQ_COUNT ? vector_owners[__frame->vector] : VectorOwner::Unknown;
+            kprintf("BIGOS_UNKNOWN_VECTOR vector=%x owner=%s error=%llx rip=%llx\n", (uint32_t)__frame->vector,
+                vector_owner_name(owner), __frame->error_code, __frame->rip);
         }
 
         static bool is_cpu_exception(uint64_t __vector) noexcept {
-            return __vector <= CPU_EXCEPTION_VECTOR_LAST;
+            return __vector < IRQ_COUNT && vector_owners[__vector] == VectorOwner::CpuException;
         }
 
-        static bool is_i8259_external_irq(uint64_t __vector) noexcept {
-            return __vector >= I8259_MASTER_VECTOR_BASE && __vector <= I8259_VECTOR_LAST;
+        static bool is_pic_external_irq(uint64_t __vector) noexcept {
+            return __vector < IRQ_COUNT && vector_owners[__vector] == VectorOwner::Pic;
         }
 
         static bool is_lapic_external_irq(uint64_t __vector) noexcept {
-            return __vector == VECTOR_LAPIC_TIMER || __vector == VECTOR_SCHED_NUDGE ||
-                   __vector == VECTOR_TLB_SHOOTDOWN;
+            return __vector < IRQ_COUNT && vector_owners[__vector] == VectorOwner::Lapic;
+        }
+
+        static bool is_apic_spurious_vector(uint64_t __vector) noexcept {
+            return __vector < IRQ_COUNT && vector_owners[__vector] == VectorOwner::ApicSpurious;
         }
 
         static bool is_syscall_vector(uint64_t __vector) noexcept {
-            return __vector == VECTOR_SYSCALL;
+            return __vector < IRQ_COUNT && vector_owners[__vector] == VectorOwner::Syscall;
         }
 
         static uint8_t vector_to_i8259_irq(uint64_t __vector) noexcept {
@@ -156,7 +164,13 @@ namespace irq {
             kernel_idt[i] = id;
 
             isr_list[i] = nullptr;
+            vector_owners[i] = VectorOwner::Unknown;
+            if (i >= CPU_EXCEPTION_VECTOR_FIRST && i <= CPU_EXCEPTION_VECTOR_LAST)
+                vector_owners[i] = VectorOwner::CpuException;
+            else if (i == VECTOR_SYSCALL)
+                vector_owners[i] = VectorOwner::Syscall;
         }
+        vector_owners[0xff] = VectorOwner::ApicSpurious;
 
         const IDTPointer idt_ptr = {(uint16_t)(sizeof(kernel_idt) - 1), (uint64_t)&kernel_idt[0]};
         load_idt(&idt_ptr);
@@ -167,6 +181,20 @@ namespace irq {
             return;
 
         isr_list[__vector] = __handler;
+    }
+
+    void __detail::setVectorOwner(uint64_t __vector, VectorOwner __owner) noexcept {
+        if (__vector >= IRQ_COUNT)
+            return;
+
+        if (vector_owners[__vector] == VectorOwner::CpuException || vector_owners[__vector] == VectorOwner::Syscall)
+            return;
+
+        vector_owners[__vector] = __owner;
+    }
+
+    void __detail::setApicDefaultDeliveryActive(bool __active) noexcept {
+        g_apic_default_delivery_active = __active;
     }
 
     extern "C" void irq_dispatch(InterruptFrame *__frame) {
@@ -187,7 +215,7 @@ namespace irq {
             return;
         }
 
-        if (__detail::is_i8259_external_irq(__frame->vector)) {
+        if (__detail::is_pic_external_irq(__frame->vector)) {
             const uint8_t irq_line = __detail::vector_to_i8259_irq(__frame->vector);
             {
                 __detail::NonblockingContextGuard nonblocking_guard;
@@ -198,12 +226,11 @@ namespace irq {
 
                 IRQHandler handler = __detail::isr_list[__frame->vector];
                 if (handler == nullptr)
-                    handler = &__detail::default_external_irq_handler;
+                    handler = &__detail::default_pic_irq_handler;
 
-                // External IRQs (including timer vector 0x20) send exactly one EOI
-                // here, after the registered handler returns. Only after that EOI may
-                // the scheduler-owned IRQ-return bridge switch to another runnable
-                // kernel thread; exceptions and syscalls never enter this bridge.
+                // PIC-owned fallback IRQs send exactly one i8259 EOI here,
+                // after the registered handler returns. APIC-owned IRQs can use
+                // the same vector number only after ownership is changed.
                 handler(__frame);
                 driver::irqchip::i8259::send_eoi(irq_line);
             }
@@ -232,15 +259,22 @@ namespace irq {
                 __detail::NonblockingContextGuard nonblocking_guard;
                 IRQHandler handler = __detail::isr_list[__frame->vector];
                 if (handler == nullptr)
-                    handler = &__detail::default_lapic_irq_handler;
+                    handler = &__detail::default_apic_irq_handler;
 
-                // LAPIC-backed interrupts own LAPIC EOI here. This keeps the
-                // APIC path separate from legacy i8259 EOI and syscall/no-EOI
-                // dispatch while preserving the scheduler IRQ-return boundary.
+                // LAPIC/APIC-owned interrupts own LAPIC EOI here. This keeps
+                // APIC external IRQs, local timer interrupts, and IPIs separate
+                // from legacy i8259 fallback and syscall/no-EOI dispatch.
                 handler(__frame);
                 driver::irqchip::lapic::send_eoi();
             }
             bigos::sched::maybe_preempt_on_irq_return(__frame);
+            return;
+        }
+
+        if (__detail::is_apic_spurious_vector(__frame->vector)) {
+            __detail::NonblockingContextGuard nonblocking_guard;
+            kprintf("BIGOS_APIC_SPURIOUS vector=%x owner=%s\n", (uint32_t)__frame->vector,
+                vector_owner_name(VectorOwner::ApicSpurious));
             return;
         }
 
@@ -263,6 +297,28 @@ namespace irq {
         __detail::initIDT();
         driver::irqchip::i8259::init();
         isr::init_isr();
+    }
+
+    bool apic_default_delivery_active() noexcept {
+        return __detail::g_apic_default_delivery_active;
+    }
+
+    const char *vector_owner_name(VectorOwner __owner) noexcept {
+        switch (__owner) {
+            case VectorOwner::CpuException:
+                return "cpu-exception";
+            case VectorOwner::Syscall:
+                return "syscall";
+            case VectorOwner::Pic:
+                return "pic";
+            case VectorOwner::Lapic:
+                return "lapic";
+            case VectorOwner::ApicSpurious:
+                return "apic-spurious";
+            case VectorOwner::Unknown:
+            default:
+                return "unknown";
+        }
     }
 
     void triggerPageFaultForValidation() noexcept {

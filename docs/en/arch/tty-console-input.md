@@ -82,7 +82,7 @@ optional syscall / scheduler / user-program smoke
 sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 ```
 
-`serial_init()` explicitly brings up early COM1 on the ordinary boot path, so default serial markers no longer depend on indirect initialization from `mm_self_test()` or similar paths. `terminal::init_tty()` initializes the input ring, console-ready flag, and keyboard decoder state. `irq::initIRQ()` then initializes IDT/PIC and registers timer/keyboard handlers. PIC initialization masks all IRQ lines by default; timer IRQ0 is still unmasked by timer initialization, while keyboard IRQ1 is unmasked for the default interactive shell path after the handler is registered. Automated headless validation still does not require manual keyboard input.
+`serial_init()` explicitly brings up early COM1 on the ordinary boot path, so default serial markers no longer depend on indirect initialization from `mm_self_test()` or similar paths. `terminal::init_tty()` initializes the input ring, console-ready flag, and keyboard decoder state. `irq::initIRQ()` then initializes IDT/PIC and registers timer/keyboard handlers. PIC initialization masks all IRQ lines by default. In the APIC default-delivery configuration, keyboard IRQ1 is routed through IOAPIC to the initialized online BSP and completes with LAPIC EOI; in the documented BSP-only fallback, keyboard IRQ1 is unmasked on the PIC path after the handler is registered. Automated headless validation still does not require manual keyboard input.
 
 ## Minimal Interactive Console
 

@@ -22,7 +22,7 @@ def read_source(relative: str) -> str:
 def keyboard_handler_body() -> str:
     isr = read_source('kernel/core/irq/isr.cc')
     start = isr.index('implement_isr(keyboard)')
-    end = isr.index('void init_isr_timer()')
+    end = isr.index('implement_isr(scheduler_nudge)')
     return isr[start:end]
 
 
@@ -30,7 +30,7 @@ def test_keyboard_irq1_handoff_preserves_dispatch_eoi_boundary() -> None:
     isr = read_source('kernel/core/irq/isr.cc')
     interrupt = read_source('kernel/core/irq/interrupt.cc')
 
-    register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
+    register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard, VectorOwner::Pic);')
     unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);')
     # default interactive userland baseline: keyboard IRQ1 is unmasked unconditionally (no BIGOS_KEYBOARD_SMOKE
     # guard) so the default-boot interactive /bin/sh can read from the TTY ring.
@@ -72,7 +72,7 @@ def test_tty_and_keyboard_are_ready_before_irq_enable() -> None:
     init_tty_index = kernel.index('bigos::terminal::init_tty();')
     init_irq_index = kernel.index('bigos::irq::initIRQ();')
     enable_irq_index = kernel.index('bigos::irq::enableIRQ();')
-    keyboard_register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard);')
+    keyboard_register_index = isr.index('register_isr(VECTOR_KEYBOARD, &isr_keyboard, VectorOwner::Pic);')
     keyboard_unmask_index = isr.index('driver::irqchip::i8259::enable_irq(IRQ_LINE_KEYBOARD);')
 
     assert init_tty_index < init_irq_index < enable_irq_index
@@ -109,11 +109,11 @@ def test_tty_ring_buffer_is_fixed_capacity_fifo_and_drops_new_input() -> None:
     tty = read_source('kernel/core/terminal/tty.cc')
 
     assert 'TTY_INPUT_CAPACITY = 128' in tty_h
-    assert 'char buffer[TTY_INPUT_CAPACITY];' in tty
+    assert 'TerminalInputRecord buffer[TTY_INPUT_CAPACITY];' in tty
     assert 'const size_t next = next_index(head);' in tty
     assert 'if (next == g_input.tail)' in tty
     assert '++g_input.dropped;' in tty
-    assert 'g_input.buffer[head] = ch;' in tty
+    assert 'g_input.buffer[head] = record;' in tty
     assert '*out = g_input.buffer[tail];' in tty
     assert 'while (count < capacity && read_char(&out[count]))' in tty
 
@@ -160,12 +160,10 @@ def test_default_user_stdout_and_stderr_reach_visible_console() -> None:
     assert 'bigos::proc::file_for_fd_current((uint32_t)__fd) == nullptr' in syscall
     assert 'serial_puts("BIGOS_USER_WRITE_SYSCALL\\n");' in syscall
     assert 'serial_puts(bounded);' in syscall
-    assert 'CR3_ROOT_MASK' in syscall
-    assert 'const uint64_t active_root = bigos::mm::read_cr3();' in syscall
-    assert 'process->kernel_address_space_root' in syscall
-    assert 'bigos::mm::activate_address_space_root(process->kernel_address_space_root);' in syscall
-    assert 'bigos::terminal::console_write(bounded);' in syscall
-    assert 'bigos::mm::activate_address_space_root(active_root);' in syscall
+    assert 'bigos::proc::copy_current_user_buffer(__buffer, bounded, __len)' in syscall
+    assert 'bigos::proc::validate_user_buffer(__buffer, __len)' in syscall
+    assert 'bigos::terminal::default_terminal_write(bounded);' in syscall
+    assert 'bigos::arch::vm_user::activate_address_space(active_root);' in syscall
 
 
 def test_keyboard_irq_echo_stays_in_non_interrupt_shell_consumer() -> None:

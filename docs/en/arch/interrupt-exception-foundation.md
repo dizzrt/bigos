@@ -1,6 +1,6 @@
 # Interrupt And Exception Foundation
 
-BigOS' early x86_64 interrupt path currently covers only the single-core, Legacy BIOS, i8259 PIC, and Bochs validation scenarios. The foundation makes CPU exceptions, external IRQs, and the minimal keyboard smoke diagnosable; it does not imply a full scheduler, input subsystem, user mode, or page-fault recovery capability.
+BigOS' x86_64 interrupt path covers CPU exceptions, the `int 0x80` syscall gate, PIC fallback IRQs, and APIC-owned local timer/IPI/supported IOAPIC external IRQs. The foundation keeps dispatch and EOI ownership diagnosable; it does not imply a full input subsystem, CPU hotplug, NUMA, MSI/MSI-X, complete IRQ affinity, or non-x86_64 interrupt backend parity.
 
 ## Initialization Order
 
@@ -49,14 +49,15 @@ The foundation-stage `InterruptFrame.rsp` was the interrupted stack pointer comp
 
 ## Dispatch Policy
 
-`irq_dispatch()` separates vectors by range:
+`irq_dispatch()` separates vectors by explicit ownership:
 
-- `0x00..0x1f`: CPU exceptions; no PIC EOI is sent.
-- `0x20..0x2f`: remapped i8259 external IRQs; an EOI is sent after the handler returns.
-- `0x80`: software-interrupt syscall entry; no PIC EOI is sent.
-- Other vectors: emit deterministic unknown-vector diagnostics and return.
+- CPU exception ownership: no irqchip EOI is sent.
+- PIC fallback IRQ ownership: one i8259 EOI is sent after the handler returns.
+- LAPIC/APIC ownership: local timer, IPI, and supported IOAPIC external IRQs send one LAPIC EOI after the handler returns.
+- Syscall ownership: vector `0x80` is a software-interrupt syscall entry and sends no irqchip EOI.
+- Unknown or unsupported ownership: emit deterministic diagnostics with the vector and known owner classification.
 
-Unregistered external IRQs use a safe default handler that prints the vector/IRQ line and then sends EOI so the PIC is not wedged.
+Unregistered owned IRQs use safe default handlers that print the vector and owner class before the owner-specific EOI path completes.
 
 ## Page Fault
 
@@ -66,9 +67,9 @@ The validation-only trigger is enabled with `xmake f --page_fault_smoke=y`. Defa
 
 ## Keyboard IRQ1 Handoff
 
-Keyboard IRQ1 now performs controlled input handoff instead of printing a smoke marker directly in the ISR. Initialization first calls `terminal::init_tty()` to prepare the input ring, console flag, and keyboard decoder state; then `irq::initIRQ()` registers the vector `0x21` handler. Default boot keeps i8259 IRQ line 1 masked. Manual keyboard IRQ validation explicitly unmasks IRQ1 with `xmake f --keyboard_smoke=y`.
+Keyboard IRQ1 now performs controlled input handoff instead of printing a smoke marker directly in the ISR. Initialization first calls `terminal::init_tty()` to prepare the input ring, console flag, and keyboard decoder state; then `irq::initIRQ()` registers the vector `0x21` handler. In the APIC default-delivery configuration the handler is owned by the IOAPIC/LAPIC path and targets the initialized online BSP; in BSP-only fallback it is owned by the PIC path and IRQ1 is unmasked after handler registration.
 
-The handler reads exactly one scancode byte from PS/2 data port `0x60`, performs bounded set-1 decoding, and passes supported characters to the fixed-capacity TTY input buffer. It does not send i8259 EOI directly, call `kprintf()`/`kput()`, write VGA/serial, allocate/free memory, block, call `mdelay()`, or depend on filesystem, scheduler, syscall, user mode, or TTY consumer progress. The external IRQ dispatch still sends exactly one EOI after the handler returns.
+The handler reads exactly one scancode byte from PS/2 data port `0x60`, performs bounded set-1 decoding, and passes supported characters to the fixed-capacity TTY input buffer. It does not send EOI directly, call `kprintf()`/`kput()`, write VGA/serial, allocate/free memory, block, call `mdelay()`, or depend on filesystem, scheduler, syscall, user mode, or TTY consumer progress. External IRQ dispatch sends exactly one owner-specific EOI after the handler returns.
 
 This path is not a full input subsystem. Multiple TTYs, blocking read, shell, user-mode input, and complete keyboard layouts are left for later stages.
 

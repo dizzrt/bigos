@@ -105,10 +105,11 @@ has been initialized as schedulable.
   owning scheduler domain. Initial placement and wakeup may enqueue work on a
   remote online CPU through the scheduler boundary, publish runnable state first,
   then set reschedule pending and send a scheduler nudge.
-- IRQ routing remains on the existing IDT/i8259/PIT/keyboard/syscall model.
-  Exception and external IRQ paths are non-blocking; `int 0x80` keeps the
-  existing syscall ABI and does not send an i8259 EOI. LAPIC timer and scheduler
-  nudge interrupts use LAPIC EOI; the nudge is not generic IPI routing.
+- IRQ routing uses explicit vector ownership. CPU exceptions and `int 0x80`
+  send no irqchip EOI, PIC fallback IRQs send i8259 EOI, and APIC-owned local
+  timer, IPI, and supported IOAPIC external IRQs send LAPIC EOI. When APIC
+  default delivery is active, the scheduler tick is LAPIC timer-owned and the
+  keyboard/input IRQ is routed through IOAPIC to the initialized online BSP.
 - TLB invalidation is expressed through a boundary that carries address-space
   root, virtual page or range, target CPU mask, and completion requirement. The
   single-core implementation accepts only the bootstrap CPU target and completes
@@ -116,9 +117,8 @@ has been initialized as schedulable.
 - Shared scheduler state, IRQ-visible state, and page-table updates publish under
   interrupt-disabled sections or the selected local boundary before becoming
   visible to handlers, fault paths, or future remote CPUs.
-- Generic IPI routing, TLB shootdown acknowledgements, CPU hotplug, NUMA, RCU,
-  full APIC external interrupt migration, and broad load balancing remain future
-  dependencies.
+- CPU hotplug, NUMA, RCU, MSI/MSI-X, broad IRQ affinity/load balancing, and
+  non-x86_64 interrupt backend parity remain future dependencies.
 
 ## Review Checklist
 

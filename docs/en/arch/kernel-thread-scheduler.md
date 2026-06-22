@@ -17,7 +17,7 @@ BigOS keeps the minimal kernel-thread model bounded, but the scheduler now owns 
 
 ## Non-Goals And Boundaries
 
-- **Limited scheduler SMP only**: per-CPU run queues and scheduler nudge are supported, but there is no CPU hotplug, NUMA, affinity API, work stealing, CFS, real-time scheduling, POSIX scheduling policy, generic IPI routing, TLB shootdown, or complete APIC default interrupt delivery.
+- **Limited scheduler SMP only**: per-CPU run queues, scheduler nudge, LAPIC timer ownership, and bounded APIC default delivery for supported timer/keyboard IRQ sources are supported, but there is no CPU hotplug, NUMA, complete IRQ affinity API, work stealing, CFS, real-time scheduling, POSIX scheduling policy, generic device IRQ balancing, or MSI/MSI-X.
 - **No full priority scheduler**: the scheduler records bounded priority/policy metadata only. Default selection remains deterministic single-core round-robin.
 - **Bounded process and syscall integration**: timer preemption does not create
   user-visible POSIX scheduling policy. Later process/fd/VFS syscalls may use
@@ -85,12 +85,16 @@ Callers execute `cli` before `switch_context`, and each resume point executes `s
 The BSP timer path continues to advance global ticks through `bigos::timer::on_tick()`, then calls bounded IRQ-context-safe `bigos::sched::on_timer_tick()`. AP local timer handlers call the same scheduler hook for AP-local time-slice accounting after recording their CPU-local tick. The hook decrements the current ordinary thread's time slice, records CPU-local pending reschedule intent on expiry, and wakes that CPU's expired sleepers through allocation-free intrusive state; it does not allocate, free, block, print bulk output, or switch directly from the timer handler.
 
 External IRQ dispatch keeps centralized EOI ownership. After a registered
-handler returns, `irq_dispatch` sends exactly one i8259 EOI, then calls
-`sched::maybe_preempt_on_irq_return()`. That bridge switches only when
-preemption is enabled, `bigos::arch_context` reports a kernel IRQ-return
-context, the current thread is still ordinary/running, and a runnable peer
-exists. LAPIC timer and scheduler-nudge interrupts use LAPIC EOI and the same bridge; the scheduler nudge is only a reschedule observation mechanism and is not TLB shootdown, CPU hotplug, generic IPI routing, or complete APIC interrupt migration. CPU exceptions and `int 0x80` syscalls never enter the bridge, send no
-i8259 EOI, and remain outside sleep/process-lifecycle recovery paths.
+handler returns, `irq_dispatch` sends exactly one owner-specific EOI, then calls
+`sched::maybe_preempt_on_irq_return()`. PIC fallback IRQs send i8259 EOI; LAPIC
+timer, scheduler-nudge IPI, TLB-shootdown IPI, and supported IOAPIC external
+IRQs send LAPIC EOI. That bridge switches only when preemption is enabled,
+`bigos::arch_context` reports a kernel IRQ-return context, the current thread is
+still ordinary/running, and a runnable peer exists. The scheduler nudge is only a
+reschedule observation mechanism and is not CPU hotplug, generic device IRQ
+balancing, or MSI/MSI-X. CPU exceptions and `int 0x80` syscalls never enter the
+bridge, send no irqchip EOI, and remain outside sleep/process-lifecycle recovery
+paths.
 
 ## Validation Smoke
 
@@ -100,4 +104,4 @@ i8259 EOI, and remain outside sleep/process-lifecycle recovery paths.
 
 `scheduler_semantics_smoke` is default off. When `BIGOS_SCHEDULER_SEMANTICS_SMOKE` is enabled, `kernel()` creates two ordinary kernel threads. The first observes `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED` while preemption is disabled and timer ticks continue; the second can emit `BIGOS_SCHED_SEMANTICS_PREEMPTED` and `BIGOS_SCHED_SEMANTICS_PASSED` only if timer-driven IRQ-return preemption runs it. These markers are distinct from the cooperative `scheduler_smoke` markers.
 
-`scheduler_smp_smoke` is default off and implicitly enables the AP startup/per-CPU timer baseline. When `BIGOS_SCHEDULER_SMP_SMOKE` is enabled, `kernel()` creates one BSP worker and one explicitly AP-placed worker. The smoke emits `BIGOS_SCHED_SMP_BSP_THREAD`, `BIGOS_SCHED_SMP_AP_THREAD`, and `BIGOS_SCHED_SMP_PASSED` only when ordinary scheduler work runs on more than one online CPU. This does not validate CPU hotplug, NUMA, TLB shootdown, generic IPI routing, or complete APIC external interrupt migration.
+`scheduler_smp_smoke` is default off and implicitly enables the AP startup/per-CPU timer baseline plus the bounded APIC default delivery gate. When `BIGOS_SCHEDULER_SMP_SMOKE` is enabled, `kernel()` creates one BSP worker and one explicitly AP-placed worker. The smoke emits `BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE`, `BIGOS_SCHED_SMP_BSP_THREAD`, `BIGOS_SCHED_SMP_AP_THREAD`, and `BIGOS_SCHED_SMP_PASSED` only when APIC-backed timer/keyboard routing is active and ordinary scheduler work runs on more than one online CPU. This does not validate CPU hotplug, NUMA, generic device IRQ balancing, MSI/MSI-X, or complete IRQ affinity.
