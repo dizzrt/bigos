@@ -1,12 +1,13 @@
 # Architecture Core Boundaries
 
-BigOS currently has one default runtime-parity architecture/backend path:
-x86_64 through the Legacy BIOS/MBR/exFAT boot flow. A runnable x86_64 UEFI boot
-backend spike exists, but it is not the default runtime-parity backend.
-Architecture boundary work keeps the Legacy BIOS path runnable and makes the
-split between kernel core concepts and x86_64 mechanisms explicit. It does not
-add UEFI runtime parity, a non-x86 backend, SMP, a broad device model, dynamic
-linking, or complete POSIX coverage.
+BigOS currently has one default runtime-parity architecture/backend path within
+the bounded userland baseline: x86_64 through the UEFI ESP/FAT and QEMU/OVMF
+boot flow. The Legacy BIOS/MBR/exFAT path remains an explicit runnable
+compatibility backend for low-level BIOS, ATA, port-IO, and Bochs validation.
+Architecture boundary work keeps both paths clear and makes the split between
+kernel core concepts and x86_64 mechanisms explicit. It does not add Secure
+Boot, GOP framebuffer, ACPI handoff, UEFI Runtime Services, a non-x86 backend,
+a broad device model, dynamic linking, or complete POSIX coverage.
 
 ## Boundary Rule
 
@@ -87,8 +88,8 @@ separate change declares and validates the behavior change:
 - Existing higher-half kernel mappings shared into user roots, user low-half
   isolation, KVMEM/direct-map availability, user stack assumptions, and current
   CR3 switching semantics.
-- Raw disk image layout, Legacy BIOS/MBR/exFAT boot packaging, and ATA PIO
-  storage path used by the default runnable backend.
+- Default UEFI ESP/FAT boot packaging, the explicit Legacy BIOS/MBR/exFAT boot
+  packaging, and the current ATA PIO/exFAT runtime storage compatibility path.
 - Minimal syscall ABI: syscall number and arguments in the existing x86_64
   registers, result returned in `rax`, and bounded user-buffer validation.
 

@@ -1,16 +1,16 @@
 # UEFI Boot Blueprint
 
-This document is the UEFI boot blueprint for BigOS. BigOS now has an x86_64 UEFI boot backend spike that builds `BOOTX64.EFI`, generates an ESP/FAT image, and exposes a QEMU/OVMF debug entry. The spike is parallel to the existing Legacy BIOS backend; it is not a second ISA, not the default boot path, and not yet a runtime-parity backend.
+This document is the UEFI boot blueprint for BigOS. BigOS now uses the x86_64 UEFI boot backend as the default runnable boot backend within the current bounded userland baseline. The backend builds `BOOTX64.EFI`, generates an ESP/FAT image, exposes a QEMU/OVMF debug entry, and reaches the existing resident init, `/bin/sh`, and bounded `/bin/*` payload boundary. Legacy BIOS remains available as an explicit compatibility and low-level debug backend.
 
 ## Current Scope
 
-The retained default BigOS boot path remains Legacy BIOS:
+The default BigOS boot path is now UEFI:
 
 ```text
-BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel -> kernel(BootInfoHeader*)
+OVMF -> ESP/FAT -> EFI/BOOT/BOOTX64.EFI -> ELF64 kernel -> kernel(BootInfoHeader*) -> bounded userland
 ```
 
-The UEFI spike is introduced as a parallel boot backend rather than replacing the current path:
+The retained Legacy BIOS path is explicit rather than removed:
 
 ```text
 Legacy BIOS path                         UEFI path
@@ -28,18 +28,18 @@ MBR -> DBR -> exDBR -> boot.bin          BOOTX64.EFI
                         kernel()
 ```
 
-Non-goals for this spike:
+Non-goals for the default UEFI backend:
 
 - Do not change the Legacy BIOS/MBR/exFAT/Bochs semantics of `xmake run bochs` or its `--display sdl2|none` target arguments.
 - Do not replace MBR, DBR, extended DBR, `boot.bin`, or the existing raw exFAT image.
-- Do not make UEFI the default boot path or claim runtime parity with the Legacy BIOS backend.
-- Do not implement Secure Boot, GOP framebuffer handoff, ACPI table handoff, UEFI Runtime Services, persistent NVRAM semantics, SMP, or a second ISA.
+- Do not claim runtime parity beyond the current bounded userland baseline.
+- Do not implement Secure Boot, GOP framebuffer handoff, ACPI table handoff, UEFI Runtime Services, persistent NVRAM semantics, new SMP scope, or a second ISA.
 - Do not require the kernel to call BIOS interrupts, UEFI Boot Services, or UEFI Runtime Services.
 - Do not introduce external UEFI libraries, hosted runtime, exceptions, RTTI, or other non-freestanding dependencies.
 
 ## Kernel Entry Assumptions
 
-Both the BIOS backend and the UEFI spike/future parity backend must provide one unified, verifiable entry environment before entering the kernel:
+Both the explicit BIOS backend and the default UEFI backend must provide one unified, verifiable entry environment before entering the kernel:
 
 - Architecture target is x86_64.
 - The kernel remains a higher-half ELF64 executable.
@@ -115,7 +115,7 @@ Section categories to cover:
 Implemented foundation:
 
 - Legacy BIOS backend produces a full v2 blob with required `core` and `memory_map` sections.
-- UEFI backend spike produces a v2 blob with required `core` and `memory_map` sections plus optional `storage_metadata` and `loader_metadata` sections.
+- UEFI backend produces a v2 blob with required `core` and `memory_map` sections plus optional `storage_metadata` and `loader_metadata` sections.
 - Runtime `_start` saves the entry `BootInfoHeader*`, calls `_init`, then restores it as the first `kernel()` argument.
 - Kernel consumer validates magic, version, size, alignment, field offsets, section offsets, section sizes, and bounds.
 - Unknown non-required sections may be skipped; missing or malformed required sections fail v2 and explicitly fall back to fixed-address v1 `BootInfo`.
@@ -123,7 +123,7 @@ Implemented foundation:
 
 Still not implemented:
 
-- Runtime parity guarantees for the UEFI backend.
+- Runtime parity beyond the current bounded userland baseline.
 - GOP framebuffer, ACPI/SMBIOS firmware table sections, and UEFI Runtime Services support.
 - Secure Boot, persistent NVRAM semantics, and non-x86_64 ISA backends.
 
@@ -167,7 +167,7 @@ Early buddy initialization releases only `usable` regions. `reserved`, `runtime`
 Initial UEFI `GetMemoryMap` mapping direction:
 
 - `EfiConventionalMemory` maps to `usable`.
-- `EfiLoaderCode`, `EfiLoaderData`, `EfiBootServicesCode`, and `EfiBootServicesData` map to `loader` in the spike and are not admitted to the initial free page pool.
+- `EfiLoaderCode`, `EfiLoaderData`, `EfiBootServicesCode`, and `EfiBootServicesData` map to `loader` and are not admitted to the initial free page pool.
 - `EfiACPIReclaimMemory` maps to `acpi_reclaim`.
 - `EfiACPIMemoryNVS` maps to `acpi_nvs`.
 - `EfiMemoryMappedIO` and `EfiMemoryMappedIOPortSpace` map to `mmio`.
@@ -184,26 +184,26 @@ Candidate follow-up changes:
 
 ## Debug Entry And Image Plan
 
-`xmake run qemu`, `xmake run qemu -- --display none`, `xmake run qemu-gdb`, and `xmake run bochs` with `--display sdl2|none` are Legacy BIOS/MBR/exFAT debug paths:
+`xmake run qemu` and `uv run python tools/boot_debug.py run` are the default UEFI/QEMU/OVMF boot entries. `xmake run qemu-uefi` remains an explicit alias for the same backend. `xmake run qemu-legacy`, `xmake run qemu-gdb`, and `xmake run bochs` with `--display sdl2|none` are explicit Legacy BIOS/MBR/exFAT debug paths:
 
 - Build MBR, DBR, extended DBR, `boot.bin`, and root `kernel`.
 - Generate a raw exFAT disk image.
-- Use QEMU with an IDE disk path for quick local boot, headless serial-marker smoke, or GDB-stub debugging.
+- Use QEMU with an IDE disk path for explicit Legacy local boot, headless serial-marker smoke, or GDB-stub debugging.
 - Keep Bochs as a supported Legacy BIOS local debug entry for early boot and hardware-behavior cross-checking.
-- Do not implicitly switch to a UEFI loader, ESP image, or OVMF configuration.
+- Do not require a UEFI loader, ESP image, OVMF configuration, Secure Boot, GOP framebuffer, ACPI handoff, Runtime Services, or a new storage driver.
 
-The UEFI spike uses separate names and separate artifacts:
+The default UEFI backend uses separate artifacts from Legacy BIOS:
 
 - `xmake build uefi-artifacts` builds `build/bin/x86/uefi/BOOTX64.EFI`.
-- `xmake run qemu-uefi -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` prepares `build/test/uefi-esp.img`, copies a writable OVMF vars file to `build/test/OVMF_VARS.uefi.fd`, and launches QEMU/OVMF.
-- `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` is the direct helper form.
+- `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` prepares `build/test/uefi-esp.img`, prepares `build/test/uefi-root.raw` as the current exFAT runtime root compatibility image, copies a writable OVMF vars file to `build/test/OVMF_VARS.uefi.fd`, and launches QEMU/OVMF.
+- `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` is the direct helper form.
 
 UEFI artifact isolation policy:
 
 - BIOS path continues using raw exFAT images and artifacts such as `build/test/os.raw`.
-- UEFI path uses an ESP/FAT image containing `EFI/BOOT/BOOTX64.EFI`, `/boot/kernel`, `/boot/user/init.elf`, and bounded `/bin/*` payloads.
+- UEFI path uses an ESP/FAT image containing `EFI/BOOT/BOOTX64.EFI`, `/boot/kernel`, `/boot/user/init.elf`, and bounded `/bin/*` payloads. Until a FAT runtime filesystem or loader-fed runtime payload exists, QEMU also attaches a separate exFAT compatibility root image as primary IDE so the current kernel VFS can reach the same bounded userland baseline.
 - UEFI firmware configuration, temporary directories, and emulator configuration must not overwrite Legacy BIOS artifacts used by `xmake run qemu`, `xmake run qemu-gdb`, or `xmake run bochs`.
-- UEFI smoke tests primarily use QEMU + OVMF. Bochs UEFI is not required for this spike.
+- UEFI smoke tests primarily use QEMU + OVMF. Bochs UEFI is not required for this backend.
 - Legacy BIOS continues to use the current raw exFAT image with QEMU IDE or Bochs.
 
 UEFI local tool assumptions:
@@ -238,9 +238,9 @@ The UEFI loader implements an ELF reader suited for UEFI and does not directly r
 | --- | --- | --- | --- | --- | --- |
 | 1 | `BootInfoHeader + tagged sections`, register-passed `BootInfo*`, unified handoff header design and docs | Yes, Legacy BIOS producer/consumer landed | Stable current BIOS `BootInfo` layout checks | ABI breakage, inconsistent legacy fallback | `define-unified-boot-handoff-abi` |
 | 2 | Migrate memory module to unified `BootMemoryRegion` consumer while keeping BIOS fallback | Yes, BIOS E820 is normalized | unified boot handoff capability header and memory-map section draft | Allocator initialization order, usable memory misclassification | `define-unified-boot-handoff-abi` |
-| 3 | Minimal UEFI loader spike implementing a UEFI ELF reader, only to load kernel, fill handoff, and enter `kernel()` | Spike | unified boot handoff capability ABI, ELF64 loading rules, toolchain spike | PE/COFF build, ExitBootServices order, page-table differences | `spike-minimal-uefi-loader` |
-| 4 | ESP/FAT image generation, OVMF/QEMU debug entry, and documented command | Spike | kernel memory API capability bootable loader | Host OVMF paths, CI portability, artifact isolation | `add-uefi-boot-debug-entry` |
+| 3 | Minimal UEFI loader implementing a UEFI ELF reader, only to load kernel, fill handoff, and enter `kernel()` | Yes, promoted into the default UEFI backend | unified boot handoff capability ABI, ELF64 loading rules, toolchain spike | PE/COFF build, ExitBootServices order, page-table differences | `spike-minimal-uefi-loader` |
+| 4 | ESP/FAT image generation, OVMF/QEMU debug entry, and documented command | Yes, promoted into the default UEFI backend | kernel memory API capability bootable loader | Host OVMF paths, CI portability, artifact isolation | `add-uefi-boot-debug-entry` |
 | 5 | GOP framebuffer, ACPI RSDP/SMBIOS handoff, and fuller UEFI validation policy | No | unified boot handoff capability sections, kernel memory API capability/4 UEFI smoke test | Framebuffer mapping, ACPI table lifecycle, runtime metadata misuse | `handoff-gop-acpi-firmware-tables` |
 | 6 | Shared ELF64 loading rule specification for BIOS and UEFI, without requiring shared loader code soon | No | Current BIOS ELF loading behavior documented | Rule/implementation drift, inconsistent error handling | `document-common-elf64-loader-rules` |
 
-Stages marked `Spike` are exploratory and still require follow-up validation before UEFI runtime parity can be claimed. Future implementation must keep the Legacy BIOS path available as fallback and continue using `xmake run qemu`, `xmake run qemu -- --display none`, `xmake run qemu-gdb`, or `xmake run bochs` to validate the existing debug entries.
+UEFI default runtime parity is bounded to the current resident init, shell, and packaged user-program baseline. Future firmware parity work must keep the Legacy BIOS path available explicitly and continue using `xmake run qemu-legacy`, `xmake run qemu-gdb`, or `xmake run bochs` when BIOS/ATA/port-IO behavior needs direct validation.

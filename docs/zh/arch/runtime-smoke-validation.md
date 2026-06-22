@@ -1,6 +1,6 @@
 # 运行时 Smoke 验证
 
-BigOS 将现有默认关闭的 runtime smoke 产品化为一组面向当前有界基线的窄验证矩阵。该矩阵只属于 tooling 和文档层：不新增内核运行时能力、不接入 CI、不补齐 UEFI runtime parity、不新增存储驱动，也不改变 smoke marker ABI。
+BigOS 将现有默认关闭的 runtime smoke 产品化为一组面向当前有界基线的窄验证矩阵。该矩阵只属于 tooling 和文档层：不新增内核运行时能力、不接入 CI、不新增默认 UEFI 启动路径之外的 firmware 能力、不新增存储驱动，也不改变 smoke marker ABI。
 
 ## 矩阵 Runner
 
@@ -8,9 +8,9 @@ BigOS 将现有默认关闭的 runtime smoke 产品化为一组面向当前有�
 - 单 case 命令：`uv run python tools/boot_debug.py runtime-smoke-matrix --case memory-self-test`
 - Artifact 覆盖路径：`uv run python tools/boot_debug.py runtime-smoke-matrix --output build/test/runtime-smoke-validation.md`
 - 串口日志：默认每个 case 一个文件，位于 `build/test/runtime-smoke/`。
-- Raw image：默认每个 case 一个 Legacy BIOS/MBR/exFAT raw image，位于 `build/test/runtime-smoke/`。
+- Image：默认每个 case 一个 UEFI ESP/FAT image 和一个 exFAT 兼容 root image，位于 `build/test/runtime-smoke/`。
 
-runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed flow 构建，准备现有 Legacy BIOS/MBR/exFAT raw image，使用 `--display none` 启动 QEMU，并在 case-specific timeout 内等待预期 COM1 marker。
+runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed flow 构建，准备默认 UEFI ESP/FAT image 和当前 exFAT 兼容 root image，使用 `--display none` 启动 QEMU/OVMF，并在 case-specific timeout 内等待预期 COM1 marker。
 
 ## 验证入口盘点
 
@@ -52,11 +52,11 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 
 ## 行为导向矩阵
 
-当前有界最小可用系统基线将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为有界最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查仍保持在默认 x86_64 Legacy BIOS/MBR/exFAT backend 边界内，不要求 UEFI runtime parity、OVMF parity、ESP/FAT runtime storage parity、virtio、AHCI/SATA、NVMe、SMP、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
+当前有界最小可用系统基线将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为有界最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查的默认 backend 现在是 x86_64 UEFI QEMU/OVMF 路径。Runtime parity 仍限定在当前 init/shell/user-program baseline，不暗示 Secure Boot、GOP framebuffer console、ACPI handoff、Runtime Services、超出被测路径的 OVMF parity、virtio、AHCI/SATA、NVMe、新存储驱动、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
 
 | Capability | 输入或路径 | 预期可观察结果 | 失败信号 | 验证层 | 环境依赖 |
 | --- | --- | --- | --- | --- | --- |
-| 默认 init 与 `/bin/sh` 可达性 | `default-init` normal boot，无 smoke 开关 | PID-1 init 启动并 launch 常驻 `/bin/sh`，通过 `BIGOS_INIT_ENTER` 后出现 `BIGOS_USER_EXEC` 观察 | 缺失预期 marker、timeout、emulator 退出或 panic marker | QEMU headless runtime 断言 | xmake、cross-binutils、QEMU、串口日志、Legacy BIOS raw image |
+| 默认 init 与 `/bin/sh` 可达性 | `default-init` normal boot，无 smoke 开关 | PID-1 init 启动并 launch 常驻 `/bin/sh`，通过 `BIGOS_INIT_ENTER` 后出现 `BIGOS_USER_EXEC` 观察 | 缺失预期 marker、timeout、emulator 退出或 panic marker | QEMU/OVMF headless runtime 断言 | xmake、cross-binutils、LLVM/LLD、mtools、QEMU、OVMF、串口日志、UEFI ESP/FAT image、exFAT 兼容 root image |
 | 简单 C 参数/环境/stdout/stderr | `userland-runtime` 运行 `/bin/smoke/args`、`/bin/smoke/env` 和 `/bin/smoke/out` | `/rw` 记录预期 `argc`/`argv`、确定性 environment 边界文本和 stdout/stderr transcript 内容 | `BIGOS_USERLAND_FAILED <reason>`、缺失 `/rw` 记录、错误 exit status 或缺失 pass marker | 默认关闭 userland runtime 断言 | xmake、cross-binutils、QEMU、串口日志、RAM-backed `/rw` |
 | 简单 C `errno` 与退出状态 | `userland-runtime` 运行失败 open/exec wrapper 和 `/bin/smoke/exit 7` | 错误 wrapper 报告文档化 `errno`，失败 `execve` 后 caller 存活，parent 观察到请求的 child status | failure marker、status 不匹配、`errno` 错误或缺失 continuation 输出 | 默认关闭 userland runtime 断言 | xmake、cross-binutils、QEMU、串口日志 |
 | Shell continuation 与 unsupported syntax | 非交互 `/bin/sh` 脚本运行非零程序、unsupported pipe syntax，再运行 `echo shell-alive` | shell 输出确定性 syntax/error 文本并继续执行下一条命令 | 缺失错误文本、缺失 `shell-alive`、shell 崩溃或缺失 pass marker | 默认关闭 userland runtime 断言；可选手工交互证据 | QEMU headless 执行脚本断言；display/input 仅用于可选交互记录 |
@@ -141,21 +141,21 @@ uv run python tools/boot_debug.py run \
 
 缺少 `uv`、`xmake`、cross-binutils、QEMU、Bochs、ROM/display 配置或其他必要本地依赖时，必须记录为 skipped 或 blocked。未运行的 smoke 不得标记为 passed。
 
-## UEFI Spike Smoke
+## 默认 UEFI Smoke
 
-x86_64 UEFI boot backend spike 使用独立 smoke 入口，不改变 Legacy runtime matrix。可运行
-`xmake run qemu-uefi -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`，
+x86_64 UEFI boot backend 是默认 smoke 入口。可运行
+`xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`，
 或直接使用 helper：
-`uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`。
+`uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`。`xmake run qemu-uefi` 仍是同一 backend 的显式别名。
 
 UEFI smoke 会构建/使用 `BOOTX64.EFI`，创建包含 kernel、PID-1 init、`/bin/sh` 和有界
-`/bin/*` 的 ESP/FAT image，使用 x86_64 OVMF 启动 QEMU，并默认使用
+`/bin/*` 的 ESP/FAT image，并为当前 VFS baseline 准备 exFAT 兼容 root image，使用 x86_64 OVMF 启动 QEMU，并默认使用
 `build/test/qemu-uefi.serial.log`。它要求 QEMU/OVMF、Homebrew LLVM/LLD、`mtools`、
 现有 x86_64 cross toolchain，以及用于 Python helper validation 的 `uv`。缺少 OVMF、
 mtools、LLVM/LLD、QEMU、cross toolchain 或 `uv` 时，必须记录为 skipped 或 blocked，
 并写明替代检查和剩余 UEFI bootability 风险。
 
-UEFI 默认 runtime marker 与 Legacy BIOS 默认 headless 路径相同，当前为 `BIGOS_USER_EXEC`。
+UEFI 默认 runtime marker 与此前 Legacy BIOS headless 路径使用的默认 init/user exec marker 相同，当前为 `BIGOS_USER_EXEC`。
 缺失该 marker 是 failed 或 blocked UEFI runtime-parity check，不是通过。Apple Silicon
 主机可能通过 TCG 运行 x86_64 QEMU，因此 validation notes 应记录 timeout 和性能相关剩余风险。
 
@@ -167,4 +167,4 @@ QEMU headless 是矩阵首选自动化 serial-marker 路径。涉及 boot、real
 
 ## 保持不变的契约
 
-runtime smoke 产品化不得改变 kernel link address、BootInfo 或 handoff ABI、page-table 假设、IDT vector、IRQ EOI 规则、syscall vector `0x80`、CR3 切换规则、smoke marker 字符串或默认关闭的 smoke entry 边界。Legacy matrix 的镜像路径仍是现有 Legacy BIOS raw image，包含 MBR/exFAT、`/boot/boot.bin`、根目录 `kernel` 和 IDE-compatible disk exposure；不要求 UEFI、OVMF、ESP/FAT、virtio、AHCI/SATA、NVMe 或新 storage driver。UEFI spike 使用显式独立的 ESP/QEMU/OVMF 路径，不能被视为替代 Legacy matrix。
+runtime smoke 产品化不得改变 kernel link address、BootInfo 或 handoff ABI、page-table 假设、IDT vector、IRQ EOI 规则、syscall vector `0x80`、CR3 切换规则、smoke marker 字符串或默认关闭的 smoke entry 边界。默认 UEFI 路径使用 ESP/FAT image 承载 `BOOTX64.EFI` 和 loader payload，并用 exFAT 兼容 root image 支撑当前 kernel VFS baseline；它不引入 FAT runtime filesystem、virtio、AHCI/SATA、NVMe 或新 storage driver。Legacy BIOS raw image 路径仍通过显式 Legacy backend 选择保留，包含 MBR/exFAT、`/boot/boot.bin`、根目录 `kernel` 和 IDE-compatible disk exposure；作为对比验证运行时应单独记录。

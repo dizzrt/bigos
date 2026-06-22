@@ -1,10 +1,11 @@
 # 架构与核心边界
 
-BigOS 当前只有一个默认具备 runtime parity 的架构/backend 路径：通过
-Legacy BIOS/MBR/exFAT 启动的 x86_64。当前已有可运行的 x86_64 UEFI boot
-backend spike，但它不是默认 runtime-parity backend。架构边界整理需要保持 Legacy
-BIOS 路径可运行，并明确区分 kernel core 概念与 x86_64 机制。本工作不新增 UEFI
-runtime parity、non-x86 backend、SMP、宽泛设备模型、动态链接或完整 POSIX 覆盖。
+BigOS 当前只有一个默认具备 bounded userland baseline 内 runtime parity 的架构/backend
+路径：通过 UEFI ESP/FAT 与 QEMU/OVMF 启动的 x86_64。Legacy BIOS/MBR/exFAT
+路径仍作为显式可运行兼容 backend 保留，用于低层 BIOS、ATA、port-IO 和 Bochs 验证。
+架构边界整理需要清晰保留两条路径，并明确区分 kernel core 概念与 x86_64 机制。本工作
+不新增 Secure Boot、GOP framebuffer、ACPI handoff、UEFI Runtime Services、non-x86
+backend、宽泛设备模型、动态链接或完整 POSIX 覆盖。
 
 ## 边界规则
 
@@ -73,8 +74,8 @@ runtime parity、non-x86 backend、SMP、宽泛设备模型、动态链接或完
   CR3 root 语义和 TLB invalidation 行为。
 - 共享到 user root 的现有 higher-half kernel mapping、user low-half 隔离、
   KVMEM/direct-map 可用性、user stack 假设和当前 CR3 switching 语义。
-- 默认可运行 backend 使用的 raw disk image layout、Legacy BIOS/MBR/exFAT boot
-  packaging 和 ATA PIO storage path。
+- 默认 UEFI ESP/FAT boot packaging、显式 Legacy BIOS/MBR/exFAT boot packaging，
+    以及当前 ATA PIO/exFAT runtime storage 兼容路径。
 - 最小 syscall ABI：syscall number 与参数仍使用现有 x86_64 寄存器，结果返回
   `rax`，并保留有界 user-buffer validation。
 

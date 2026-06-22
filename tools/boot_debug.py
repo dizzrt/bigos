@@ -24,6 +24,7 @@ UEFI_ARTIFACT_DIR = BUILD_DIR / 'bin' / 'x86' / 'uefi'
 DEFAULT_IMAGE = BUILD_DIR / 'test' / 'os.raw'
 DEFAULT_PERSISTENT_IMAGE = BUILD_DIR / 'test' / 'persistent-rw.raw'
 DEFAULT_UEFI_IMAGE = BUILD_DIR / 'test' / 'uefi-esp.img'
+DEFAULT_UEFI_ROOT_IMAGE = BUILD_DIR / 'test' / 'uefi-root.raw'
 DEFAULT_BOCHSRC = BUILD_DIR / 'test' / 'bochsrc.bxrc'
 DEFAULT_KERNEL = BUILD_DIR / 'kernel'
 DEFAULT_CPU_MODEL = 'corei7_haswell_4770'
@@ -202,20 +203,33 @@ class RuntimeSmokeResult:
 
 SMOKE_OPTIONS = (
     'mm_self_test',
+    'slab_debug',
     'page_fault_smoke',
     'timer_smoke',
+    'ap_startup_percpu_timers',
     'keyboard_smoke',
     'scheduler_smoke',
     'scheduler_semantics_smoke',
     'scheduler_smp_smoke',
+    'tlb_shootdown_smoke',
     'blocking_smoke',
     'user_vmem_smoke',
     'syscall_smoke',
     'user_program_smoke',
+    'user_elf_smoke',
     'fs_smoke',
     'block_io_request_smoke',
-    'user_elf_smoke',
+    'demand_paging_smoke',
+    'file_backed_mapping_smoke',
+    'shared_readonly_mappings_smoke',
+    'anonymous_lifecycle_smoke',
+    'growable_tables_smoke',
+    'fork_cow_smoke',
+    'time_identity_smoke',
+    'signal_smoke',
     'writable_fs_smoke',
+    'persistent_writable_fs',
+    'persistent_writable_fs_smoke',
     'pipe_smoke',
     'userland_smoke',
     'filesystem_maturity_smoke',
@@ -535,24 +549,23 @@ def build_current_artifacts(boot_mode: str = 'legacy') -> None:
     run_command('kernel build', ['xmake', 'build', 'kernel'], PROJECT_ROOT)
     if boot_mode == 'uefi':
         run_command('uefi build', ['xmake', 'build', 'uefi-artifacts'], PROJECT_ROOT)
+        run_command('boot build', ['xmake', 'build', 'boot-artifacts'], PROJECT_ROOT)
     else:
         run_command('boot build', ['xmake', 'build', 'boot-artifacts'], PROJECT_ROOT)
     run_command('user elf build', ['xmake', 'build', 'user-init-elf'], PROJECT_ROOT)
     require_file(DEFAULT_KERNEL, 'kernel build', 'kernel ELF')
     if boot_mode == 'uefi':
         require_file(UEFI_LOADER, 'uefi build', 'BOOTX64.EFI')
-    else:
-        for name, (path, max_size) in BOOT_ARTIFACTS.items():
-            require_file(path, 'boot build', f'{name} artifact', max_size)
+    for name, (path, max_size) in BOOT_ARTIFACTS.items():
+        require_file(path, 'boot build', f'{name} artifact', max_size)
 
 
 def get_artifacts(kernel: Path = DEFAULT_KERNEL, boot_mode: str = 'legacy') -> PreparedArtifacts:
     require_file(kernel, 'image build', 'kernel ELF')
-    if boot_mode == 'legacy':
-        for name, (path, max_size) in BOOT_ARTIFACTS.items():
-            require_file(path, 'image build', f'{name} artifact', max_size)
-    else:
+    if boot_mode == 'uefi':
         require_file(UEFI_LOADER, 'image build', 'BOOTX64.EFI')
+    for name, (path, max_size) in BOOT_ARTIFACTS.items():
+        require_file(path, 'image build', f'{name} artifact', max_size)
     require_file(USER_INIT_ELF, 'image build', USER_INIT_ELF_PATH, USER_INIT_ELF_MAX_BYTES)
     bin_programs: list[tuple[str, Path]] = []
     for name in USER_BIN_PROGRAMS:
@@ -1348,6 +1361,15 @@ def prepare_uefi_vars(vars_template: Path, output_path: Path) -> Path:
     return output_path
 
 
+def uefi_root_image_path(args: argparse.Namespace, esp_image_path: Path) -> Path:
+    configured = getattr(args, 'uefi_root_image', None)
+    if configured:
+        return Path(configured).resolve()
+    if esp_image_path == DEFAULT_UEFI_IMAGE.resolve():
+        return DEFAULT_UEFI_ROOT_IMAGE.resolve()
+    return esp_image_path.with_suffix('.root.raw')
+
+
 def qemu_uefi_command(
     image_path: Path,
     serial_log: Path,
@@ -1355,6 +1377,7 @@ def qemu_uefi_command(
     ovmf_code: Path,
     ovmf_vars: Path,
     *,
+    root_image_path: Path | None = None,
     extra_args: Sequence[str] = (),
 ) -> list[str]:
     command = [
@@ -1363,13 +1386,31 @@ def qemu_uefi_command(
         f'if=pflash,format=raw,readonly=on,file={ovmf_code}',
         '-drive',
         f'if=pflash,format=raw,file={ovmf_vars}',
-        '-drive',
-        f'file={image_path},format=raw,if=ide',
-        '-serial',
-        f'file:{serial_log}',
-        '-no-reboot',
-        '-no-shutdown',
     ]
+    if root_image_path is not None:
+        command.extend(
+            [
+                '-drive',
+                f'file={root_image_path},format=raw,if=ide,index=0',
+                '-drive',
+                f'file={image_path},format=raw,if=ide,index=1',
+            ]
+        )
+    else:
+        command.extend(
+            [
+                '-drive',
+                f'file={image_path},format=raw,if=ide',
+            ]
+        )
+    command.extend(
+        [
+            '-serial',
+            f'file:{serial_log}',
+            '-no-reboot',
+            '-no-shutdown',
+        ]
+    )
     if display == 'none':
         command.extend(['-display', 'none'])
     command.extend(split_extra_args(extra_args))
@@ -1458,6 +1499,7 @@ def run(args: argparse.Namespace) -> int:
     boot_mode = args.boot_mode
     image_arg = DEFAULT_UEFI_IMAGE if boot_mode == 'uefi' and args.image == str(DEFAULT_IMAGE) else Path(args.image)
     image_path = Path(image_arg).resolve()
+    root_image_path = uefi_root_image_path(args, image_path) if boot_mode == 'uefi' else None
     persistent_image = Path(args.persistent_image).resolve() if args.persistent_image else None
     bochsrc_path = Path(args.bochsrc).resolve() if args.bochsrc else DEFAULT_BOCHSRC
     image_size = parse_size(args.image_size)
@@ -1488,6 +1530,9 @@ def run(args: argparse.Namespace) -> int:
     if boot_mode == 'uefi':
         create_uefi_image(image_path, image_size, artifacts)
         validate_uefi_image(image_path)
+        assert root_image_path is not None
+        create_image(root_image_path, image_size, artifacts)
+        validate_image(root_image_path)
     else:
         layout = create_image(image_path, image_size, artifacts)
         validate_image(image_path)
@@ -1512,6 +1557,8 @@ def run(args: argparse.Namespace) -> int:
             )
 
     print(f'image: {image_path}')
+    if root_image_path is not None:
+        print(f'uefi_root_image: {root_image_path}')
     print(f'boot_mode: {boot_mode}')
     print(f'emulator: {emulator}')
     if is_bochs_backend(emulator):
@@ -1530,6 +1577,7 @@ def run(args: argparse.Namespace) -> int:
                     display,
                     ovmf_code,
                     ovmf_vars,
+                    root_image_path=root_image_path,
                     extra_args=args.qemu_extra,
                 )
                 if ovmf_code is not None and ovmf_vars is not None
@@ -1568,6 +1616,7 @@ def run(args: argparse.Namespace) -> int:
                     display,
                     ovmf_code,
                     ovmf_vars,
+                    root_image_path=root_image_path,
                     extra_args=args.qemu_extra,
                 )
             else:
@@ -1626,6 +1675,14 @@ def runtime_smoke_serial_log(case: RuntimeSmokeCase, serial_log_dir: Path) -> Pa
     return serial_log_dir / f'{case.case_id}.serial.log'
 
 
+def runtime_smoke_image_path(case: RuntimeSmokeCase, image_dir: Path) -> Path:
+    return image_dir / f'{case.case_id}.uefi-esp.img'
+
+
+def runtime_smoke_uefi_root_image_path(case: RuntimeSmokeCase, image_dir: Path) -> Path:
+    return image_dir / f'{case.case_id}.uefi-root.raw'
+
+
 def runtime_smoke_run_args(
     case: RuntimeSmokeCase,
     image_path: Path,
@@ -1635,14 +1692,18 @@ def runtime_smoke_run_args(
     return argparse.Namespace(
         image=str(image_path),
         image_size=image_size,
-        boot_mode='legacy',
+        boot_mode='uefi',
         emulator='qemu',
         display='none',
         keep_image=True,
+        uefi_root_image=str(runtime_smoke_uefi_root_image_path(case, image_path.parent)),
         persistent_image=None,
         bochsrc=None,
         romimage=None,
         vgaromimage=None,
+        ovmf_code=None,
+        ovmf_vars_template=None,
+        ovmf_vars_output=str(DEFAULT_QEMU_UEFI_VARS),
         skip_build=False,
         serial_log=str(serial_log),
         expect_serial_marker=case.expected_marker,
@@ -1654,7 +1715,7 @@ def runtime_smoke_run_args(
 
 
 def collect_tool_availability(include_bochs: bool) -> list[ToolAvailability]:
-    tools = ['uv', *BUILD_TOOLS, 'qemu-system-x86_64']
+    tools = ['uv', *BUILD_TOOLS, *UEFI_BUILD_TOOLS, *UEFI_ESP_TOOLS, 'qemu-system-x86_64']
     if include_bochs:
         tools.append('bochs')
     availability: list[ToolAvailability] = []
@@ -1672,6 +1733,8 @@ def missing_required_tools(availability: Sequence[ToolAvailability]) -> list[str
         'x86_64-elf-g++',
         'x86_64-elf-ld',
         'x86_64-elf-as',
+        *UEFI_BUILD_TOOLS,
+        *UEFI_ESP_TOOLS,
         'qemu-system-x86_64',
     }
     return [item.tool for item in availability if item.tool in required and not item.available]
@@ -1697,7 +1760,8 @@ def format_runtime_smoke_artifact(
         '- `schema_version`: `runtime-smoke-validation/v1`',
         '- `preferred_emulator`: `qemu`',
         '- `preferred_display`: `none`',
-        '- `image_path`: existing Legacy BIOS/MBR/exFAT raw image path generated by `tools/boot_debug.py`',
+        '- `image_path`: default UEFI ESP/FAT image generated by `tools/boot_debug.py`',
+        '- `uefi_root_image`: exFAT compatibility root image attached as primary IDE for the current VFS baseline',
         '- `case.status`: one of `passed`, `failed`, `skipped`, or `blocked`',
         '- `case.observed_markers`: optional intermediate `BIGOS_` markers observed for multi-step cases',
         '',
@@ -1729,7 +1793,7 @@ def format_runtime_smoke_artifact(
                     f'`xmake f {switches}`',
                     f'`{case.expected_marker}`',
                     f'`{case.timeout_seconds:g}s`',
-                    '`tools/boot_debug.py run --emulator qemu --display none`',
+                    '`tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none`',
                     markdown_escape(boundary),
                 ]
             )
@@ -1791,8 +1855,8 @@ def format_runtime_smoke_artifact(
             '',
             '## Non-Goals',
             '',
-            '- This validation productization does not add OS runtime features, CI platform integration, UEFI '
-            'support, storage drivers, or new smoke marker ABI.',
+            '- This validation productization does not add OS runtime features, CI platform integration, new '
+            'storage drivers, or new smoke marker ABI.',
             '- Existing smoke switches remain default-off outside explicit `xmake f ...=y` configuration.',
             '- Existing boot layout, disk image layout, interrupt ABI, syscall ABI, and smoke-only user process '
             'boundaries remain unchanged.',
@@ -1844,7 +1908,7 @@ def blocked_runtime_smoke_result(case: RuntimeSmokeCase, serial_log: Path, reaso
 def run_runtime_smoke_case(case: RuntimeSmokeCase, args: argparse.Namespace) -> RuntimeSmokeResult:
     serial_log_dir = Path(args.serial_log_dir).resolve()
     serial_log = runtime_smoke_serial_log(case, serial_log_dir)
-    image_path = Path(args.image_dir).resolve() / f'{case.case_id}.raw'
+    image_path = runtime_smoke_image_path(case, Path(args.image_dir).resolve())
 
     try:
         run_command('runtime smoke config', runtime_smoke_xmake_config(case), PROJECT_ROOT)
@@ -1934,7 +1998,7 @@ def make_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         '--image',
         default=str(DEFAULT_IMAGE),
-        help='raw disk image path under build/test by default',
+        help='image path under build/test; defaults to UEFI ESP/FAT when --boot-mode uefi',
     )
     run_parser.add_argument('--image-size', default='64M', help='raw image size, e.g. 64M, 128M, or bytes')
     run_parser.add_argument(
@@ -1944,13 +2008,13 @@ def make_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         '--boot-mode',
         choices=BOOT_MODES,
-        default='legacy',
-        help='boot backend image/debug path: legacy MBR/exFAT or UEFI ESP/OVMF',
+        default='uefi',
+        help='boot backend image/debug path: UEFI ESP/OVMF default or explicit legacy MBR/exFAT',
     )
     run_parser.add_argument(
         '--emulator',
         choices=EMULATORS,
-        default='bochs',
+        default='qemu',
         help='emulator backend to launch after image generation',
     )
     run_parser.add_argument(
@@ -2001,6 +2065,10 @@ def make_parser() -> argparse.ArgumentParser:
         action='append',
         default=[],
         help='extra QEMU argument string appended after stable helper-managed arguments; may be repeated',
+    )
+    run_parser.add_argument(
+        '--uefi-root-image',
+        help='exFAT root image attached as primary IDE for --boot-mode uefi runtime VFS payloads',
     )
     run_parser.add_argument('--ovmf-code', help='x86_64 OVMF code firmware path for --boot-mode uefi')
     run_parser.add_argument('--ovmf-vars-template', help='OVMF vars template copied for --boot-mode uefi')

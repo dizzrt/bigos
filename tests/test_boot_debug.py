@@ -154,7 +154,7 @@ def test_bochs_extra_can_override_generated_display(tmp_path: Path) -> None:
         None,
         None,
         boot_debug.resolve_display('bochs', 'sdl2'),
-            1,
+        1,
         ['display_library: nogui'],
     )
 
@@ -181,16 +181,18 @@ def test_qemu_command_uses_legacy_bios_ide_disk_and_headless_serial(tmp_path: Pa
 
 def test_qemu_uefi_command_uses_ovmf_pflash_and_esp_serial(tmp_path: Path) -> None:
     image = tmp_path / 'uefi-esp.img'
+    root_image = tmp_path / 'uefi-root.raw'
     serial_log = tmp_path / 'qemu-uefi.serial.log'
     code = tmp_path / 'edk2-x86_64-code.fd'
     vars_copy = tmp_path / 'OVMF_VARS.uefi.fd'
 
-    command = boot_debug.qemu_uefi_command(image, serial_log, 'none', code, vars_copy)
+    command = boot_debug.qemu_uefi_command(image, serial_log, 'none', code, vars_copy, root_image_path=root_image)
 
     assert command[0] == 'qemu-system-x86_64'
     assert f'if=pflash,format=raw,readonly=on,file={code}' in command
     assert f'if=pflash,format=raw,file={vars_copy}' in command
-    assert f'file={image},format=raw,if=ide' in command
+    assert f'file={root_image},format=raw,if=ide,index=0' in command
+    assert f'file={image},format=raw,if=ide,index=1' in command
     assert command[command.index('-serial') + 1] == f'file:{serial_log}'
     assert command[command.index('-display') + 1] == 'none'
     assert '-boot' not in command
@@ -259,6 +261,25 @@ def test_build_current_artifacts_uses_saved_xmake_config(monkeypatch) -> None:
     ]
 
 
+def test_build_current_artifacts_uefi_builds_loader_and_exfat_root_inputs(monkeypatch) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(stage, command, cwd, **kwargs):
+        commands.append(list(command))
+
+    monkeypatch.setattr(boot_debug, 'run_command', fake_run_command)
+    monkeypatch.setattr(boot_debug, 'require_file', lambda *args, **kwargs: None)
+
+    boot_debug.build_current_artifacts('uefi')
+
+    assert commands == [
+        ['xmake', 'build', 'kernel'],
+        ['xmake', 'build', 'uefi-artifacts'],
+        ['xmake', 'build', 'boot-artifacts'],
+        ['xmake', 'build', 'user-init-elf'],
+    ]
+
+
 def test_image_artifact_discovery_requires_default_userland(monkeypatch, tmp_path: Path) -> None:
     kernel = write_bytes(tmp_path / 'kernel', b'kernel')
     missing_init = tmp_path / 'missing-init.elf'
@@ -307,6 +328,7 @@ def test_run_parser_accepts_skip_build() -> None:
     args = parser.parse_args(['run', '--skip-build', '--emulator', 'qemu', '--display', 'none'])
 
     assert args.skip_build is True
+    assert args.boot_mode == 'uefi'
     assert args.emulator == 'qemu'
     assert args.display == 'none'
 
@@ -354,6 +376,8 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
     )
     assert hasattr(run_args, 'persistent_image')
     assert run_args.persistent_image is None
+    assert run_args.boot_mode == 'uefi'
+    assert run_args.uefi_root_image.endswith('.uefi-root.raw')
 
 
 def test_default_init_case_uses_marker_behavior_assertion_without_smoke_switch() -> None:
@@ -394,6 +418,7 @@ def test_runtime_smoke_run_args_use_qemu_headless_marker_path(tmp_path: Path) ->
     args = boot_debug.runtime_smoke_run_args(case, image, serial_log, '64M')
 
     assert args.emulator == 'qemu'
+    assert args.boot_mode == 'uefi'
     assert args.display == 'none'
     assert args.expect_serial_marker == 'BIGOS_MM_SELF_TEST_PASSED'
     assert args.serial_log == str(serial_log)
@@ -500,6 +525,7 @@ def test_runtime_smoke_matrix_runs_selected_case_and_writes_artifact(tmp_path: P
     assert commands == [boot_debug.runtime_smoke_xmake_config(boot_debug.case_by_id('memory-self-test'))]
     assert len(run_args) == 1
     assert '| `memory-self-test` | `passed` | `BIGOS_MM_SELF_TEST_PASSED` | `BIGOS_MM_SELF_TEST_PASSED` |' in artifact
+    assert 'default UEFI ESP/FAT image' in artifact
 
 
 def test_display_resolution_uses_backend_defaults() -> None:
@@ -624,6 +650,7 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     assert 'target("bochs-sdl2")' not in xmake
     assert 'target("bochs")' in xmake
     assert 'target("qemu")' in xmake
+    assert 'target("qemu-legacy")' in xmake
     assert 'target("qemu-gdb")' in xmake
     assert 'target("qemu-uefi")' in xmake
     assert 'target("qemu-headless")' not in xmake
@@ -637,9 +664,13 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     assert 'process.openv("python3", args)' in xmake
     assert 'option.get("arguments")' in xmake
     assert 'add_deps("kernel", "boot-artifacts", "user-init-elf")' in xmake
-    assert 'add_deps("kernel", "uefi-artifacts", "user-init-elf")' in xmake
+    assert 'add_deps("kernel", "uefi-artifacts", "boot-artifacts", "user-init-elf")' in xmake
     assert 'path.join(uefi_bindir, "BOOTX64.EFI")' in xmake
-    assert '"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img"' in xmake
-    assert 'run_boot_debug("bochs", "build/test/bochs.serial.log",' in xmake
-    assert 'run_boot_debug("qemu", "build/test/qemu.serial.log",' in xmake
-    assert 'run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log",' in xmake
+    assert (
+        '"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img", "--uefi-root-image", "build/test/uefi-root.raw"'
+        in xmake
+    )
+    assert '"build/test/bochs.serial.log"' in xmake
+    assert '"build/test/qemu-uefi.serial.log"' in xmake
+    assert '"build/test/qemu.serial.log"' in xmake
+    assert '"build/test/qemu-gdb.serial.log"' in xmake

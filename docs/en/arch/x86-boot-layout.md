@@ -6,7 +6,7 @@ BigOS currently uses the Legacy BIOS path:
 BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel
 ```
 
-This path remains the default runnable boot backend and the producer of the Legacy BIOS kernel handoff data. The x86_64 UEFI spike in `docs/en/arch/uefi-boot-blueprint.md` is a parallel backend and does not replace the MBR/DBR/exDBR/`boot.bin` flow; the active Legacy debug entries are `xmake run qemu`, `xmake run qemu -- --display none`, `xmake run qemu-gdb`, and `xmake run bochs` with `--display sdl2|none`.
+This path remains an explicit runnable compatibility backend and the producer of the Legacy BIOS kernel handoff data. The x86_64 UEFI backend in `docs/en/arch/uefi-boot-blueprint.md` is now the default runnable backend within the bounded userland baseline, but it does not replace the MBR/DBR/exDBR/`boot.bin` flow; the active Legacy debug entries are `xmake run qemu-legacy`, `xmake run qemu-gdb`, and `xmake run bochs` with `--display sdl2|none`.
 
 The early boot path depends on these fixed physical and virtual addresses:
 
@@ -61,11 +61,11 @@ The v2 blob currently contains two required sections:
 - `core`: Legacy BIOS protocol metadata, boot drive, exFAT data-region LBA, kernel load virtual address, kernel entry virtual address, kernel file size, and kernel memory size.
 - `memory_map`: `BootMemoryRegion[]` entries normalized from BIOS E820 ARDS.
 
-The UEFI spike also produces a `BootInfo` v2 blob, but its blob address is loader-allocated rather than the Legacy fixed `0x9000..0x9fff` area. Its required `core` section identifies the UEFI boot protocol and writes `exfat_data_area_lba` as zero so ESP/root storage provenance is not overloaded into the Legacy exFAT field. UEFI storage provenance and loader diagnostics live in optional `storage_metadata` and `loader_metadata` sections; the kernel startup validator still depends only on valid required `core` and `memory_map` sections, and unknown optional sections remain skippable.
+The UEFI backend also produces a `BootInfo` v2 blob, but its blob address is loader-allocated rather than the Legacy fixed `0x9000..0x9fff` area. Its required `core` section identifies the UEFI boot protocol and writes `exfat_data_area_lba` as zero so ESP/root storage provenance is not overloaded into the Legacy exFAT field. UEFI storage provenance and loader diagnostics live in optional `storage_metadata` and `loader_metadata` sections; the kernel startup validator still depends only on valid required `core` and `memory_map` sections, and unknown optional sections remain skippable.
 
 The v2 magic is independent from the v1 magic, so consumers do not distinguish the fixed v1 struct from the header/section blob using `version` alone. The section table and payload offsets are relative to `BootInfoHeader`. Consumers check header size, total size, section-table bounds, payload bounds, required sections, and payload alignment. Unknown optional sections are skipped; missing or malformed required sections reject v2 and allow explicit fallback to fixed-address v1.
 
-The v2 blob at `0x9000..0x9fff` does not move or overlap the E820 buffer, legacy metadata aliases, v1 `BootInfo`, boot-stage page tables, kernel higher-half page-table backing area, kernel physical load base, or higher-half virtual base. Future fixed low addresses, page-table reserved regions, or handoff aliases must update this layout and describe compatibility with the UEFI spike and future parity backend.
+The v2 blob at `0x9000..0x9fff` does not move or overlap the E820 buffer, legacy metadata aliases, v1 `BootInfo`, boot-stage page tables, kernel higher-half page-table backing area, kernel physical load base, or higher-half virtual base. Future fixed low addresses, page-table reserved regions, or handoff aliases must update this layout and describe compatibility with the default UEFI backend and future parity work.
 
 `BootMemoryRegion` maps BIOS E820 as follows:
 
@@ -78,7 +78,7 @@ The v2 blob at `0x9000..0x9fff` does not move or overlap the E820 buffer, legacy
 
 Reserved, runtime, MMIO, ACPI reclaim, ACPI NVS, bad memory, and unknown memory types are not released during early buddy initialization. `acpi_reclaim` remains reserved until a future ACPI table lifecycle stage proves it can be reclaimed safely.
 
-The UEFI spike maps `EfiConventionalMemory` to `usable`, preserves source type/value/attributes as UEFI metadata, maps runtime descriptors to `runtime`, maps MMIO descriptors to `mmio`, maps ACPI descriptors to `acpi_reclaim` or `acpi_nvs`, and conservatively maps loader-owned, boot-services-owned, bad, unknown, or reserved descriptors away from the initial free page pool.
+The UEFI backend maps `EfiConventionalMemory` to `usable`, preserves source type/value/attributes as UEFI metadata, maps runtime descriptors to `runtime`, maps MMIO descriptors to `mmio`, maps ACPI descriptors to `acpi_reclaim` or `acpi_nvs`, and conservatively maps loader-owned, boot-services-owned, bad, unknown, or reserved descriptors away from the initial free page pool.
 
 The kernel direct map is created after `init_buddy()` and `init_vmem()`, before `BIGOS_MM_SELF_TEST`. It uses `KDIRECT_BASE = 0xffff900000000000` and `KDIRECT_LEN = 0x400000000000`, selects only page-aligned ordinary RAM ranges from the BootInfo memory map, and maps them as `direct = KDIRECT_BASE + physical`. `KVMEM_BASE` remains the kernel heap/vmalloc-style virtual allocation window and does not promise any linear relationship to physical addresses. Recursive self-mapping window, low identity map, higher-half kernel base, and fixed boot handoff addresses are not redefined by the direct map.
 
@@ -86,6 +86,6 @@ The first direct-map version does not cover MMIO, framebuffer, ACPI reclaim/NVS,
 
 The protected-mode extended DBR stage reads `boot.bin` through ATA primary-master PIO. Therefore it requires BIOS boot drive `0x80`; other BIOS drive numbers halt the system and display a visible `U` code in VGA text memory.
 
-`xmake run qemu`, `xmake run qemu -- --display none`, and `xmake run qemu-gdb` use the same Legacy BIOS/MBR/exFAT raw image through QEMU's IDE disk path (`-drive file=<image>,format=raw,if=ide`). `xmake run bochs` keeps the existing Bochs debug entry and selects SDL2 or no-GUI display through `--display sdl2|none` target arguments. These entries do not switch to `BOOTX64.EFI`, an ESP/FAT image, QEMU/OVMF, virtio, AHCI/SATA, NVMe, or a new storage driver.
+`xmake run qemu-legacy` and `xmake run qemu-gdb` use the same Legacy BIOS/MBR/exFAT raw image through QEMU's IDE disk path (`-drive file=<image>,format=raw,if=ide`). `xmake run bochs` keeps the existing Bochs debug entry and selects SDL2 or no-GUI display through `--display sdl2|none` target arguments. These entries do not require `BOOTX64.EFI`, an ESP/FAT image, QEMU/OVMF, Secure Boot, GOP framebuffer, ACPI handoff, Runtime Services, virtio, AHCI/SATA, NVMe, or a new storage driver.
 
-The UEFI debug path is explicit: `xmake run qemu-uefi` or `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu` builds/uses `build/bin/x86/uefi/BOOTX64.EFI`, generates `build/test/uefi-esp.img`, copies an OVMF vars template to `build/test/OVMF_VARS.uefi.fd`, and writes UEFI serial output to `build/test/qemu-uefi.serial.log` unless overridden. It uses QEMU/OVMF with an ESP/FAT image and remains isolated from the Legacy raw image, Bochs config, BIOS boot sectors, and `boot.bin`.
+The default UEFI debug path is `xmake run qemu` or `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu`; `xmake run qemu-uefi` remains an explicit alias. It builds/uses `build/bin/x86/uefi/BOOTX64.EFI`, generates `build/test/uefi-esp.img`, prepares `build/test/uefi-root.raw` as the current exFAT runtime root compatibility image, copies an OVMF vars template to `build/test/OVMF_VARS.uefi.fd`, and writes UEFI serial output to `build/test/qemu-uefi.serial.log` unless overridden. It uses QEMU/OVMF with an ESP/FAT image and remains isolated from Bochs config, BIOS boot sectors, and `boot.bin`.

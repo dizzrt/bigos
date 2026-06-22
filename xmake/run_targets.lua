@@ -23,17 +23,45 @@ target("bochs")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
-        return run_boot_debug("bochs", "build/test/bochs.serial.log", option.get("arguments") or {}, process)
+        return run_boot_debug(
+            "bochs",
+            "build/test/bochs.serial.log",
+            option.get("arguments") or {},
+            process,
+            {"--boot-mode", "legacy", "--image", "build/test/os.raw"}
+        )
     end)
 
 target("qemu")
+    set_kind("phony")
+    set_default(false)
+    add_deps("kernel", "uefi-artifacts", "boot-artifacts", "user-init-elf")
+    on_run(function (target)
+        import("core.base.option")
+        import("core.base.process")
+        return run_boot_debug(
+            "qemu",
+            "build/test/qemu-uefi.serial.log",
+            option.get("arguments") or {},
+            process,
+            {"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img", "--uefi-root-image", "build/test/uefi-root.raw"}
+        )
+    end)
+
+target("qemu-legacy")
     set_kind("phony")
     set_default(false)
     add_deps("kernel", "boot-artifacts", "user-init-elf")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
-        return run_boot_debug("qemu", "build/test/qemu.serial.log", option.get("arguments") or {}, process)
+        return run_boot_debug(
+            "qemu",
+            "build/test/qemu.serial.log",
+            option.get("arguments") or {},
+            process,
+            {"--boot-mode", "legacy", "--image", "build/test/os.raw"}
+        )
     end)
 
 target("qemu-gdb")
@@ -43,13 +71,19 @@ target("qemu-gdb")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
-        return run_boot_debug("qemu-gdb", "build/test/qemu-gdb.serial.log", option.get("arguments") or {}, process)
+        return run_boot_debug(
+            "qemu-gdb",
+            "build/test/qemu-gdb.serial.log",
+            option.get("arguments") or {},
+            process,
+            {"--boot-mode", "legacy", "--image", "build/test/os.raw"}
+        )
     end)
 
 target("qemu-uefi")
     set_kind("phony")
     set_default(false)
-    add_deps("kernel", "uefi-artifacts", "user-init-elf")
+    add_deps("kernel", "uefi-artifacts", "boot-artifacts", "user-init-elf")
     on_run(function (target)
         import("core.base.option")
         import("core.base.process")
@@ -58,6 +92,6 @@ target("qemu-uefi")
             "build/test/qemu-uefi.serial.log",
             option.get("arguments") or {},
             process,
-            {"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img"}
+            {"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img", "--uefi-root-image", "build/test/uefi-root.raw"}
         )
     end)

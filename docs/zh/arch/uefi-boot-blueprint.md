@@ -1,19 +1,20 @@
 # UEFI Boot Blueprint
 
-本文档是 BigOS 的 UEFI 启动蓝图。BigOS 现在具备 x86_64 UEFI boot backend spike，
-可以构建 `BOOTX64.EFI`、生成 ESP/FAT 镜像，并提供 QEMU/OVMF 调试入口。该 spike
-与现有 Legacy BIOS backend 并行存在；它不是第二 ISA，不是默认启动路径，也还不是
-runtime-parity backend。
+本文档是 BigOS 的 UEFI 启动蓝图。BigOS 现在将 x86_64 UEFI boot backend 作为默认
+可运行启动后端，runtime parity 边界限定为当前 bounded userland baseline。该后端
+可以构建 `BOOTX64.EFI`、生成 ESP/FAT 镜像、提供 QEMU/OVMF 调试入口，并到达现有
+resident init、`/bin/sh` 和有界 `/bin/*` payload 边界。Legacy BIOS 仍作为显式兼容与
+低层调试 backend 保留。
 
 ## 当前范围
 
-BigOS 保留的默认启动路径仍然是 Legacy BIOS：
+BigOS 默认启动路径现在是 UEFI：
 
 ```text
-BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel -> kernel(BootInfoHeader*)
+OVMF -> ESP/FAT -> EFI/BOOT/BOOTX64.EFI -> ELF64 kernel -> kernel(BootInfoHeader*) -> bounded userland
 ```
 
-UEFI spike 作为并行 boot backend 引入，而不是替换当前路径：
+Legacy BIOS 路径显式保留，而不是被删除：
 
 ```text
 Legacy BIOS path                         UEFI path
@@ -31,18 +32,18 @@ MBR -> DBR -> exDBR -> boot.bin          BOOTX64.EFI
                         kernel()
 ```
 
-本 spike 的非目标：
+默认 UEFI backend 的非目标：
 
 - 不改变 `xmake run bochs` 及其 `--display sdl2|none` target arguments 的 Legacy BIOS/MBR/exFAT/Bochs 语义。
 - 不替换 MBR、DBR、extended DBR、`boot.bin` 或现有 raw exFAT image。
-- 不把 UEFI 设为默认启动路径，也不宣称它已达到与 Legacy BIOS backend 的 runtime parity。
-- 不实现 Secure Boot、GOP framebuffer handoff、ACPI table handoff、UEFI Runtime Services、持久 NVRAM 语义、SMP 或第二 ISA。
+- 不宣称超出当前 bounded userland baseline 的 runtime parity。
+- 不实现 Secure Boot、GOP framebuffer handoff、ACPI table handoff、UEFI Runtime Services、持久 NVRAM 语义、新 SMP 范围或第二 ISA。
 - 不要求 kernel 调用 BIOS interrupt、UEFI Boot Services 或 UEFI Runtime Services。
 - 不引入外部 UEFI 库、hosted runtime、异常、RTTI 或其它非 freestanding 依赖。
 
 ## Kernel Entry 假设
 
-BIOS backend 与 UEFI spike/未来 parity backend 进入 kernel 前都必须提供统一、可验证的入口环境：
+显式 BIOS backend 与默认 UEFI backend 进入 kernel 前都必须提供统一、可验证的入口环境：
 
 - 架构目标是 x86_64。
 - kernel 保持 higher-half ELF64 executable。
@@ -124,7 +125,7 @@ BootInfoSection[]
 
 - Legacy BIOS backend 生产完整 v2 blob，包含 required `core` section 和 required
   `memory_map` section。
-- UEFI backend spike 生产 v2 blob，包含 required `core` 与 `memory_map` sections，
+- UEFI backend 生产 v2 blob，包含 required `core` 与 `memory_map` sections，
   以及 optional `storage_metadata` 与 `loader_metadata` sections。
 - runtime `_start` 保存入口 `BootInfoHeader*`，调用 `_init` 后恢复为 `kernel()` 的第一个参数。
 - kernel consumer 校验 magic、version、size、alignment、field offset、section offset、section size 和边界。
@@ -133,7 +134,7 @@ BootInfoSection[]
 
 仍未实现的范围：
 
-- UEFI backend 的 runtime parity 保证。
+- 超出当前 bounded userland baseline 的 UEFI runtime parity。
 - GOP framebuffer、ACPI/SMBIOS firmware table section 和 UEFI Runtime Services 支持。
 - Secure Boot、持久 NVRAM 语义和非 x86_64 ISA backend。
 
@@ -180,7 +181,7 @@ UEFI `GetMemoryMap` 初步映射方向：
 
 - `EfiConventionalMemory` 映射为 `usable`。
 - `EfiLoaderCode`、`EfiLoaderData`、`EfiBootServicesCode` 和 `EfiBootServicesData`
-  在 spike 中映射为 `loader`，不会进入初始 free page pool。
+  映射为 `loader`，不会进入初始 free page pool。
 - `EfiACPIReclaimMemory` 映射为 `acpi_reclaim`。
 - `EfiACPIMemoryNVS` 映射为 `acpi_nvs`。
 - `EfiMemoryMappedIO`、`EfiMemoryMappedIOPortSpace` 映射为 `mmio`。
@@ -199,30 +200,31 @@ UEFI `GetMemoryMap` 初步映射方向：
 
 ## 调试入口与镜像规划
 
-`xmake run qemu`、`xmake run qemu -- --display none`、`xmake run qemu-gdb` 和带 `--display sdl2|none` 的 `xmake run bochs` 是 Legacy BIOS/MBR/exFAT 调试路径：
+`xmake run qemu` 和 `uv run python tools/boot_debug.py run` 是默认 UEFI/QEMU/OVMF 启动入口。`xmake run qemu-uefi` 仍是同一后端的显式别名。`xmake run qemu-legacy`、`xmake run qemu-gdb` 和带 `--display sdl2|none` 的 `xmake run bochs` 是显式 Legacy BIOS/MBR/exFAT 调试路径：
 
 - 构建 MBR、DBR、extended DBR、`boot.bin` 和 root `kernel`。
 - 生成 raw exFAT disk image。
-- 使用 QEMU IDE disk 路径进行快速本地启动、headless serial-marker smoke 或 GDB stub 调试。
+- 使用 QEMU IDE disk 路径进行显式 Legacy 本地启动、headless serial-marker smoke 或 GDB stub 调试。
 - 保留 Bochs 作为支持的 Legacy BIOS 本地调试入口，用于早期 boot 和硬件行为交叉验证。
-- 不隐式切换为 UEFI loader、ESP image 或 OVMF 配置。
+- 不要求 UEFI loader、ESP image、OVMF 配置、Secure Boot、GOP framebuffer、ACPI handoff、Runtime Services 或新存储驱动。
 
-UEFI spike 使用独立命名和独立产物：
+默认 UEFI backend 使用与 Legacy BIOS 分离的产物：
 
 - `xmake build uefi-artifacts` 构建 `build/bin/x86/uefi/BOOTX64.EFI`。
-- `xmake run qemu-uefi -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
-  会准备 `build/test/uefi-esp.img`，复制可写 OVMF vars 文件到
+- `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
+  会准备 `build/test/uefi-esp.img`，并准备 `build/test/uefi-root.raw` 作为当前 exFAT runtime root 兼容镜像，复制可写 OVMF vars 文件到
   `build/test/OVMF_VARS.uefi.fd`，并启动 QEMU/OVMF。
-- `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
+- `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
   是直接 helper 形式。
 
 UEFI 产物隔离策略：
 
 - BIOS 路径继续使用 raw exFAT image 和 `build/test/os.raw` 一类产物。
 - UEFI 路径使用 ESP/FAT image，包含 `EFI/BOOT/BOOTX64.EFI`、`/boot/kernel`、
-  `/boot/user/init.elf` 和有界 `/bin/*` payload。
+  `/boot/user/init.elf` 和有界 `/bin/*` payload。在 FAT runtime filesystem 或 loader-fed runtime payload
+  落地前，QEMU 还会将独立 exFAT 兼容 root image 挂为 primary IDE，使当前 kernel VFS 可以到达同一有界用户态基线。
 - UEFI 固件配置、临时目录和 emulator 配置不得覆盖 `xmake run qemu`、`xmake run qemu-gdb` 或 `xmake run bochs` 使用的 Legacy BIOS 产物。
-- UEFI smoke test 首选 QEMU + OVMF；本 spike 不要求 Bochs UEFI。
+- UEFI smoke test 首选 QEMU + OVMF；该后端不要求 Bochs UEFI。
 - Legacy BIOS 继续使用当前 raw exFAT image，并通过 QEMU IDE 或 Bochs 启动。
 
 UEFI 本地工具假设：
@@ -262,10 +264,11 @@ exFAT、固定低地址和页表准备的实现。BIOS 与 UEFI loader 需要共
 | --- | --- | --- | --- | --- | --- |
 | 1 | `BootInfoHeader + tagged sections`、寄存器传递 `BootInfo*`、统一 handoff header 设计与文档化 | 是，Legacy BIOS producer/consumer 已落地 | 当前 BIOS `BootInfo` layout 校验稳定 | ABI 破坏、legacy fallback 不一致 | `define-unified-boot-handoff-abi` |
 | 2 | 内存模块迁移到统一 `BootMemoryRegion` consumer，并保留 BIOS fallback | 是，BIOS E820 已规范化 | unified boot handoff capability header 和 memory map section 草案 | allocator 初始化顺序、可用内存误判 | `define-unified-boot-handoff-abi` |
-| 3 | 最小 UEFI loader spike，单独实现 UEFI ELF reader，目标仅为加载 kernel、填充 handoff、进入 `kernel()` | Spike | unified boot handoff capability ABI、ELF64 加载规则、工具链 spike | PE/COFF 构建、ExitBootServices 顺序、页表差异 | `spike-minimal-uefi-loader` |
-| 4 | ESP/FAT 镜像生成、OVMF/QEMU 调试入口和文档化命令 | Spike | kernel memory API capability loader 可启动 | 宿主机 OVMF 路径、CI 可移植性、产物隔离 | `add-uefi-boot-debug-entry` |
+| 3 | 最小 UEFI loader，单独实现 UEFI ELF reader，目标仅为加载 kernel、填充 handoff、进入 `kernel()` | 是，已晋升为默认 UEFI backend 的组成部分 | unified boot handoff capability ABI、ELF64 加载规则、工具链 spike | PE/COFF 构建、ExitBootServices 顺序、页表差异 | `spike-minimal-uefi-loader` |
+| 4 | ESP/FAT 镜像生成、OVMF/QEMU 调试入口和文档化命令 | 是，已晋升为默认 UEFI backend 的组成部分 | kernel memory API capability loader 可启动 | 宿主机 OVMF 路径、CI 可移植性、产物隔离 | `add-uefi-boot-debug-entry` |
 | 5 | GOP framebuffer、ACPI RSDP/SMBIOS handoff 和更完整的 UEFI 验证策略 | 否 | unified boot handoff capability sections、kernel memory API capability/4 UEFI smoke test | framebuffer 映射、ACPI 表生命周期、runtime metadata 误用 | `handoff-gop-acpi-firmware-tables` |
 | 6 | BIOS 与 UEFI 共享 ELF64 加载规则规范，但不要求近期共享 loader 代码 | 否 | 当前 BIOS ELF 加载行为文档化 | 规则与实现漂移、错误处理不一致 | `document-common-elf64-loader-rules` |
 
-标记为 `Spike` 的阶段仍是探索性能力，后续需要继续验证后才能宣称 UEFI runtime parity。
-后续实现必须保持 Legacy BIOS 路径可回退，并用 `xmake run qemu`、`xmake run qemu -- --display none`、`xmake run qemu-gdb` 或 `xmake run bochs` 继续验证现有调试入口。
+UEFI 默认 runtime parity 仅限当前 resident init、shell 和 packaged user-program 基线。后续 firmware parity
+工作必须保持 Legacy BIOS 路径可被显式选择，并在需要 BIOS/ATA/port-IO 行为验证时继续使用
+`xmake run qemu-legacy`、`xmake run qemu-gdb` 或 `xmake run bochs`。

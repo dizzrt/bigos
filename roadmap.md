@@ -13,14 +13,14 @@ implementation, validation, or change-tracking documents.
 Project goal: grow BigOS from the current x86_64 research kernel toward a more
 general-purpose, multi-architecture kernel with explicitly bounded POSIX-like
 compatibility subsets. The current runnable implementation remains x86_64-only,
-now multi-core capable, with the existing Legacy BIOS boot/storage path as the
-default baseline and a runnable x86_64 UEFI boot backend spike available as a
-non-parity backend.
+now multi-core capable, with the x86_64 UEFI boot backend as the default
+bounded-userland baseline and the existing Legacy BIOS boot/storage path kept as
+an explicit compatibility backend.
 
 项目目标：将 BigOS 从当前 x86_64 研究内核逐步推进为更通用、支持多架构，并具备明确有界
-POSIX-like 兼容子集的内核。当前可运行实现仍是 x86_64-only，现已具备多核能力，现有
-Legacy BIOS boot/storage 路径仍是默认基线，同时已有一个不具备运行时等价能力的 x86_64
-UEFI boot backend spike。
+POSIX-like 兼容子集的内核。当前可运行实现仍是 x86_64-only，现已具备多核能力，x86_64
+UEFI boot backend 是默认有界用户态基线，现有 Legacy BIOS boot/storage 路径作为显式兼容
+backend 保留。
 
 ## Current Implementation Summary / 当前实现概述
 
@@ -70,11 +70,12 @@ changes them:
 BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改变前，后续规划和文档都应保持
 以下边界：
 
-- Current runnable backends: x86_64 with the existing Legacy BIOS style boot
-  flow as the default baseline, plus an x86_64 UEFI boot backend spike; UEFI and
-  additional architectures are not yet runtime-parity backends.
-- 当前可运行 backend：x86_64 与现有 Legacy BIOS 风格启动流程仍是默认基线，另有
-  x86_64 UEFI boot backend spike；UEFI 和其他架构尚不具备运行时等价能力。
+- Current runnable backends: x86_64 UEFI is the default bounded-userland boot
+  backend; the existing Legacy BIOS style boot flow remains an explicit
+  compatibility backend. Additional architectures are not yet runtime-parity
+  backends.
+- 当前可运行 backend：x86_64 UEFI 是默认有界用户态启动 backend；现有 Legacy BIOS 风格
+  启动流程仍作为显式兼容 backend 保留。其他架构尚不具备运行时等价能力。
 - Execution model: multi-core capable with per-CPU scheduling and cross-CPU
   coordination, mostly synchronous I/O, bounded userland.
 - 执行模型：具备多核能力，支持 per-CPU 调度与跨核协同，I/O 以同步为主，有界用户态。
@@ -98,11 +99,11 @@ BigOS 是受控研究内核，不是完整通用 OS。在新的阶段明确改�
 - 内存/文件模型：bounded anonymous demand paging/COW、有界可写运行期存储，以及有界
   persistent clean-sync `/rw` 存储，但无广泛 file-backed `mmap`、无完整 POSIX filesystem、
   无 journaling 或 crash recovery、无 async I/O、无广泛存储/设备支持。
-- Boot/backends: the UEFI backend is a completed x86_64 boot spike not yet at
-  runtime parity; promoting it to the default backend is planned mainline work,
-  while storage, device, and ISA backends remain future or parallel-track items.
-- 启动/backend：UEFI backend 已完成 x86_64 boot spike，但尚未达到运行时等价；将其提升为
-  默认 backend 是已规划的主线工作，而 storage、device、ISA backend 仍是后续或并行轨道事项。
+- Boot/backends: the UEFI backend is the default x86_64 bounded-userland boot
+  backend. Broader firmware parity, storage, device, and ISA backends remain
+  future or parallel-track items.
+- 启动/backend：UEFI backend 是默认 x86_64 有界用户态启动 backend。更广泛的 firmware
+  parity、storage、device、ISA backend 仍是后续或并行轨道事项。
 
 ## Completed Capability Baseline / 已完成能力基线
 
@@ -145,10 +146,9 @@ planning rather than as individual future-stage items.
   一致性的可写目录树；具备排队块 I/O 层与第二块设备后端的设备/驱动框架；有界进程/会话/
   终端与 syscall/libc 子集；以及具备 per-CPU run queue、类型化 IPI 投递、跨核 TLB
   shootdown 与 APIC-backed 中断投递的真实多核执行。
-- Expansion foundations: the runnable x86_64 UEFI boot backend spike, initial
+- Expansion foundations: the default x86_64 UEFI boot backend, initial
   x86_64/core decoupling, and terminal preparation.
-- 扩展基础：可运行的 x86_64 UEFI boot backend spike、初步 x86_64/core 解耦，以及终端能力
-  准备。
+- 扩展基础：默认 x86_64 UEFI boot backend、初步 x86_64/core 解耦，以及终端能力准备。
 
 ## Future Mainline / 后续主线
 
@@ -291,17 +291,17 @@ userland, while the Legacy BIOS path remains a runnable cross-validation backend
 用户可见目标：BigOS 默认通过 UEFI 启动并到达相同的有界用户态，同时 Legacy BIOS 路径仍
 作为可运行的交叉验证 backend 保留。
 
-- [ ] Task M6.1: promote the UEFI backend from a non-parity spike to the default
+- [x] Task M6.1: promote the UEFI backend from a bounded spike to the default
   runnable boot backend, reaching the existing bounded userland baseline.
-- [ ] 任务 M6.1：将 UEFI backend 从不具备运行时等价的 spike 提升为默认可运行启动 backend，
+- [x] 任务 M6.1：将 UEFI backend 从有界 spike 提升为默认可运行启动 backend，
   到达现有有界用户态基线。
-- [ ] Task M6.2: keep the Legacy BIOS boot and storage path runnable and unchanged
+- [x] Task M6.2: keep the Legacy BIOS boot and storage path runnable and unchanged
   as a downgraded cross-validation backend, without removing it.
-- [ ] 任务 M6.2：保持 Legacy BIOS 启动与存储路径可运行且不变，作为降级的交叉验证 backend
+- [x] 任务 M6.2：保持 Legacy BIOS 启动与存储路径可运行且不变，作为降级的交叉验证 backend
   保留，不删除。
-- [ ] Task M6.3: align default build, run, and headless smoke validation so the
+- [x] Task M6.3: align default build, run, and headless smoke validation so the
   existing user-visible boot behavior is reproduced through the UEFI path.
-- [ ] 任务 M6.3：对齐默认构建、运行与 headless smoke 验证，使现有用户可见启动行为可通过
+- [x] 任务 M6.3：对齐默认构建、运行与 headless smoke 验证，使现有用户可见启动行为可通过
   UEFI 路径复现。
 
 ### Milestone M7 — Framebuffer Console And Unicode Text / 里程碑 M7 — Framebuffer 控制台与 Unicode 文本

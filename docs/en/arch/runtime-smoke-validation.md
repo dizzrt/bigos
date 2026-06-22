@@ -1,6 +1,6 @@
 # Runtime Smoke Validation
 
-BigOS productizes the existing default-off runtime smokes as a narrow validation matrix for the current bounded baseline. The matrix is a tooling and documentation layer only: it does not add kernel runtime features, CI integration, UEFI runtime parity, storage drivers, or new smoke marker ABI.
+BigOS productizes the existing default-off runtime smokes as a narrow validation matrix for the current bounded baseline. The matrix is a tooling and documentation layer only: it does not add kernel runtime features, CI integration, firmware features beyond the default UEFI boot path, storage drivers, or new smoke marker ABI.
 
 ## Matrix Runner
 
@@ -8,9 +8,9 @@ BigOS productizes the existing default-off runtime smokes as a narrow validation
 - Single case command: `uv run python tools/boot_debug.py runtime-smoke-matrix --case memory-self-test`
 - Artifact override: `uv run python tools/boot_debug.py runtime-smoke-matrix --output build/test/runtime-smoke-validation.md`
 - Serial logs: one file per case under `build/test/runtime-smoke/` by default.
-- Raw images: one Legacy BIOS/MBR/exFAT raw image per case under `build/test/runtime-smoke/` by default.
+- Images: one UEFI ESP/FAT image and one exFAT compatibility root image per case under `build/test/runtime-smoke/` by default.
 
-The runner explicitly configures each case through `xmake f`, builds through the existing xmake-backed flow, prepares the existing Legacy BIOS/MBR/exFAT raw image, launches QEMU with `--display none`, and waits for the expected COM1 marker within the case-specific timeout.
+The runner explicitly configures each case through `xmake f`, builds through the existing xmake-backed flow, prepares the default UEFI ESP/FAT image plus current exFAT compatibility root image, launches QEMU/OVMF with `--display none`, and waits for the expected COM1 marker within the case-specific timeout.
 
 ## Validation Inventory
 
@@ -52,11 +52,11 @@ Each case enables only the listed smoke switch and explicitly disables the other
 
 ## Behavior-Oriented Matrix
 
-The current bounded minimal usable system baseline promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the bounded minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. These checks remain bounded to the default x86_64 Legacy BIOS/MBR/exFAT backend and do not require UEFI runtime parity, OVMF parity, ESP/FAT runtime storage parity, virtio, AHCI/SATA, NVMe, SMP, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
+The current bounded minimal usable system baseline promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the bounded minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. The default backend for these checks is now the x86_64 UEFI QEMU/OVMF path. Runtime parity remains bounded to the current init/shell/user-program baseline and does not imply Secure Boot, GOP framebuffer console, ACPI handoff, Runtime Services, OVMF parity beyond the tested path, virtio, AHCI/SATA, NVMe, new storage drivers, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
 
 | Capability | Input or path | Expected observable result | Failure signal | Layer | Environment dependency |
 | --- | --- | --- | --- | --- | --- |
-| Default init and `/bin/sh` reachability | `default-init` normal boot, no smoke switch | PID-1 init starts and resident `/bin/sh` is launched, observed by `BIGOS_INIT_ENTER` then `BIGOS_USER_EXEC` | Missing expected marker, timeout, emulator exit, or panic marker | QEMU headless runtime assertion | xmake, cross-binutils, QEMU, serial log, Legacy BIOS raw image |
+| Default init and `/bin/sh` reachability | `default-init` normal boot, no smoke switch | PID-1 init starts and resident `/bin/sh` is launched, observed by `BIGOS_INIT_ENTER` then `BIGOS_USER_EXEC` | Missing expected marker, timeout, emulator exit, or panic marker | QEMU/OVMF headless runtime assertion | xmake, cross-binutils, LLVM/LLD, mtools, QEMU, OVMF, serial log, UEFI ESP/FAT image, exFAT compatibility root image |
 | Simple C args/env/stdout/stderr | `userland-runtime` runs `/bin/smoke/args`, `/bin/smoke/env`, and `/bin/smoke/out` | `/rw` records expected `argc`/`argv`, deterministic environment boundary text, and stdout/stderr transcript content | `BIGOS_USERLAND_FAILED <reason>`, missing `/rw` record, wrong exit status, or missing pass marker | Default-off userland runtime assertion | xmake, cross-binutils, QEMU, serial log, RAM-backed `/rw` |
 | Simple C `errno` and exit status | `userland-runtime` runs failing open/exec wrappers and `/bin/smoke/exit 7` | Error wrappers report documented `errno`, failed `execve` leaves caller alive, parent observes requested child status | Failure marker, mismatched status, wrong `errno`, or missing continuation output | Default-off userland runtime assertion | xmake, cross-binutils, QEMU, serial log |
 | Shell continuation and unsupported syntax | Non-interactive `/bin/sh` script runs a non-zero program, unsupported pipe syntax, then `echo shell-alive` | Shell reports deterministic syntax/error text and continues to the next command | Missing error text, missing `shell-alive`, shell crash, or missing pass marker | Default-off userland runtime assertion; manual interactive evidence optional | QEMU headless for scripted assertion; display/input only for optional interactive notes |
@@ -158,13 +158,13 @@ The runner writes a Markdown-first validation artifact to `build/test/runtime-sm
 
 Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, or other required local dependencies must be recorded as skipped or blocked. A smoke that did not run must not be marked as passed.
 
-## UEFI Spike Smoke
+## Default UEFI Smoke
 
-The x86_64 UEFI boot backend spike has a separate smoke entry and does not change the Legacy runtime matrix. Use `xmake run qemu-uefi -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` or the direct helper form `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`.
+The x86_64 UEFI boot backend is the default smoke entry. Use `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` or the direct helper form `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`. `xmake run qemu-uefi` remains an explicit alias for the same backend.
 
-The UEFI smoke builds/uses `BOOTX64.EFI`, creates an ESP/FAT image with the kernel, PID-1 init, `/bin/sh`, and bounded `/bin/*`, launches QEMU with x86_64 OVMF, and uses `build/test/qemu-uefi.serial.log` by default. It requires QEMU/OVMF, Homebrew LLVM/LLD, `mtools`, the existing x86_64 cross toolchain, and `uv` for Python helper validation. Missing OVMF, mtools, LLVM/LLD, QEMU, the cross toolchain, or `uv` must be recorded as skipped or blocked with substitute checks and residual UEFI bootability risk.
+The UEFI smoke builds/uses `BOOTX64.EFI`, creates an ESP/FAT image with the kernel, PID-1 init, `/bin/sh`, and bounded `/bin/*`, prepares an exFAT compatibility root image for the current VFS baseline, launches QEMU with x86_64 OVMF, and uses `build/test/qemu-uefi.serial.log` by default. It requires QEMU/OVMF, Homebrew LLVM/LLD, `mtools`, the existing x86_64 cross toolchain, and `uv` for Python helper validation. Missing OVMF, mtools, LLVM/LLD, QEMU, the cross toolchain, or `uv` must be recorded as skipped or blocked with substitute checks and residual UEFI bootability risk.
 
-The expected default UEFI runtime marker is the same default init/user exec marker as the Legacy BIOS default headless path, currently `BIGOS_USER_EXEC`. Missing that marker is a failed or blocked UEFI runtime-parity check, not a pass. Apple Silicon hosts may run x86_64 QEMU through TCG, so validation notes should record timeout values and performance-related residual risk when applicable.
+The expected default UEFI runtime marker is the same default init/user exec marker previously used by the Legacy BIOS headless path, currently `BIGOS_USER_EXEC`. Missing that marker is a failed or blocked UEFI runtime-parity check, not a pass. Apple Silicon hosts may run x86_64 QEMU through TCG, so validation notes should record timeout values and performance-related residual risk when applicable.
 
 ## Cross-Validation
 
@@ -174,4 +174,4 @@ When Bochs cross-validation is unavailable, record why it was skipped, which QEM
 
 ## Preserved Contracts
 
-Runtime smoke productization must not change kernel link addresses, BootInfo or handoff ABI, page-table assumptions, IDT vectors, IRQ EOI rules, syscall vector `0x80`, CR3 switching rules, smoke marker strings, or default-off smoke entry boundaries. The Legacy matrix image path remains the existing Legacy BIOS raw image with MBR/exFAT, `/boot/boot.bin`, root `kernel`, and IDE-compatible disk exposure; it does not require UEFI, OVMF, ESP/FAT, virtio, AHCI/SATA, NVMe, or a new storage driver. The UEFI spike uses its own explicit ESP/QEMU/OVMF path and must not be counted as replacing the Legacy matrix.
+Runtime smoke productization must not change kernel link addresses, BootInfo or handoff ABI, page-table assumptions, IDT vectors, IRQ EOI rules, syscall vector `0x80`, CR3 switching rules, smoke marker strings, or default-off smoke entry boundaries. The default UEFI path uses an ESP/FAT image for `BOOTX64.EFI` and loader payloads, plus an exFAT compatibility root image for the current kernel VFS baseline; it does not introduce a FAT runtime filesystem, virtio, AHCI/SATA, NVMe, or a new storage driver. The Legacy BIOS raw image path with MBR/exFAT, `/boot/boot.bin`, root `kernel`, and IDE-compatible disk exposure remains available through explicit Legacy backend selection and should be recorded separately when run as a comparison path.
