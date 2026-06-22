@@ -69,6 +69,18 @@ namespace bigos::terminal {
                         (void)bigos::proc::signal_process_group_from_current(g_foreground_pgid, bigos::signal::SIGINT);
                     *out = 0x03;
                     return ConsumeResult::Character;
+                case TerminalControl::ScrollPageUp:
+                    console_scroll_page_up();
+                    return ConsumeResult::Ignored;
+                case TerminalControl::ScrollPageDown:
+                    console_scroll_page_down();
+                    return ConsumeResult::Ignored;
+                case TerminalControl::ScrollHome:
+                    console_scroll_home();
+                    return ConsumeResult::Ignored;
+                case TerminalControl::ScrollEnd:
+                    console_scroll_end();
+                    return ConsumeResult::Ignored;
                 case TerminalControl::Unsupported:
                     return ConsumeResult::Ignored;
                 case TerminalControl::None:

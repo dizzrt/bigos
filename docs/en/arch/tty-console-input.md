@@ -11,14 +11,14 @@ keyboard IRQ1
   -> inb(0x60)
   -> input::handle_keyboard_scancode()
   -> PS/2 set-1 bounded decode
-  -> terminal::enqueue_input()
+  -> terminal::enqueue_input() / terminal::enqueue_input_record()
   -> fixed TerminalInputRecord ring
   -> non-interrupt consumer read_input_record()/read_char()/drain()
   -> optional blocking consumer read_char_blocking()
   -> default user stdin when fd 0 has no installed file
 ```
 
-The keyboard ISR reads one scancode byte, updates fixed decoder state, and enqueues supported characters into the TTY input buffer as fixed-size terminal input records. On a successful enqueue, the TTY layer may wake one blocked reader through the bounded scheduler wakeup helper. The ISR does not call `kprintf()`, `kput()`, VGA/serial output, dynamic allocation, blocking waits, `mdelay()`, filesystem, syscall, user-mode paths, or direct context switching.
+The keyboard ISR reads one scancode byte, updates fixed decoder state, and enqueues supported characters or bounded terminal-control events into the TTY input buffer as fixed-size terminal input records. On a successful enqueue, the TTY layer may wake one blocked reader through the bounded scheduler wakeup helper. The ISR does not call `kprintf()`, `kput()`, VGA/serial output, dynamic allocation, blocking waits, `mdelay()`, filesystem, syscall, user-mode paths, direct context switching, or console viewport redraw.
 
 ## Scancode Policy
 
@@ -28,14 +28,15 @@ The current decoder supports a minimal US-layout PS/2 set 1 subset:
 - Enter, Backspace, Tab, and Escape.
 - Shift, Ctrl, and Alt make/break state updates; modifier scancodes do not emit characters themselves.
 - Ctrl emits C0 control characters for representative letters and a small set of control keys.
+- `0xe0` extended Home, End, PageUp, and PageDown are represented as bounded terminal-control events for scrollback navigation.
 
-Extended scancode prefixes `0xe0`/`0xe1` and unmapped scancodes are counted as unsupported and dropped. The decoder does not panic, allocate, block, or write unknown scancodes into the TTY buffer.
+Unsupported extended scancode sequences and unmapped scancodes are counted as unsupported and dropped. The decoder does not panic, allocate, block, redraw VGA output, or write unknown scancodes into the TTY buffer.
 
 ## TTY Input Buffer
 
 The TTY input buffer is a static fixed-capacity ring buffer with capacity `TTY_INPUT_CAPACITY`. The IRQ producer writes through `terminal::enqueue_input()` or `terminal::enqueue_input_record()`; non-interrupt consumers may read the raw bounded record through `terminal::read_input_record()` or use the byte-compatible `terminal::read_char()` and `terminal::drain()` helpers.
 
-Each `TerminalInputRecord` is either a character record or a control record. The bounded control subset is line end, backspace, delete-like, EOF-like, interrupt-like, and unsupported control. `\r` is normalized to line end for the byte-compatible consumer, EOF-like input becomes a deterministic empty-read result on default console stdin, interrupt-like input is delivered as the bounded `0x03` byte for the shell to cancel the current line, and unsupported controls are consumed as deterministic no-ops by the terminal consumer.
+Each `TerminalInputRecord` is either a character record or a control record. The bounded control subset is line end, backspace, delete-like, EOF-like, interrupt-like, scrollback PageUp/PageDown/Home/End, and unsupported control. `\r` is normalized to line end for the byte-compatible consumer, EOF-like input becomes a deterministic empty-read result on default console stdin, interrupt-like input is delivered as the bounded `0x03` byte for the shell to cancel the current line, scrollback controls are consumed by non-interrupt character consumers to adjust the console viewport, and unsupported controls are consumed as deterministic no-ops by the terminal consumer.
 
 Overflow is deterministic: when the ring buffer is full, new input is dropped and the drop counter increments; unread input is not overwritten. Empty-buffer reads return `false` or `0` and do not sleep, wait for the scheduler, or depend on processes or user mode.
 
@@ -51,15 +52,17 @@ Interactive console usability connects the same blocking consumer to default use
 
 ## Console Output Boundary
 
-Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps the existing `terminal::console_put()` and `terminal::console_write()` VGA text-mode backend. Interactive console usability routes user writes to fd `1` or fd `2` through this visible console when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
+Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps `terminal::console_put()` and `terminal::console_write()` over the default 80x25 VGA text-mode backend. The runtime console owns a fixed 256-line in-kernel scrollback buffer and renders the visible 80x25 viewport from that bounded state. Interactive console usability routes user writes to fd `1` or fd `2` through this visible console when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
 
 Basic control-character behavior:
 
 - `\n`: move to the beginning of the next line.
 - `\r`: move to the beginning of the current line.
-- `\t`: advance by four character positions.
-- `\b`: move back one cell when not at the start position and erase that cell.
+- `\t`: advance by four character positions using deterministic blank cells.
+- `\b`: move back one cell when possible and erase that cell.
 - Unsupported escape sequences: ANSI/VT sequences are not parsed; Escape is written as an ordinary character or ignored by an upper layer.
+
+When output moves past the last visible row, the default VGA text backend and the runtime console keep the hardware cursor inside the 80x25 visible range. The runtime console follows newest output while the viewport is at the bottom; PageUp or Home can move the viewport into retained history, and later PageDown or End returns toward the newest output. New output while viewing history does not corrupt retained history or force the viewport back to the bottom. The supported console clear path clears the visible window, discards retained runtime scrollback, and resets the viewport to the bottom.
 
 `kput()`, `kputs()`, `kprintf()`, `serial_puts()`, and fatal/page-fault/memory self-test marker paths keep early direct-output semantics and do not depend on TTY initialization or input-buffer state.
 
@@ -89,6 +92,7 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 The default interactive shell path intentionally stays below POSIX terminal scope:
 
 - Keyboard IRQ1 only decodes and enqueues fixed-size input records, then performs the bounded TTY wakeup.
+- Scrollback navigation keys are fixed-size TTY control records; viewport movement and whole-screen redraw occur only when a non-interrupt terminal consumer processes those records.
 - Printable input, newline feedback, backspace feedback, EOF-like exit, interrupt-like line cancellation, and unsupported-control no-op behavior are produced by the non-interrupt terminal or shell consumer after `read(0, ...)` returns.
 - The default terminal keeps one numeric foreground `pgid`. It is queried and
   changed only from ordinary syscall/user-process context; IRQ1 never performs
@@ -103,8 +107,9 @@ The default interactive shell path intentionally stays below POSIX terminal scop
 ## Non-Goals
 
 This path does not implement multiple TTYs, full ANSI/VT terminal behavior,
-command history, termios, complete job control, background read/write control,
-USB HID, APIC/IOAPIC, SMP, or internationalized keyboard layouts. The minimal fd
+command history, termios, pseudo-terminals, complete job control, background
+read/write control, USB HID, graphical console mode, persistent or unbounded
+history, APIC/IOAPIC, SMP, or internationalized keyboard layouts. The minimal fd
 integration covers only the default console fast paths for bounded userland and
 does not introduce `/dev/tty`, a general character-device filesystem, async I/O,
-or full POSIX terminal reads.
+new user-visible terminal syscalls, or full POSIX terminal reads.

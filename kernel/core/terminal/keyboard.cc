@@ -4,6 +4,10 @@
 
 namespace bigos::input {
     namespace {
+        using terminal::TerminalControl;
+        using terminal::TerminalInputKind;
+        using terminal::TerminalInputRecord;
+
         constexpr uint8_t SCANCODE_RELEASE_BIT = 0x80;
         constexpr uint8_t SCANCODE_EXTENDED_E0 = 0xe0;
         constexpr uint8_t SCANCODE_EXTENDED_E1 = 0xe1;
@@ -12,6 +16,10 @@ namespace bigos::input {
         constexpr uint8_t SCANCODE_RIGHT_SHIFT = 0x36;
         constexpr uint8_t SCANCODE_CTRL = 0x1d;
         constexpr uint8_t SCANCODE_ALT = 0x38;
+        constexpr uint8_t SCANCODE_HOME = 0x47;
+        constexpr uint8_t SCANCODE_PAGE_UP = 0x49;
+        constexpr uint8_t SCANCODE_END = 0x4f;
+        constexpr uint8_t SCANCODE_PAGE_DOWN = 0x51;
 
         struct KeyMapEntry {
             char normal;
@@ -115,6 +123,83 @@ namespace bigos::input {
         void record_unsupported() noexcept {
             ++g_state.unsupported;
         }
+
+        bool make_scroll_record(uint8_t base_scancode, TerminalInputRecord *out) noexcept {
+            if (out == nullptr)
+                return false;
+
+            TerminalControl control = TerminalControl::Unsupported;
+            switch (base_scancode) {
+                case SCANCODE_HOME:
+                    control = TerminalControl::ScrollHome;
+                    break;
+                case SCANCODE_END:
+                    control = TerminalControl::ScrollEnd;
+                    break;
+                case SCANCODE_PAGE_UP:
+                    control = TerminalControl::ScrollPageUp;
+                    break;
+                case SCANCODE_PAGE_DOWN:
+                    control = TerminalControl::ScrollPageDown;
+                    break;
+                default:
+                    return false;
+            }
+
+            *out = {TerminalInputKind::Control, 0, control};
+            return true;
+        }
+
+        bool decode_ps2_set1_record(uint8_t scancode, TerminalInputRecord *out) noexcept {
+            if (out == nullptr)
+                return false;
+
+            if (scancode == SCANCODE_EXTENDED_E0 || scancode == SCANCODE_EXTENDED_E1) {
+                g_state.extended = true;
+                return false;
+            }
+
+            const bool released = (scancode & SCANCODE_RELEASE_BIT) != 0;
+            const uint8_t base_scancode = scancode & (uint8_t)~SCANCODE_RELEASE_BIT;
+
+            if (g_state.extended) {
+                g_state.extended = false;
+                if (released)
+                    return false;
+                if (make_scroll_record(base_scancode, out))
+                    return true;
+                record_unsupported();
+                return false;
+            }
+
+            if (base_scancode >= 128) {
+                record_unsupported();
+                return false;
+            }
+
+            if (update_modifier(base_scancode, !released))
+                return false;
+
+            if (released)
+                return false;
+
+            const KeyMapEntry entry = g_set1_keymap[base_scancode];
+            char translated = 0;
+            if (g_state.ctrl && entry.ctrl != 0)
+                translated = entry.ctrl;
+            else if (g_state.shift)
+                translated = entry.shifted;
+            else
+                translated = entry.normal;
+
+            if (translated == 0) {
+                record_unsupported();
+                return false;
+            }
+
+            *out = {TerminalInputKind::Character, translated, TerminalControl::None};
+            return true;
+        }
     }   // namespace
 
     void init_keyboard_decoder() noexcept {
@@ -125,53 +210,21 @@ namespace bigos::input {
         if (out == nullptr)
             return false;
 
-        if (scancode == SCANCODE_EXTENDED_E0 || scancode == SCANCODE_EXTENDED_E1) {
-            g_state.extended = true;
-            record_unsupported();
-            return false;
-        }
-
-        if (g_state.extended) {
-            g_state.extended = false;
-            record_unsupported();
-            return false;
-        }
-
-        const bool released = (scancode & SCANCODE_RELEASE_BIT) != 0;
-        const uint8_t base_scancode = scancode & (uint8_t)~SCANCODE_RELEASE_BIT;
-        if (base_scancode >= 128) {
-            record_unsupported();
-            return false;
-        }
-
-        if (update_modifier(base_scancode, !released))
+        TerminalInputRecord record{};
+        if (!decode_ps2_set1_record(scancode, &record))
             return false;
 
-        if (released)
+        if (record.kind != TerminalInputKind::Character)
             return false;
 
-        const KeyMapEntry entry = g_set1_keymap[base_scancode];
-        char translated = 0;
-        if (g_state.ctrl && entry.ctrl != 0)
-            translated = entry.ctrl;
-        else if (g_state.shift)
-            translated = entry.shifted;
-        else
-            translated = entry.normal;
-
-        if (translated == 0) {
-            record_unsupported();
-            return false;
-        }
-
-        *out = translated;
+        *out = record.ch;
         return true;
     }
 
     void handle_keyboard_scancode(uint8_t scancode) noexcept {
-        char ch = 0;
-        if (decode_ps2_set1(scancode, &ch)) {
-            (void)terminal::enqueue_input(ch);
+        TerminalInputRecord record{};
+        if (decode_ps2_set1_record(scancode, &record)) {
+            (void)terminal::enqueue_input_record(record);
         }
     }
 

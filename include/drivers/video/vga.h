@@ -74,6 +74,7 @@ namespace video {
         void write(const char *__s, uint8_t __x, uint8_t __y, uint8_t __color = VT_COLOR_NORMAL);
 
         void clear_screen();
+        void fill_cell(uint8_t __x, uint8_t __y, char __ch, uint8_t __color = VT_COLOR_NORMAL);
 
         // if __offset is positive scroll up else scroll down
         // TODO void scroll_screen(int16_t __offset = 1);

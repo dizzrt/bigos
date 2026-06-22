@@ -15,6 +15,15 @@ namespace video {
             return mode->width * __y + __x;
         }
 
+        static inline uint16_t cell_count() {
+            return mode->width * mode->height;
+        }
+
+        static inline uint16_t clamp_pos(uint16_t __pos) {
+            const uint16_t cells = cell_count();
+            return __pos < cells ? __pos : (uint16_t)(cells - 1);
+        }
+
         static inline ptr8_t text_cell(uint16_t __pos) {
             return (ptr8_t)((__pos << 1) + frame_buffer_base);
         }
@@ -40,16 +49,53 @@ namespace video {
         }
 
         static void set_cursor(uint16_t __pos) {
+            __pos = clamp_pos(__pos);
             bigos::outb(VGA_CRT_IC, 0x0e);
             bigos::outb(VGA_CRT_DC, (uint8_t)(__pos >> 8));
             bigos::outb(VGA_CRT_IC, 0x0f);
             bigos::outb(VGA_CRT_DC, (uint8_t)__pos);
         }
 
+        static void clear_row(uint32_t __row, uint8_t __color) {
+            const uint32_t row_start = __row * mode->width;
+            for (uint32_t x = 0; x < mode->width; ++x)
+                put_cell((uint16_t)(row_start + x), ' ', __color);
+        }
+
+        static void scroll_up_one(uint8_t __color) {
+            for (uint32_t y = 1; y < mode->height; ++y) {
+                for (uint32_t x = 0; x < mode->width; ++x) {
+                    const uint16_t from = (uint16_t)(y * mode->width + x);
+                    const uint16_t to = (uint16_t)((y - 1) * mode->width + x);
+                    ptr8_t src = text_cell(from);
+                    put_cell(to, (char)src[0], src[1]);
+                }
+            }
+            clear_row(mode->height - 1, __color);
+        }
+
+        static uint16_t newline_pos(uint16_t __pos, uint8_t __color) {
+            __pos = clamp_pos(__pos);
+            const uint16_t row = __pos / mode->width;
+            if (row + 1 >= mode->height) {
+                scroll_up_one(__color);
+                return (uint16_t)((mode->height - 1) * mode->width);
+            }
+            return (uint16_t)((row + 1) * mode->width);
+        }
+
+        static uint16_t advance_pos(uint16_t __pos, uint8_t __color) {
+            if (__pos + 1 >= cell_count()) {
+                scroll_up_one(__color);
+                return (uint16_t)((mode->height - 1) * mode->width);
+            }
+            return (uint16_t)(__pos + 1);
+        }
+
         static void write(char __ch, uint16_t __pos, uint8_t __color = VT_COLOR_NORMAL) {
+            __pos = clamp_pos(__pos);
             if (__ch == '\n') {
-                __pos = (__pos / mode->width + 1) * mode->width;
-                set_cursor(__pos);
+                set_cursor(newline_pos(__pos, __color));
                 return;
             }
 
@@ -60,7 +106,8 @@ namespace video {
             }
 
             if (__ch == '\t') {
-                move_cursor(4);
+                for (uint8_t i = 0; i < 4; ++i)
+                    write(' ', get_cursor(), __color);
                 return;
             }
 
@@ -74,7 +121,7 @@ namespace video {
             }
 
             put_cell(__pos, __ch, __color);
-            set_cursor(__pos + 1);
+            set_cursor(advance_pos(__pos, __color));
         }
 
         static void write(const char *__s, uint16_t __pos, uint8_t __color = VT_COLOR_NORMAL) {
@@ -88,11 +135,19 @@ namespace video {
         }
 
         void set_cursor(uint8_t __x, uint8_t __y) {
+            if (__x >= mode->width)
+                __x = (uint8_t)(mode->width - 1);
+            if (__y >= mode->height)
+                __y = (uint8_t)(mode->height - 1);
             set_cursor(convert_pos(__x, __y));
         }
 
         void move_cursor(int16_t __offset) {
-            uint16_t pos = get_cursor() + __offset;
+            int32_t pos = (int32_t)get_cursor() + __offset;
+            if (pos < 0)
+                pos = 0;
+            if (pos >= cell_count())
+                pos = cell_count() - 1;
             set_cursor(pos);
         }
 
@@ -124,6 +179,12 @@ namespace video {
             }
 
             set_cursor(0);
+        }
+
+        void fill_cell(uint8_t __x, uint8_t __y, char __ch, uint8_t __color) {
+            if (__x >= mode->width || __y >= mode->height)
+                return;
+            put_cell(convert_pos(__x, __y), __ch, __color);
         }
 
         // TODO void scroll_screen(int16_t __offset) {}

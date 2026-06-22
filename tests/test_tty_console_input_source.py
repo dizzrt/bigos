@@ -104,6 +104,31 @@ def test_scancode_decoder_covers_minimal_set1_mapping_and_modifiers() -> None:
     assert 'record_unsupported();' in keyboard
 
 
+def test_scancode_decoder_classifies_scrollback_extended_keys_as_control_records() -> None:
+    keyboard = read_source('kernel/core/terminal/keyboard.cc')
+    tty_h = read_source('include/bigos/tty.h')
+
+    expected_controls = (
+        'ScrollPageUp',
+        'ScrollPageDown',
+        'ScrollHome',
+        'ScrollEnd',
+    )
+    for control in expected_controls:
+        assert control in tty_h
+        assert f'TerminalControl::{control}' in keyboard
+
+    assert 'SCANCODE_EXTENDED_E0 = 0xe0' in keyboard
+    assert 'SCANCODE_HOME = 0x47' in keyboard
+    assert 'SCANCODE_PAGE_UP = 0x49' in keyboard
+    assert 'SCANCODE_END = 0x4f' in keyboard
+    assert 'SCANCODE_PAGE_DOWN = 0x51' in keyboard
+    assert 'bool make_scroll_record(uint8_t base_scancode, TerminalInputRecord *out) noexcept' in keyboard
+    assert '*out = {TerminalInputKind::Control, 0, control};' in keyboard
+    assert 'if (make_scroll_record(base_scancode, out))' in keyboard
+    assert '(void)terminal::enqueue_input_record(record);' in keyboard
+
+
 def test_tty_ring_buffer_is_fixed_capacity_fifo_and_drops_new_input() -> None:
     tty_h = read_source('include/bigos/tty.h')
     tty = read_source('kernel/core/terminal/tty.cc')
@@ -121,6 +146,20 @@ def test_tty_ring_buffer_is_fixed_capacity_fifo_and_drops_new_input() -> None:
     forbidden_tokens = ('kmalloc', 'alloc_kernel_pages', 'while (true)', 'sleep_for', 'read_char_blocking')
     for token in forbidden_tokens:
         assert token not in enqueue_body
+
+
+def test_tty_char_consumers_handle_scrollback_events_without_byte_leakage() -> None:
+    tty = read_source('kernel/core/terminal/tty.cc')
+
+    assert 'case TerminalControl::ScrollPageUp:' in tty
+    assert 'console_scroll_page_up();' in tty
+    assert 'case TerminalControl::ScrollPageDown:' in tty
+    assert 'console_scroll_page_down();' in tty
+    assert 'case TerminalControl::ScrollHome:' in tty
+    assert 'console_scroll_home();' in tty
+    assert 'case TerminalControl::ScrollEnd:' in tty
+    assert 'console_scroll_end();' in tty
+    assert tty.count('return ConsumeResult::Ignored;') >= 5
 
 
 def test_tty_blocking_consumer_is_additive_and_uses_wait_queue() -> None:
@@ -144,12 +183,66 @@ def test_console_api_wraps_vga_without_serial_mirroring() -> None:
 
     assert 'void console_put(char ch) noexcept;' in console_h
     assert 'void console_write(const char *s) noexcept;' in console_h
-    assert 'bigos::device::write_video_text(ch);' in console
+    assert 'void console_scroll_page_up() noexcept;' in console_h
+    assert 'ConsoleCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_WIDTH];' in console
+    assert 'CONSOLE_SCROLLBACK_LINES = 256' in console
+    assert 'bigos::device::fill_video_text_cell' in console
     assert 'serial_puts' not in console
     assert "if (__ch == '\\r')" in vga
     assert "if (__ch == '\\b')" in vga
     assert 'void bigos::kput(char c)' in io
     assert 'bigos::device::write_video_text(c);' in io
+
+
+def test_direct_kernel_vga_diagnostics_switch_from_user_cr3() -> None:
+    io = read_source('kernel/core/bigos/io.cc')
+
+    assert '#include <bigos/arch_vm_user_boundary.h>' in io
+    assert '#include <bigos/proc.h>' in io
+    assert 'switch_to_current_kernel_cr3()' in io
+    assert 'process->kernel_address_space_root' in io
+    assert 'bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);' in io
+    assert 'restore_cr3(restore_root);' in io
+
+
+def test_vga_text_backend_bounds_cursor_and_scrolls_visible_screen() -> None:
+    vga = read_source('kernel/drivers/video/vga.cc')
+    vga_h = read_source('include/drivers/video/vga.h')
+
+    assert 'static DisplayMode mode_3{80, 25, true};' in vga
+    assert 'static uint64_t frame_buffer_base = 0xb8000;' in vga
+    assert 'static inline uint16_t clamp_pos(uint16_t __pos)' in vga
+    assert '__pos = clamp_pos(__pos);' in vga
+    assert 'static void scroll_up_one(uint8_t __color)' in vga
+    assert 'clear_row(mode->height - 1, __color);' in vga
+    assert 'static uint16_t newline_pos(uint16_t __pos, uint8_t __color)' in vga
+    assert 'static uint16_t advance_pos(uint16_t __pos, uint8_t __color)' in vga
+    assert "write(' ', get_cursor(), __color);" in vga
+    assert 'void fill_cell(uint8_t __x, uint8_t __y, char __ch, uint8_t __color = VT_COLOR_NORMAL);' in vga_h
+
+
+def test_console_scrollback_state_viewport_follow_and_clear_policy() -> None:
+    console = read_source('kernel/core/terminal/console.cc')
+
+    assert 'CONSOLE_WIDTH = 80' in console
+    assert 'CONSOLE_HEIGHT = 25' in console
+    assert 'CONSOLE_SCROLLBACK_LINES = 256' in console
+    assert 'uint64_t oldest_line;' in console
+    assert 'uint64_t current_line;' in console
+    assert 'uint64_t viewport_top;' in console
+    assert 'uint8_t cursor_x;' in console
+    assert 'uint64_t bottom_viewport_top() noexcept' in console
+    assert 'bool viewport_at_bottom() noexcept' in console
+    assert 'void render_viewport() noexcept' in console
+    assert 'bigos::device::fill_video_text_cell' in console
+    assert 'bigos::device::set_video_text_cursor(g_console.cursor_x, cursor_y);' in console
+    assert 'g_console.current_line + 1 - CONSOLE_SCROLLBACK_LINES' in console
+    assert 'if (follow)' in console
+    assert 'console_scroll_page_up' in console
+    assert 'console_scroll_page_down' in console
+    assert 'console_scroll_home' in console
+    assert 'console_scroll_end' in console
+    assert 'Clear-screen discards retained runtime scrollback' in console
 
 
 def test_default_user_stdout_and_stderr_reach_visible_console() -> None:
@@ -176,3 +269,5 @@ def test_keyboard_irq_echo_stays_in_non_interrupt_shell_consumer() -> None:
     assert 'should_echo_input' in shell
     assert 'write_all' not in body
     assert 'console_write' not in body
+    assert 'console_scroll' not in body
+    assert 'fill_cell' not in body

@@ -19,6 +19,10 @@ namespace bigos::terminal {
         DeleteLike,
         EofLike,
         InterruptLike,
+        ScrollPageUp,
+        ScrollPageDown,
+        ScrollHome,
+        ScrollEnd,
         Unsupported,
     };
 

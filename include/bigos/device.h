@@ -94,6 +94,8 @@ namespace device {
         void (*clear_screen)() noexcept;
         void (*write_char)(char __ch, uint8_t __color) noexcept;
         void (*write_string)(const char *__s, uint8_t __color) noexcept;
+        void (*fill_cell)(uint8_t __x, uint8_t __y, char __ch, uint8_t __color) noexcept;
+        void (*set_cursor)(uint8_t __x, uint8_t __y) noexcept;
     };
 
     struct RtcInterface {
@@ -121,6 +123,8 @@ namespace device {
     void clear_video_text() noexcept;
     void write_video_text(char __ch, uint8_t __color = 0x0f) noexcept;
     void write_video_text(const char *__s, uint8_t __color = 0x0f) noexcept;
+    void fill_video_text_cell(uint8_t __x, uint8_t __y, char __ch, uint8_t __color = 0x0f) noexcept;
+    void set_video_text_cursor(uint8_t __x, uint8_t __y) noexcept;
     bool read_rtc_time(driver::rtc::DateTime *__out) noexcept;
 }   // namespace device
 NAMESPACE_BIGOS_END

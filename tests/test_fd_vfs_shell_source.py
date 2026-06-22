@@ -76,6 +76,17 @@ def test_vfs_read_clamps_eof_and_advances_offset_only_on_success() -> None:
     assert '*__bytes_read = result.bytes_read;' in source
 
 
+def test_exfat_no_fat_chain_reads_avoid_heap_cluster_buffer() -> None:
+    source = read_source('kernel/core/fs/exfat.cc')
+
+    assert 'ReadResult read_contiguous_file(' in source
+    assert 'uint8_t sector[SECTOR_SIZE];' in source
+    assert 'status = read_sector(__mount->device, cluster_base_lba + sector_in_cluster, sector);' in source
+    assert 'if (__file->no_fat_chain)' in source
+    assert 'return read_contiguous_file(__mount, __file, __offset, __dst, to_read);' in source
+    assert 'if (visited != nullptr)\n                bigos::free(visited);' in source
+
+
 def test_process_fd_table_lifecycle_and_helpers_are_growable() -> None:
     header = read_source('include/bigos/proc.h')
     source = read_source('kernel/core/proc/proc.cc')

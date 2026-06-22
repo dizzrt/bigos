@@ -13,6 +13,11 @@ namespace bigos::terminal {
     // Ordinary runtime console output. Early diagnostics continue to use kput/kputs.
     void console_put(char ch) noexcept;
     void console_write(const char *s) noexcept;
+    void console_clear() noexcept;
+    void console_scroll_page_up() noexcept;
+    void console_scroll_page_down() noexcept;
+    void console_scroll_home() noexcept;
+    void console_scroll_end() noexcept;
     bool default_terminal_write(const char *s) noexcept;
 }   // namespace bigos::terminal
 

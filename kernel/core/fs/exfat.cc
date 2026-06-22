@@ -93,6 +93,54 @@ namespace {
             __mount->device, lba, __mount->sectors_per_cluster, __buffer, __mount->bytes_per_cluster));
     }
 
+    bigos::fs::ReadResult read_contiguous_file(
+        bigos::fs::ExfatMount *__mount, const bigos::fs::FileMetadata *__file, uint64_t __offset, void *__dst,
+        size_t __len) noexcept {
+        const uint64_t max_clusters =
+            (__file->data_length + __mount->bytes_per_cluster - 1) / __mount->bytes_per_cluster;
+        if (max_clusters == 0)
+            return {bigos::fs::FsStatus::Success, 0};
+        const uint64_t last_cluster = (uint64_t)__file->first_cluster + max_clusters - 1;
+        if (!cluster_valid(__mount, __file->first_cluster) || last_cluster > UINT32_MAX ||
+            !cluster_valid(__mount, (uint32_t)last_cluster))
+            return {bigos::fs::FsStatus::MalformedFilesystem, 0};
+
+        const uint64_t first_cluster_index = __offset / __mount->bytes_per_cluster;
+        uint32_t cluster = __file->first_cluster + (uint32_t)first_cluster_index;
+        uint64_t cluster_base_lba = 0;
+        bigos::fs::FsStatus status = cluster_lba(__mount, cluster, &cluster_base_lba);
+        if (status != bigos::fs::FsStatus::Success)
+            return {status, 0};
+
+        uint32_t sector_in_cluster = (uint32_t)((__offset % __mount->bytes_per_cluster) / __mount->sector_size);
+        uint32_t offset_in_sector = (uint32_t)(__offset % __mount->sector_size);
+        uint8_t sector[SECTOR_SIZE];
+        size_t copied = 0;
+        while (copied < __len) {
+            status = read_sector(__mount->device, cluster_base_lba + sector_in_cluster, sector);
+            if (status != bigos::fs::FsStatus::Success)
+                return {status, copied};
+
+            size_t chunk = __mount->sector_size - offset_in_sector;
+            if (chunk > __len - copied)
+                chunk = __len - copied;
+            memcpy((uint8_t *)__dst + copied, sector + offset_in_sector, chunk);
+            copied += chunk;
+            offset_in_sector = 0;
+            ++sector_in_cluster;
+            if (sector_in_cluster >= __mount->sectors_per_cluster && copied < __len) {
+                ++cluster;
+                if (!cluster_valid(__mount, cluster))
+                    return {bigos::fs::FsStatus::MalformedFilesystem, copied};
+                status = cluster_lba(__mount, cluster, &cluster_base_lba);
+                if (status != bigos::fs::FsStatus::Success)
+                    return {status, copied};
+                sector_in_cluster = 0;
+            }
+        }
+        return {bigos::fs::FsStatus::Success, copied};
+    }
+
     bigos::fs::FsStatus validate_boot_region(
         driver::block::BlockDevice *__device, const bigos::fs::Partition *__partition,
         bigos::fs::ExfatMount *__out) noexcept {
@@ -554,6 +602,9 @@ namespace fs {
         if ((uint64_t)to_read > available)
             to_read = (size_t)available;
 
+        if (__file->no_fat_chain)
+            return read_contiguous_file(__mount, __file, __offset, __dst, to_read);
+
         uint8_t *cluster_buffer = (uint8_t *)bigos::kmalloc(__mount->bytes_per_cluster);
         if (cluster_buffer == nullptr)
             return {FsStatus::OutOfMemory, 0};
@@ -572,6 +623,8 @@ namespace fs {
         const uint64_t max_clusters =
             (__file->data_length + __mount->bytes_per_cluster - 1) / __mount->bytes_per_cluster;
         if (max_clusters > __mount->cluster_count) {
+            if (visited != nullptr)
+                bigos::free(visited);
             bigos::free(cluster_buffer);
             return {FsStatus::MalformedFilesystem, 0};
         }

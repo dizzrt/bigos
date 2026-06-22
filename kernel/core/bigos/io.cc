@@ -1,7 +1,9 @@
 #include <stdarg.h>
 #include <string.h>
+#include <bigos/arch_vm_user_boundary.h>
 #include <bigos/device.h>
 #include <bigos/io.h>
+#include <bigos/proc.h>
 #include <bigos/utils.h>
 
 #define COM1_PORT 0x3f8
@@ -56,12 +58,44 @@ void bigos::serial_puts(const char *s) {
     }
 }
 
+namespace {
+    uint64_t switch_to_current_kernel_cr3() {
+#ifdef BIGOS_USER_PROCESS
+        const bigos::proc::Process *process = bigos::proc::current_process();
+        if (process == nullptr || process->kernel_address_space_root == bigos::mm::INVALID_PHYS_ADDR)
+            return 0;
+
+        const uint64_t active_root = bigos::arch::vm_user::active_address_space_root();
+        if (bigos::arch::vm_user::is_active_address_space(process->kernel_address_space_root))
+            return 0;
+
+        bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
+        return active_root;
+#else
+        return 0;
+#endif
+    }
+
+    void restore_cr3(uint64_t root) {
+#ifdef BIGOS_USER_PROCESS
+        if (root != 0 && !bigos::arch::vm_user::is_active_address_space(root))
+            bigos::arch::vm_user::activate_address_space(root);
+#else
+        (void)root;
+#endif
+    }
+}   // namespace
+
 void bigos::kput(char c) {
+    const uint64_t restore_root = switch_to_current_kernel_cr3();
     bigos::device::write_video_text(c);
+    restore_cr3(restore_root);
 }
 
 void bigos::kputs(const char *s) {
+    const uint64_t restore_root = switch_to_current_kernel_cr3();
     bigos::device::write_video_text(s);
+    restore_cr3(restore_root);
 }
 
 static void emit_buffer(const char *buffer, bool dual) {

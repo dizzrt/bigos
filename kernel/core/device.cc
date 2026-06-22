@@ -38,8 +38,22 @@ namespace {
         driver::video::vga::write(__s, __color);
     }
 
+    void vga_fill_cell(uint8_t __x, uint8_t __y, char __ch, uint8_t __color) noexcept {
+        driver::video::vga::fill_cell(__x, __y, __ch, __color);
+    }
+
+    void vga_set_cursor(uint8_t __x, uint8_t __y) noexcept {
+        driver::video::vga::set_cursor(__x, __y);
+    }
+
     const bigos::device::TimerInterface g_pit_interface = {&pit_init_channel0};
-    const bigos::device::VideoTextInterface g_vga_interface = {&vga_clear_screen, &vga_write_char, &vga_write_string};
+    const bigos::device::VideoTextInterface g_vga_interface = {
+        &vga_clear_screen,
+        &vga_write_char,
+        &vga_write_string,
+        &vga_fill_cell,
+        &vga_set_cursor,
+    };
     const bigos::device::RtcInterface g_rtc_interface = {&driver::rtc::read_time};
 
     bool same_device_identity(const bigos::device::DeviceDescriptor &__a,
@@ -353,6 +367,24 @@ namespace device {
             return;
         }
         driver::video::vga::write(__s, __color);
+    }
+
+    void fill_video_text_cell(uint8_t __x, uint8_t __y, char __ch, uint8_t __color) noexcept {
+        const VideoTextInterface *video = video_text(DeviceRole::VgaText);
+        if (video != nullptr && video->fill_cell != nullptr) {
+            video->fill_cell(__x, __y, __ch, __color);
+            return;
+        }
+        driver::video::vga::fill_cell(__x, __y, __ch, __color);
+    }
+
+    void set_video_text_cursor(uint8_t __x, uint8_t __y) noexcept {
+        const VideoTextInterface *video = video_text(DeviceRole::VgaText);
+        if (video != nullptr && video->set_cursor != nullptr) {
+            video->set_cursor(__x, __y);
+            return;
+        }
+        driver::video::vga::set_cursor(__x, __y);
     }
 
     bool read_rtc_time(driver::rtc::DateTime *__out) noexcept {

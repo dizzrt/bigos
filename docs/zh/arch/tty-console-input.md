@@ -11,14 +11,14 @@ keyboard IRQ1
   -> inb(0x60)
   -> input::handle_keyboard_scancode()
   -> PS/2 set-1 bounded decode
-  -> terminal::enqueue_input()
+  -> terminal::enqueue_input() / terminal::enqueue_input_record()
   -> fixed TerminalInputRecord ring
   -> non-interrupt consumer read_input_record()/read_char()/drain()
   -> optional blocking consumer read_char_blocking()
   -> fd 0 未安装文件时的默认用户态 stdin
 ```
 
-keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并在产生受支持字符时以固定大小 terminal input record 入队到 TTY 输入缓冲。成功入队后，TTY 层可以通过 bounded scheduler wakeup helper 唤醒一个 blocked reader。ISR 不调用 `kprintf()`、`kput()`、VGA/serial 输出、动态分配、阻塞等待、`mdelay()`、filesystem、syscall、用户态相关路径或直接 context switch。
+keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并在产生受支持字符或有界 terminal-control event 时以固定大小 terminal input record 入队到 TTY 输入缓冲。成功入队后，TTY 层可以通过 bounded scheduler wakeup helper 唤醒一个 blocked reader。ISR 不调用 `kprintf()`、`kput()`、VGA/serial 输出、动态分配、阻塞等待、`mdelay()`、filesystem、syscall、用户态相关路径、直接 context switch 或 console viewport redraw。
 
 ## Scancode 策略
 
@@ -28,14 +28,15 @@ keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并�
 - Enter、Backspace、Tab、Escape。
 - Shift、Ctrl、Alt 的 make/break 状态更新；modifier scancode 本身不产生字符。
 - Ctrl 仅对代表性字母和少量控制键输出 C0 控制字符。
+- `0xe0` 扩展 Home、End、PageUp 和 PageDown 会表示为有界 terminal-control event，用于 scrollback navigation。
 
-扩展 scancode 前缀 `0xe0`/`0xe1` 和未映射 scancode 被记录到 unsupported counter 并丢弃。decoder 不 panic、不分配、不阻塞，也不会把未知 scancode 写入 TTY buffer。
+不支持的扩展 scancode 序列和未映射 scancode 会记录到 unsupported counter 并丢弃。decoder 不 panic、不分配、不阻塞、不重绘 VGA 输出，也不会把未知 scancode 写入 TTY buffer。
 
 ## TTY 输入缓冲
 
 TTY 输入缓冲是静态固定容量 ring buffer，容量为 `TTY_INPUT_CAPACITY`。IRQ producer 使用 `terminal::enqueue_input()` 或 `terminal::enqueue_input_record()` 写入；非中断 consumer 可以通过 `terminal::read_input_record()` 读取原始有界 record，也可以继续使用 byte-compatible 的 `terminal::read_char()` 和 `terminal::drain()` helper。
 
-每个 `TerminalInputRecord` 要么是 character record，要么是 control record。有界 control 子集包括 line end、backspace、delete-like、EOF-like、interrupt-like 和 unsupported control。byte-compatible consumer 会把 `\r` 归一为 line end，EOF-like input 在默认 console stdin 上表现为确定性的 empty-read result，interrupt-like input 以有界 `0x03` byte 交给 shell 取消当前行，unsupported control 由 terminal consumer 作为确定性 no-op 消费。
+每个 `TerminalInputRecord` 要么是 character record，要么是 control record。有界 control 子集包括 line end、backspace、delete-like、EOF-like、interrupt-like、scrollback PageUp/PageDown/Home/End 和 unsupported control。byte-compatible consumer 会把 `\r` 归一为 line end，EOF-like input 在默认 console stdin 上表现为确定性的 empty-read result，interrupt-like input 以有界 `0x03` byte 交给 shell 取消当前行，scrollback control 由非中断 character consumer 消费并调整 console viewport，unsupported control 由 terminal consumer 作为确定性 no-op 消费。
 
 Overflow 策略是确定性的：当 ring buffer 满时丢弃新输入并递增 drop counter，不覆盖 unread input。空 buffer 读取返回 `false` 或 `0`，不 sleep、不等待 scheduler，也不依赖进程或用户态。
 
@@ -51,15 +52,17 @@ blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-threa
 
 ## Console 输出边界
 
-普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装现有 `terminal::console_put()` 和 `terminal::console_write()` VGA text-mode backend。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到这个可见 console；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
+普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装 `terminal::console_put()` 和 `terminal::console_write()`，底层仍是默认 80x25 VGA text-mode backend。runtime console 拥有固定 256 行内核 scrollback buffer，并从该有界状态渲染可见 80x25 viewport。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到这个可见 console；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
 
 基础控制字符行为：
 
 - `\n`：移动到下一行行首。
 - `\r`：移动到当前行行首。
-- `\t`：向后移动 4 个字符位置。
-- `\b`：在非起始位置回退一格并擦除该字符。
+- `\t`：用确定性的空白 cell 向后移动 4 个字符位置。
+- `\b`：在可回退时回退一格并擦除该字符。
 - Unsupported escape sequence：不解析 ANSI/VT 序列；Escape 作为普通字符写入或由上层决定忽略。
+
+当输出越过最后一个可见行时，默认 VGA text backend 和 runtime console 会把硬件光标保持在 80x25 可见范围内。runtime console 在 viewport 位于底部时跟随最新输出；PageUp 或 Home 可以把 viewport 移到保留历史，之后 PageDown 或 End 会向最新输出返回。查看历史时产生的新输出不会破坏保留历史，也不会强制把 viewport 拉回底部。受支持的 console clear path 会清空可见窗口、丢弃保留的 runtime scrollback，并把 viewport 重置到底部。
 
 `kput()`、`kputs()`、`kprintf()`、`serial_puts()` 和 fatal/page-fault/memory self-test marker 路径保留 early direct output 语义，不依赖 TTY 初始化或 input buffer 状态。
 
@@ -89,6 +92,7 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 默认交互 shell 路径刻意保持在 POSIX terminal 范围以下：
 
 - Keyboard IRQ1 只解码并入队固定大小 input record，然后执行 bounded TTY wakeup。
+- Scrollback navigation key 是固定大小 TTY control record；viewport 移动和整屏重绘只在非中断 terminal consumer 处理这些 record 时发生。
 - Printable input、newline feedback、backspace feedback、EOF-like exit、interrupt-like line cancellation 和 unsupported-control no-op 行为由 `read(0, ...)` 返回后的非中断 terminal 或 shell consumer 产生。
 - 默认终端保存一个数值型 foreground `pgid`。查询和变更只在普通 syscall/用户进程上下文执行；IRQ1 不遍历 process group、不执行 shell 策略、不分配、不阻塞，也不做文件系统 I/O。
 - Interrupt-like input 仍向 consumer 返回有界 `0x03` byte，并尝试向当前 foreground group 进行有界 `SIGINT` 投递。foreground group 缺失或为空时只产生确定性 no-op/错误结果，不解引用悬垂进程对象。
@@ -97,4 +101,4 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 ## 非目标
 
-该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、termios、完整 job control、后台读写控制、USB HID、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。
+该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、termios、伪终端、完整 job control、后台读写控制、USB HID、图形 console mode、持久化或无限历史、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O、新的用户可见 terminal syscall 或完整 POSIX terminal read。
