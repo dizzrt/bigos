@@ -190,6 +190,7 @@ class RuntimeSmokeCase:
     validation_markers: tuple[str, ...] = ()
     proc_boundary: str = ''
     qemu_extra: tuple[str, ...] = ()
+    boot_mode: str = 'uefi'
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,7 @@ SMOKE_OPTIONS = (
     'scheduler_semantics_smoke',
     'scheduler_smp_smoke',
     'tlb_shootdown_smoke',
+    'multicore_hardening_smoke',
     'blocking_smoke',
     'user_vmem_smoke',
     'syscall_smoke',
@@ -325,6 +327,34 @@ RUNTIME_SMOKE_MATRIX = (
             'not CPU hotplug, NUMA, MSI/MSI-X, complete IRQ affinity, or non-x86_64 backends'
         ),
         qemu_extra=('-cpu', 'max', '-smp', '2'),
+    ),
+    RuntimeSmokeCase(
+        case_id='multicore-hardening',
+        title='Multicore runtime hardening',
+        switches=('multicore_hardening_smoke',),
+        expected_marker='BIGOS_MULTICORE_HARDENING_PASSED',
+        timeout_seconds=25.0,
+        risk_area=(
+            'bounded AP scheduler, scheduler nudge IPI, remote wakeup, timeout wakeup, and TLB shootdown completion'
+        ),
+        validation_markers=(
+            'BIGOS_AP_ONLINE',
+            'BIGOS_AP_LOCAL_TIMER',
+            'BIGOS_MULTICORE_HARDENING_AP_THREAD',
+            'BIGOS_MULTICORE_HARDENING_IPI',
+            'BIGOS_MULTICORE_HARDENING_REMOTE_WAKE',
+            'BIGOS_MULTICORE_HARDENING_TIMEOUT_WAKE',
+            'BIGOS_MULTICORE_HARDENING_TLB',
+            'BIGOS_MULTICORE_HARDENING_PASSED',
+            'BIGOS_USER_EXEC',
+        ),
+        proc_boundary=(
+            'default-off multicore hardening kernel-thread smoke; validates bounded 2-CPU scheduler/IPI/TLB '
+            'interaction plus normal userland baseline marker, not CPU hotplug, NUMA, async I/O, full POSIX '
+            'concurrency, or UEFI runtime parity'
+        ),
+        qemu_extra=('-cpu', 'max', '-smp', '2'),
+        boot_mode='legacy',
     ),
     RuntimeSmokeCase(
         case_id='blocking-primitives',
@@ -1871,7 +1901,8 @@ def runtime_smoke_serial_log(case: RuntimeSmokeCase, serial_log_dir: Path) -> Pa
 
 
 def runtime_smoke_image_path(case: RuntimeSmokeCase, image_dir: Path) -> Path:
-    return image_dir / f'{case.case_id}.uefi-esp.img'
+    suffix = 'uefi-esp.img' if case.boot_mode == 'uefi' else 'legacy.raw'
+    return image_dir / f'{case.case_id}.{suffix}'
 
 
 def runtime_smoke_uefi_root_image_path(case: RuntimeSmokeCase, image_dir: Path) -> Path:
@@ -1887,11 +1918,13 @@ def runtime_smoke_run_args(
     return argparse.Namespace(
         image=str(image_path),
         image_size=image_size,
-        boot_mode='uefi',
+        boot_mode=case.boot_mode,
         emulator='qemu',
         display='none',
         keep_image=True,
-        uefi_root_image=str(runtime_smoke_uefi_root_image_path(case, image_path.parent)),
+        uefi_root_image=str(runtime_smoke_uefi_root_image_path(case, image_path.parent))
+        if case.boot_mode == 'uefi'
+        else None,
         persistent_image=None,
         bochsrc=None,
         romimage=None,
@@ -1988,7 +2021,7 @@ def format_runtime_smoke_artifact(
                     f'`xmake f {switches}`',
                     f'`{case.expected_marker}`',
                     f'`{case.timeout_seconds:g}s`',
-                    '`tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none`',
+                    f'`tools/boot_debug.py run --boot-mode {case.boot_mode} --emulator qemu --display none`',
                     markdown_escape(boundary),
                 ]
             )

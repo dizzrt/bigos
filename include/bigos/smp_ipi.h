@@ -20,6 +20,7 @@ namespace smp {
         LocalTarget,
         InvalidTarget,
         OfflineTarget,
+        NonSchedulableTarget,
         MissingApicId,
         LapicUnavailable,
         SendFailed,

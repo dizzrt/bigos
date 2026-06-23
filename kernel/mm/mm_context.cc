@@ -127,7 +127,7 @@ namespace mm {
             const uint64_t bit = cpu_bit(id);
             if ((mask & bit) == 0)
                 continue;
-            if (!cpu::cpu_online(id))
+            if (!cpu::cpu_online(id) || cpu::slot_for(id).timer_state != cpu::LocalTimerState::Ready)
                 mask &= ~bit;
         }
         return mask;

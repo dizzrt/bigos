@@ -59,6 +59,7 @@ struct TlbShootdownSlot {
     uint64_t length;
     uint64_t target_cpu_mask;
     volatile uint64_t ack_cpu_mask;
+    bigos::mm::MmContext *mm_context;
     uint64_t generation;
 };
 
@@ -303,6 +304,18 @@ static bool wait_for_tlb_shootdown_ack(uint64_t __target_mask) noexcept {
         asm volatile("pause" ::: "memory");
     }
     return false;
+}
+
+static void tlb_shootdown_panic(const char *__kind, uint64_t __target_mask, uint64_t __delivered_mask,
+    const bigos::smp::IpiDeliveryResult &__failure) noexcept {
+    const uint64_t ack = __atomic_load_n(&g_tlb_shootdown_slot.ack_cpu_mask, __ATOMIC_ACQUIRE);
+    const uint64_t missing = __target_mask & ~ack;
+    bigos::kpanic(bigos::PanicCode::Generic, "mm-tlb",
+        "TLB shootdown %s requester=%u target=%llx delivered=%llx ack=%llx missing=%llx mm=%llx generation=%llx "
+        "failure_status=%u failure_cpu=%u failure_apic=%x failure_vector=%x\n",
+        __kind, bigos::cpu::current_cpu_id(), __target_mask, __delivered_mask, ack, missing,
+        (uint64_t)g_tlb_shootdown_slot.mm_context, g_tlb_shootdown_slot.generation, (uint32_t)__failure.status,
+        __failure.target_cpu, __failure.target_apic_id, (uint32_t)__failure.vector);
 }
 
 static void direct_map_panic(const char *__message) noexcept {
@@ -1035,6 +1048,12 @@ namespace mm {
 
         const uint64_t remote_mask = target_mask & ~current_bit;
         if (remote_mask != 0) {
+            if (!__request.require_completion) {
+                bigos::kpanic(bigos::PanicCode::Generic, "mm-tlb",
+                    "TLB shootdown async-forbidden requester=%u target=%llx mm=%llx root=%llx\n",
+                    bigos::cpu::current_cpu_id(), remote_mask, (uint64_t)__request.mm_context,
+                    __request.address_space_root & PAGING_DESCRIPTOR_ADDR_MASK);
+            }
             shootdown_lock(&g_tlb_shootdown_slot.lock);
             g_tlb_shootdown_slot.scope = __request.scope;
             g_tlb_shootdown_slot.address_space_root = __request.address_space_root & PAGING_DESCRIPTOR_ADDR_MASK;
@@ -1042,7 +1061,11 @@ namespace mm {
             g_tlb_shootdown_slot.length = __request.length;
             g_tlb_shootdown_slot.target_cpu_mask = remote_mask;
             g_tlb_shootdown_slot.ack_cpu_mask = 0;
+            g_tlb_shootdown_slot.mm_context = __request.mm_context;
             g_tlb_shootdown_slot.generation++;
+            // Publish the complete request snapshot before the active flag and
+            // IPI delivery, so remote handlers never observe a partial request.
+            asm volatile("" ::: "memory");
             __atomic_store_n(&g_tlb_shootdown_slot.active, true, __ATOMIC_RELEASE);
 
             bigos::smp::IpiDeliveryResult failure = {};
@@ -1051,12 +1074,12 @@ namespace mm {
             if (delivered != remote_mask) {
                 __atomic_store_n(&g_tlb_shootdown_slot.active, false, __ATOMIC_RELEASE);
                 shootdown_unlock(&g_tlb_shootdown_slot.lock);
-                bigos::kpanic(bigos::PanicCode::Generic, "mm-tlb", "TLB shootdown IPI delivery failed\n");
+                tlb_shootdown_panic("ipi-delivery", remote_mask, delivered, failure);
             }
             if (__request.require_completion && !wait_for_tlb_shootdown_ack(remote_mask)) {
                 __atomic_store_n(&g_tlb_shootdown_slot.active, false, __ATOMIC_RELEASE);
                 shootdown_unlock(&g_tlb_shootdown_slot.lock);
-                bigos::kpanic(bigos::PanicCode::Generic, "mm-tlb", "TLB shootdown ack timeout\n");
+                tlb_shootdown_panic("ack-timeout", remote_mask, delivered, failure);
             }
             __atomic_store_n(&g_tlb_shootdown_slot.active, false, __ATOMIC_RELEASE);
             shootdown_unlock(&g_tlb_shootdown_slot.lock);

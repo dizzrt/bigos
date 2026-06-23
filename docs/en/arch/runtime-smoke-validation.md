@@ -30,6 +30,7 @@ Behavior-oriented validation distinguishes three entry classes:
 | `scheduler-semantics` | `--scheduler_semantics_smoke=y` | `BIGOS_SCHED_SEMANTICS_PASSED` | 15s | Timer slice expiry, preemption-disable deferral, and guarded IRQ-return reschedule. |
 | `scheduler-smp` | `--scheduler_smp_smoke=y` | `BIGOS_SCHED_SMP_PASSED` | 20s | Per-CPU run queues with one BSP worker and one AP-placed worker; not generic IPI, TLB shootdown, CPU hotplug, or full APIC interrupt migration. |
 | `apic-default-interrupt-delivery` | `--scheduler_smp_smoke=y` | `BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE` | 20s | LAPIC timer ownership, IOAPIC keyboard routing to BSP, APIC EOI ownership, and bounded SMP startup gate; not CPU hotplug, NUMA, MSI/MSI-X, complete IRQ affinity, or backend parity. |
+| `multicore-hardening` | `--multicore_hardening_smoke=y` | `BIGOS_MULTICORE_HARDENING_PASSED` | 25s | Default-off QEMU legacy 2-CPU hardening path for AP scheduler placement, scheduler nudge IPI, remote wakeup, timeout wakeup, TLB shootdown completion, and normal userland baseline marker; not CPU hotplug, NUMA, async I/O, full POSIX concurrency, or UEFI runtime parity. |
 | `blocking-primitives` | `--blocking_smoke=y` | `BIGOS_BLOCKING_SMOKE_PASSED` | 15s | Synthetic TTY producer plus wait queue wakeup and timeout sleep. |
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` minimal syscall ABI path. |
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO plus VFS open/read/release over the read-only exFAT backend. |

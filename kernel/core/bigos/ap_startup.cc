@@ -139,8 +139,10 @@ namespace arch::x86::ap_startup {
         for (uint32_t i = 0; i < __timeout_iterations; i++) {
             if (mailbox->ack_state == ACK_ONLINE && bigos::cpu::cpu_online(__cpu_id))
                 return WaitResult::Online;
-            if (mailbox->ack_state == ACK_INVALID_CPU || mailbox->ack_state == ACK_INVALID_MAILBOX)
-                break;
+            if (mailbox->ack_state == ACK_INVALID_CPU)
+                return WaitResult::InvalidCpu;
+            if (mailbox->ack_state == ACK_INVALID_MAILBOX)
+                return WaitResult::InvalidMailbox;
             asm volatile("pause" : : : "memory");
         }
 
@@ -212,12 +214,14 @@ namespace arch::x86::ap_startup {
             if (!prepare_startup_mailbox(id, slot.apic_id, stack_top, (uint64_t)&bigos_x86_ap_kernel_entry, stack_top)) {
                 bigos::serial_puts("BIGOS_AP_MAILBOX_FAILED\n");
                 (void)bigos::cpu::mark_cpu_failed(id, bigos::cpu::CpuFailureReason::InvalidTopology);
+                bigos::free_pages(stack);
                 continue;
             }
 
             if (!driver::irqchip::lapic::send_init(slot.apic_id)) {
                 bigos::serial_puts("BIGOS_AP_INIT_FAILED\n");
                 (void)bigos::cpu::mark_cpu_failed(id, bigos::cpu::CpuFailureReason::ApicUnavailable);
+                bigos::free_pages(stack);
                 continue;
             }
             bigos::serial_puts("BIGOS_AP_INIT_SENT\n");
@@ -225,13 +229,19 @@ namespace arch::x86::ap_startup {
             if (!driver::irqchip::lapic::send_sipi(slot.apic_id, SIPI_VECTOR)) {
                 bigos::serial_puts("BIGOS_AP_SIPI_FAILED\n");
                 (void)bigos::cpu::mark_cpu_failed(id, bigos::cpu::CpuFailureReason::ApicUnavailable);
+                bigos::free_pages(stack);
                 continue;
             }
             bigos::serial_puts("BIGOS_AP_SIPI_SENT\n");
 
-            if (wait_for_online_ack(id, STARTUP_TIMEOUT_ITERATIONS) == WaitResult::Online) {
+            const WaitResult wait_result = wait_for_online_ack(id, STARTUP_TIMEOUT_ITERATIONS);
+            if (wait_result == WaitResult::Online) {
                 bigos::serial_puts("BIGOS_AP_ONLINE\n");
                 started++;
+            } else if (wait_result == WaitResult::InvalidCpu) {
+                bigos::serial_puts("BIGOS_AP_INVALID_CPU\n");
+            } else if (wait_result == WaitResult::InvalidMailbox) {
+                bigos::serial_puts("BIGOS_AP_INVALID_MAILBOX\n");
             } else {
                 bigos::serial_puts("BIGOS_AP_TIMEOUT\n");
             }
@@ -285,7 +295,12 @@ extern "C" [[noreturn]] void bigos_x86_ap_kernel_entry(
     local.reschedule_pending = false;
     bigos::serial_puts("BIGOS_AP_LOCAL_STATE_READY\n");
 
-    (void)bigos::arch::x86::ap_startup::init_local_timer_for_cpu(cpu_id);
+    if (!bigos::arch::x86::ap_startup::init_local_timer_for_cpu(cpu_id)) {
+        bigos::serial_puts("BIGOS_AP_TIMER_FAILED\n");
+        (void)bigos::cpu::mark_cpu_failed(cpu_id, bigos::cpu::CpuFailureReason::TimerUnavailable);
+        __mailbox->ack_state = ACK_INVALID_CPU;
+        park_ap(false);
+    }
 
     if (!bigos::sched::init_current_cpu_domain()) {
         __mailbox->ack_state = ACK_INVALID_CPU;

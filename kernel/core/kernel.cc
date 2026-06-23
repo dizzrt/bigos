@@ -15,6 +15,7 @@
 #include <bigos/percpu.h>
 #include <bigos/proc.h>
 #include <bigos/sched.h>
+#include <bigos/smp_ipi.h>
 #include <bigos/syscall.h>
 #include <bigos/time.h>
 #include <bigos/timer.h>
@@ -232,6 +233,151 @@ namespace {
         (void)bigos::mm::teardown_user_address_space(root);
         bigos::mm::release_mm_context(g_tlb_shootdown_smoke_context);
         g_tlb_shootdown_smoke_context = nullptr;
+    }
+}   // namespace
+#endif
+
+#ifdef BIGOS_MULTICORE_HARDENING_SMOKE
+namespace {
+    constexpr uint32_t MULTICORE_HARDENING_TIMEOUT_ITERATIONS = 2000000;
+    volatile bool g_multicore_hardening_ap_ready = false;
+    volatile bool g_multicore_hardening_remote_wake = false;
+    volatile bool g_multicore_hardening_timeout_wake = false;
+    volatile bool g_multicore_hardening_release = false;
+    volatile bool g_multicore_hardening_finish = false;
+    bigos::sched::WaitQueue g_multicore_hardening_wait_queue = {};
+    bigos::mm::MmContext *g_multicore_hardening_context = nullptr;
+
+    bigos::cpu::CpuId multicore_hardening_target_cpu() noexcept {
+        for (bigos::cpu::CpuId id = 1; id < bigos::cpu::MAX_CPUS; id++) {
+            if (bigos::cpu::cpu_id_supported(id) && bigos::cpu::cpu_online(id) &&
+                bigos::cpu::slot_for(id).timer_state == bigos::cpu::LocalTimerState::Ready)
+                return id;
+        }
+        return bigos::cpu::MAX_CPUS;
+    }
+
+    bool multicore_hardening_release_ready(void *) noexcept {
+        return g_multicore_hardening_release;
+    }
+
+    void multicore_hardening_ap_worker(void *) noexcept {
+        if (bigos::cpu::current_cpu_id() == bigos::cpu::BOOTSTRAP_CPU_ID) {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED placement\n");
+            return;
+        }
+        if (g_multicore_hardening_context == nullptr ||
+            !bigos::mm::enter_mm_context(g_multicore_hardening_context)) {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED ap-mm\n");
+            return;
+        }
+
+        g_multicore_hardening_ap_ready = true;
+        bigos::serial_puts("BIGOS_MULTICORE_HARDENING_AP_THREAD\n");
+
+        const int wait_result = bigos::sched::wait_queue_wait_until(
+            &g_multicore_hardening_wait_queue, &multicore_hardening_release_ready, nullptr, 40);
+        if (wait_result == bigos::sched::WAIT_OK) {
+            g_multicore_hardening_remote_wake = true;
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_REMOTE_WAKE\n");
+        } else {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED remote-wake\n");
+        }
+
+        if (bigos::sched::sleep_for(2) == bigos::sched::WAIT_TIMEOUT) {
+            g_multicore_hardening_timeout_wake = true;
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_TIMEOUT_WAKE\n");
+        } else {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED timeout-wake\n");
+        }
+
+        while (!g_multicore_hardening_finish)
+            asm volatile("pause" ::: "memory");
+        bigos::mm::leave_current_mm_context();
+    }
+
+    void multicore_hardening_bsp_worker(void *) noexcept {
+        bigos::sched::init_wait_queue(&g_multicore_hardening_wait_queue);
+        const bigos::cpu::CpuId target_cpu = multicore_hardening_target_cpu();
+        if (target_cpu >= bigos::cpu::MAX_CPUS) {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_SKIPPED cpu\n");
+            return;
+        }
+
+        const uint64_t root = bigos::mm::derive_user_address_space_root();
+        if (root == bigos::mm::INVALID_PHYS_ADDR) {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED root\n");
+            return;
+        }
+        g_multicore_hardening_context = bigos::mm::create_mm_context(root);
+        if (g_multicore_hardening_context == nullptr) {
+            (void)bigos::mm::teardown_user_address_space(root);
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED context\n");
+            return;
+        }
+
+        if (bigos::sched::create_kernel_thread_on_cpu(&multicore_hardening_ap_worker, nullptr, target_cpu) ==
+            bigos::sched::INVALID_THREAD_ID) {
+            bigos::mm::release_mm_context(g_multicore_hardening_context);
+            g_multicore_hardening_context = nullptr;
+            (void)bigos::mm::teardown_user_address_space(root);
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED thread\n");
+            return;
+        }
+
+        uint32_t wait = 0;
+        while (!g_multicore_hardening_ap_ready && wait++ < MULTICORE_HARDENING_TIMEOUT_ITERATIONS)
+            bigos::sched::yield();
+        if (!g_multicore_hardening_ap_ready) {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED ap-timeout\n");
+            return;
+        }
+
+        const bigos::smp::IpiDeliveryResult nudge =
+            bigos::smp::send_ipi(target_cpu, bigos::smp::IpiType::SchedulerNudge);
+        if (nudge.status == bigos::smp::IpiDeliveryStatus::Delivered)
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_IPI\n");
+        else {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED ipi\n");
+            g_multicore_hardening_finish = true;
+            return;
+        }
+
+        g_multicore_hardening_release = true;
+        (void)bigos::sched::wake_one(&g_multicore_hardening_wait_queue);
+        wait = 0;
+        while ((!g_multicore_hardening_remote_wake || !g_multicore_hardening_timeout_wake) &&
+               wait++ < MULTICORE_HARDENING_TIMEOUT_ITERATIONS)
+            bigos::sched::yield();
+        if (!g_multicore_hardening_remote_wake || !g_multicore_hardening_timeout_wake) {
+            bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED scheduler\n");
+            g_multicore_hardening_finish = true;
+            return;
+        }
+
+        bigos::mm::TlbInvalidationRequest request = {
+            bigos::mm::TlbInvalidationScope::AddressSpace,
+            bigos::mm::TlbInvalidationReason::Generic,
+            bigos::mm::mm_context_root(g_multicore_hardening_context),
+            0,
+            0,
+            0,
+            true,
+            g_multicore_hardening_context,
+        };
+        bigos::mm::invalidate_tlb(request);
+        bigos::serial_puts("BIGOS_MULTICORE_HARDENING_TLB\n");
+        bigos::serial_puts("BIGOS_MULTICORE_HARDENING_PASSED\n");
+
+        g_multicore_hardening_finish = true;
+        wait = 0;
+        while (bigos::mm::mm_context_active_cpu_mask(g_multicore_hardening_context) != 0 &&
+               wait++ < MULTICORE_HARDENING_TIMEOUT_ITERATIONS)
+            bigos::sched::yield();
+        bigos::mm::mark_mm_context_dying(g_multicore_hardening_context);
+        (void)bigos::mm::teardown_user_address_space(root);
+        bigos::mm::release_mm_context(g_multicore_hardening_context);
+        g_multicore_hardening_context = nullptr;
     }
 }   // namespace
 #endif
@@ -1491,6 +1637,11 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&tlb_shootdown_smoke_bsp_worker, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED thread\n");
+#endif
+#ifdef BIGOS_MULTICORE_HARDENING_SMOKE
+    if (bigos::sched::create_kernel_thread(&multicore_hardening_bsp_worker, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED thread\n");
 #endif
 #ifdef BIGOS_BLOCKING_SMOKE
     bigos::sched::create_kernel_thread(&blocking_smoke_reader, nullptr);

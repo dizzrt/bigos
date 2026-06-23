@@ -54,6 +54,11 @@ namespace smp {
 
         const cpu::CpuSlot &slot = cpu::slot_for(__target_cpu);
         result.target_apic_id = slot.apic_id;
+        if (slot.timer_state != cpu::LocalTimerState::Ready) {
+            result.status = IpiDeliveryStatus::NonSchedulableTarget;
+            record_failure(result);
+            return result;
+        }
         if (slot.apic_id == cpu::INVALID_APIC_ID) {
             result.status = IpiDeliveryStatus::MissingApicId;
             record_failure(result);

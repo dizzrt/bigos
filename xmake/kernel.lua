@@ -83,6 +83,11 @@ if has_config("tlb_shootdown_smoke") then
     add_defines("BIGOS_TLB_SHOOTDOWN_SMOKE")
 end
 
+if has_config("multicore_hardening_smoke") then
+    add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
+    add_defines("BIGOS_MULTICORE_HARDENING_SMOKE")
+end
+
 if has_config("keyboard_smoke") then
     add_defines("BIGOS_KEYBOARD_SMOKE")
 end

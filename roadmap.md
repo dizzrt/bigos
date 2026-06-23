@@ -341,15 +341,15 @@ concurrency stress before further subsystems build on it.
 
 用户可见目标：在更多子系统构建于其上之前，让刚落地的多核基线在并发压力下可被信任。
 
-- [ ] Task M8.1: concurrency stress and regression validation for multi-core
+- [x] Task M8.1: concurrency stress and regression validation for multi-core
   scheduling, cross-CPU wakeups, IPI delivery, and TLB shootdown completion.
-- [ ] 任务 M8.1：针对多核调度、跨核唤醒、IPI 投递与 TLB shootdown 完成的并发压力与回归验证。
-- [ ] Task M8.2: audit and harden shared-state locking and ordering across affected
+- [x] 任务 M8.1：针对多核调度、跨核唤醒、IPI 投递与 TLB shootdown 完成的并发压力与回归验证。
+- [x] Task M8.2: audit and harden shared-state locking and ordering across affected
   scheduler, memory, and interrupt paths.
-- [ ] 任务 M8.2：审查并加固受影响的调度、内存与中断路径上的共享状态加锁与顺序。
-- [ ] Task M8.3: strengthen deterministic diagnostics and fail-closed behavior for
+- [x] 任务 M8.2：审查并加固受影响的调度、内存与中断路径上的共享状态加锁与顺序。
+- [x] Task M8.3: strengthen deterministic diagnostics and fail-closed behavior for
   multi-core fault and timeout conditions.
-- [ ] 任务 M8.3：增强多核故障与超时条件下的确定性诊断与 fail-closed 行为。
+- [x] 任务 M8.3：增强多核故障与超时条件下的确定性诊断与 fail-closed 行为。
 
 ### Milestone M9 — Asynchronous And Interrupt-Driven I/O / 里程碑 M9 — 异步与中断驱动 I/O
 

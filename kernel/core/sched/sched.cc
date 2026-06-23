@@ -26,6 +26,12 @@ namespace sched {
         constexpr uint32_t DEFAULT_TIME_SLICE_TICKS = 2;
         constexpr int32_t DEFAULT_STATIC_PRIORITY = 0;
         constexpr uint32_t DEFAULT_POLICY_SLOT = 0;
+        constexpr uint32_t SCHED_DIAG_OP_NONE = 0;
+        constexpr uint32_t SCHED_DIAG_OP_RQ_PUSH = 1;
+        constexpr uint32_t SCHED_DIAG_OP_RQ_POP = 2;
+        constexpr uint32_t SCHED_DIAG_OP_WAKE = 3;
+        constexpr uint32_t SCHED_DIAG_OP_NUDGE = 4;
+        constexpr uint32_t SCHED_DIAG_OP_TIMER = 5;
 
         static_assert(KERNEL_THREAD_STACK_PAGES > 0);
         static_assert(DEFAULT_TIME_SLICE_TICKS > 0);
@@ -95,6 +101,11 @@ namespace sched {
             volatile uint64_t slice_expired_events;
             volatile uint64_t deferred_preemption_events;
             volatile uint64_t irq_return_preemptions;
+            volatile cpu::CpuId diag_current_cpu;
+            volatile cpu::CpuId diag_target_cpu;
+            volatile uint32_t diag_thread_state;
+            volatile bool diag_thread_on_run_queue;
+            volatile uint32_t diag_operation;
         };
 
         SchedulerCpuState g_domains[cpu::MAX_CPUS];
@@ -148,6 +159,13 @@ namespace sched {
             return domain;
         }
 
+        SchedulerCpuState *current_domain_strict() noexcept {
+            SchedulerCpuState *domain = domain_for_cpu(cpu::current_cpu_id());
+            if (domain == nullptr || !domain->initialized)
+                return nullptr;
+            return domain;
+        }
+
         bool init_domain(cpu::CpuId __id) noexcept {
             if (!cpu::cpu_id_supported(__id))
                 return false;
@@ -176,6 +194,11 @@ namespace sched {
             domain->slice_expired_events = 0;
             domain->deferred_preemption_events = 0;
             domain->irq_return_preemptions = 0;
+            domain->diag_current_cpu = cpu::MAX_CPUS;
+            domain->diag_target_cpu = cpu::MAX_CPUS;
+            domain->diag_thread_state = 0;
+            domain->diag_thread_on_run_queue = false;
+            domain->diag_operation = SCHED_DIAG_OP_NONE;
             domain->initialized = true;
             return true;
         }
@@ -186,7 +209,19 @@ namespace sched {
 
         bool cpu_schedulable(cpu::CpuId __id) noexcept {
             SchedulerCpuState *domain = domain_for_cpu(__id);
-            return domain != nullptr && domain->initialized && cpu::cpu_online(__id);
+            return domain != nullptr && domain->initialized && cpu::cpu_online(__id) &&
+                   cpu::slot_for(__id).timer_state == cpu::LocalTimerState::Ready;
+        }
+
+        void record_scheduler_diag(
+            SchedulerCpuState *__domain, TCB *__t, cpu::CpuId __target_cpu, uint32_t __operation) noexcept {
+            if (__domain == nullptr)
+                return;
+            __domain->diag_current_cpu = cpu::current_cpu_id();
+            __domain->diag_target_cpu = __target_cpu;
+            __domain->diag_thread_state = __t != nullptr ? (uint32_t)__t->state : 0xffffffffu;
+            __domain->diag_thread_on_run_queue = __t != nullptr && __t->on_run_queue;
+            __domain->diag_operation = __operation;
         }
 
         ThreadId allocate_thread_id() noexcept {
@@ -293,8 +328,11 @@ namespace sched {
         }
 
         void rq_push(SchedulerCpuState *__domain, TCB *__t) noexcept {
-            if (__domain == nullptr || __t == nullptr || __t->state != ThreadState::Runnable || __t->on_run_queue)
+            if (__domain == nullptr || __t == nullptr || __t->state != ThreadState::Runnable || __t->on_run_queue) {
+                record_scheduler_diag(__domain, __t, __domain != nullptr ? __domain->cpu_id : cpu::MAX_CPUS,
+                    SCHED_DIAG_OP_RQ_PUSH);
                 return;
+            }
             __t->rq_next = nullptr;
             __t->owner_cpu = __domain->cpu_id;
             __t->on_run_queue = true;
@@ -318,8 +356,10 @@ namespace sched {
                 t->on_run_queue = false;
                 if (__domain->run_queue_depth > 0)
                     --__domain->run_queue_depth;
-                if (t->state == ThreadState::Runnable)
+                if (t->state == ThreadState::Runnable) {
+                    record_scheduler_diag(__domain, t, __domain->cpu_id, SCHED_DIAG_OP_RQ_POP);
                     return t;
+                }
             }
             return nullptr;
         }
@@ -407,6 +447,7 @@ namespace sched {
             refresh_time_slice(__t);
             rq_push(__domain, __t);
             request_reschedule_locked(__domain);
+            record_scheduler_diag(__domain, __t, __domain->cpu_id, SCHED_DIAG_OP_WAKE);
             return true;
         }
 
@@ -430,7 +471,11 @@ namespace sched {
         void nudge_cpu(cpu::CpuId __target_cpu) noexcept {
             if (__target_cpu == cpu::current_cpu_id() || !cpu_schedulable(__target_cpu))
                 return;
-            (void)smp::send_ipi(__target_cpu, smp::IpiType::SchedulerNudge);
+            const smp::IpiDeliveryResult result = smp::send_ipi(__target_cpu, smp::IpiType::SchedulerNudge);
+            if (result.status != smp::IpiDeliveryStatus::Delivered) {
+                SchedulerCpuState *domain = domain_for_cpu(__target_cpu);
+                record_scheduler_diag(domain, nullptr, __target_cpu, SCHED_DIAG_OP_NUDGE);
+            }
         }
 
         // New-thread startup path. Entered for the first time through the prepared
@@ -795,16 +840,21 @@ namespace sched {
             __detail::wait_queue_remove_locked(t);
             t = next;
         }
-        __detail::SchedulerCpuState *domain = t != nullptr ? __detail::domain_for_cpu(t->owner_cpu) : nullptr;
-        if (domain == nullptr) {
+        if (t == nullptr) {
             __detail::wait_queue_unlock(__queue);
             return 0;
         }
+        const bigos::cpu::CpuId owner_cpu = t->owner_cpu;
+        __detail::wait_queue_remove_locked(t);
+        __detail::wait_queue_unlock(__queue);
+
+        __detail::SchedulerCpuState *domain = __detail::domain_for_cpu(owner_cpu);
+        if (domain == nullptr)
+            return 0;
         __detail::spin_lock(&domain->lock);
         const uint32_t woke = __detail::wake_thread_locked(domain, t, WAIT_OK) ? 1u : 0u;
         const cpu::CpuId target_cpu = domain->cpu_id;
         __detail::spin_unlock(&domain->lock);
-        __detail::wait_queue_unlock(__queue);
         if (woke != 0)
             __detail::nudge_cpu(target_cpu);
         return woke;
@@ -819,9 +869,13 @@ namespace sched {
         uint32_t count = 0;
         while (__queue->head != nullptr) {
             __detail::TCB *t = (__detail::TCB *)__queue->head;
-            __detail::SchedulerCpuState *domain = __detail::domain_for_cpu(t->owner_cpu);
+            const bigos::cpu::CpuId owner_cpu = t->owner_cpu;
+            __detail::wait_queue_remove_locked(t);
+            __detail::wait_queue_unlock(__queue);
+
+            __detail::SchedulerCpuState *domain = __detail::domain_for_cpu(owner_cpu);
             if (domain == nullptr) {
-                __detail::wait_queue_remove_locked(t);
+                __detail::wait_queue_lock(__queue);
                 continue;
             }
             __detail::spin_lock(&domain->lock);
@@ -831,9 +885,8 @@ namespace sched {
             if (woke) {
                 ++count;
                 __detail::nudge_cpu(target_cpu);
-            } else {
-                __detail::wait_queue_remove_locked(t);
             }
+            __detail::wait_queue_lock(__queue);
         }
         __detail::wait_queue_unlock(__queue);
         return count;
@@ -900,11 +953,12 @@ namespace sched {
         // no direct thread switch. Context switching is deferred to explicit
         // scheduler-owned return boundaries after EOI.
         const timer::tick_t now = timer::ticks();
-        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::SchedulerCpuState *domain = __detail::current_domain_strict();
         if (domain == nullptr || !domain->initialized)
             return;
 
         __detail::spin_lock(&domain->lock);
+        __detail::record_scheduler_diag(domain, domain->current, domain->cpu_id, __detail::SCHED_DIAG_OP_TIMER);
         __detail::TCB *prev = nullptr;
         __detail::TCB *cur = domain->sleep_head;
         while (cur != nullptr) {
@@ -916,9 +970,10 @@ namespace sched {
                     prev->sleep_next = next;
                 cur->sleep_next = nullptr;
                 if (cur->wait_queue != nullptr) {
-                    __detail::wait_queue_lock(cur->wait_queue);
+                    WaitQueue *queue = cur->wait_queue;
+                    __detail::wait_queue_lock(queue);
                     __detail::wait_queue_remove_locked(cur);
-                    __detail::wait_queue_unlock(cur->wait_queue);
+                    __detail::wait_queue_unlock(queue);
                 }
                 if (cur->state == ThreadState::Sleeping) {
                     cur->wait_result = WAIT_TIMEOUT;
@@ -949,7 +1004,7 @@ namespace sched {
     }
 
     void on_scheduler_nudge() noexcept {
-        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::SchedulerCpuState *domain = __detail::current_domain_strict();
         if (domain == nullptr || !domain->initialized)
             return;
         __detail::SpinGuard lock(&domain->lock);

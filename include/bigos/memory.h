@@ -132,10 +132,9 @@ namespace mm {
     // user mapping so the leaf remains reachable from ring3 in a later change.
     _attr_nodiscard_ bool map_page(uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept;
 
-    // Single-core-compatible TLB invalidation boundary. The current
-    // implementation accepts only the bootstrap CPU target mask and completes by
-    // local invlpg or CR3 reload; future SMP shootdown will extend this boundary
-    // with remote target sets, IPI delivery and acknowledgement ordering.
+    // TLB invalidation boundary. Local targets complete through invlpg or CR3
+    // reload; remote online targets use typed TLB-shootdown IPIs and fail closed
+    // unless every required acknowledgement arrives before the bounded timeout.
     void invalidate_tlb(const TlbInvalidationRequest &__request) noexcept;
 
     // unmap_page() clears the PTE for __vaddr (if present) and invalidates the TLB

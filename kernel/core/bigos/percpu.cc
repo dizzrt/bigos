@@ -391,7 +391,7 @@ namespace cpu {
                 if (g_cpu_slots[id].startup_state != CpuStartupState::Empty && g_cpu_slots[id].apic_id == __apic_id)
                     return id;
             }
-            return BOOTSTRAP_CPU_ID;
+            return MAX_CPUS;
         }
 
         const RsdpDescriptor *scan_rsdp(uint32_t __base, uint32_t __length) noexcept {
@@ -619,8 +619,13 @@ namespace cpu {
     }
 
     CpuId current_cpu_id() noexcept {
-        if (g_initialized && driver::irqchip::lapic::status() == driver::irqchip::lapic::Status::Enabled)
-            return cpu_id_for_apic_id(driver::irqchip::lapic::id());
+        if (g_initialized && driver::irqchip::lapic::status() == driver::irqchip::lapic::Status::Enabled) {
+            const uint32_t apic_id = driver::irqchip::lapic::id();
+            const CpuId id = cpu_id_for_apic_id(apic_id);
+            if (id >= MAX_CPUS)
+                bigos::kpanic(bigos::PanicCode::Generic, "cpu-local", "unknown local APIC id %x\n", apic_id);
+            return id;
+        }
         return BOOTSTRAP_CPU_ID;
     }
 

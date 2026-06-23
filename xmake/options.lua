@@ -60,6 +60,12 @@ option("tlb_shootdown_smoke")
     set_description("enable validation-only SMP IPI / TLB shootdown smoke markers")
 option_end()
 
+option("multicore_hardening_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only multicore runtime hardening smoke")
+option_end()
+
 option("blocking_smoke")
     set_default(false)
     set_showmenu(true)

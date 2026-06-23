@@ -30,6 +30,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `scheduler-semantics` | `--scheduler_semantics_smoke=y` | `BIGOS_SCHED_SEMANTICS_PASSED` | 15s | Time slice 到期、preemption-disable 延迟与 guarded IRQ-return reschedule。 |
 | `scheduler-smp` | `--scheduler_smp_smoke=y` | `BIGOS_SCHED_SMP_PASSED` | 20s | Per-CPU run queue 上的一个 BSP worker 和一个 AP-placed worker；不声明 generic IPI、TLB shootdown、CPU hotplug 或完整 APIC interrupt migration。 |
 | `apic-default-interrupt-delivery` | `--scheduler_smp_smoke=y` | `BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE` | 20s | LAPIC timer ownership、IOAPIC keyboard 到 BSP 的路由、APIC EOI ownership 与 bounded SMP startup gate；不声明 CPU hotplug、NUMA、MSI/MSI-X、完整 IRQ affinity 或 backend parity。 |
+| `multicore-hardening` | `--multicore_hardening_smoke=y` | `BIGOS_MULTICORE_HARDENING_PASSED` | 25s | 默认关闭的 QEMU legacy 2 CPU hardening 路径，覆盖 AP scheduler placement、scheduler nudge IPI、remote wakeup、timeout wakeup、TLB shootdown completion 和普通 userland baseline marker；不声明 CPU hotplug、NUMA、async I/O、完整 POSIX concurrency 或 UEFI runtime parity。 |
 | `blocking-primitives` | `--blocking_smoke=y` | `BIGOS_BLOCKING_SMOKE_PASSED` | 15s | Synthetic TTY producer 加 wait queue wakeup 与 timeout sleep。 |
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` 最小 syscall ABI 路径。 |
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO 加只读 exFAT backend 上的 VFS open/read/release 路径。 |
