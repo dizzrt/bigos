@@ -40,6 +40,19 @@ namespace mm {
 
     struct SlabAllocatorStats;
 
+    enum class DeviceMmioCachePolicy : uint8_t {
+        Uncached,
+        WriteCombining,
+    };
+
+    struct DeviceMmioMapping {
+        void *vaddr;
+        uint64_t paddr;
+        uint64_t length;
+        DeviceMmioCachePolicy cache_policy;
+        bool valid;
+    };
+
     // Explicit page-table entry attributes for the map/unmap primitive.
     // Bit positions match x86_64 paging-structure entries so the value can be
     // OR-ed straight onto the physical frame address.
@@ -205,6 +218,12 @@ namespace mm {
     bool is_direct_mapped_phys(uint64_t __phys, uint64_t __len = 1) noexcept;
     _attr_nodiscard_ void *phys_to_direct(uint64_t __phys) noexcept;
     uint64_t direct_to_phys(const void *__addr) noexcept;
+
+    // Device/MMIO ranges such as a firmware framebuffer must be mapped through
+    // this explicit boundary before writes. Callers must not use the ordinary
+    // RAM direct-map alias for framebuffer or other device memory.
+    _attr_nodiscard_ DeviceMmioMapping map_device_mmio(
+        uint64_t __phys, uint64_t __len, DeviceMmioCachePolicy __cache_policy) noexcept;
 
     // IRQ-disabled-only snapshot: internally masks same-CPU IRQ interleaving while reading allocator lists.
     extern void collect_slab_stats(SlabAllocatorStats *__stats) noexcept;

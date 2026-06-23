@@ -99,6 +99,17 @@ struct EFI_BOOT_SERVICES {
     void *exit;
     void *unload_image;
     EFI_STATUS(EFIAPI *exit_boot_services)(EFI_HANDLE image_handle, UINTN map_key);
+    void *get_next_monotonic_count;
+    void *stall;
+    void *set_watchdog_timer;
+    void *connect_controller;
+    void *disconnect_controller;
+    void *open_protocol;
+    void *close_protocol;
+    void *open_protocol_information;
+    void *protocols_per_handle;
+    void *locate_handle_buffer;
+    EFI_STATUS(EFIAPI *locate_protocol)(const EFI_GUID *protocol, void *registration, void **interface);
 };
 
 struct EFI_SYSTEM_TABLE {
@@ -158,6 +169,46 @@ struct EFI_FILE_PROTOCOL {
     EFI_FILE_SET_POSITION set_position;
 };
 
+enum EFI_GRAPHICS_PIXEL_FORMAT {
+    PixelRedGreenBlueReserved8BitPerColor,
+    PixelBlueGreenRedReserved8BitPerColor,
+    PixelBitMask,
+    PixelBltOnly,
+    PixelFormatMax,
+};
+
+struct EFI_PIXEL_BITMASK {
+    uint32_t red_mask;
+    uint32_t green_mask;
+    uint32_t blue_mask;
+    uint32_t reserved_mask;
+};
+
+struct EFI_GRAPHICS_OUTPUT_MODE_INFORMATION {
+    uint32_t version;
+    uint32_t horizontal_resolution;
+    uint32_t vertical_resolution;
+    EFI_GRAPHICS_PIXEL_FORMAT pixel_format;
+    EFI_PIXEL_BITMASK pixel_information;
+    uint32_t pixels_per_scan_line;
+};
+
+struct EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE {
+    uint32_t max_mode;
+    uint32_t mode;
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
+    UINTN size_of_info;
+    EFI_PHYSICAL_ADDRESS frame_buffer_base;
+    UINTN frame_buffer_size;
+};
+
+struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
+    void *query_mode;
+    void *set_mode;
+    void *blt;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *mode;
+};
+
 #define EFI_SUCCESS 0ull
 #define EFI_BUFFER_TOO_SMALL 0x8000000000000005ull
 #define EFI_LOAD_ERROR 0x8000000000000001ull
@@ -174,5 +225,7 @@ static constexpr EFI_GUID EFI_LOADED_IMAGE_PROTOCOL_GUID = {
     0x5b1b31a1, 0x9562, 0x11d2, {0x8e, 0x3f, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}};
 static constexpr EFI_GUID EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID = {
     0x0964e5b22, 0x6459, 0x11d2, {0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}};
+static constexpr EFI_GUID EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID = {
+    0x9042a9de, 0x23dc, 0x4a38, {0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a}};
 
 #endif

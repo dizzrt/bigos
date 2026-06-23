@@ -23,6 +23,8 @@
 #define BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP 2u
 #define BIGOS_BOOT_SECTION_TYPE_STORAGE_METADATA 3u
 #define BIGOS_BOOT_SECTION_TYPE_LOADER_METADATA  4u
+#define BIGOS_BOOT_SECTION_TYPE_FRAMEBUFFER_METADATA 5u
+#define BIGOS_BOOT_SECTION_TYPE_FONT_ASSET_METADATA  6u
 
 #define BIGOS_BOOT_SECTION_FLAG_REQUIRED 0x00000001u
 
@@ -34,6 +36,24 @@
 
 #define BIGOS_BOOT_LOADER_BACKEND_UNKNOWN     0u
 #define BIGOS_BOOT_LOADER_BACKEND_X86_64_UEFI 1u
+
+#define BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_UNKNOWN 0u
+#define BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_BGRX8888 1u
+#define BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_RGBX8888 2u
+#define BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_BITMASK  3u
+
+#define BIGOS_BOOT_FRAMEBUFFER_ATTR_WRITE_COMBINE 0x00000001u
+#define BIGOS_BOOT_FRAMEBUFFER_ATTR_UNCACHEABLE   0x00000002u
+#define BIGOS_BOOT_FRAMEBUFFER_ATTR_FIRMWARE_GOP  0x00000004u
+
+#define BIGOS_BOOT_FONT_ASSET_FLAG_LOADER_PROVIDED 0x00000001u
+#define BIGOS_BOOT_FONT_ASSET_FLAG_ESP_LOADED      0x00000002u
+
+#define BIGOS_BOOT_FONT_FORMAT_UNKNOWN       0u
+#define BIGOS_BOOT_FONT_FORMAT_UNIFONT_HEX_V1 1u
+#define BIGOS_BOOT_FONT_ASSET_MAGIC          0x544e4642u
+#define BIGOS_BOOT_FONT_ASSET_HEADER_SIZE    24u
+#define BIGOS_BOOT_FONT_ASSET_MAX_BYTES      0x1000000ull
 
 #define BIGOS_BOOT_MEMORY_TYPE_UNKNOWN      0u
 #define BIGOS_BOOT_MEMORY_TYPE_USABLE       1u
@@ -78,6 +98,26 @@
 #define BIGOS_BOOT_MEMORY_REGION_OFF_SOURCE_TYPE     20u
 #define BIGOS_BOOT_MEMORY_REGION_OFF_ATTRIBUTES      24u
 #define BIGOS_BOOT_MEMORY_REGION_OFF_SOURCE_VALUE    32u
+
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_PHYSICAL_BASE       0u
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_BYTE_SIZE           8u
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_WIDTH               16u
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_HEIGHT              20u
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_PIXELS_PER_SCANLINE 24u
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_BITS_PER_PIXEL      28u
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_BYTES_PER_PIXEL     30u
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_PIXEL_FORMAT        32u
+#define BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_ATTRIBUTES          36u
+
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_PHYSICAL_BASE  0u
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_BYTE_SIZE      8u
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_FORMAT_VERSION 16u
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_GLYPH_WIDTH    20u
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_GLYPH_HEIGHT   22u
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_CELL_WIDTH     24u
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_CELL_HEIGHT    26u
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_FLAGS          28u
+#define BIGOS_BOOT_FONT_ASSET_METADATA_OFF_GLYPH_COUNT    32u
 
 #define BIGOS_BOOT_INFO_OFF_MAGIC               0u
 #define BIGOS_BOOT_INFO_OFF_VERSION             4u
@@ -169,7 +209,53 @@ struct BootLoaderMetadata {
     char boot_file_path[64];
 };
 
+struct BootFramebufferMetadata {
+    uint64_t physical_base;
+    uint64_t byte_size;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixels_per_scanline;
+    uint16_t bits_per_pixel;
+    uint16_t bytes_per_pixel;
+    uint32_t pixel_format;
+    uint32_t attributes;
+};
+
+struct BootFontAssetMetadata {
+    uint64_t physical_base;
+    uint64_t byte_size;
+    uint32_t format_version;
+    uint16_t glyph_width;
+    uint16_t glyph_height;
+    uint16_t cell_width;
+    uint16_t cell_height;
+    uint32_t flags;
+    uint32_t glyph_count;
+};
+
+struct BootFontAssetHeader {
+    uint32_t magic;
+    uint32_t header_size;
+    uint32_t format_version;
+    uint16_t glyph_width;
+    uint16_t glyph_height;
+    uint16_t cell_width;
+    uint16_t cell_height;
+    uint32_t glyph_count;
+};
+
 #ifdef __cplusplus
+enum class BootOptionalSectionStatus : uint8_t {
+    Absent,
+    Valid,
+    Invalid,
+};
+
+template <typename T> struct BootOptionalSectionView {
+    BootOptionalSectionStatus status;
+    const T *payload;
+};
+
 struct BootHandoff {
     const BootInfoHeader *v2;
     const BootInfo *v1;
@@ -236,6 +322,68 @@ inline const BootInfoSection *bigos_boot_info_v2_find_section(const BootInfoHead
     return nullptr;
 }
 
+inline bool bigos_boot_range_overflows(uint64_t base, uint64_t size) {
+    return size == 0 || base + size < base;
+}
+
+inline bool bigos_boot_framebuffer_metadata_valid(const BootFramebufferMetadata *metadata) {
+    if (metadata == nullptr)
+        return false;
+    if (metadata->width == 0 || metadata->height == 0 || metadata->pixels_per_scanline == 0)
+        return false;
+    if (metadata->pixels_per_scanline < metadata->width)
+        return false;
+    if (metadata->bytes_per_pixel == 0 || metadata->bits_per_pixel == 0)
+        return false;
+    if (metadata->pixel_format != BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_BGRX8888 &&
+        metadata->pixel_format != BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_RGBX8888 &&
+        metadata->pixel_format != BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_BITMASK)
+        return false;
+    if (bigos_boot_range_overflows(metadata->physical_base, metadata->byte_size))
+        return false;
+    uint64_t min_size = (uint64_t)metadata->height * metadata->pixels_per_scanline * metadata->bytes_per_pixel;
+    return min_size >= metadata->height && metadata->byte_size >= min_size;
+}
+
+inline bool bigos_boot_font_asset_metadata_valid(const BootFontAssetMetadata *metadata) {
+    if (metadata == nullptr)
+        return false;
+    if (metadata->format_version != BIGOS_BOOT_FONT_FORMAT_UNIFONT_HEX_V1)
+        return false;
+    if (metadata->glyph_width == 0 || metadata->glyph_height == 0 || metadata->cell_width == 0 ||
+        metadata->cell_height == 0)
+        return false;
+    if (metadata->byte_size < BIGOS_BOOT_FONT_ASSET_HEADER_SIZE || metadata->byte_size > BIGOS_BOOT_FONT_ASSET_MAX_BYTES)
+        return false;
+    return !bigos_boot_range_overflows(metadata->physical_base, metadata->byte_size);
+}
+
+inline BootOptionalSectionView<BootFramebufferMetadata> bigos_boot_info_v2_framebuffer_metadata(
+    const BootInfoHeader *header) {
+    const BootInfoSection *section = bigos_boot_info_v2_find_section(header, BIGOS_BOOT_SECTION_TYPE_FRAMEBUFFER_METADATA);
+    if (section == nullptr)
+        return {BootOptionalSectionStatus::Absent, nullptr};
+    if (section->size < sizeof(BootFramebufferMetadata))
+        return {BootOptionalSectionStatus::Invalid, nullptr};
+    const auto *metadata = (const BootFramebufferMetadata *)((const uint8_t *)header + section->offset);
+    if (!bigos_boot_framebuffer_metadata_valid(metadata))
+        return {BootOptionalSectionStatus::Invalid, nullptr};
+    return {BootOptionalSectionStatus::Valid, metadata};
+}
+
+inline BootOptionalSectionView<BootFontAssetMetadata> bigos_boot_info_v2_font_asset_metadata(
+    const BootInfoHeader *header) {
+    const BootInfoSection *section = bigos_boot_info_v2_find_section(header, BIGOS_BOOT_SECTION_TYPE_FONT_ASSET_METADATA);
+    if (section == nullptr)
+        return {BootOptionalSectionStatus::Absent, nullptr};
+    if (section->size < sizeof(BootFontAssetMetadata))
+        return {BootOptionalSectionStatus::Invalid, nullptr};
+    const auto *metadata = (const BootFontAssetMetadata *)((const uint8_t *)header + section->offset);
+    if (!bigos_boot_font_asset_metadata_valid(metadata))
+        return {BootOptionalSectionStatus::Invalid, nullptr};
+    return {BootOptionalSectionStatus::Valid, metadata};
+}
+
 inline BootHandoff bigos_boot_resolve_handoff(const BootInfoHeader *candidate) {
     if (bigos_boot_info_v2_validate(candidate))
         return {candidate, nullptr};
@@ -289,12 +437,49 @@ static_assert(sizeof(BootStorageMetadata) == 144);
 static_assert(alignof(BootStorageMetadata) == 8);
 static_assert(sizeof(BootLoaderMetadata) == 176);
 static_assert(alignof(BootLoaderMetadata) == 4);
+static_assert(sizeof(BootFramebufferMetadata) == 40);
+static_assert(alignof(BootFramebufferMetadata) == 8);
+static_assert(sizeof(BootFontAssetMetadata) == 40);
+static_assert(alignof(BootFontAssetMetadata) == 8);
+static_assert(sizeof(BootFontAssetHeader) == BIGOS_BOOT_FONT_ASSET_HEADER_SIZE);
+static_assert(alignof(BootFontAssetHeader) == 4);
 static_assert(__builtin_offsetof(BootMemoryRegion, physical_base) == BIGOS_BOOT_MEMORY_REGION_OFF_PHYSICAL_BASE);
 static_assert(__builtin_offsetof(BootMemoryRegion, length) == BIGOS_BOOT_MEMORY_REGION_OFF_LENGTH);
 static_assert(__builtin_offsetof(BootMemoryRegion, normalized_type) == BIGOS_BOOT_MEMORY_REGION_OFF_NORMALIZED_TYPE);
 static_assert(__builtin_offsetof(BootMemoryRegion, source_type) == BIGOS_BOOT_MEMORY_REGION_OFF_SOURCE_TYPE);
 static_assert(__builtin_offsetof(BootMemoryRegion, attributes) == BIGOS_BOOT_MEMORY_REGION_OFF_ATTRIBUTES);
 static_assert(__builtin_offsetof(BootMemoryRegion, source_value) == BIGOS_BOOT_MEMORY_REGION_OFF_SOURCE_VALUE);
+static_assert(
+    __builtin_offsetof(BootFramebufferMetadata, physical_base) ==
+    BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_PHYSICAL_BASE);
+static_assert(__builtin_offsetof(BootFramebufferMetadata, byte_size) == BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_BYTE_SIZE);
+static_assert(__builtin_offsetof(BootFramebufferMetadata, width) == BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_WIDTH);
+static_assert(__builtin_offsetof(BootFramebufferMetadata, height) == BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_HEIGHT);
+static_assert(
+    __builtin_offsetof(BootFramebufferMetadata, pixels_per_scanline) ==
+    BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_PIXELS_PER_SCANLINE);
+static_assert(
+    __builtin_offsetof(BootFramebufferMetadata, bits_per_pixel) ==
+    BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_BITS_PER_PIXEL);
+static_assert(
+    __builtin_offsetof(BootFramebufferMetadata, bytes_per_pixel) ==
+    BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_BYTES_PER_PIXEL);
+static_assert(
+    __builtin_offsetof(BootFramebufferMetadata, pixel_format) == BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_PIXEL_FORMAT);
+static_assert(
+    __builtin_offsetof(BootFramebufferMetadata, attributes) == BIGOS_BOOT_FRAMEBUFFER_METADATA_OFF_ATTRIBUTES);
+static_assert(
+    __builtin_offsetof(BootFontAssetMetadata, physical_base) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_PHYSICAL_BASE);
+static_assert(__builtin_offsetof(BootFontAssetMetadata, byte_size) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_BYTE_SIZE);
+static_assert(
+    __builtin_offsetof(BootFontAssetMetadata, format_version) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_FORMAT_VERSION);
+static_assert(__builtin_offsetof(BootFontAssetMetadata, glyph_width) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_GLYPH_WIDTH);
+static_assert(
+    __builtin_offsetof(BootFontAssetMetadata, glyph_height) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_GLYPH_HEIGHT);
+static_assert(__builtin_offsetof(BootFontAssetMetadata, cell_width) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_CELL_WIDTH);
+static_assert(__builtin_offsetof(BootFontAssetMetadata, cell_height) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_CELL_HEIGHT);
+static_assert(__builtin_offsetof(BootFontAssetMetadata, flags) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_FLAGS);
+static_assert(__builtin_offsetof(BootFontAssetMetadata, glyph_count) == BIGOS_BOOT_FONT_ASSET_METADATA_OFF_GLYPH_COUNT);
 #endif
 
 #endif   // _ARCH_X86_BOOT_BOOT_INFO_H

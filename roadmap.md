@@ -313,10 +313,10 @@ Legacy text console remains as a fallback.
 用户可见目标：在 UEFI 下控制台以点阵字形在图形 framebuffer 上渲染文本，并可显示 CJK 等
 非 ASCII 字符，同时保留 Legacy 文本控制台作为回退。
 
-- [ ] Task M7.1: obtain a linear framebuffer through firmware graphics output and
+- [x] Task M7.1: obtain a linear framebuffer through firmware graphics output and
   pass framebuffer geometry and a font asset to the kernel through the boot
   handoff so they are available early.
-- [ ] 任务 M7.1：通过固件图形输出获取线性 framebuffer，并经启动握手把 framebuffer 几何信息
+- [x] 任务 M7.1：通过固件图形输出获取线性 framebuffer，并经启动握手把 framebuffer 几何信息
   与字体资产早期传给内核。
 - [ ] Task M7.2: a build-time font asset pipeline that converts the bundled bitmap
   font into a compact in-kernel glyph lookup covering half-width and full-width

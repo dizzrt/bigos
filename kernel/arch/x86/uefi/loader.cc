@@ -15,6 +15,7 @@
 #define UEFI_FIXED_LOW_PD 0x4000ull
 #define UEFI_FIXED_HIGH_PD 0x5000ull
 #define UEFI_FIXED_PAGE_TABLE_BYTES 0x4000ull
+#define UEFI_FONT_MAX_BYTES BIGOS_BOOT_FONT_ASSET_MAX_BYTES
 #define EM_X86_64 62
 #define EV_CURRENT 1
 
@@ -33,6 +34,16 @@ struct FinalMemoryMap {
     UINTN key;
     UINTN descriptor_size;
     uint32_t descriptor_version;
+};
+
+struct FramebufferHandoff {
+    bool available;
+    BootFramebufferMetadata metadata;
+};
+
+struct FontAssetHandoff {
+    bool available;
+    BootFontAssetMetadata metadata;
 };
 
 static EFI_SYSTEM_TABLE *g_system_table;
@@ -61,6 +72,26 @@ static void print(const char *serial, const CHAR16 *console) {
     console_print(console);
 }
 
+static void serial_print_hex(uint64_t value) {
+    serial_print("0x");
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        uint8_t digit = (uint8_t)((value >> shift) & 0xfu);
+        char out[2] = {(char)(digit < 10 ? '0' + digit : 'a' + digit - 10), 0};
+        serial_print(out);
+    }
+}
+
+static void serial_print_dec(uint64_t value) {
+    char buffer[21];
+    uint32_t index = sizeof(buffer);
+    buffer[--index] = 0;
+    do {
+        buffer[--index] = (char)('0' + (value % 10));
+        value /= 10;
+    } while (value != 0 && index > 0);
+    serial_print(&buffer[index]);
+}
+
 [[noreturn]] static void fail(const char *serial, const CHAR16 *console) {
     print(serial, console);
     for (;;) {
@@ -83,6 +114,14 @@ static void *memcpy_local(void *dest, const void *src, uint64_t size) {
         out[i] = in[i];
     }
     return dest;
+}
+
+extern "C" void *memset(void *dest, int value, uint64_t size) {
+    return memset_local(dest, value, size);
+}
+
+extern "C" void *memcpy(void *dest, const void *src, uint64_t size) {
+    return memcpy_local(dest, src, size);
 }
 
 static uint32_t align_up_u32(uint32_t value, uint32_t alignment) {
@@ -161,7 +200,7 @@ static EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *open_simple_file_system() {
     return (EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *)fs_raw;
 }
 
-static uint8_t *read_file_from_esp(const CHAR16 *path, uint64_t *size_out) {
+static uint8_t *read_file_from_esp(const CHAR16 *path, uint64_t *size_out, bool required, uint64_t max_size) {
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = open_simple_file_system();
     EFI_FILE_PROTOCOL *root = nullptr;
     EFI_STATUS status = fs->open_volume(fs, &root);
@@ -172,7 +211,11 @@ static uint8_t *read_file_from_esp(const CHAR16 *path, uint64_t *size_out) {
     EFI_FILE_PROTOCOL *file = nullptr;
     status = root->open(root, &file, path, EFI_FILE_MODE_READ, 0);
     if (efi_error(status) || file == nullptr) {
-        fail("BIGOS_UEFI_LOADER_ERROR open kernel\r\n", u"BigOS UEFI: failed to open \\boot\\kernel\r\n");
+        root->close(root);
+        if (required) {
+            fail("BIGOS_UEFI_LOADER_ERROR open file\r\n", u"BigOS UEFI: failed to open required ESP file\r\n");
+        }
+        return nullptr;
     }
 
     status = file->set_position(file, 0xffffffffffffffffull);
@@ -180,24 +223,44 @@ static uint8_t *read_file_from_esp(const CHAR16 *path, uint64_t *size_out) {
     if (!efi_error(status)) {
         status = file->get_position(file, &file_size);
     }
-    if (efi_error(status) || file_size == 0) {
-        fail("BIGOS_UEFI_LOADER_ERROR kernel size\r\n", u"BigOS UEFI: failed to measure kernel ELF\r\n");
+    if (efi_error(status) || file_size == 0 || file_size > max_size) {
+        file->close(file);
+        root->close(root);
+        if (required) {
+            fail("BIGOS_UEFI_LOADER_ERROR file size\r\n", u"BigOS UEFI: failed to measure required ESP file\r\n");
+        }
+        return nullptr;
     }
     status = file->set_position(file, 0);
     if (efi_error(status)) {
-        fail("BIGOS_UEFI_LOADER_ERROR kernel seek\r\n", u"BigOS UEFI: failed to rewind kernel ELF\r\n");
+        file->close(file);
+        root->close(root);
+        if (required) {
+            fail("BIGOS_UEFI_LOADER_ERROR file seek\r\n", u"BigOS UEFI: failed to rewind required ESP file\r\n");
+        }
+        return nullptr;
     }
 
     void *buffer = nullptr;
     status = bs()->allocate_pool(EfiLoaderData, file_size, &buffer);
     if (efi_error(status) || buffer == nullptr) {
-        fail("BIGOS_UEFI_LOADER_ERROR kernel buffer\r\n", u"BigOS UEFI: failed to allocate kernel ELF buffer\r\n");
+        file->close(file);
+        root->close(root);
+        if (required) {
+            fail("BIGOS_UEFI_LOADER_ERROR file buffer\r\n", u"BigOS UEFI: failed to allocate ESP file buffer\r\n");
+        }
+        return nullptr;
     }
 
     UINTN read_size = file_size;
     status = file->read(file, &read_size, buffer);
     if (efi_error(status) || read_size != file_size) {
-        fail("BIGOS_UEFI_LOADER_ERROR kernel read\r\n", u"BigOS UEFI: failed to read kernel ELF\r\n");
+        file->close(file);
+        root->close(root);
+        if (required) {
+            fail("BIGOS_UEFI_LOADER_ERROR file read\r\n", u"BigOS UEFI: failed to read required ESP file\r\n");
+        }
+        return nullptr;
     }
     file->close(file);
     root->close(root);
@@ -229,7 +292,7 @@ static bool validate_segment_file_range(const Elf64_Phdr *phdr, uint64_t file_si
 
 static LoadedKernel load_kernel_elf() {
     uint64_t file_size = 0;
-    uint8_t *file = read_file_from_esp(u"\\boot\\kernel", &file_size);
+    uint8_t *file = read_file_from_esp(u"\\boot\\kernel", &file_size, true, KERNEL_MAX_LOAD_BYTES);
     auto *ehdr = (const Elf64_Ehdr *)file;
     if (!validate_elf_header(ehdr, file_size)) {
         fail("BIGOS_UEFI_LOADER_ERROR invalid kernel\r\n", u"BigOS UEFI: invalid kernel ELF\r\n");
@@ -280,6 +343,138 @@ static void materialize_kernel_segments(const LoadedKernel &kernel) {
         uint64_t phys = KERNEL_PHYS_BASE + (phdr->p_vaddr - KERNEL_VMA_BASE);
         memcpy_local((void *)phys, kernel.file + phdr->p_offset, phdr->p_filesz);
     }
+}
+
+static uint32_t normalize_gop_pixel_format(const EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info) {
+    if (info == nullptr)
+        return BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_UNKNOWN;
+    switch (info->pixel_format) {
+        case PixelBlueGreenRedReserved8BitPerColor:
+            return BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_BGRX8888;
+        case PixelRedGreenBlueReserved8BitPerColor:
+            return BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_RGBX8888;
+        case PixelBitMask:
+            if (info->pixel_information.red_mask == 0x00ff0000u && info->pixel_information.green_mask == 0x0000ff00u &&
+                info->pixel_information.blue_mask == 0x000000ffu)
+                return BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_BGRX8888;
+            if (info->pixel_information.red_mask == 0x000000ffu && info->pixel_information.green_mask == 0x0000ff00u &&
+                info->pixel_information.blue_mask == 0x00ff0000u)
+                return BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_RGBX8888;
+            return BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_UNKNOWN;
+        default:
+            return BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_UNKNOWN;
+    }
+}
+
+static FramebufferHandoff prepare_framebuffer_handoff() {
+    void *gop_raw = nullptr;
+    EFI_STATUS status = bs()->locate_protocol(&EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID, nullptr, &gop_raw);
+    if (efi_error(status) || gop_raw == nullptr) {
+        print("BIGOS_UEFI_FRAMEBUFFER unavailable stage=locate_gop\r\n", u"BigOS UEFI: GOP unavailable; framebuffer fallback\r\n");
+        return {};
+    }
+
+    auto *gop = (EFI_GRAPHICS_OUTPUT_PROTOCOL *)gop_raw;
+    if (gop->mode == nullptr || gop->mode->info == nullptr || gop->mode->frame_buffer_base == 0 ||
+        gop->mode->frame_buffer_size == 0) {
+        print("BIGOS_UEFI_FRAMEBUFFER unavailable stage=gop_mode\r\n", u"BigOS UEFI: GOP mode unusable; framebuffer fallback\r\n");
+        return {};
+    }
+
+    const EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = gop->mode->info;
+    uint32_t format = normalize_gop_pixel_format(info);
+    if (format == BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_UNKNOWN || info->horizontal_resolution == 0 ||
+        info->vertical_resolution == 0 || info->pixels_per_scan_line < info->horizontal_resolution) {
+        print("BIGOS_UEFI_FRAMEBUFFER unavailable stage=pixel_format\r\n",
+              u"BigOS UEFI: GOP pixel format unsupported; framebuffer fallback\r\n");
+        return {};
+    }
+
+    FramebufferHandoff handoff = {};
+    handoff.available = true;
+    handoff.metadata = {
+        gop->mode->frame_buffer_base,
+        gop->mode->frame_buffer_size,
+        info->horizontal_resolution,
+        info->vertical_resolution,
+        info->pixels_per_scan_line,
+        32,
+        4,
+        format,
+        BIGOS_BOOT_FRAMEBUFFER_ATTR_FIRMWARE_GOP | BIGOS_BOOT_FRAMEBUFFER_ATTR_WRITE_COMBINE,
+    };
+    if (!bigos_boot_framebuffer_metadata_valid(&handoff.metadata)) {
+        print("BIGOS_UEFI_FRAMEBUFFER unavailable stage=metadata_validate\r\n",
+              u"BigOS UEFI: GOP metadata invalid; framebuffer fallback\r\n");
+        return {};
+    }
+
+    serial_print("BIGOS_UEFI_FRAMEBUFFER base=");
+    serial_print_hex(handoff.metadata.physical_base);
+    serial_print(" size=");
+    serial_print_hex(handoff.metadata.byte_size);
+    serial_print(" width=");
+    serial_print_dec(handoff.metadata.width);
+    serial_print(" height=");
+    serial_print_dec(handoff.metadata.height);
+    serial_print(" stride=");
+    serial_print_dec(handoff.metadata.pixels_per_scanline);
+    serial_print(" format=");
+    serial_print_dec(handoff.metadata.pixel_format);
+    serial_print("\r\n");
+    return handoff;
+}
+
+static FontAssetHandoff prepare_font_asset_handoff() {
+    uint64_t file_size = 0;
+    uint8_t *file = read_file_from_esp(u"\\boot\\fonts\\unifont.bin", &file_size, false, UEFI_FONT_MAX_BYTES);
+    if (file == nullptr) {
+        print("BIGOS_UEFI_FONT unavailable stage=open_font\r\n", u"BigOS UEFI: font asset unavailable; font fallback\r\n");
+        return {};
+    }
+    if (file_size < sizeof(BootFontAssetHeader)) {
+        print("BIGOS_UEFI_FONT unavailable stage=font_size\r\n", u"BigOS UEFI: font asset too small; font fallback\r\n");
+        return {};
+    }
+
+    const auto *header = (const BootFontAssetHeader *)file;
+    if (header->magic != BIGOS_BOOT_FONT_ASSET_MAGIC || header->header_size < sizeof(BootFontAssetHeader) ||
+        header->format_version != BIGOS_BOOT_FONT_FORMAT_UNIFONT_HEX_V1 || header->glyph_width == 0 ||
+        header->glyph_height == 0 || header->cell_width == 0 || header->cell_height == 0) {
+        print("BIGOS_UEFI_FONT unavailable stage=font_header\r\n", u"BigOS UEFI: font asset invalid; font fallback\r\n");
+        return {};
+    }
+
+    FontAssetHandoff handoff = {};
+    handoff.available = true;
+    handoff.metadata = {
+        (uint64_t)file,
+        file_size,
+        header->format_version,
+        header->glyph_width,
+        header->glyph_height,
+        header->cell_width,
+        header->cell_height,
+        BIGOS_BOOT_FONT_ASSET_FLAG_LOADER_PROVIDED | BIGOS_BOOT_FONT_ASSET_FLAG_ESP_LOADED,
+        header->glyph_count,
+    };
+    if (!bigos_boot_font_asset_metadata_valid(&handoff.metadata)) {
+        print("BIGOS_UEFI_FONT unavailable stage=metadata_validate\r\n", u"BigOS UEFI: font metadata invalid; font fallback\r\n");
+        return {};
+    }
+
+    serial_print("BIGOS_UEFI_FONT base=");
+    serial_print_hex(handoff.metadata.physical_base);
+    serial_print(" size=");
+    serial_print_hex(handoff.metadata.byte_size);
+    serial_print(" version=");
+    serial_print_dec(handoff.metadata.format_version);
+    serial_print(" cell=");
+    serial_print_dec(handoff.metadata.cell_width);
+    serial_print("x");
+    serial_print_dec(handoff.metadata.cell_height);
+    serial_print("\r\n");
+    return handoff;
 }
 
 static uint64_t uefi_memory_attributes(const EFI_MEMORY_DESCRIPTOR *desc) {
@@ -395,15 +590,26 @@ static void refresh_memory_map(FinalMemoryMap *map) {
     }
 }
 
-static BootInfoHeader *build_boot_info(void *boot_info_storage, const LoadedKernel &kernel, FinalMemoryMap *map) {
-    uint32_t section_count = 4;
+static BootInfoHeader *build_boot_info(
+    void *boot_info_storage,
+    const LoadedKernel &kernel,
+    FinalMemoryMap *map,
+    const FramebufferHandoff &framebuffer,
+    const FontAssetHandoff &font_asset) {
+    uint32_t section_count = 4 + (framebuffer.available ? 1u : 0u) + (font_asset.available ? 1u : 0u);
     uint32_t section_table_offset = align_up_u32(sizeof(BootInfoHeader), alignof(BootInfoSection));
     uint32_t core_offset =
         align_up_u32(section_table_offset + section_count * sizeof(BootInfoSection), alignof(BootInfoCore));
     uint32_t memory_map_offset = align_up_u32(core_offset + sizeof(BootInfoCore), alignof(BootMemoryRegion));
-    uint32_t storage_min_offset = memory_map_offset;
+    uint32_t tail_min_offset = memory_map_offset;
+    uint32_t storage_min_offset = align_up_u32(tail_min_offset, alignof(BootStorageMetadata));
     uint32_t loader_min_offset = align_up_u32(storage_min_offset + sizeof(BootStorageMetadata), alignof(BootLoaderMetadata));
-    uint32_t fixed_tail_size = loader_min_offset + sizeof(BootLoaderMetadata) - storage_min_offset;
+    uint32_t next_min_offset = loader_min_offset + sizeof(BootLoaderMetadata);
+    if (framebuffer.available)
+        next_min_offset = align_up_u32(next_min_offset, alignof(BootFramebufferMetadata)) + sizeof(BootFramebufferMetadata);
+    if (font_asset.available)
+        next_min_offset = align_up_u32(next_min_offset, alignof(BootFontAssetMetadata)) + sizeof(BootFontAssetMetadata);
+    uint32_t fixed_tail_size = next_min_offset - tail_min_offset;
     uint32_t memory_map_capacity = (UEFI_BOOT_INFO_BYTES - memory_map_offset - fixed_tail_size) / sizeof(BootMemoryRegion);
 
     auto *header = (BootInfoHeader *)boot_info_storage;
@@ -419,7 +625,18 @@ static BootInfoHeader *build_boot_info(void *boot_info_storage, const LoadedKern
     uint32_t memory_map_size = region_count * sizeof(BootMemoryRegion);
     uint32_t storage_offset = align_up_u32(memory_map_offset + memory_map_size, alignof(BootStorageMetadata));
     uint32_t loader_offset = align_up_u32(storage_offset + sizeof(BootStorageMetadata), alignof(BootLoaderMetadata));
-    uint32_t total_size = align_up_u32(loader_offset + sizeof(BootLoaderMetadata), BIGOS_BOOT_INFO_V2_ALIGNMENT);
+    uint32_t next_offset = loader_offset + sizeof(BootLoaderMetadata);
+    uint32_t framebuffer_offset = 0;
+    if (framebuffer.available) {
+        framebuffer_offset = align_up_u32(next_offset, alignof(BootFramebufferMetadata));
+        next_offset = framebuffer_offset + sizeof(BootFramebufferMetadata);
+    }
+    uint32_t font_offset = 0;
+    if (font_asset.available) {
+        font_offset = align_up_u32(next_offset, alignof(BootFontAssetMetadata));
+        next_offset = font_offset + sizeof(BootFontAssetMetadata);
+    }
+    uint32_t total_size = align_up_u32(next_offset, BIGOS_BOOT_INFO_V2_ALIGNMENT);
     if (total_size > UEFI_BOOT_INFO_BYTES) {
         fail("BIGOS_UEFI_LOADER_ERROR boot info too large\r\n", u"BigOS UEFI: BootInfo is too large\r\n");
     }
@@ -447,6 +664,15 @@ static BootInfoHeader *build_boot_info(void *boot_info_storage, const LoadedKern
                    alignof(BootStorageMetadata), 0};
     sections[3] = {BIGOS_BOOT_SECTION_TYPE_LOADER_METADATA, 0, loader_offset, sizeof(BootLoaderMetadata),
                    alignof(BootLoaderMetadata), 0};
+    uint32_t section_index = 4;
+    if (framebuffer.available) {
+        sections[section_index++] = {BIGOS_BOOT_SECTION_TYPE_FRAMEBUFFER_METADATA, 0, framebuffer_offset,
+                                     sizeof(BootFramebufferMetadata), alignof(BootFramebufferMetadata), 0};
+    }
+    if (font_asset.available) {
+        sections[section_index++] = {BIGOS_BOOT_SECTION_TYPE_FONT_ASSET_METADATA, 0, font_offset,
+                                     sizeof(BootFontAssetMetadata), alignof(BootFontAssetMetadata), 0};
+    }
 
     auto *core = (BootInfoCore *)((uint8_t *)header + core_offset);
     core->flags = BIGOS_BOOT_CORE_FLAG_UEFI;
@@ -474,6 +700,15 @@ static BootInfoHeader *build_boot_info(void *boot_info_storage, const LoadedKern
     copy_ascii(loader->build_id, sizeof(loader->build_id), "bigos-uefi-spike-v1");
     copy_char16_ascii(loader->firmware_vendor, sizeof(loader->firmware_vendor), g_system_table->firmware_vendor);
     copy_ascii(loader->boot_file_path, sizeof(loader->boot_file_path), "\\boot\\kernel");
+
+    if (framebuffer.available) {
+        auto *fb = (BootFramebufferMetadata *)((uint8_t *)header + framebuffer_offset);
+        *fb = framebuffer.metadata;
+    }
+    if (font_asset.available) {
+        auto *font = (BootFontAssetMetadata *)((uint8_t *)header + font_offset);
+        *font = font_asset.metadata;
+    }
 
     if (!bigos_boot_info_v2_validate(header)) {
         fail("BIGOS_UEFI_LOADER_ERROR invalid boot info\r\n", u"BigOS UEFI: invalid BootInfo v2\r\n");
@@ -508,16 +743,19 @@ extern "C" EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE 
     print("BIGOS_UEFI_LOADER_START\r\n", u"BigOS UEFI loader start\r\n");
 
     LoadedKernel kernel = load_kernel_elf();
+    FramebufferHandoff framebuffer = prepare_framebuffer_handoff();
+    FontAssetHandoff font_asset = prepare_font_asset_handoff();
     EFI_PHYSICAL_ADDRESS stack = allocate_low_pages(UEFI_STACK_PAGES, "stack", u"BigOS UEFI: failed to allocate stack\r\n");
     EFI_PHYSICAL_ADDRESS boot_info_storage = allocate_low_pages(1, "boot info",
                                                                 u"BigOS UEFI: failed to allocate BootInfo\r\n");
 
     refresh_memory_map(&g_final_map);
-    BootInfoHeader *boot_info = build_boot_info((void *)boot_info_storage, kernel, &g_final_map);
+    BootInfoHeader *boot_info =
+        build_boot_info((void *)boot_info_storage, kernel, &g_final_map, framebuffer, font_asset);
     EFI_STATUS status = bs()->exit_boot_services(g_image_handle, g_final_map.key);
     if (efi_error(status)) {
         refresh_memory_map(&g_final_map);
-        boot_info = build_boot_info((void *)boot_info_storage, kernel, &g_final_map);
+        boot_info = build_boot_info((void *)boot_info_storage, kernel, &g_final_map, framebuffer, font_asset);
         status = bs()->exit_boot_services(g_image_handle, g_final_map.key);
         if (efi_error(status)) {
             fail("BIGOS_UEFI_LOADER_ERROR exit boot services\r\n", u"BigOS UEFI: ExitBootServices failed\r\n");

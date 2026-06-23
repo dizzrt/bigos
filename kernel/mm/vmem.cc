@@ -13,6 +13,8 @@
 
 #define KVMEM_LEN        0x10000000000ul
 #define KVMEM_BASE       0xffff880000000000ul
+#define KDEVICE_MMIO_BASE 0xffffd00000000000ul
+#define KDEVICE_MMIO_LEN  0x10000000000ul
 #define KERNEL_PML4_ADDR 0x2000ul
 #define KERNEL_HIGHER_HALF_BASE 0xffffffff80000000ul
 #define SELF_MAPPING_BASE       0xffff800000000000ul
@@ -66,6 +68,8 @@ static constexpr uint32_t TLB_SHOOTDOWN_TIMEOUT_ITERATIONS = 1000000;
 static_assert(bigos::mm::KDIRECT_BASE >= SELF_MAPPING_BASE + SELF_MAPPING_LEN);
 static_assert(bigos::mm::KDIRECT_BASE >= KVMEM_BASE + KVMEM_LEN);
 static_assert(bigos::mm::KDIRECT_BASE + bigos::mm::KDIRECT_LEN <= KERNEL_HIGHER_HALF_BASE);
+static_assert(KDEVICE_MMIO_BASE >= bigos::mm::KDIRECT_BASE + bigos::mm::KDIRECT_LEN);
+static_assert(KDEVICE_MMIO_BASE + KDEVICE_MMIO_LEN <= KERNEL_HIGHER_HALF_BASE);
 static_assert(KVMEM_BASE < bigos::mm::KDIRECT_BASE || KVMEM_BASE >= bigos::mm::KDIRECT_BASE + bigos::mm::KDIRECT_LEN);
 
 static inline bool paging_present(uint64_t __descriptor) noexcept {
@@ -151,6 +155,7 @@ static uint32_t gDirectMapRangeCount;
 // non-IRQ-context only: mutated without atomics, never from an IRQ handler.
 static uint16_t *gFrameRefcount;
 static uint64_t gFrameRefcountMaxFrame;
+static uint64_t gDeviceMmioNext;
 
 constexpr uint16_t FRAME_REFCOUNT_MAX = 0xffffu;
 
@@ -922,15 +927,48 @@ static void init_direct_map_from_region(uint64_t __base, uint64_t __len, uint32_
     map_direct_range(aligned_base, aligned_len);
 }
 
+static bool boot_ranges_overlap(uint64_t left_base, uint64_t left_len, uint64_t right_base, uint64_t right_len) noexcept {
+    if (left_len == 0 || right_len == 0)
+        return false;
+    uint64_t left_end = left_base + left_len;
+    uint64_t right_end = right_base + right_len;
+    if (left_end < left_base || right_end < right_base)
+        return true;
+    return left_base < right_end && right_base < left_end;
+}
+
+static void init_direct_map_from_region_excluding_framebuffer(
+    const BootMemoryRegion &__region, const BootFramebufferMetadata *__framebuffer) noexcept {
+    if (__framebuffer == nullptr ||
+        !boot_ranges_overlap(__region.physical_base, __region.length, __framebuffer->physical_base, __framebuffer->byte_size)) {
+        init_direct_map_from_region(__region.physical_base, __region.length, __region.normalized_type);
+        return;
+    }
+
+    uint64_t region_end = __region.physical_base + __region.length;
+    uint64_t fb_end = __framebuffer->physical_base + __framebuffer->byte_size;
+    if (region_end < __region.physical_base || fb_end < __framebuffer->physical_base)
+        return;
+
+    if (__region.physical_base < __framebuffer->physical_base)
+        init_direct_map_from_region(
+            __region.physical_base, __framebuffer->physical_base - __region.physical_base, __region.normalized_type);
+    if (fb_end < region_end)
+        init_direct_map_from_region(fb_end, region_end - fb_end, __region.normalized_type);
+}
+
 static void init_direct_map_v2(const BootInfoHeader *__header) noexcept {
     const BootInfoSection *section = bigos_boot_info_v2_find_section(__header, BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP);
     if (section == nullptr || section->size % sizeof(BootMemoryRegion) != 0)
         direct_map_panic("BIGOS_DIRECT_MAP_INIT_FAILED invalid boot memory map");
 
     const BootMemoryRegion *regions = (const BootMemoryRegion *)((const uint8_t *)__header + section->offset);
+    auto framebuffer = bigos_boot_info_v2_framebuffer_metadata(__header);
+    const BootFramebufferMetadata *framebuffer_metadata =
+        framebuffer.status == BootOptionalSectionStatus::Valid ? framebuffer.payload : nullptr;
     uint32_t nr_regions = section->size / sizeof(BootMemoryRegion);
     for (uint32_t i = 0; i < nr_regions; i++)
-        init_direct_map_from_region(regions[i].physical_base, regions[i].length, regions[i].normalized_type);
+        init_direct_map_from_region_excluding_framebuffer(regions[i], framebuffer_metadata);
 }
 
 static uint32_t normalize_legacy_ards_type(uint32_t __type) noexcept {
@@ -1041,6 +1079,7 @@ namespace mm {
         }
 
         void init_vmem() {
+            gDeviceMmioNext = KDEVICE_MMIO_BASE;
             MemoryBlock *mblk = new MemoryBlock();
             // mblk->vmem = &kvmem;
             // KVMEM is a kernel heap/vmalloc-style virtual allocation area,
@@ -1265,6 +1304,41 @@ namespace mm {
         if (!is_direct_mapped_phys(phys, 1))
             return INVALID_PHYS_ADDR;
         return phys;
+    }
+
+    DeviceMmioMapping map_device_mmio(
+        uint64_t __phys, uint64_t __len, DeviceMmioCachePolicy __cache_policy) noexcept {
+        DeviceMmioMapping invalid = {nullptr, __phys, 0, __cache_policy, false};
+        if (__len == 0 || __phys + __len < __phys)
+            return invalid;
+
+        uint64_t aligned_phys = __phys & ~(PAGE_SIZE - 1ull);
+        uint64_t offset = __phys - aligned_phys;
+        uint64_t mapped_len = (__len + offset + PAGE_SIZE - 1ull) & ~(PAGE_SIZE - 1ull);
+        if (mapped_len == 0 || mapped_len > KDEVICE_MMIO_LEN)
+            return invalid;
+
+        uint64_t vaddr = gDeviceMmioNext;
+        uint64_t next = vaddr + mapped_len;
+        if (vaddr < KDEVICE_MMIO_BASE || next < vaddr || next > KDEVICE_MMIO_BASE + KDEVICE_MMIO_LEN)
+            return invalid;
+
+        uint64_t mapped_pages = 0;
+        while (mapped_pages < mapped_len / PAGE_SIZE) {
+            uint64_t phys = aligned_phys + mapped_pages * PAGE_SIZE;
+            uint64_t virt = vaddr + mapped_pages * PAGE_SIZE;
+            if (!map_page(virt, phys, page_attr::PRESENT | page_attr::WRITABLE | page_attr::NO_EXECUTE)) {
+                while (mapped_pages != 0) {
+                    mapped_pages--;
+                    unmap_page(vaddr + mapped_pages * PAGE_SIZE);
+                }
+                return invalid;
+            }
+            mapped_pages++;
+        }
+
+        gDeviceMmioNext = next;
+        return {(void *)(vaddr + offset), __phys, __len, __cache_policy, true};
     }
 
     bool map_page(uint64_t __vaddr, uint64_t __phys, PageAttr __attr) noexcept {

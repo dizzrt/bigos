@@ -53,6 +53,7 @@ def make_uefi_artifacts(tmp_path: Path):
         uefi_loader=write_bytes(tmp_path / 'BOOTX64.EFI', b'MZ' + bytes(128)),
         user_init_elf=write_bytes(tmp_path / 'init.elf', b'\x7fELF' + bytes(128)),
         bin_programs=(('sh', write_bytes(bin_dir / 'sh', b'\x7fELFsh')),),
+        font_asset=write_bytes(tmp_path / 'unifont.bin', b'BFNT' + bytes(128)),
     )
 
 
@@ -214,6 +215,7 @@ def test_create_uefi_image_uses_mtools_without_touching_legacy_layout(tmp_path: 
     assert ['mcopy', '-o', '-i', str(image), str(tmp_path / 'BOOTX64.EFI'), '::/EFI/BOOT/BOOTX64.EFI'] in commands
     assert ['mcopy', '-o', '-i', str(image), str(tmp_path / 'kernel'), '::/boot/kernel'] in commands
     assert ['mcopy', '-o', '-i', str(image), str(tmp_path / 'init.elf'), '::/boot/user/init.elf'] in commands
+    assert ['mcopy', '-o', '-i', str(image), str(tmp_path / 'unifont.bin'), '::/boot/fonts/unifont.bin'] in commands
     assert not any('mbr.bin' in part or 'boot.bin' in part for command in commands for part in command)
 
 
@@ -269,6 +271,7 @@ def test_build_current_artifacts_uefi_builds_loader_and_exfat_root_inputs(monkey
 
     monkeypatch.setattr(boot_debug, 'run_command', fake_run_command)
     monkeypatch.setattr(boot_debug, 'require_file', lambda *args, **kwargs: None)
+    monkeypatch.setattr(boot_debug, 'generate_boot_font_asset', lambda *args, **kwargs: None)
 
     boot_debug.build_current_artifacts('uefi')
 

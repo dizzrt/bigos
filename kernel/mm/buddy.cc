@@ -1,5 +1,6 @@
 #include <arch/x86/boot/boot_info.h>
 #include <arch/x86/ap_startup.h>
+#include <bigos/boot_handoff.h>
 #include <bigos/io.h>   // remove later
 #include <bigos/panic.h>
 #include <irq/interrupt.h>
@@ -580,6 +581,43 @@ namespace mm {
             return true;
         }
 
+        static bool ranges_overlap(uint64_t left_base, uint64_t left_len, uint64_t right_base, uint64_t right_len) noexcept {
+            if (left_len == 0 || right_len == 0)
+                return false;
+            uint64_t left_end = left_base + left_len;
+            uint64_t right_end = right_base + right_len;
+            if (left_end < left_base || right_end < right_base)
+                return true;
+            return left_base < right_end && right_base < left_end;
+        }
+
+        static uint32_t consume_region_excluding_framebuffer(
+            const BootMemoryRegion &region, const BootFramebufferMetadata *framebuffer) noexcept {
+            if (region.normalized_type != BIGOS_BOOT_MEMORY_TYPE_USABLE)
+                return 0;
+            if (framebuffer == nullptr ||
+                !ranges_overlap(region.physical_base, region.length, framebuffer->physical_base, framebuffer->byte_size)) {
+                handle_ards(region.physical_base, region.length);
+                return 1;
+            }
+
+            uint64_t region_end = region.physical_base + region.length;
+            uint64_t fb_end = framebuffer->physical_base + framebuffer->byte_size;
+            if (region_end < region.physical_base || fb_end < framebuffer->physical_base)
+                return 0;
+
+            uint32_t consumed = 0;
+            if (region.physical_base < framebuffer->physical_base) {
+                handle_ards(region.physical_base, framebuffer->physical_base - region.physical_base);
+                consumed++;
+            }
+            if (fb_end < region_end) {
+                handle_ards(fb_end, region_end - fb_end);
+                consumed++;
+            }
+            return consumed;
+        }
+
         static uint32_t consume_v2_memory_map(const BootInfoHeader *header) noexcept {
             const BootInfoSection *section =
                 bigos_boot_info_v2_find_section(header, BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP);
@@ -587,11 +625,13 @@ namespace mm {
                 return 0;
 
             const BootMemoryRegion *regions = (const BootMemoryRegion *)((const uint8_t *)header + section->offset);
+            auto framebuffer = bigos_boot_info_v2_framebuffer_metadata(header);
+            const BootFramebufferMetadata *framebuffer_metadata =
+                framebuffer.status == BootOptionalSectionStatus::Valid ? framebuffer.payload : nullptr;
             uint32_t usable_regions = 0;
             uint32_t nr_regions = section->size / sizeof(BootMemoryRegion);
             for (uint32_t i = 0; i < nr_regions; i++) {
-                if (consume_region(regions[i]))
-                    usable_regions++;
+                usable_regions += consume_region_excluding_framebuffer(regions[i], framebuffer_metadata);
             }
             return usable_regions;
         }

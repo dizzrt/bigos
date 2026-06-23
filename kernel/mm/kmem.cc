@@ -1,4 +1,5 @@
 #include <type_traits>
+#include <bigos/boot_handoff.h>
 #include <bigos/io.h>   // TODO remove later
 #include <bigos/memory.h>
 #include <bigos/panic.h>
@@ -118,6 +119,7 @@ namespace mm {
     }   // namespace __detail
 
     void init_mem(const BootInfoHeader *__boot_info) noexcept {
+        bigos::boot::init_early_handoff_views(__boot_info);
         __detail::init_cache();
         __detail::init_buddy(__boot_info);
         __detail::init_vmem();

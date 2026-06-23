@@ -176,9 +176,8 @@ def test_direct_map_initialization_uses_bootinfo_ram_and_panics_on_partial_failu
     assert 'void init_direct_map(const BootInfoHeader *__boot_info)' in vmem
     assert 'BootHandoff handoff = bigos_boot_resolve_handoff(__boot_info);' in vmem
     assert 'bigos_boot_info_v2_find_section(__header, BIGOS_BOOT_SECTION_TYPE_MEMORY_MAP)' in vmem
-    assert (
-        'init_direct_map_from_region(regions[i].physical_base, regions[i].length, regions[i].normalized_type);' in vmem
-    )
+    assert 'init_direct_map_from_region_excluding_framebuffer(regions[i], framebuffer_metadata);' in vmem
+    assert 'bigos_boot_info_v2_framebuffer_metadata(__header)' in vmem
     assert 'map_direct_page(bigos::mm::KDIRECT_BASE + phys, phys)' in vmem
     assert 'map_direct_large_page(bigos::mm::KDIRECT_BASE + phys, phys)' in vmem
     assert 'PAGING_DESCRIPTOR_LARGE_PAGE' in vmem

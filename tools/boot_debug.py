@@ -9,6 +9,7 @@ import os
 import shlex
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import time
@@ -33,6 +34,13 @@ DEFAULT_QEMU_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu.serial.log'
 DEFAULT_QEMU_GDB_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu-gdb.serial.log'
 DEFAULT_QEMU_UEFI_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu-uefi.serial.log'
 DEFAULT_QEMU_UEFI_VARS = BUILD_DIR / 'test' / 'OVMF_VARS.uefi.fd'
+FONT_SOURCE = PROJECT_ROOT / 'assets' / 'fonts' / 'unifont_all-17.0.04.hex'
+FONT_ASSET = BUILD_DIR / 'assets' / 'fonts' / 'unifont.bin'
+FONT_ASSET_PATH = '/boot/fonts/unifont.bin'
+FONT_ASSET_MAGIC = 0x544E4642
+FONT_ASSET_HEADER_SIZE = 24
+FONT_FORMAT_UNIFONT_HEX_V1 = 1
+FONT_ASSET_MAX_BYTES = 16 * 1024 * 1024
 MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'
 EMULATORS = ('bochs', 'qemu', 'qemu-gdb')
 BOOT_MODES = ('legacy', 'uefi')
@@ -163,6 +171,7 @@ class PreparedArtifacts:
     bin_programs: tuple[tuple[str, Path], ...] = ()
     # List of (name, Path) for optional user /bin/smoke programs.
     smoke_bin_programs: tuple[tuple[str, Path], ...] = ()
+    font_asset: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -545,6 +554,28 @@ def check_tools(emulator: str, need_emulator: bool, need_build: bool, boot_mode:
         raise StageError('preflight', 'missing required tool(s): ' + ', '.join(missing))
 
 
+def generate_boot_font_asset(source: Path, output: Path) -> None:
+    require_file(source, 'font asset build', 'source font asset')
+    raw = source.read_bytes()
+    glyph_count = sum(1 for line in raw.splitlines() if line.strip() and b':' in line)
+    header = struct.pack(
+        '<IIIHHHHI',
+        FONT_ASSET_MAGIC,
+        FONT_ASSET_HEADER_SIZE,
+        FONT_FORMAT_UNIFONT_HEX_V1,
+        8,
+        16,
+        8,
+        16,
+        glyph_count,
+    )
+    payload = header + raw
+    if len(payload) > FONT_ASSET_MAX_BYTES:
+        raise StageError('font asset build', f'generated font asset is too large: {len(payload)} bytes')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+
+
 def build_current_artifacts(boot_mode: str = 'legacy') -> None:
     run_command('kernel build', ['xmake', 'build', 'kernel'], PROJECT_ROOT)
     if boot_mode == 'uefi':
@@ -553,9 +584,12 @@ def build_current_artifacts(boot_mode: str = 'legacy') -> None:
     else:
         run_command('boot build', ['xmake', 'build', 'boot-artifacts'], PROJECT_ROOT)
     run_command('user elf build', ['xmake', 'build', 'user-init-elf'], PROJECT_ROOT)
+    if boot_mode == 'uefi':
+        generate_boot_font_asset(FONT_SOURCE, FONT_ASSET)
     require_file(DEFAULT_KERNEL, 'kernel build', 'kernel ELF')
     if boot_mode == 'uefi':
         require_file(UEFI_LOADER, 'uefi build', 'BOOTX64.EFI')
+        require_file(FONT_ASSET, 'font asset build', FONT_ASSET_PATH, FONT_ASSET_MAX_BYTES)
     for name, (path, max_size) in BOOT_ARTIFACTS.items():
         require_file(path, 'boot build', f'{name} artifact', max_size)
 
@@ -564,6 +598,9 @@ def get_artifacts(kernel: Path = DEFAULT_KERNEL, boot_mode: str = 'legacy') -> P
     require_file(kernel, 'image build', 'kernel ELF')
     if boot_mode == 'uefi':
         require_file(UEFI_LOADER, 'image build', 'BOOTX64.EFI')
+        if not FONT_ASSET.exists():
+            generate_boot_font_asset(FONT_SOURCE, FONT_ASSET)
+        require_file(FONT_ASSET, 'image build', FONT_ASSET_PATH, FONT_ASSET_MAX_BYTES)
     for name, (path, max_size) in BOOT_ARTIFACTS.items():
         require_file(path, 'image build', f'{name} artifact', max_size)
     require_file(USER_INIT_ELF, 'image build', USER_INIT_ELF_PATH, USER_INIT_ELF_MAX_BYTES)
@@ -589,6 +626,7 @@ def get_artifacts(kernel: Path = DEFAULT_KERNEL, boot_mode: str = 'legacy') -> P
         user_init_elf=USER_INIT_ELF,
         bin_programs=tuple(bin_programs),
         smoke_bin_programs=tuple(smoke_bin_programs),
+        font_asset=FONT_ASSET if boot_mode == 'uefi' else None,
     )
 
 
@@ -943,7 +981,7 @@ def create_uefi_image(image_path: Path, image_size: int, artifacts: PreparedArti
         image.truncate(image_size)
 
     run_command('uefi esp format', ['mformat', '-i', str(image_path), '-F', '::'], PROJECT_ROOT)
-    for directory in ('/EFI', '/EFI/BOOT', '/boot', '/boot/user', '/bin'):
+    for directory in ('/EFI', '/EFI/BOOT', '/boot', '/boot/user', '/boot/fonts', '/bin'):
         run_command('uefi esp mkdir', ['mmd', '-i', str(image_path), mtools_path(directory)], PROJECT_ROOT)
     if artifacts.smoke_bin_programs:
         run_command('uefi esp mkdir', ['mmd', '-i', str(image_path), mtools_path('/bin/smoke')], PROJECT_ROOT)
@@ -954,6 +992,9 @@ def create_uefi_image(image_path: Path, image_size: int, artifacts: PreparedArti
     mtools_copy_in(image_path, artifacts.kernel, '/kernel')
     if artifacts.user_init_elf is not None:
         mtools_copy_in(image_path, artifacts.user_init_elf, USER_INIT_ELF_PATH)
+    if artifacts.font_asset is None:
+        raise StageError('uefi esp build', f'missing font asset artifact path for {FONT_ASSET_PATH}')
+    mtools_copy_in(image_path, artifacts.font_asset, FONT_ASSET_PATH)
     for name, program in artifacts.bin_programs:
         mtools_copy_in(image_path, program, f'/bin/{name}')
     for name, program in artifacts.smoke_bin_programs:
@@ -964,6 +1005,7 @@ def validate_uefi_image(image_path: Path) -> None:
     required_paths = (
         '/EFI/BOOT/BOOTX64.EFI',
         '/boot/kernel',
+        FONT_ASSET_PATH,
         USER_INIT_ELF_PATH,
         '/bin/sh',
     )

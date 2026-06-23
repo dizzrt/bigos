@@ -33,7 +33,8 @@ Non-goals for the default UEFI backend:
 - Do not change the Legacy BIOS/MBR/exFAT/Bochs semantics of `xmake run bochs` or its `--display sdl2|none` target arguments.
 - Do not replace MBR, DBR, extended DBR, `boot.bin`, or the existing raw exFAT image.
 - Do not claim runtime parity beyond the current bounded userland baseline.
-- Do not implement Secure Boot, GOP framebuffer handoff, ACPI table handoff, UEFI Runtime Services, persistent NVRAM semantics, new SMP scope, or a second ISA.
+- Do not implement Secure Boot, ACPI table handoff, UEFI Runtime Services, persistent NVRAM semantics, new SMP scope, or a second ISA.
+- Do not treat GOP framebuffer metadata handoff as glyph rendering, Unicode display, framebuffer scrollback, or graphical console parity.
 - Do not require the kernel to call BIOS interrupts, UEFI Boot Services, or UEFI Runtime Services.
 - Do not introduce external UEFI libraries, hosted runtime, exceptions, RTTI, or other non-freestanding dependencies.
 
@@ -116,6 +117,7 @@ Implemented foundation:
 
 - Legacy BIOS backend produces a full v2 blob with required `core` and `memory_map` sections.
 - UEFI backend produces a v2 blob with required `core` and `memory_map` sections plus optional `storage_metadata` and `loader_metadata` sections.
+- UEFI backend may also produce optional `framebuffer_metadata` and `font_asset_metadata` sections. The framebuffer section is normalized from the firmware current GOP mode and records physical base, byte size, width, height, pixels per scanline, pixel format, bytes/bits per pixel, and write/cache hints. The font section describes the ESP-loaded first boot font asset.
 - Runtime `_start` saves the entry `BootInfoHeader*`, calls `_init`, then restores it as the first `kernel()` argument.
 - Kernel consumer validates magic, version, size, alignment, field offsets, section offsets, section sizes, and bounds.
 - Unknown non-required sections may be skipped; missing or malformed required sections fail v2 and explicitly fall back to fixed-address v1 `BootInfo`.
@@ -124,7 +126,7 @@ Implemented foundation:
 Still not implemented:
 
 - Runtime parity beyond the current bounded userland baseline.
-- GOP framebuffer, ACPI/SMBIOS firmware table sections, and UEFI Runtime Services support.
+- Glyph rendering, Unicode display, framebuffer scrollback, ACPI/SMBIOS firmware table sections, and UEFI Runtime Services support.
 - Secure Boot, persistent NVRAM semantics, and non-x86_64 ISA backends.
 
 ## Unified Memory Map Plan
@@ -164,6 +166,8 @@ BIOS E820 mapping:
 
 Early buddy initialization releases only `usable` regions. `reserved`, `runtime`, `mmio`, `acpi_reclaim`, `acpi_nvs`, `bad_memory`, and unknown regions never enter the buddy free list. `acpi_reclaim` stays reserved until ACPI table discovery, copying, and lifecycle management prove it safe to reclaim.
 
+When a valid framebuffer metadata section is present, the framebuffer physical range is treated conservatively even if firmware also reports an overlapping `usable` range: early buddy initialization excludes that subrange from the ordinary RAM free pool, and direct-map initialization skips it so later framebuffer writers cannot rely on an ordinary-RAM alias. Kernel code that needs to write a firmware framebuffer must request a virtual address through `bigos::mm::map_device_mmio(physical_base, length, cache_policy)`; direct `phys_to_direct()` framebuffer writes are outside the allowed boundary.
+
 Initial UEFI `GetMemoryMap` mapping direction:
 
 - `EfiConventionalMemory` maps to `usable`.
@@ -195,6 +199,7 @@ Candidate follow-up changes:
 The default UEFI backend uses separate artifacts from Legacy BIOS:
 
 - `xmake build uefi-artifacts` builds `build/bin/x86/uefi/BOOTX64.EFI`.
+- The first boot-time font source asset is `assets/fonts/unifont_all-17.0.04.hex`. The Python image helper generates the versioned payload `build/assets/fonts/unifont.bin` and packages it into the ESP as `/boot/fonts/unifont.bin`; the UEFI loader consumes only the ESP runtime path.
 - `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` prepares `build/test/uefi-esp.img`, prepares `build/test/uefi-root.raw` as the current exFAT runtime root compatibility image, copies a writable OVMF vars file to `build/test/OVMF_VARS.uefi.fd`, and launches QEMU/OVMF.
 - `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` is the direct helper form.
 
@@ -202,6 +207,7 @@ UEFI artifact isolation policy:
 
 - BIOS path continues using raw exFAT images and artifacts such as `build/test/os.raw`.
 - UEFI path uses an ESP/FAT image containing `EFI/BOOT/BOOTX64.EFI`, `/boot/kernel`, `/boot/user/init.elf`, and bounded `/bin/*` payloads. Until a FAT runtime filesystem or loader-fed runtime payload exists, QEMU also attaches a separate exFAT compatibility root image as primary IDE so the current kernel VFS can reach the same bounded userland baseline.
+- The ESP/FAT image also contains `/boot/fonts/unifont.bin` for framebuffer handoff metadata. Missing or invalid font metadata is a documented fallback and must not block serial diagnostics, VGA text fallback, memory initialization, or bounded userland validation.
 - UEFI firmware configuration, temporary directories, and emulator configuration must not overwrite Legacy BIOS artifacts used by `xmake run qemu`, `xmake run qemu-gdb`, or `xmake run bochs`.
 - UEFI smoke tests primarily use QEMU + OVMF. Bochs UEFI is not required for this backend.
 - Legacy BIOS continues to use the current raw exFAT image with QEMU IDE or Bochs.
@@ -219,6 +225,8 @@ UEFI BootInfo metadata sections:
 - In the UEFI `core` section, `boot_protocol` is `UEFI` and `exfat_data_area_lba` is zero; ESP or root storage identity is not encoded in the Legacy exFAT field.
 - The optional `storage_metadata` section describes the UEFI ESP/root source and boot path.
 - The optional `loader_metadata` section records diagnostic backend, loader version/build id, firmware vendor/revision, and boot file path information.
+- The optional `framebuffer_metadata` section records UEFI GOP current-mode geometry and physical framebuffer bounds before `ExitBootServices`. It is parsed as an immutable optional view by the kernel; absent metadata keeps the Legacy/VGA text and serial fallback valid, while invalid metadata is ignored before any framebuffer writes.
+- The optional `font_asset_metadata` section records the ESP-loaded `/boot/fonts/unifont.bin` buffer address, byte size, format version, cell metrics, and loader-provided flags. The kernel validates metadata bounds before exposing the view and does not dereference the asset as part of this handoff change.
 - Kernel startup still depends only on valid required `core` and `memory_map` sections; missing or unknown optional sections remain skippable.
 
 ## ELF64 Loading Rules
@@ -240,7 +248,7 @@ The UEFI loader implements an ELF reader suited for UEFI and does not directly r
 | 2 | Migrate memory module to unified `BootMemoryRegion` consumer while keeping BIOS fallback | Yes, BIOS E820 is normalized | unified boot handoff capability header and memory-map section draft | Allocator initialization order, usable memory misclassification | `define-unified-boot-handoff-abi` |
 | 3 | Minimal UEFI loader implementing a UEFI ELF reader, only to load kernel, fill handoff, and enter `kernel()` | Yes, promoted into the default UEFI backend | unified boot handoff capability ABI, ELF64 loading rules, toolchain spike | PE/COFF build, ExitBootServices order, page-table differences | `spike-minimal-uefi-loader` |
 | 4 | ESP/FAT image generation, OVMF/QEMU debug entry, and documented command | Yes, promoted into the default UEFI backend | kernel memory API capability bootable loader | Host OVMF paths, CI portability, artifact isolation | `add-uefi-boot-debug-entry` |
-| 5 | GOP framebuffer, ACPI RSDP/SMBIOS handoff, and fuller UEFI validation policy | No | unified boot handoff capability sections, kernel memory API capability/4 UEFI smoke test | Framebuffer mapping, ACPI table lifecycle, runtime metadata misuse | `handoff-gop-acpi-firmware-tables` |
+| 5 | GOP framebuffer metadata handoff, ACPI RSDP/SMBIOS handoff, and fuller UEFI validation policy | Partial: GOP framebuffer/font metadata handoff only | unified boot handoff capability sections, kernel memory API capability/UEFI smoke test | Framebuffer mapping, ACPI table lifecycle, runtime metadata misuse | `handoff-gop-acpi-firmware-tables` |
 | 6 | Shared ELF64 loading rule specification for BIOS and UEFI, without requiring shared loader code soon | No | Current BIOS ELF loading behavior documented | Rule/implementation drift, inconsistent error handling | `document-common-elf64-loader-rules` |
 
 UEFI default runtime parity is bounded to the current resident init, shell, and packaged user-program baseline. Future firmware parity work must keep the Legacy BIOS path available explicitly and continue using `xmake run qemu-legacy`, `xmake run qemu-gdb`, or `xmake run bochs` when BIOS/ATA/port-IO behavior needs direct validation.

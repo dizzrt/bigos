@@ -148,15 +148,18 @@ x86_64 UEFI boot backend 是默认 smoke 入口。可运行
 或直接使用 helper：
 `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`。`xmake run qemu-uefi` 仍是同一 backend 的显式别名。
 
-UEFI smoke 会构建/使用 `BOOTX64.EFI`，创建包含 kernel、PID-1 init、`/bin/sh` 和有界
-`/bin/*` 的 ESP/FAT image，并为当前 VFS baseline 准备 exFAT 兼容 root image，使用 x86_64 OVMF 启动 QEMU，并默认使用
+UEFI smoke 会构建/使用 `BOOTX64.EFI`，创建包含 kernel、PID-1 init、`/bin/sh`、有界
+`/bin/*` 和 `/boot/fonts/unifont.bin` 的 ESP/FAT image，并为当前 VFS baseline 准备 exFAT 兼容 root image，使用 x86_64 OVMF 启动 QEMU，并默认使用
 `build/test/qemu-uefi.serial.log`。它要求 QEMU/OVMF、Homebrew LLVM/LLD、`mtools`、
 现有 x86_64 cross toolchain，以及用于 Python helper validation 的 `uv`。缺少 OVMF、
 mtools、LLVM/LLD、QEMU、cross toolchain 或 `uv` 时，必须记录为 skipped 或 blocked，
 并写明替代检查和剩余 UEFI bootability 风险。
 
 UEFI 默认 runtime marker 与此前 Legacy BIOS headless 路径使用的默认 init/user exec marker 相同，当前为 `BIGOS_USER_EXEC`。
-缺失该 marker 是 failed 或 blocked UEFI runtime-parity check，不是通过。Apple Silicon
+Framebuffer handoff 证据应与通过条件分开记录，可使用 `BIGOS_UEFI_FRAMEBUFFER` 等 serial
+诊断，以及确认 framebuffer 物理范围已从 ordinary RAM 和 direct-map 初始化中排除的 kernel/source-level
+检查。framebuffer 或 font metadata 缺失属于 framebuffer-handoff fallback；只要达到 bounded userland
+marker，它不是默认 UEFI boot failure。缺失 `BIGOS_USER_EXEC` 是 failed 或 blocked UEFI runtime-parity check，不是通过。Apple Silicon
 主机可能通过 TCG 运行 x86_64 QEMU，因此 validation notes 应记录 timeout 和性能相关剩余风险。
 
 ## 交叉验证

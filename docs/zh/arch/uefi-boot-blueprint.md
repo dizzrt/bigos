@@ -37,7 +37,8 @@ MBR -> DBR -> exDBR -> boot.bin          BOOTX64.EFI
 - 不改变 `xmake run bochs` 及其 `--display sdl2|none` target arguments 的 Legacy BIOS/MBR/exFAT/Bochs 语义。
 - 不替换 MBR、DBR、extended DBR、`boot.bin` 或现有 raw exFAT image。
 - 不宣称超出当前 bounded userland baseline 的 runtime parity。
-- 不实现 Secure Boot、GOP framebuffer handoff、ACPI table handoff、UEFI Runtime Services、持久 NVRAM 语义、新 SMP 范围或第二 ISA。
+- 不实现 Secure Boot、ACPI table handoff、UEFI Runtime Services、持久 NVRAM 语义、新 SMP 范围或第二 ISA。
+- 不把 GOP framebuffer metadata handoff 等同于 glyph rendering、Unicode display、framebuffer scrollback 或图形 console parity。
 - 不要求 kernel 调用 BIOS interrupt、UEFI Boot Services 或 UEFI Runtime Services。
 - 不引入外部 UEFI 库、hosted runtime、异常、RTTI 或其它非 freestanding 依赖。
 
@@ -127,6 +128,10 @@ BootInfoSection[]
   `memory_map` section。
 - UEFI backend 生产 v2 blob，包含 required `core` 与 `memory_map` sections，
   以及 optional `storage_metadata` 与 `loader_metadata` sections。
+- UEFI backend 也可以生产 optional `framebuffer_metadata` 与 `font_asset_metadata`
+  sections。framebuffer section 从固件当前 GOP 模式规范化而来，记录物理基址、字节大小、宽高、
+  pixels per scanline、pixel format、bytes/bits per pixel 以及写入/cache hint。
+  font section 描述 ESP 加载的首个 boot font asset。
 - runtime `_start` 保存入口 `BootInfoHeader*`，调用 `_init` 后恢复为 `kernel()` 的第一个参数。
 - kernel consumer 校验 magic、version、size、alignment、field offset、section offset、section size 和边界。
 - 未识别的非必需 section 可以跳过；必需 section 缺失或格式错误导致 v2 失败，并显式 fallback 到 v1 fixed-address `BootInfo`。
@@ -135,7 +140,7 @@ BootInfoSection[]
 仍未实现的范围：
 
 - 超出当前 bounded userland baseline 的 UEFI runtime parity。
-- GOP framebuffer、ACPI/SMBIOS firmware table section 和 UEFI Runtime Services 支持。
+- Glyph rendering、Unicode display、framebuffer scrollback、ACPI/SMBIOS firmware table section 和 UEFI Runtime Services 支持。
 - Secure Boot、持久 NVRAM 语义和非 x86_64 ISA backend。
 
 ## 统一内存图规划
@@ -177,6 +182,12 @@ early buddy 初始化只释放 `usable` 区域。`reserved`、`runtime`、`mmio`
 `acpi_reclaim`、`acpi_nvs`、`bad_memory` 和 unknown 区域都不会进入 buddy free list。
 `acpi_reclaim` 在 ACPI 表发现、复制和生命周期管理完成前保持保留。
 
+当存在有效 framebuffer metadata section 时，即使固件也把重叠区域报告为 `usable`，framebuffer
+物理范围仍按保守策略处理：early buddy 初始化会从 ordinary RAM free pool 中排除该子范围，
+direct-map 初始化也会跳过它，避免后续 framebuffer writer 依赖 ordinary-RAM alias。kernel 代码如果需要写 firmware framebuffer，必须通过
+`bigos::mm::map_device_mmio(physical_base, length, cache_policy)` 获取虚拟地址；直接通过
+`phys_to_direct()` 写 framebuffer 不属于允许边界。
+
 UEFI `GetMemoryMap` 初步映射方向：
 
 - `EfiConventionalMemory` 映射为 `usable`。
@@ -211,6 +222,9 @@ UEFI `GetMemoryMap` 初步映射方向：
 默认 UEFI backend 使用与 Legacy BIOS 分离的产物：
 
 - `xmake build uefi-artifacts` 构建 `build/bin/x86/uefi/BOOTX64.EFI`。
+- 首个 boot-time font 源资产固定为 `assets/fonts/unifont_all-17.0.04.hex`。Python image
+  helper 生成版本化 payload `build/assets/fonts/unifont.bin`，并打包到 ESP 的
+  `/boot/fonts/unifont.bin`；UEFI loader 只消费 ESP runtime path。
 - `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
   会准备 `build/test/uefi-esp.img`，并准备 `build/test/uefi-root.raw` 作为当前 exFAT runtime root 兼容镜像，复制可写 OVMF vars 文件到
   `build/test/OVMF_VARS.uefi.fd`，并启动 QEMU/OVMF。
@@ -223,6 +237,9 @@ UEFI 产物隔离策略：
 - UEFI 路径使用 ESP/FAT image，包含 `EFI/BOOT/BOOTX64.EFI`、`/boot/kernel`、
   `/boot/user/init.elf` 和有界 `/bin/*` payload。在 FAT runtime filesystem 或 loader-fed runtime payload
   落地前，QEMU 还会将独立 exFAT 兼容 root image 挂为 primary IDE，使当前 kernel VFS 可以到达同一有界用户态基线。
+- ESP/FAT image 同时包含 `/boot/fonts/unifont.bin`，供 framebuffer handoff metadata 使用。
+  font metadata 缺失或非法是文档化 fallback，不能阻塞 serial diagnostics、VGA text fallback、
+  memory initialization 或 bounded userland validation。
 - UEFI 固件配置、临时目录和 emulator 配置不得覆盖 `xmake run qemu`、`xmake run qemu-gdb` 或 `xmake run bochs` 使用的 Legacy BIOS 产物。
 - UEFI smoke test 首选 QEMU + OVMF；该后端不要求 Bochs UEFI。
 - Legacy BIOS 继续使用当前 raw exFAT image，并通过 QEMU IDE 或 Bochs 启动。
@@ -243,6 +260,12 @@ UEFI BootInfo metadata sections：
 - Optional `storage_metadata` section 描述 UEFI ESP/root 来源和 boot path。
 - Optional `loader_metadata` section 记录诊断用 backend、loader version/build id、
   firmware vendor/revision 和 boot file path 信息。
+- Optional `framebuffer_metadata` section 在 `ExitBootServices` 前记录 UEFI GOP 当前模式的
+  geometry 与物理 framebuffer 边界。kernel 将其解析为 immutable optional view；metadata 缺失时
+  Legacy/VGA text 与 serial fallback 仍然有效，metadata 非法时在任何 framebuffer 写入前忽略。
+- Optional `font_asset_metadata` section 记录 ESP 加载的 `/boot/fonts/unifont.bin` buffer 地址、
+  字节大小、format version、cell metrics 和 loader-provided flags。kernel 在暴露 view 前校验
+  metadata bounds，本 handoff change 不会解引用该资产并执行 glyph lookup。
 - Kernel 启动仍只依赖有效的 required `core` 与 `memory_map` sections；缺失或未知的
   optional section 仍可跳过。
 
@@ -266,7 +289,7 @@ exFAT、固定低地址和页表准备的实现。BIOS 与 UEFI loader 需要共
 | 2 | 内存模块迁移到统一 `BootMemoryRegion` consumer，并保留 BIOS fallback | 是，BIOS E820 已规范化 | unified boot handoff capability header 和 memory map section 草案 | allocator 初始化顺序、可用内存误判 | `define-unified-boot-handoff-abi` |
 | 3 | 最小 UEFI loader，单独实现 UEFI ELF reader，目标仅为加载 kernel、填充 handoff、进入 `kernel()` | 是，已晋升为默认 UEFI backend 的组成部分 | unified boot handoff capability ABI、ELF64 加载规则、工具链 spike | PE/COFF 构建、ExitBootServices 顺序、页表差异 | `spike-minimal-uefi-loader` |
 | 4 | ESP/FAT 镜像生成、OVMF/QEMU 调试入口和文档化命令 | 是，已晋升为默认 UEFI backend 的组成部分 | kernel memory API capability loader 可启动 | 宿主机 OVMF 路径、CI 可移植性、产物隔离 | `add-uefi-boot-debug-entry` |
-| 5 | GOP framebuffer、ACPI RSDP/SMBIOS handoff 和更完整的 UEFI 验证策略 | 否 | unified boot handoff capability sections、kernel memory API capability/4 UEFI smoke test | framebuffer 映射、ACPI 表生命周期、runtime metadata 误用 | `handoff-gop-acpi-firmware-tables` |
+| 5 | GOP framebuffer metadata handoff、ACPI RSDP/SMBIOS handoff 和更完整的 UEFI 验证策略 | 部分：仅完成 GOP framebuffer/font metadata handoff | unified boot handoff capability sections、kernel memory API capability/UEFI smoke test | framebuffer 映射、ACPI 表生命周期、runtime metadata 误用 | `handoff-gop-acpi-firmware-tables` |
 | 6 | BIOS 与 UEFI 共享 ELF64 加载规则规范，但不要求近期共享 loader 代码 | 否 | 当前 BIOS ELF 加载行为文档化 | 规则与实现漂移、错误处理不一致 | `document-common-elf64-loader-rules` |
 
 UEFI 默认 runtime parity 仅限当前 resident init、shell 和 packaged user-program 基线。后续 firmware parity
