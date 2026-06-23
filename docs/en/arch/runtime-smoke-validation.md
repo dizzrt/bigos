@@ -83,6 +83,17 @@ are unavailable, mark the interactive portion skipped or blocked and record the
 source-level, build, and headless checks used as substitutes plus the remaining
 console-usability risk.
 
+Framebuffer console validation is separate from the default serial marker pass
+condition. When QEMU + OVMF graphical evidence is available, notes should record
+the framebuffer geometry, `BIGOS_CONSOLE_RENDER backend=framebuffer-text`,
+visible text, software cursor behavior, and PageUp/PageDown/Home/End viewport
+redraw behavior. Missing OVMF, QEMU, display/screenshot support, framebuffer
+metadata, or glyph lookup readiness should be marked as skipped or blocked with
+the VGA fallback, source-level checks, build result, and residual graphical
+console risk recorded. A successful framebuffer console check still does not
+claim UTF-8 decoding, CJK display, ANSI/VT, `termios`, multiple terminals, or a
+complete POSIX terminal.
+
 The `blocking-primitives` case emits intermediate markers `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, and `BIGOS_BLOCKING_TIMEOUT_EXPIRED` before the final pass marker. It uses a synthetic TTY producer, so automated QEMU headless validation does not require manual keyboard input; optional manual keyboard validation should be recorded separately when performed.
 
 The `scheduler-semantics` case emits intermediate markers `BIGOS_SCHED_SEMANTICS_START`, `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED`, and `BIGOS_SCHED_SEMANTICS_PREEMPTED` before the final pass marker. It exercises time-slice expiry and timer-driven IRQ-return reschedule without enabling memory, filesystem, user-program, user-ELF, or broad smoke options. Because it touches IRQ/timer/context-switch behavior, validation notes should record QEMU headless serial logs and whether Bochs or QEMU+Bochs cross-validation was executed or skipped.
@@ -155,6 +166,9 @@ The runner writes a Markdown-first validation artifact to `build/test/runtime-sm
 - `status`: `passed`, `failed`, `skipped`, or `blocked`.
 - `failed stage`: preflight, build, image build, validation, or emulator marker stage.
 - `skip reason`, `alternative checks`, and `residual risk`: required for unavailable tools or skipped cross-validation.
+- `console backend evidence`: optional framebuffer/VGA backend selection,
+  framebuffer geometry, visible-text/cursor/scrollback notes, and skipped or
+  blocked graphical evidence.
 
 Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, or other required local dependencies must be recorded as skipped or blocked. A smoke that did not run must not be marked as passed.
 
@@ -166,7 +180,7 @@ The UEFI smoke builds/uses `BOOTX64.EFI`, creates an ESP/FAT image with the kern
 
 The expected default UEFI runtime marker is the same default init/user exec marker previously used by the Legacy BIOS headless path, currently `BIGOS_USER_EXEC`. Framebuffer handoff evidence should be recorded separately from the pass condition, using serial diagnostics such as `BIGOS_UEFI_FRAMEBUFFER` and the kernel/source-level checks that the framebuffer physical range is excluded from ordinary RAM and direct-map initialization. Glyph lookup font asset readiness should also be recorded separately: the validation notes should state whether `build/assets/fonts/unifont.bin` was generated as a glyph lookup payload, packaged to ESP `/boot/fonts/unifont.bin`, loaded by the UEFI backend with `BIGOS_UEFI_FONT`, and accepted by kernel-side validation with `BIGOS_FONT_LOOKUP ready` or rejected with an explicit unavailable stage. Missing framebuffer metadata, font metadata, or glyph lookup validation is a handoff/lookup fallback, not a default UEFI boot failure, as long as the bounded userland marker is reached. Missing `BIGOS_USER_EXEC` is a failed or blocked UEFI runtime-parity check, not a pass. Apple Silicon hosts may run x86_64 QEMU through TCG, so validation notes should record timeout values and performance-related residual risk when applicable.
 
-Glyph lookup readiness is only an input for later framebuffer console work. It does not prove framebuffer glyph rendering, Unicode display, software cursor support, framebuffer scrollback, Secure Boot, ACPI handoff, UEFI Runtime Services, or full device/storage parity.
+Glyph lookup readiness is an input for the bounded framebuffer console backend. It does not by itself prove framebuffer glyph rendering, Unicode display, software cursor support, framebuffer scrollback, Secure Boot, ACPI handoff, UEFI Runtime Services, or full device/storage parity; validation must record the selected console backend and graphical/manual evidence separately when those claims are being checked.
 
 ## Cross-Validation
 

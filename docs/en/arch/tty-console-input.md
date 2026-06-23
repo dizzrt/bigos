@@ -1,6 +1,6 @@
 # TTY, Console, And Keyboard Input
 
-BigOS input covers only single-core x86_64, i8259 PIC, PS/2 set-1 keyboard, and VGA text mode. Its goal is a minimal, verifiable keyboard-to-TTY handoff and an ordinary runtime text output entry. It is not a full terminal, shell, or user-mode input subsystem.
+BigOS input covers only single-core x86_64, i8259 PIC, PS/2 set-1 keyboard, and the default runtime text console. Its goal is a minimal, verifiable keyboard-to-TTY handoff and an ordinary runtime text output entry. It is not a full terminal, shell, or user-mode input subsystem.
 
 ## Input Data Flow
 
@@ -52,7 +52,7 @@ Interactive console usability connects the same blocking consumer to default use
 
 ## Console Output Boundary
 
-Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps `terminal::console_put()` and `terminal::console_write()` over the default 80x25 VGA text-mode backend. The runtime console owns a fixed 256-line in-kernel scrollback buffer and renders the visible 80x25 viewport from that bounded state. Interactive console usability routes user writes to fd `1` or fd `2` through this visible console when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
+Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps `terminal::console_put()` and `terminal::console_write()`. The runtime console owns the fixed 80x25 cell state, cursor position, 256-line in-kernel scrollback buffer, viewport policy, and clear policy. Rendering is delegated to the selected internal backend: VGA text remains the Legacy fallback, while a UEFI framebuffer text backend may be selected only after validated framebuffer metadata, an explicit `map_device_mmio()` mapping, a supported 32-bit RGBX/BGRX pixel format, and a usable glyph lookup view are available. Interactive console usability routes user writes to fd `1` or fd `2` through this same default console path when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
 
 Basic control-character behavior:
 
@@ -62,9 +62,11 @@ Basic control-character behavior:
 - `\b`: move back one cell when possible and erase that cell.
 - Unsupported escape sequences: ANSI/VT sequences are not parsed; Escape is written as an ordinary character or ignored by an upper layer.
 
-When output moves past the last visible row, the default VGA text backend and the runtime console keep the hardware cursor inside the 80x25 visible range. The runtime console follows newest output while the viewport is at the bottom; PageUp or Home can move the viewport into retained history, and later PageDown or End returns toward the newest output. New output while viewing history does not corrupt retained history or force the viewport back to the bottom. The supported console clear path clears the visible window, discards retained runtime scrollback, and resets the viewport to the bottom.
+When output moves past the last visible row, the runtime console updates its owned scrollback state and asks the backend to redraw the complete visible viewport. The VGA backend uses the hardware text cursor; the framebuffer backend renders glyph pixels from the current `char` cells and draws a software cursor from backend state without storing cursor bytes in scrollback. PageUp or Home can move the viewport into retained history, and later PageDown or End returns toward the newest output. New output while viewing history does not corrupt retained history or force the viewport back to the bottom. The supported console clear path clears the visible window through the selected backend, discards retained runtime scrollback, and resets the viewport to the bottom.
 
-`kput()`, `kputs()`, `kprintf()`, `serial_puts()`, and fatal/page-fault/memory self-test marker paths keep early direct-output semantics and do not depend on TTY initialization or input-buffer state.
+The framebuffer backend renders only the current bounded console cell bytes. Missing glyphs use a deterministic replacement-or-blank policy, and unsupported control bytes are blank at the renderer boundary. This does not implement UTF-8 decoding, CJK display, Unicode codepoint cells, double-width terminal layout, ANSI/VT parsing, color attribute state, multiple terminals, `termios`, or complete POSIX terminal behavior.
+
+`kput()`, `kputs()`, `kprintf()`, `serial_puts()`, and fatal/page-fault/memory self-test marker paths keep early direct-output semantics and do not depend on TTY initialization, framebuffer console initialization, glyph lookup availability, or input-buffer state.
 
 ## Initialization Order
 
@@ -102,13 +104,14 @@ The default interactive shell path intentionally stays below POSIX terminal scop
   foreground group is missing or empty, the result is deterministic no-op/error
   handling, never a dangling process-object dereference.
 - `/bin/sh` shows its deterministic `$ ` prompt only when fd `0` and fd `1` are still bound to the default console fast paths; pipes or redirected files suppress the prompt.
-- stdout and stderr are visible on VGA text mode through fd `1` and fd `2` when those descriptors are not redirected.
+- stdout and stderr are visible through the selected default console render backend through fd `1` and fd `2` when those descriptors are not redirected.
 
 ## Non-Goals
 
 This path does not implement multiple TTYs, full ANSI/VT terminal behavior,
 command history, termios, pseudo-terminals, complete job control, background
-read/write control, USB HID, graphical console mode, persistent or unbounded
+read/write control, USB HID, full graphical terminal behavior, UTF-8 decoding,
+CJK display, Unicode codepoint cells, double-width cells, persistent or unbounded
 history, APIC/IOAPIC, SMP, or internationalized keyboard layouts. The minimal fd
 integration covers only the default console fast paths for bounded userland and
 does not introduce `/dev/tty`, a general character-device filesystem, async I/O,

@@ -1,5 +1,5 @@
 #include <bigos/console.h>
-#include <bigos/device.h>
+#include <bigos/console_render.h>
 
 namespace bigos::terminal {
     namespace {
@@ -8,13 +8,8 @@ namespace bigos::terminal {
         constexpr uint32_t CONSOLE_SCROLLBACK_LINES = 256;
         constexpr uint8_t CONSOLE_COLOR = 0x0f;
 
-        struct ConsoleCell {
-            char ch;
-            uint8_t color;
-        };
-
         struct ConsoleState {
-            ConsoleCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_WIDTH];
+            ConsoleRenderCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_WIDTH];
             uint64_t oldest_line;
             uint64_t current_line;
             uint64_t viewport_top;
@@ -30,7 +25,7 @@ namespace bigos::terminal {
         }
 
         void clear_line(uint64_t line) noexcept {
-            ConsoleCell *cells = g_console.lines[line_slot(line)];
+            ConsoleRenderCell *cells = g_console.lines[line_slot(line)];
             for (uint32_t x = 0; x < CONSOLE_WIDTH; ++x) {
                 cells[x].ch = ' ';
                 cells[x].color = CONSOLE_COLOR;
@@ -60,26 +55,33 @@ namespace bigos::terminal {
             if (!g_console.initialized)
                 return;
 
+            const ConsoleRenderBackend &backend = console_render_backend();
+            const ConsoleRenderCell blank = {' ', CONSOLE_COLOR};
+            backend.begin_viewport_redraw();
             clamp_viewport();
             for (uint32_t y = 0; y < CONSOLE_HEIGHT; ++y) {
                 const uint64_t line = g_console.viewport_top + y;
                 for (uint32_t x = 0; x < CONSOLE_WIDTH; ++x) {
                     if (line >= g_console.oldest_line && line <= g_console.current_line) {
-                        const ConsoleCell &cell = g_console.lines[line_slot(line)][x];
-                        bigos::device::fill_video_text_cell((uint8_t)x, (uint8_t)y, cell.ch, cell.color);
+                        const ConsoleRenderCell &cell = g_console.lines[line_slot(line)][x];
+                        backend.draw_cell((uint8_t)x, (uint8_t)y, cell);
                     } else {
-                        bigos::device::fill_video_text_cell((uint8_t)x, (uint8_t)y, ' ', CONSOLE_COLOR);
+                        backend.draw_cell((uint8_t)x, (uint8_t)y, blank);
                     }
                 }
             }
 
-            const uint64_t cursor_screen_line = g_console.current_line >= g_console.viewport_top
-                ? g_console.current_line - g_console.viewport_top
-                : 0;
-            const uint8_t cursor_y = cursor_screen_line < CONSOLE_HEIGHT
-                ? (uint8_t)cursor_screen_line
-                : (uint8_t)(CONSOLE_HEIGHT - 1);
-            bigos::device::set_video_text_cursor(g_console.cursor_x, cursor_y);
+            backend.end_viewport_redraw();
+            if (g_console.current_line >= g_console.viewport_top) {
+                const uint64_t cursor_screen_line = g_console.current_line - g_console.viewport_top;
+                if (cursor_screen_line < CONSOLE_HEIGHT) {
+                    const ConsoleRenderCell &cell =
+                        g_console.lines[line_slot(g_console.current_line)][g_console.cursor_x];
+                    backend.set_cursor(g_console.cursor_x, (uint8_t)cursor_screen_line, true, cell);
+                    return;
+                }
+            }
+            backend.set_cursor(0, 0, false, blank);
         }
 
         void reset_console_state() noexcept {
@@ -152,7 +154,9 @@ namespace bigos::terminal {
     }   // namespace
 
     void init_console() noexcept {
+        init_console_render_backend();
         reset_console_state();
+        console_render_backend().clear();
         render_viewport();
         g_console_ready = true;
     }

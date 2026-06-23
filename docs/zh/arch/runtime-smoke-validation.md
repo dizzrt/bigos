@@ -76,6 +76,9 @@ notes 应记录 backend、display/input method、输入命令、观察到的 pro
 和结果。若这些能力不可用，需要将交互部分标记为 skipped 或 blocked，并记录替代的
 source-level、build、headless 检查以及剩余 console-usability 风险。
 
+framebuffer console 验证与默认串口 marker 通过条件分开记录。若 QEMU + OVMF 图形证据可用，notes
+应记录 framebuffer geometry、`BIGOS_CONSOLE_RENDER backend=framebuffer-text`、可见文本、软件光标行为，以及 PageUp/PageDown/Home/End viewport 重绘行为。缺少 OVMF、QEMU、display/screenshot 支持、framebuffer metadata 或 glyph lookup readiness 时，应标记为 skipped 或 blocked，并记录 VGA fallback、source-level checks、构建结果和剩余图形 console 风险。framebuffer console 验证通过也不声明 UTF-8 decoding、CJK 显示、ANSI/VT、`termios`、多终端或完整 POSIX terminal。
+
 `blocking-primitives` case 在最终 pass marker 前还会输出 `BIGOS_BLOCKING_WAIT_BLOCKED`、`BIGOS_BLOCKING_WAKE_SENT`、`BIGOS_BLOCKING_WAIT_RESUMED`、`BIGOS_BLOCKING_TIMEOUT_BLOCKED` 与 `BIGOS_BLOCKING_TIMEOUT_EXPIRED` 中间 marker。它使用 synthetic TTY producer，因此 QEMU headless 自动验证不依赖手工键盘输入；若执行可选手工键盘验证，需要单独记录。
 
 `scheduler-semantics` case 在最终 pass marker 前还会输出 `BIGOS_SCHED_SEMANTICS_START`、`BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED` 与 `BIGOS_SCHED_SEMANTICS_PREEMPTED` 中间 marker。它验证 time-slice expiry 与 timer-driven IRQ-return reschedule，不会启用 memory、filesystem、user-program、user-ELF 或 broad smoke 选项。由于该 case 涉及 IRQ/timer/context-switch 行为，validation notes 需要记录 QEMU headless 串口日志，以及 Bochs 或 QEMU+Bochs 交叉验证是执行还是跳过。
@@ -138,6 +141,7 @@ uv run python tools/boot_debug.py run \
 - `status`：`passed`、`failed`、`skipped` 或 `blocked`。
 - `failed stage`：preflight、build、image build、validation 或 emulator marker 阶段。
 - `skip reason`、`alternative checks` 与 `residual risk`：工具不可用或跳过交叉验证时必须记录。
+- `console backend evidence`：可选记录 framebuffer/VGA backend selection、framebuffer geometry、可见文本/光标/scrollback notes，以及图形证据 skipped 或 blocked 状态。
 
 缺少 `uv`、`xmake`、cross-binutils、QEMU、Bochs、ROM/display 配置或其他必要本地依赖时，必须记录为 skipped 或 blocked。未运行的 smoke 不得标记为 passed。
 
@@ -167,9 +171,9 @@ userland marker，它不是默认 UEFI boot failure。缺失 `BIGOS_USER_EXEC` �
 check，不是通过。Apple Silicon 主机可能通过 TCG 运行 x86_64 QEMU，因此 validation notes 应记录 timeout
 和性能相关剩余风险。
 
-Glyph lookup readiness 只是后续 framebuffer console work 的输入，不证明 framebuffer glyph rendering、Unicode
+Glyph lookup readiness 是有界 framebuffer console backend 的输入。它本身不证明 framebuffer glyph rendering、Unicode
 display、software cursor support、framebuffer scrollback、Secure Boot、ACPI handoff、UEFI Runtime Services
-或完整 device/storage parity。
+或完整 device/storage parity；验证这些结论时必须单独记录选中的 console backend 和图形/手工证据。
 
 ## 交叉验证
 

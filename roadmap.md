@@ -323,10 +323,10 @@ Legacy text console remains as a fallback.
   glyphs.
 - [x] 任务 M7.2：构建期字体资产管线，将随附点阵字体转换为紧凑的内核内字形查找，覆盖半宽与
   全宽字形。
-- [ ] Task M7.3: a framebuffer text console backend that renders glyphs, a software
+- [x] Task M7.3: a framebuffer text console backend that renders glyphs, a software
   cursor, and scrolling behind the existing console output interface so upper
   console/scrollback state stays reusable.
-- [ ] 任务 M7.3：framebuffer 文本控制台后端，在既有控制台输出接口之后渲染字形、软件光标与
+- [x] 任务 M7.3：framebuffer 文本控制台后端，在既有控制台输出接口之后渲染字形、软件光标与
   滚动，使上层 console/scrollback 状态可复用。
 - [ ] Task M7.4: upgrade the console text model to UTF-8 decoding, codepoint-based
   cells, and double-width cell handling so non-ASCII text can be displayed; the

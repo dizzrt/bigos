@@ -175,18 +175,24 @@ def test_tty_blocking_consumer_is_additive_and_uses_wait_queue() -> None:
     assert 'sched::wait_queue_wait_until(&g_input_wait, &input_available, nullptr, timeout_ticks)' in tty
 
 
-def test_console_api_wraps_vga_without_serial_mirroring() -> None:
+def test_console_api_uses_render_backend_without_serial_mirroring() -> None:
     console_h = read_source('include/bigos/console.h')
+    render_h = read_source('include/bigos/console_render.h')
     console = read_source('kernel/core/terminal/console.cc')
+    render = read_source('kernel/core/terminal/console_render.cc')
     vga = read_source('kernel/drivers/video/vga.cc')
     io = read_source('kernel/core/bigos/io.cc')
 
     assert 'void console_put(char ch) noexcept;' in console_h
     assert 'void console_write(const char *s) noexcept;' in console_h
     assert 'void console_scroll_page_up() noexcept;' in console_h
-    assert 'ConsoleCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_WIDTH];' in console
+    assert 'struct ConsoleRenderBackend' in render_h
+    assert 'ConsoleRenderCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_WIDTH];' in console
     assert 'CONSOLE_SCROLLBACK_LINES = 256' in console
-    assert 'bigos::device::fill_video_text_cell' in console
+    assert 'console_render_backend()' in console
+    assert 'bigos::device::fill_video_text_cell' not in console
+    assert 'const bigos::terminal::ConsoleRenderBackend g_vga_backend' in render
+    assert 'bigos::device::fill_video_text_cell' in render
     assert 'serial_puts' not in console
     assert "if (__ch == '\\r')" in vga
     assert "if (__ch == '\\b')" in vga
@@ -223,9 +229,12 @@ def test_vga_text_backend_bounds_cursor_and_scrolls_visible_screen() -> None:
 
 def test_console_scrollback_state_viewport_follow_and_clear_policy() -> None:
     console = read_source('kernel/core/terminal/console.cc')
+    render_h = read_source('include/bigos/console_render.h')
 
     assert 'CONSOLE_WIDTH = 80' in console
     assert 'CONSOLE_HEIGHT = 25' in console
+    assert 'CONSOLE_RENDER_WIDTH = 80' in render_h
+    assert 'CONSOLE_RENDER_HEIGHT = 25' in render_h
     assert 'CONSOLE_SCROLLBACK_LINES = 256' in console
     assert 'uint64_t oldest_line;' in console
     assert 'uint64_t current_line;' in console
@@ -234,8 +243,10 @@ def test_console_scrollback_state_viewport_follow_and_clear_policy() -> None:
     assert 'uint64_t bottom_viewport_top() noexcept' in console
     assert 'bool viewport_at_bottom() noexcept' in console
     assert 'void render_viewport() noexcept' in console
-    assert 'bigos::device::fill_video_text_cell' in console
-    assert 'bigos::device::set_video_text_cursor(g_console.cursor_x, cursor_y);' in console
+    assert 'backend.begin_viewport_redraw();' in console
+    assert 'backend.draw_cell((uint8_t)x, (uint8_t)y, cell);' in console
+    assert 'backend.set_cursor(g_console.cursor_x, (uint8_t)cursor_screen_line, true, cell);' in console
+    assert 'backend.set_cursor(0, 0, false, blank);' in console
     assert 'g_console.current_line + 1 - CONSOLE_SCROLLBACK_LINES' in console
     assert 'if (follow)' in console
     assert 'console_scroll_page_up' in console

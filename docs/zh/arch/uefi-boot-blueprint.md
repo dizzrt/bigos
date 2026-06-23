@@ -263,7 +263,8 @@ UEFI BootInfo metadata sections：
   firmware vendor/revision 和 boot file path 信息。
 - Optional `framebuffer_metadata` section 在 `ExitBootServices` 前记录 UEFI GOP 当前模式的
   geometry 与物理 framebuffer 边界。kernel 将其解析为 immutable optional view；metadata 缺失时
-  Legacy/VGA text 与 serial fallback 仍然有效，metadata 非法时在任何 framebuffer 写入前忽略。
+  Legacy/VGA text 与 serial fallback 仍然有效，metadata 非法时在任何 framebuffer 写入前忽略。运行期 framebuffer console 渲染只能在通过
+  `bigos::mm::map_device_mmio()` 映射该范围后消费这个 view。
 - Optional `font_asset_metadata` section 记录 ESP 加载的 `/boot/fonts/unifont.bin` buffer 地址、
   字节大小、glyph lookup format version、glyph/cell metrics 和 loader-provided flags。UEFI loader
   校验 glyph lookup header magic、header size、declared byte size、format version、table offsets
@@ -271,7 +272,7 @@ UEFI BootInfo metadata sections：
   pixels。kernel startup 会在暴露只读 lookup view 前校验 payload header、range table、glyph records、
   bitmap bounds、alignment 和 width classes，供后续 console code 使用。
 - Glyph lookup asset 当前记录 Unifont 8x16 半宽和 16x16 全宽 bitmap glyph。width class 只是字体资产属性；
-  它不是 UTF-8 decoding、terminal cell policy、framebuffer glyph rendering、software cursor 或 framebuffer scrollback。
+  它不是 UTF-8 decoding、Unicode terminal cell policy、CJK 显示或双宽 terminal layout。有界 runtime framebuffer console backend 可以使用可用 glyph bitmap 渲染当前 `char` cell 和软件光标，但这不会把默认 console 扩大为完整图形 terminal 或 POSIX terminal。
 - Kernel 启动仍只依赖有效的 required `core` 与 `memory_map` sections；缺失或未知的
   optional section 仍可跳过。
 

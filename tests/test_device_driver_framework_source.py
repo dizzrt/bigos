@@ -127,7 +127,8 @@ def test_timer_video_and_rtc_normal_paths_use_published_wrappers() -> None:
     assert 'bigos::device::init_pit_timer();' in isr
     assert 'driver::timer::pit::init_channel0();' not in isr
     assert 'bigos::device::write_video_text(c);' in io
-    assert 'bigos::device::fill_video_text_cell' in console
+    assert 'console_render_backend()' in console
+    assert 'bigos::device::fill_video_text_cell' in read_source('kernel/core/terminal/console_render.cc')
     assert 'void fill_video_text_cell(uint8_t __x, uint8_t __y, char __ch, uint8_t __color = 0x0f) noexcept;' in read_source('include/bigos/device.h')
     assert 'bigos::device::read_rtc_time(&dt)' in time
 

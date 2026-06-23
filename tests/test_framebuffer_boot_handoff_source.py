@@ -62,6 +62,7 @@ def test_kernel_consumes_optional_metadata_without_framebuffer_direct_map_alias(
     buddy = read_source('kernel/mm/buddy.cc')
     vmem = read_source('kernel/mm/vmem.cc')
     memory = read_source('include/bigos/memory.h')
+    render = read_source('kernel/core/terminal/console_render.cc')
 
     assert 'init_early_handoff_views' in handoff
     assert 'BootOptionalSectionStatus::Valid' in handoff
@@ -73,3 +74,31 @@ def test_kernel_consumes_optional_metadata_without_framebuffer_direct_map_alias(
     assert 'KDEVICE_MMIO_BASE' in vmem
     assert 'map_page(virt, phys, page_attr::PRESENT | page_attr::WRITABLE | page_attr::NO_EXECUTE)' in vmem
     assert 'return (void *)(KDIRECT_BASE + __phys);' in vmem
+    assert 'bigos::boot::early_framebuffer()' in render
+    assert 'bigos::mm::map_device_mmio(metadata.physical_base, metadata.byte_size, policy)' in render
+    assert 'phys_to_direct' not in render
+
+
+def test_framebuffer_console_backend_validates_geometry_and_renders_glyph_cells() -> None:
+    render_h = read_source('include/bigos/console_render.h')
+    render = read_source('kernel/core/terminal/console_render.cc')
+    console = read_source('kernel/core/terminal/console.cc')
+
+    assert 'struct ConsoleRenderBackend' in render_h
+    assert 'CONSOLE_RENDER_WIDTH = 80' in render_h
+    assert 'CONSOLE_RENDER_HEIGHT = 25' in render_h
+    assert 'init_console_render_backend();' in console
+    assert 'probe_framebuffer_backend()' in render
+    assert 'bigos_boot_framebuffer_metadata_valid(&metadata)' in render
+    assert 'metadata.pixel_format != BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_BGRX8888' in render
+    assert 'metadata.bits_per_pixel != 32 || metadata.bytes_per_pixel != 4' in render
+    assert 'checked_mul_u64(bigos::terminal::CONSOLE_RENDER_WIDTH, cell_width, grid_width)' in render
+    assert 'grid_width > metadata.width || grid_height > metadata.height' in render
+    assert 'metadata.height, stride_bytes, min_size' in render
+    assert 'lookup_render_glyph' in render
+    assert "bigos::font::lookup_glyph('?', __glyph)" in render
+    assert 'glyph_bit_set' in render
+    assert 'framebuffer_set_cursor' in render
+    assert 'framebuffer_draw_cell(__x, __y, __cell, true);' in render
+    assert 'BIGOS_CONSOLE_RENDER backend=framebuffer-text' in render
+    assert 'BIGOS_CONSOLE_RENDER backend=vga-text' in render
