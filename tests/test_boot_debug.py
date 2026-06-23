@@ -724,7 +724,7 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
         '"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img", "--uefi-root-image", "build/test/uefi-root.raw"'
         in xmake
     )
-    assert '"build/test/bochs.serial.log"' in xmake
-    assert '"build/test/qemu-uefi.serial.log"' in xmake
-    assert '"build/test/qemu.serial.log"' in xmake
-    assert '"build/test/qemu-gdb.serial.log"' in xmake
+    assert '"log/bochs.serial.log"' in xmake
+    assert '"log/qemu-uefi.serial.log"' in xmake
+    assert '"log/qemu.serial.log"' in xmake
+    assert '"log/qemu-gdb.serial.log"' in xmake

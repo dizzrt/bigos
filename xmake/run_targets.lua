@@ -25,7 +25,7 @@ target("bochs")
         import("core.base.process")
         return run_boot_debug(
             "bochs",
-            "build/test/bochs.serial.log",
+            "log/bochs.serial.log",
             option.get("arguments") or {},
             process,
             {"--boot-mode", "legacy", "--image", "build/test/os.raw"}
@@ -41,7 +41,7 @@ target("qemu")
         import("core.base.process")
         return run_boot_debug(
             "qemu",
-            "build/test/qemu-uefi.serial.log",
+            "log/qemu-uefi.serial.log",
             option.get("arguments") or {},
             process,
             {"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img", "--uefi-root-image", "build/test/uefi-root.raw"}
@@ -57,7 +57,7 @@ target("qemu-legacy")
         import("core.base.process")
         return run_boot_debug(
             "qemu",
-            "build/test/qemu.serial.log",
+            "log/qemu.serial.log",
             option.get("arguments") or {},
             process,
             {"--boot-mode", "legacy", "--image", "build/test/os.raw"}
@@ -73,7 +73,7 @@ target("qemu-gdb")
         import("core.base.process")
         return run_boot_debug(
             "qemu-gdb",
-            "build/test/qemu-gdb.serial.log",
+            "log/qemu-gdb.serial.log",
             option.get("arguments") or {},
             process,
             {"--boot-mode", "legacy", "--image", "build/test/os.raw"}
@@ -89,7 +89,7 @@ target("qemu-uefi")
         import("core.base.process")
         return run_boot_debug(
             "qemu",
-            "build/test/qemu-uefi.serial.log",
+            "log/qemu-uefi.serial.log",
             option.get("arguments") or {},
             process,
             {"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img", "--uefi-root-image", "build/test/uefi-root.raw"}

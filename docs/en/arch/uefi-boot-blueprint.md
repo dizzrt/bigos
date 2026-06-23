@@ -201,7 +201,7 @@ The default UEFI backend uses separate artifacts from Legacy BIOS:
 - `xmake build uefi-artifacts` builds `build/bin/x86/uefi/BOOTX64.EFI`.
 - The first boot-time font source asset is `assets/fonts/unifont_all-17.0.04.hex`. The Python image helper converts the bundled Unifont HEX data into the versioned glyph lookup payload `build/assets/fonts/unifont.bin` and packages it into the ESP as `/boot/fonts/unifont.bin`; the UEFI loader consumes only the ESP runtime path and performs only basic format gating.
 - `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` prepares `build/test/uefi-esp.img`, prepares `build/test/uefi-root.raw` as the current exFAT runtime root compatibility image, copies a writable OVMF vars file to `build/test/OVMF_VARS.uefi.fd`, and launches QEMU/OVMF.
-- `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` is the direct helper form.
+- `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log log/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` is the direct helper form.
 
 UEFI artifact isolation policy:
 

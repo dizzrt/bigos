@@ -33,6 +33,7 @@
 
 # build
 build/
+log/
 .xmake/
 .cache/
 compile_commands.json

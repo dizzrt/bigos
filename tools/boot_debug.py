@@ -20,6 +20,7 @@ from typing import BinaryIO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = PROJECT_ROOT / 'build'
+LOG_DIR = PROJECT_ROOT / 'log'
 BOOT_ARTIFACT_DIR = BUILD_DIR / 'bin' / 'x86' / 'boot'
 UEFI_ARTIFACT_DIR = BUILD_DIR / 'bin' / 'x86' / 'uefi'
 DEFAULT_IMAGE = BUILD_DIR / 'test' / 'os.raw'
@@ -29,10 +30,10 @@ DEFAULT_UEFI_ROOT_IMAGE = BUILD_DIR / 'test' / 'uefi-root.raw'
 DEFAULT_BOCHSRC = BUILD_DIR / 'test' / 'bochsrc.bxrc'
 DEFAULT_KERNEL = BUILD_DIR / 'kernel'
 DEFAULT_CPU_MODEL = 'corei7_haswell_4770'
-DEFAULT_SERIAL_LOG = BUILD_DIR / 'test' / 'serial.log'
-DEFAULT_QEMU_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu.serial.log'
-DEFAULT_QEMU_GDB_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu-gdb.serial.log'
-DEFAULT_QEMU_UEFI_SERIAL_LOG = BUILD_DIR / 'test' / 'qemu-uefi.serial.log'
+DEFAULT_SERIAL_LOG = LOG_DIR / 'serial.log'
+DEFAULT_QEMU_SERIAL_LOG = LOG_DIR / 'qemu.serial.log'
+DEFAULT_QEMU_GDB_SERIAL_LOG = LOG_DIR / 'qemu-gdb.serial.log'
+DEFAULT_QEMU_UEFI_SERIAL_LOG = LOG_DIR / 'qemu-uefi.serial.log'
 DEFAULT_QEMU_UEFI_VARS = BUILD_DIR / 'test' / 'OVMF_VARS.uefi.fd'
 FONT_SOURCE = PROJECT_ROOT / 'assets' / 'fonts' / 'unifont_all-17.0.04.hex'
 FONT_ASSET = BUILD_DIR / 'assets' / 'fonts' / 'unifont.bin'
@@ -1338,7 +1339,7 @@ def render_bochsrc(
         f'ata0-master: type=disk, path="{image_path}", mode=flat, '
         f'cylinders={cylinders}, heads={heads}, spt={sectors_per_track}, sect_size=512',
         serial_line,
-        'log: build/test/bochs.log',
+        f'log: {LOG_DIR / "bochs.log"}',
         'panic: action=fatal',
         'error: action=report',
         'info: action=report',
@@ -2236,7 +2237,7 @@ def make_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         '--serial-log',
-        help='COM1 output file; QEMU defaults under build/test when omitted',
+        help='COM1 output file; QEMU defaults under log/ when omitted',
     )
     run_parser.add_argument(
         '--expect-serial-marker',
@@ -2296,12 +2297,12 @@ def make_parser() -> argparse.ArgumentParser:
     )
     matrix_parser.add_argument(
         '--output',
-        default=str(BUILD_DIR / 'test' / 'runtime-smoke-validation.md'),
+        default=str(LOG_DIR / 'runtime-smoke-validation.md'),
         help='Markdown validation artifact path',
     )
     matrix_parser.add_argument(
         '--serial-log-dir',
-        default=str(BUILD_DIR / 'test' / 'runtime-smoke'),
+        default=str(LOG_DIR / 'runtime-smoke'),
         help='directory for per-case serial logs',
     )
     matrix_parser.add_argument(

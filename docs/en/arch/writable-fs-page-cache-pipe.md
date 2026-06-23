@@ -203,7 +203,7 @@ Run the headless QEMU serial-marker smoke with, for example:
 ```bash
 xmake f --writable_fs_smoke=y
 uv run python tools/boot_debug.py run --emulator qemu --display none \
-  --serial-log build/test/serial.log --expect-serial-marker BIGOS_WRITABLE_FS_PASSED
+  --serial-log log/serial.log --expect-serial-marker BIGOS_WRITABLE_FS_PASSED
 ```
 
 When QEMU/Bochs, ROM/display, the cross toolchain, or the disk image are

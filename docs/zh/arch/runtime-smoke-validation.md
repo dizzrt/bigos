@@ -6,8 +6,8 @@ BigOS 将现有默认关闭的 runtime smoke 产品化为一组面向当前有�
 
 - 首选自动化命令：`uv run python tools/boot_debug.py runtime-smoke-matrix`
 - 单 case 命令：`uv run python tools/boot_debug.py runtime-smoke-matrix --case memory-self-test`
-- Artifact 覆盖路径：`uv run python tools/boot_debug.py runtime-smoke-matrix --output build/test/runtime-smoke-validation.md`
-- 串口日志：默认每个 case 一个文件，位于 `build/test/runtime-smoke/`。
+- Artifact 覆盖路径：`uv run python tools/boot_debug.py runtime-smoke-matrix --output log/runtime-smoke-validation.md`
+- 串口日志：默认每个 case 一个文件，位于 `log/runtime-smoke/`。
 - Image：默认每个 case 一个 UEFI ESP/FAT image 和一个 exFAT 兼容 root image，位于 `build/test/runtime-smoke/`。
 
 runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed flow 构建，准备默认 UEFI ESP/FAT image 和当前 exFAT 兼容 root image，使用 `--display none` 启动 QEMU/OVMF，并在 case-specific timeout 内等待预期 COM1 marker。
@@ -120,14 +120,14 @@ xmake f --mm_self_test=y
 uv run python tools/boot_debug.py run \
   --emulator qemu \
   --display none \
-  --serial-log build/test/runtime-smoke/memory-self-test.serial.log \
+  --serial-log log/runtime-smoke/memory-self-test.serial.log \
   --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED \
   --smoke-timeout 10
 ```
 
 ## Artifact 字段
 
-除非提供 `--output`，runner 会将 Markdown-first validation artifact 写入 `build/test/runtime-smoke-validation.md`。该 artifact 保留 JSON schema 兼容字段，便于未来自动化消费：
+除非提供 `--output`，runner 会将 Markdown-first validation artifact 写入 `log/runtime-smoke-validation.md`。该 artifact 保留 JSON schema 兼容字段，便于未来自动化消费：
 
 - `schema_version`：runtime smoke validation schema version。
 - `tool availability`：`uv`、`xmake`、`x86_64-elf-*`、QEMU，以及可选 Bochs。
@@ -150,11 +150,11 @@ uv run python tools/boot_debug.py run \
 x86_64 UEFI boot backend 是默认 smoke 入口。可运行
 `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`，
 或直接使用 helper：
-`uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`。`xmake run qemu-uefi` 仍是同一 backend 的显式别名。
+`uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log log/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`。`xmake run qemu-uefi` 仍是同一 backend 的显式别名。
 
 UEFI smoke 会构建/使用 `BOOTX64.EFI`，创建包含 kernel、PID-1 init、`/bin/sh`、有界
 `/bin/*` 和 `/boot/fonts/unifont.bin` 的 ESP/FAT image，并为当前 VFS baseline 准备 exFAT 兼容 root image，使用 x86_64 OVMF 启动 QEMU，并默认使用
-`build/test/qemu-uefi.serial.log`。它要求 QEMU/OVMF、Homebrew LLVM/LLD、`mtools`、
+`log/qemu-uefi.serial.log`。它要求 QEMU/OVMF、Homebrew LLVM/LLD、`mtools`、
 现有 x86_64 cross toolchain，以及用于 Python helper validation 的 `uv`。缺少 OVMF、
 mtools、LLVM/LLD、QEMU、cross toolchain 或 `uv` 时，必须记录为 skipped 或 blocked，
 并写明替代检查和剩余 UEFI bootability 风险。
