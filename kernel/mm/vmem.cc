@@ -321,8 +321,10 @@ static bool direct_map_select_range(
     if (end > bigos::mm::KDIRECT_LEN)
         end = bigos::mm::KDIRECT_LEN;
 
-    uint64_t aligned_base = align_up_page(__base);
-    uint64_t aligned_end = align_down_page(end);
+    uint64_t aligned_base = align_down_page(__base);
+    uint64_t aligned_end = align_up_page(end);
+    if (aligned_end > bigos::mm::KDIRECT_LEN)
+        aligned_end = bigos::mm::KDIRECT_LEN;
     if (aligned_end <= aligned_base)
         return false;
 
@@ -927,6 +929,21 @@ static void init_direct_map_from_region(uint64_t __base, uint64_t __len, uint32_
     map_direct_range(aligned_base, aligned_len);
 }
 
+static void init_direct_map_font_asset(const BootInfoHeader *__header) noexcept {
+    auto font = bigos_boot_info_v2_font_asset_metadata(__header);
+    if (font.status != BootOptionalSectionStatus::Valid)
+        return;
+    if (direct_map_range_covered(font.payload->physical_base, font.payload->byte_size))
+        return;
+
+    uint64_t aligned_base = 0;
+    uint64_t aligned_len = 0;
+    if (!direct_map_select_range(font.payload->physical_base, font.payload->byte_size, &aligned_base, &aligned_len))
+        return;
+
+    map_direct_range(aligned_base, aligned_len);
+}
+
 static bool boot_ranges_overlap(uint64_t left_base, uint64_t left_len, uint64_t right_base, uint64_t right_len) noexcept {
     if (left_len == 0 || right_len == 0)
         return false;
@@ -969,6 +986,7 @@ static void init_direct_map_v2(const BootInfoHeader *__header) noexcept {
     uint32_t nr_regions = section->size / sizeof(BootMemoryRegion);
     for (uint32_t i = 0; i < nr_regions; i++)
         init_direct_map_from_region_excluding_framebuffer(regions[i], framebuffer_metadata);
+    init_direct_map_font_asset(__header);
 }
 
 static uint32_t normalize_legacy_ards_type(uint32_t __type) noexcept {

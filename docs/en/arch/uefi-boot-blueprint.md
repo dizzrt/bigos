@@ -199,7 +199,7 @@ Candidate follow-up changes:
 The default UEFI backend uses separate artifacts from Legacy BIOS:
 
 - `xmake build uefi-artifacts` builds `build/bin/x86/uefi/BOOTX64.EFI`.
-- The first boot-time font source asset is `assets/fonts/unifont_all-17.0.04.hex`. The Python image helper generates the versioned payload `build/assets/fonts/unifont.bin` and packages it into the ESP as `/boot/fonts/unifont.bin`; the UEFI loader consumes only the ESP runtime path.
+- The first boot-time font source asset is `assets/fonts/unifont_all-17.0.04.hex`. The Python image helper converts the bundled Unifont HEX data into the versioned glyph lookup payload `build/assets/fonts/unifont.bin` and packages it into the ESP as `/boot/fonts/unifont.bin`; the UEFI loader consumes only the ESP runtime path and performs only basic format gating.
 - `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` prepares `build/test/uefi-esp.img`, prepares `build/test/uefi-root.raw` as the current exFAT runtime root compatibility image, copies a writable OVMF vars file to `build/test/OVMF_VARS.uefi.fd`, and launches QEMU/OVMF.
 - `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log build/test/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` is the direct helper form.
 
@@ -207,7 +207,7 @@ UEFI artifact isolation policy:
 
 - BIOS path continues using raw exFAT images and artifacts such as `build/test/os.raw`.
 - UEFI path uses an ESP/FAT image containing `EFI/BOOT/BOOTX64.EFI`, `/boot/kernel`, `/boot/user/init.elf`, and bounded `/bin/*` payloads. Until a FAT runtime filesystem or loader-fed runtime payload exists, QEMU also attaches a separate exFAT compatibility root image as primary IDE so the current kernel VFS can reach the same bounded userland baseline.
-- The ESP/FAT image also contains `/boot/fonts/unifont.bin` for framebuffer handoff metadata. Missing or invalid font metadata is a documented fallback and must not block serial diagnostics, VGA text fallback, memory initialization, or bounded userland validation.
+- The ESP/FAT image also contains `/boot/fonts/unifont.bin` for framebuffer handoff metadata and the later kernel glyph lookup view. Missing or invalid font metadata or lookup validation is a documented fallback and must not block serial diagnostics, VGA text fallback, memory initialization, or bounded userland validation.
 - UEFI firmware configuration, temporary directories, and emulator configuration must not overwrite Legacy BIOS artifacts used by `xmake run qemu`, `xmake run qemu-gdb`, or `xmake run bochs`.
 - UEFI smoke tests primarily use QEMU + OVMF. Bochs UEFI is not required for this backend.
 - Legacy BIOS continues to use the current raw exFAT image with QEMU IDE or Bochs.
@@ -226,7 +226,8 @@ UEFI BootInfo metadata sections:
 - The optional `storage_metadata` section describes the UEFI ESP/root source and boot path.
 - The optional `loader_metadata` section records diagnostic backend, loader version/build id, firmware vendor/revision, and boot file path information.
 - The optional `framebuffer_metadata` section records UEFI GOP current-mode geometry and physical framebuffer bounds before `ExitBootServices`. It is parsed as an immutable optional view by the kernel; absent metadata keeps the Legacy/VGA text and serial fallback valid, while invalid metadata is ignored before any framebuffer writes.
-- The optional `font_asset_metadata` section records the ESP-loaded `/boot/fonts/unifont.bin` buffer address, byte size, format version, cell metrics, and loader-provided flags. The kernel validates metadata bounds before exposing the view and does not dereference the asset as part of this handoff change.
+- The optional `font_asset_metadata` section records the ESP-loaded `/boot/fonts/unifont.bin` buffer address, byte size, glyph lookup format version, glyph/cell metrics, and loader-provided flags. The UEFI loader checks the glyph lookup header magic, header size, declared byte size, format version, table offsets, and basic metrics, but it does not parse Unicode ranges, search glyph records, classify terminal cells, or write framebuffer pixels. Kernel startup validates the payload header, range table, glyph records, bitmap bounds, alignment, and width classes before exposing a read-only lookup view for later console code.
+- The glyph lookup asset currently records Unifont 8x16 half-width and 16x16 full-width bitmap glyphs. Its width class is a font asset property only; it is not UTF-8 decoding, a terminal cell policy, framebuffer glyph rendering, a software cursor, or framebuffer scrollback.
 - Kernel startup still depends only on valid required `core` and `memory_map` sections; missing or unknown optional sections remain skippable.
 
 ## ELF64 Loading Rules

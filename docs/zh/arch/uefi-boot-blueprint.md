@@ -223,8 +223,9 @@ UEFI `GetMemoryMap` 初步映射方向：
 
 - `xmake build uefi-artifacts` 构建 `build/bin/x86/uefi/BOOTX64.EFI`。
 - 首个 boot-time font 源资产固定为 `assets/fonts/unifont_all-17.0.04.hex`。Python image
-  helper 生成版本化 payload `build/assets/fonts/unifont.bin`，并打包到 ESP 的
-  `/boot/fonts/unifont.bin`；UEFI loader 只消费 ESP runtime path。
+  helper 将随附 Unifont HEX 数据转换为版本化 glyph lookup payload
+  `build/assets/fonts/unifont.bin`，并打包到 ESP 的 `/boot/fonts/unifont.bin`；UEFI loader
+  只消费 ESP runtime path，并且只做基本格式门禁。
 - `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
   会准备 `build/test/uefi-esp.img`，并准备 `build/test/uefi-root.raw` 作为当前 exFAT runtime root 兼容镜像，复制可写 OVMF vars 文件到
   `build/test/OVMF_VARS.uefi.fd`，并启动 QEMU/OVMF。
@@ -237,9 +238,9 @@ UEFI 产物隔离策略：
 - UEFI 路径使用 ESP/FAT image，包含 `EFI/BOOT/BOOTX64.EFI`、`/boot/kernel`、
   `/boot/user/init.elf` 和有界 `/bin/*` payload。在 FAT runtime filesystem 或 loader-fed runtime payload
   落地前，QEMU 还会将独立 exFAT 兼容 root image 挂为 primary IDE，使当前 kernel VFS 可以到达同一有界用户态基线。
-- ESP/FAT image 同时包含 `/boot/fonts/unifont.bin`，供 framebuffer handoff metadata 使用。
-  font metadata 缺失或非法是文档化 fallback，不能阻塞 serial diagnostics、VGA text fallback、
-  memory initialization 或 bounded userland validation。
+- ESP/FAT image 同时包含 `/boot/fonts/unifont.bin`，供 framebuffer handoff metadata 和后续
+  kernel glyph lookup view 使用。font metadata 缺失、非法或 lookup 校验失败都是文档化 fallback，
+  不能阻塞 serial diagnostics、VGA text fallback、memory initialization 或 bounded userland validation。
 - UEFI 固件配置、临时目录和 emulator 配置不得覆盖 `xmake run qemu`、`xmake run qemu-gdb` 或 `xmake run bochs` 使用的 Legacy BIOS 产物。
 - UEFI smoke test 首选 QEMU + OVMF；该后端不要求 Bochs UEFI。
 - Legacy BIOS 继续使用当前 raw exFAT image，并通过 QEMU IDE 或 Bochs 启动。
@@ -264,8 +265,13 @@ UEFI BootInfo metadata sections：
   geometry 与物理 framebuffer 边界。kernel 将其解析为 immutable optional view；metadata 缺失时
   Legacy/VGA text 与 serial fallback 仍然有效，metadata 非法时在任何 framebuffer 写入前忽略。
 - Optional `font_asset_metadata` section 记录 ESP 加载的 `/boot/fonts/unifont.bin` buffer 地址、
-  字节大小、format version、cell metrics 和 loader-provided flags。kernel 在暴露 view 前校验
-  metadata bounds，本 handoff change 不会解引用该资产并执行 glyph lookup。
+  字节大小、glyph lookup format version、glyph/cell metrics 和 loader-provided flags。UEFI loader
+  校验 glyph lookup header magic、header size、declared byte size、format version、table offsets
+  和基本 metrics，但不解析 Unicode ranges、不搜索 glyph records、不分类 terminal cells，也不写 framebuffer
+  pixels。kernel startup 会在暴露只读 lookup view 前校验 payload header、range table、glyph records、
+  bitmap bounds、alignment 和 width classes，供后续 console code 使用。
+- Glyph lookup asset 当前记录 Unifont 8x16 半宽和 16x16 全宽 bitmap glyph。width class 只是字体资产属性；
+  它不是 UTF-8 decoding、terminal cell policy、framebuffer glyph rendering、software cursor 或 framebuffer scrollback。
 - Kernel 启动仍只依赖有效的 required `core` 与 `memory_map` sections；缺失或未知的
   optional section 仍可跳过。
 

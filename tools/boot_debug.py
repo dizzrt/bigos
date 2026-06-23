@@ -38,9 +38,13 @@ FONT_SOURCE = PROJECT_ROOT / 'assets' / 'fonts' / 'unifont_all-17.0.04.hex'
 FONT_ASSET = BUILD_DIR / 'assets' / 'fonts' / 'unifont.bin'
 FONT_ASSET_PATH = '/boot/fonts/unifont.bin'
 FONT_ASSET_MAGIC = 0x544E4642
-FONT_ASSET_HEADER_SIZE = 24
-FONT_FORMAT_UNIFONT_HEX_V1 = 1
+FONT_ASSET_HEADER_SIZE = 64
+FONT_ASSET_RANGE_RECORD_SIZE = 20
+FONT_ASSET_GLYPH_RECORD_SIZE = 24
+FONT_FORMAT_GLYPH_LOOKUP_V1 = 2
 FONT_ASSET_MAX_BYTES = 16 * 1024 * 1024
+FONT_WIDTH_CLASS_HALF = 1
+FONT_WIDTH_CLASS_FULL = 2
 MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'
 EMULATORS = ('bochs', 'qemu', 'qemu-gdb')
 BOOT_MODES = ('legacy', 'uefi')
@@ -554,24 +558,172 @@ def check_tools(emulator: str, need_emulator: bool, need_build: bool, boot_mode:
         raise StageError('preflight', 'missing required tool(s): ' + ', '.join(missing))
 
 
+@dataclass(frozen=True)
+class GlyphAssetRecord:
+    codepoint: int
+    bitmap: bytes
+    glyph_width: int
+    glyph_height: int
+    cell_width: int
+    cell_height: int
+    width_class: int
+
+
+@dataclass(frozen=True)
+class GlyphAssetRange:
+    first_codepoint: int
+    last_codepoint: int
+    first_glyph_index: int
+    glyph_count: int
+    width_class: int
+
+
+def parse_unifont_hex_glyphs(raw: bytes) -> list[GlyphAssetRecord]:
+    records: list[GlyphAssetRecord] = []
+    previous_codepoint = -1
+    for line_number, raw_line in enumerate(raw.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            codepoint_text, bitmap_text = line.split(b':', 1)
+        except ValueError as exc:
+            raise StageError('font asset build', f'line {line_number}: missing codepoint separator') from exc
+        try:
+            codepoint = int(codepoint_text, 16)
+        except ValueError as exc:
+            raise StageError('font asset build', f'line {line_number}: invalid codepoint') from exc
+        if codepoint < 0 or codepoint > 0x10FFFF:
+            raise StageError('font asset build', f'line {line_number}: codepoint out of Unicode range')
+        if codepoint <= previous_codepoint:
+            raise StageError('font asset build', f'line {line_number}: duplicate or out-of-order codepoint')
+        if len(bitmap_text) == 32:
+            glyph_width = 8
+            width_class = FONT_WIDTH_CLASS_HALF
+        elif len(bitmap_text) == 64:
+            glyph_width = 16
+            width_class = FONT_WIDTH_CLASS_FULL
+        else:
+            raise StageError('font asset build', f'line {line_number}: unsupported bitmap length {len(bitmap_text)}')
+        try:
+            bitmap = bytes.fromhex(bitmap_text.decode('ascii'))
+        except ValueError as exc:
+            raise StageError('font asset build', f'line {line_number}: invalid bitmap hex') from exc
+        expected_bytes = (glyph_width // 8) * 16
+        if len(bitmap) != expected_bytes:
+            raise StageError('font asset build', f'line {line_number}: bitmap byte length mismatch')
+        records.append(
+            GlyphAssetRecord(
+                codepoint=codepoint,
+                bitmap=bitmap,
+                glyph_width=glyph_width,
+                glyph_height=16,
+                cell_width=glyph_width,
+                cell_height=16,
+                width_class=width_class,
+            )
+        )
+        previous_codepoint = codepoint
+    if not records:
+        raise StageError('font asset build', 'source font asset does not contain glyph records')
+    return records
+
+
+def build_glyph_asset_ranges(records: Sequence[GlyphAssetRecord]) -> list[GlyphAssetRange]:
+    ranges: list[GlyphAssetRange] = []
+    start_index = 0
+    first = records[0]
+    previous = first
+    for index, record in enumerate(records[1:], start=1):
+        if record.codepoint == previous.codepoint + 1 and record.width_class == previous.width_class:
+            previous = record
+            continue
+        ranges.append(
+            GlyphAssetRange(first.codepoint, previous.codepoint, start_index, index - start_index, first.width_class)
+        )
+        start_index = index
+        first = record
+        previous = record
+    ranges.append(
+        GlyphAssetRange(first.codepoint, previous.codepoint, start_index, len(records) - start_index, first.width_class)
+    )
+    return ranges
+
+
+def build_glyph_lookup_payload(records: Sequence[GlyphAssetRecord]) -> bytes:
+    if not records:
+        raise StageError('font asset build', 'glyph lookup payload requires at least one glyph')
+    ranges = build_glyph_asset_ranges(records)
+    range_table_offset = FONT_ASSET_HEADER_SIZE
+    glyph_record_offset = range_table_offset + len(ranges) * FONT_ASSET_RANGE_RECORD_SIZE
+    bitmap_data_offset = glyph_record_offset + len(records) * FONT_ASSET_GLYPH_RECORD_SIZE
+
+    range_table = bytearray()
+    for glyph_range in ranges:
+        range_table += struct.pack(
+            '<IIIIHH',
+            glyph_range.first_codepoint,
+            glyph_range.last_codepoint,
+            glyph_range.first_glyph_index,
+            glyph_range.glyph_count,
+            glyph_range.width_class,
+            0,
+        )
+
+    glyph_table = bytearray()
+    bitmap_data = bytearray()
+    for record in records:
+        bitmap_offset = len(bitmap_data)
+        bitmap_data += record.bitmap
+        glyph_table += struct.pack(
+            '<IIIHHHHHH',
+            record.codepoint,
+            bitmap_offset,
+            len(record.bitmap),
+            record.glyph_width,
+            record.glyph_height,
+            record.cell_width,
+            record.cell_height,
+            record.width_class,
+            0,
+        )
+
+    payload_size = bitmap_data_offset + len(bitmap_data)
+    header = struct.pack(
+        '<IIIIIIIIIIIHHHHIII',
+        FONT_ASSET_MAGIC,
+        FONT_ASSET_HEADER_SIZE,
+        FONT_FORMAT_GLYPH_LOOKUP_V1,
+        0,
+        payload_size,
+        range_table_offset,
+        len(ranges),
+        glyph_record_offset,
+        len(records),
+        bitmap_data_offset,
+        len(bitmap_data),
+        16,
+        16,
+        16,
+        16,
+        0,
+        0,
+        0,
+    )
+    if len(header) != FONT_ASSET_HEADER_SIZE:
+        raise StageError('font asset build', f'internal glyph asset header size mismatch: {len(header)} bytes')
+    payload = header + range_table + glyph_table + bitmap_data
+    if len(payload) != payload_size:
+        raise StageError('font asset build', 'internal glyph asset payload size mismatch')
+    if len(payload) > FONT_ASSET_MAX_BYTES:
+        raise StageError('font asset build', f'generated font asset is too large: {len(payload)} bytes')
+    return payload
+
+
 def generate_boot_font_asset(source: Path, output: Path) -> None:
     require_file(source, 'font asset build', 'source font asset')
     raw = source.read_bytes()
-    glyph_count = sum(1 for line in raw.splitlines() if line.strip() and b':' in line)
-    header = struct.pack(
-        '<IIIHHHHI',
-        FONT_ASSET_MAGIC,
-        FONT_ASSET_HEADER_SIZE,
-        FONT_FORMAT_UNIFONT_HEX_V1,
-        8,
-        16,
-        8,
-        16,
-        glyph_count,
-    )
-    payload = header + raw
-    if len(payload) > FONT_ASSET_MAX_BYTES:
-        raise StageError('font asset build', f'generated font asset is too large: {len(payload)} bytes')
+    payload = build_glyph_lookup_payload(parse_unifont_hex_glyphs(raw))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(payload)
 

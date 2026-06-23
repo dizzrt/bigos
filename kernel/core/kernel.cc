@@ -10,6 +10,7 @@
 #include <arch/x86/ap_startup.h>
 #include <bigos/block_io.h>
 #include <bigos/device.h>
+#include <bigos/glyph_font.h>
 #include <bigos/memory.h>
 #include <bigos/percpu.h>
 #include <bigos/proc.h>
@@ -1379,6 +1380,7 @@ void kernel(const BootInfoHeader *boot_info) {
 
     bigos::cpu::init_bootstrap_cpu();
     bigos::init_mem(boot_info);
+    bigos::font::init_kernel_glyph_lookup();
     (void)bigos::arch::x86::ap_startup::prepare_trampoline_region();
     bigos::device::init();
     (void)bigos::device::probe_all(bigos::device::ProbeContext::KernelInit);

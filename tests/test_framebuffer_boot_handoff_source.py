@@ -14,11 +14,18 @@ def test_bootinfo_framebuffer_and_font_sections_are_versioned_and_checked() -> N
     assert '#define BIGOS_BOOT_SECTION_TYPE_FONT_ASSET_METADATA  6u' in boot_info
     assert 'struct BootFramebufferMetadata' in boot_info
     assert 'struct BootFontAssetMetadata' in boot_info
+    assert 'struct BootFontAssetHeader' in boot_info
+    assert 'struct BootFontAssetRangeRecord' in boot_info
+    assert 'struct BootFontAssetGlyphRecord' in boot_info
+    assert '#define BIGOS_BOOT_FONT_FORMAT_GLYPH_LOOKUP_V1 2u' in boot_info
     assert 'enum class BootOptionalSectionStatus' in boot_info
     assert 'bigos_boot_info_v2_framebuffer_metadata' in boot_info
     assert 'bigos_boot_info_v2_font_asset_metadata' in boot_info
     assert 'static_assert(sizeof(BootFramebufferMetadata) == 40)' in boot_info
     assert 'static_assert(sizeof(BootFontAssetMetadata) == 40)' in boot_info
+    assert 'static_assert(sizeof(BootFontAssetHeader) == BIGOS_BOOT_FONT_ASSET_HEADER_SIZE)' in boot_info
+    assert 'static_assert(sizeof(BootFontAssetRangeRecord) == BIGOS_BOOT_FONT_ASSET_RANGE_SIZE)' in boot_info
+    assert 'static_assert(sizeof(BootFontAssetGlyphRecord) == BIGOS_BOOT_FONT_ASSET_GLYPH_SIZE)' in boot_info
     assert 'BIGOS_BOOT_INFO_V2_MAGIC' in boot_info
     assert 'static_assert(sizeof(BootInfoHeader) == 24)' in boot_info
     assert 'static_assert(sizeof(BootInfo) == BIGOS_BOOT_INFO_SIZE)' in boot_info
@@ -37,6 +44,10 @@ def test_uefi_loader_collects_gop_and_font_without_claiming_console_ready() -> N
     assert 'BIGOS_UEFI_FRAMEBUFFER' in loader
     assert 'BIGOS_UEFI_FONT' in loader
     assert 'u"\\\\boot\\\\fonts\\\\unifont.bin"' in loader
+    assert 'BIGOS_BOOT_FONT_FORMAT_GLYPH_LOOKUP_V1' in loader
+    assert 'header->payload_size != file_size' in loader
+    assert 'sizeof(BootFontAssetRangeRecord)' in loader
+    assert 'sizeof(BootFontAssetGlyphRecord)' in loader
     assert 'BIGOS_BOOT_SECTION_TYPE_FRAMEBUFFER_METADATA' in loader
     assert 'BIGOS_BOOT_SECTION_TYPE_FONT_ASSET_METADATA' in loader
     assert "FONT_SOURCE = PROJECT_ROOT / 'assets' / 'fonts' / 'unifont_all-17.0.04.hex'" in boot_debug

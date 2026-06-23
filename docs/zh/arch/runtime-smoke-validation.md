@@ -158,9 +158,18 @@ mtools、LLVM/LLD、QEMU、cross toolchain 或 `uv` 时，必须记录为 skippe
 UEFI 默认 runtime marker 与此前 Legacy BIOS headless 路径使用的默认 init/user exec marker 相同，当前为 `BIGOS_USER_EXEC`。
 Framebuffer handoff 证据应与通过条件分开记录，可使用 `BIGOS_UEFI_FRAMEBUFFER` 等 serial
 诊断，以及确认 framebuffer 物理范围已从 ordinary RAM 和 direct-map 初始化中排除的 kernel/source-level
-检查。framebuffer 或 font metadata 缺失属于 framebuffer-handoff fallback；只要达到 bounded userland
-marker，它不是默认 UEFI boot failure。缺失 `BIGOS_USER_EXEC` 是 failed 或 blocked UEFI runtime-parity check，不是通过。Apple Silicon
-主机可能通过 TCG 运行 x86_64 QEMU，因此 validation notes 应记录 timeout 和性能相关剩余风险。
+检查。Glyph lookup font asset readiness 也应与通过条件分开记录：validation notes 应说明
+`build/assets/fonts/unifont.bin` 是否已生成为 glyph lookup payload、是否打包到 ESP
+`/boot/fonts/unifont.bin`、UEFI backend 是否通过 `BIGOS_UEFI_FONT` 加载，以及 kernel-side
+validation 是否通过 `BIGOS_FONT_LOOKUP ready` 接受或以显式 unavailable stage 拒绝。framebuffer
+metadata、font metadata 或 glyph lookup validation 缺失属于 handoff/lookup fallback；只要达到 bounded
+userland marker，它不是默认 UEFI boot failure。缺失 `BIGOS_USER_EXEC` 是 failed 或 blocked UEFI runtime-parity
+check，不是通过。Apple Silicon 主机可能通过 TCG 运行 x86_64 QEMU，因此 validation notes 应记录 timeout
+和性能相关剩余风险。
+
+Glyph lookup readiness 只是后续 framebuffer console work 的输入，不证明 framebuffer glyph rendering、Unicode
+display、software cursor support、framebuffer scrollback、Secure Boot、ACPI handoff、UEFI Runtime Services
+或完整 device/storage parity。
 
 ## 交叉验证
 

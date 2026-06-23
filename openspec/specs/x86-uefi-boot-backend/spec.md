@@ -207,28 +207,33 @@ The x86_64 UEFI backend SHALL obtain the firmware current linear framebuffer mod
 - **THEN** it MUST accept the firmware current GOP mode instead of applying a resolution or pixel-format preference policy
 - **AND** validation MUST check metadata self-consistency rather than require a fixed resolution
 
-### Requirement: UEFI backend loads boot font asset
+### Requirement: UEFI backend loads glyph lookup font asset
 
-The x86_64 UEFI backend SHALL load the first boot-time font asset from the ESP and describe it through BootInfo v2 font asset metadata.
+The x86_64 UEFI backend SHALL load the generated glyph lookup font asset from the ESP and describe it through BootInfo v2 font asset metadata before entering the kernel. The loader MUST remain a bounded file loader and format gate; it MUST NOT execute glyph lookup or framebuffer text rendering.
 
-#### Scenario: Source font asset is packaged into ESP
+#### Scenario: Glyph lookup font asset is packaged into ESP
 
 - **WHEN** the UEFI ESP image is prepared for framebuffer handoff work
-- **THEN** the source font asset MUST come from `assets/fonts/unifont_all-17.0.04.hex`
-- **AND** the build path MUST write the generated font payload to `build/assets/fonts/unifont.bin`
-- **AND** the packaging path MUST place the generated font payload at `/boot/fonts/unifont.bin` inside the ESP
+- **THEN** the generated glyph lookup payload MUST be packaged at `/boot/fonts/unifont.bin`
+- **AND** the packaged file MUST be the build output derived from the bundled bitmap font source rather than the repository source file itself
 
-#### Scenario: Font asset is loaded from ESP
+#### Scenario: Loader accepts supported glyph lookup header
 
-- **WHEN** the UEFI loader prepares framebuffer handoff metadata
-- **THEN** it MUST load `/boot/fonts/unifont.bin` from the ESP using bounded file-size and format-version checks
-- **AND** it MUST write loader-provided font asset metadata before entering the kernel
+- **WHEN** the UEFI loader reads `/boot/fonts/unifont.bin` from the ESP
+- **THEN** it MUST validate magic, header size, format version, declared byte size, glyph/cell metrics, and bounded file size before writing font asset metadata
+- **AND** it MUST preserve the loaded buffer across `ExitBootServices` when metadata is marked valid
 
-#### Scenario: Font asset load fails
+#### Scenario: Loader rejects unsupported font payload
 
-- **WHEN** the UEFI loader cannot find, read, allocate, preserve, or validate the ESP font asset
+- **WHEN** the ESP font asset is missing, too large, too small, has unsupported format version, invalid metrics, or inconsistent header fields
 - **THEN** it MUST report an explicit loader diagnostic or enter the kernel without valid font metadata only through a documented fallback
-- **AND** it MUST NOT corrupt BootInfo v2 required sections, memory map records, or the default bounded userland boot path
+- **AND** it MUST NOT corrupt required BootInfo v2 sections, framebuffer metadata, memory map records, or the default bounded userland boot path
+
+#### Scenario: Loader does not own glyph lookup semantics
+
+- **WHEN** the UEFI loader has accepted and preserved the font asset buffer
+- **THEN** it MUST pass address, size, format version, metrics, and flags to the kernel through BootInfo v2 font asset metadata
+- **AND** it MUST NOT parse Unicode codepoint ranges, search glyph records, classify terminal cells, or write framebuffer pixels
 
 ### Requirement: UEFI framebuffer handoff preserves boot baseline
 
@@ -245,4 +250,3 @@ The x86_64 UEFI backend SHALL add framebuffer handoff without regressing the exi
 - **WHEN** the default UEFI backend boots with framebuffer metadata enabled
 - **THEN** the existing bounded userland baseline MUST remain observable through deterministic serial evidence
 - **AND** successful framebuffer metadata generation alone MUST NOT be treated as a successful default boot validation if the baseline is not reached
-

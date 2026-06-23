@@ -132,6 +132,14 @@ static uint64_t align_up_u64(uint64_t value, uint64_t alignment) {
     return alignment == 0 ? value : (value + alignment - 1) & ~(alignment - 1);
 }
 
+static bool font_asset_subrange_valid(
+    uint32_t offset, uint32_t count, uint32_t record_size, uint32_t payload_size, uint32_t *end) {
+    if (offset > payload_size || count > (payload_size - offset) / record_size)
+        return false;
+    *end = offset + count * record_size;
+    return true;
+}
+
 static bool efi_error(EFI_STATUS status) {
     return (status & 0x8000000000000000ull) != 0;
 }
@@ -438,9 +446,23 @@ static FontAssetHandoff prepare_font_asset_handoff() {
     }
 
     const auto *header = (const BootFontAssetHeader *)file;
-    if (header->magic != BIGOS_BOOT_FONT_ASSET_MAGIC || header->header_size < sizeof(BootFontAssetHeader) ||
-        header->format_version != BIGOS_BOOT_FONT_FORMAT_UNIFONT_HEX_V1 || header->glyph_width == 0 ||
-        header->glyph_height == 0 || header->cell_width == 0 || header->cell_height == 0) {
+    uint32_t range_table_end = 0;
+    uint32_t glyph_table_end = 0;
+    if (header->magic != BIGOS_BOOT_FONT_ASSET_MAGIC || header->header_size != sizeof(BootFontAssetHeader) ||
+        header->format_version != BIGOS_BOOT_FONT_FORMAT_GLYPH_LOOKUP_V1 || header->payload_size != file_size ||
+        header->glyph_width == 0 || header->glyph_height == 0 || header->cell_width == 0 || header->cell_height == 0 ||
+        header->glyph_width > header->cell_width || header->glyph_height > header->cell_height ||
+        header->range_count == 0 || header->glyph_count == 0 || header->bitmap_data_size == 0 ||
+        header->range_table_offset < header->header_size || header->glyph_record_offset < header->range_table_offset ||
+        header->bitmap_data_offset < header->glyph_record_offset ||
+        !font_asset_subrange_valid(header->range_table_offset, header->range_count, sizeof(BootFontAssetRangeRecord),
+            header->payload_size, &range_table_end) ||
+        range_table_end != header->glyph_record_offset ||
+        !font_asset_subrange_valid(header->glyph_record_offset, header->glyph_count, sizeof(BootFontAssetGlyphRecord),
+            header->payload_size, &glyph_table_end) ||
+        glyph_table_end != header->bitmap_data_offset ||
+        header->bitmap_data_offset > header->payload_size ||
+        header->bitmap_data_size > header->payload_size - header->bitmap_data_offset) {
         print("BIGOS_UEFI_FONT unavailable stage=font_header\r\n", u"BigOS UEFI: font asset invalid; font fallback\r\n");
         return {};
     }

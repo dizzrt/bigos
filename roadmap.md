@@ -318,10 +318,10 @@ Legacy text console remains as a fallback.
   handoff so they are available early.
 - [x] 任务 M7.1：通过固件图形输出获取线性 framebuffer，并经启动握手把 framebuffer 几何信息
   与字体资产早期传给内核。
-- [ ] Task M7.2: a build-time font asset pipeline that converts the bundled bitmap
+- [x] Task M7.2: a build-time font asset pipeline that converts the bundled bitmap
   font into a compact in-kernel glyph lookup covering half-width and full-width
   glyphs.
-- [ ] 任务 M7.2：构建期字体资产管线，将随附点阵字体转换为紧凑的内核内字形查找，覆盖半宽与
+- [x] 任务 M7.2：构建期字体资产管线，将随附点阵字体转换为紧凑的内核内字形查找，覆盖半宽与
   全宽字形。
 - [ ] Task M7.3: a framebuffer text console backend that renders glyphs, a software
   cursor, and scrolling behind the existing console output interface so upper

@@ -1,5 +1,6 @@
 import importlib.util
 import re
+import struct
 import sys
 from io import StringIO
 from pathlib import Path
@@ -55,6 +56,10 @@ def make_uefi_artifacts(tmp_path: Path):
         bin_programs=(('sh', write_bytes(bin_dir / 'sh', b'\x7fELFsh')),),
         font_asset=write_bytes(tmp_path / 'unifont.bin', b'BFNT' + bytes(128)),
     )
+
+
+def unpack_font_header(payload: bytes) -> tuple[int, ...]:
+    return struct.unpack('<IIIIIIIIIIIHHHHIII', payload[: boot_debug.FONT_ASSET_HEADER_SIZE])
 
 
 def test_parse_size_suffixes() -> None:
@@ -243,6 +248,52 @@ def test_cleanup_image_lock_removes_image_sidecar_lock(tmp_path: Path) -> None:
 
     assert boot_debug.image_lock_path(image) == lock
     assert not lock.exists()
+
+
+def test_generate_boot_font_asset_writes_glyph_lookup_payload(tmp_path: Path) -> None:
+    source = write_bytes(
+        tmp_path / 'font.hex',
+        b'0041:00000000182424427E42424200000000\n'
+        b'4E00:0000000000000000FFFF00000000000000000000000000000000000000000000\n',
+    )
+    output = tmp_path / 'unifont.bin'
+
+    boot_debug.generate_boot_font_asset(source, output)
+
+    payload = output.read_bytes()
+    header = unpack_font_header(payload)
+    assert header[0] == boot_debug.FONT_ASSET_MAGIC
+    assert header[1] == boot_debug.FONT_ASSET_HEADER_SIZE
+    assert header[2] == boot_debug.FONT_FORMAT_GLYPH_LOOKUP_V1
+    assert header[4] == len(payload)
+    assert header[5] == boot_debug.FONT_ASSET_HEADER_SIZE
+    assert header[6] == 2
+    assert header[7] == boot_debug.FONT_ASSET_HEADER_SIZE + 2 * boot_debug.FONT_ASSET_RANGE_RECORD_SIZE
+    assert header[8] == 2
+    assert header[9] == header[7] + 2 * boot_debug.FONT_ASSET_GLYPH_RECORD_SIZE
+    assert header[10] == 48
+    assert header[11:15] == (16, 16, 16, 16)
+    first_glyph = struct.unpack('<IIIHHHHHH', payload[header[7] : header[7] + boot_debug.FONT_ASSET_GLYPH_RECORD_SIZE])
+    second_glyph = struct.unpack(
+        '<IIIHHHHHH',
+        payload[
+            header[7] + boot_debug.FONT_ASSET_GLYPH_RECORD_SIZE : header[7]
+            + 2 * boot_debug.FONT_ASSET_GLYPH_RECORD_SIZE
+        ],
+    )
+    assert first_glyph[:9] == (0x41, 0, 16, 8, 16, 8, 16, boot_debug.FONT_WIDTH_CLASS_HALF, 0)
+    assert second_glyph[:9] == (0x4E00, 16, 32, 16, 16, 16, 16, boot_debug.FONT_WIDTH_CLASS_FULL, 0)
+
+
+def test_parse_unifont_hex_glyphs_rejects_invalid_source_data() -> None:
+    with pytest.raises(boot_debug.StageError, match='unsupported bitmap length'):
+        boot_debug.parse_unifont_hex_glyphs(b'0041:00\n')
+    with pytest.raises(boot_debug.StageError, match='duplicate or out-of-order'):
+        boot_debug.parse_unifont_hex_glyphs(
+            b'0042:00000000182424427E42424200000000\n0041:00000000182424427E42424200000000\n'
+        )
+    with pytest.raises(boot_debug.StageError, match='invalid bitmap hex'):
+        boot_debug.parse_unifont_hex_glyphs(b'0041:GG000000182424427E42424200000000\n')
 
 
 def test_build_current_artifacts_uses_saved_xmake_config(monkeypatch) -> None:
