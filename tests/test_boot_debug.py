@@ -68,6 +68,31 @@ def test_parse_size_suffixes() -> None:
     assert boot_debug.parse_size('512') == 512
 
 
+def test_default_log_paths_use_logs_directory() -> None:
+    assert boot_debug.LOG_DIR == PROJECT_ROOT / 'logs'
+    assert boot_debug.DEFAULT_SERIAL_LOG == PROJECT_ROOT / 'logs' / 'serial.log'
+    assert boot_debug.DEFAULT_QEMU_SERIAL_LOG == PROJECT_ROOT / 'logs' / 'qemu.serial.log'
+    assert boot_debug.DEFAULT_QEMU_GDB_SERIAL_LOG == PROJECT_ROOT / 'logs' / 'qemu-gdb.serial.log'
+    assert boot_debug.DEFAULT_QEMU_UEFI_SERIAL_LOG == PROJECT_ROOT / 'logs' / 'qemu-uefi.serial.log'
+
+    parser = boot_debug.make_parser()
+    args = parser.parse_args(['runtime-smoke-matrix'])
+    assert args.output == str(PROJECT_ROOT / 'logs' / 'runtime-smoke-validation.md')
+    assert args.serial_log_dir == str(PROJECT_ROOT / 'logs' / 'runtime-smoke')
+
+    custom = parser.parse_args(
+        [
+            'runtime-smoke-matrix',
+            '--output',
+            'log/custom-validation.md',
+            '--serial-log-dir',
+            'log/custom-serial',
+        ]
+    )
+    assert custom.output == 'log/custom-validation.md'
+    assert custom.serial_log_dir == 'log/custom-serial'
+
+
 def test_disk_geometry_matches_default_image_size() -> None:
     cylinders, heads, sectors_per_track = boot_debug.disk_geometry(boot_debug.DEFAULT_IMAGE_SIZE)
 
@@ -724,7 +749,11 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
         '"--boot-mode", "uefi", "--image", "build/test/uefi-esp.img", "--uefi-root-image", "build/test/uefi-root.raw"'
         in xmake
     )
-    assert '"log/bochs.serial.log"' in xmake
-    assert '"log/qemu-uefi.serial.log"' in xmake
-    assert '"log/qemu.serial.log"' in xmake
-    assert '"log/qemu-gdb.serial.log"' in xmake
+    assert '"logs/bochs.serial.log"' in xmake
+    assert '"logs/qemu-uefi.serial.log"' in xmake
+    assert '"logs/qemu.serial.log"' in xmake
+    assert '"logs/qemu-gdb.serial.log"' in xmake
+    assert '"log/bochs.serial.log"' not in xmake
+    assert '"log/qemu-uefi.serial.log"' not in xmake
+    assert '"log/qemu.serial.log"' not in xmake
+    assert '"log/qemu-gdb.serial.log"' not in xmake

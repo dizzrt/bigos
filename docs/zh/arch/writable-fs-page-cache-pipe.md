@@ -157,7 +157,7 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
 ```bash
 xmake f --writable_fs_smoke=y
 uv run python tools/boot_debug.py run --emulator qemu --display none \
-  --serial-log log/serial.log --expect-serial-marker BIGOS_WRITABLE_FS_PASSED
+  --serial-log logs/serial.log --expect-serial-marker BIGOS_WRITABLE_FS_PASSED
 ```
 
 当 QEMU/Bochs、ROM/显示、交叉工具链或磁盘镜像不可用时，记录缺失工具、跳过的验证

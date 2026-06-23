@@ -6,8 +6,8 @@ BigOS productizes the existing default-off runtime smokes as a narrow validation
 
 - Preferred automated command: `uv run python tools/boot_debug.py runtime-smoke-matrix`
 - Single case command: `uv run python tools/boot_debug.py runtime-smoke-matrix --case memory-self-test`
-- Artifact override: `uv run python tools/boot_debug.py runtime-smoke-matrix --output log/runtime-smoke-validation.md`
-- Serial logs: one file per case under `log/runtime-smoke/` by default.
+- Artifact override: `uv run python tools/boot_debug.py runtime-smoke-matrix --output logs/runtime-smoke-validation.md`
+- Serial logs: one file per case under `logs/runtime-smoke/` by default.
 - Images: one UEFI ESP/FAT image and one exFAT compatibility root image per case under `build/test/runtime-smoke/` by default.
 
 The runner explicitly configures each case through `xmake f`, builds through the existing xmake-backed flow, prepares the default UEFI ESP/FAT image plus current exFAT compatibility root image, launches QEMU/OVMF with `--display none`, and waits for the expected COM1 marker within the case-specific timeout.
@@ -34,7 +34,7 @@ Behavior-oriented validation distinguishes three entry classes:
 | `blocking-primitives` | `--blocking_smoke=y` | `BIGOS_BLOCKING_SMOKE_PASSED` | 15s | Synthetic TTY producer plus wait queue wakeup and timeout sleep. |
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` minimal syscall ABI path. |
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO plus VFS open/read/release over the read-only exFAT backend. |
-| `block-io-request-layer` | `--block_io_request_smoke=y` | `BIGOS_BLOCK_IO_REQUEST_PASSED` | 20s | Bounded synchronous request submission, validation failure, per-device queue exhaustion, unsupported write, and device-error propagation; no async I/O or user ABI. |
+| `block-io-request-layer` | `--block_io_request_smoke=y` | `BIGOS_BLOCK_IO_REQUEST_PASSED` | 20s | Bounded synchronous request submission, validation failure, per-device queue exhaustion, unsupported write, device-error propagation, and kernel-internal interrupt-driven completion; no complete async I/O or user ABI. |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | Runs the embedded flat image as a lifecycle-core process; smoke entry remains default-off. |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | Packages `/boot/user/init.elf` and runs it through reusable ELF exec preparation; smoke entry remains default-off. |
 | `demand-paging` | `--demand_paging_smoke=y` | `BIGOS_DEMAND_PAGING_PASSED` | 30s | VMA-backed lazy anonymous materialization and deterministic fault handling. |
@@ -150,14 +150,14 @@ xmake f --mm_self_test=y
 uv run python tools/boot_debug.py run \
   --emulator qemu \
   --display none \
-  --serial-log log/runtime-smoke/memory-self-test.serial.log \
+  --serial-log logs/runtime-smoke/memory-self-test.serial.log \
   --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED \
   --smoke-timeout 10
 ```
 
 ## Artifact Fields
 
-The runner writes a Markdown-first validation artifact to `log/runtime-smoke-validation.md` unless `--output` is provided. The artifact keeps JSON schema compatible fields for future automation:
+The runner writes a Markdown-first validation artifact to `logs/runtime-smoke-validation.md` unless `--output` is provided. The artifact keeps JSON schema compatible fields for future automation:
 
 - `schema_version`: runtime smoke validation schema version.
 - `tool availability`: `uv`, `xmake`, `x86_64-elf-*`, QEMU, and optionally Bochs.
@@ -180,9 +180,9 @@ Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, o
 
 ## Default UEFI Smoke
 
-The x86_64 UEFI boot backend is the default smoke entry. Use `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` or the direct helper form `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log log/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`. `xmake run qemu-uefi` remains an explicit alias for the same backend.
+The x86_64 UEFI boot backend is the default smoke entry. Use `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` or the direct helper form `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log logs/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`. `xmake run qemu-uefi` remains an explicit alias for the same backend.
 
-The UEFI smoke builds/uses `BOOTX64.EFI`, creates an ESP/FAT image with the kernel, PID-1 init, `/bin/sh`, bounded `/bin/*`, and `/boot/fonts/unifont.bin`, prepares an exFAT compatibility root image for the current VFS baseline, launches QEMU with x86_64 OVMF, and uses `log/qemu-uefi.serial.log` by default. It requires QEMU/OVMF, Homebrew LLVM/LLD, `mtools`, the existing x86_64 cross toolchain, and `uv` for Python helper validation. Missing OVMF, mtools, LLVM/LLD, QEMU, the cross toolchain, or `uv` must be recorded as skipped or blocked with substitute checks and residual UEFI bootability risk.
+The UEFI smoke builds/uses `BOOTX64.EFI`, creates an ESP/FAT image with the kernel, PID-1 init, `/bin/sh`, bounded `/bin/*`, and `/boot/fonts/unifont.bin`, prepares an exFAT compatibility root image for the current VFS baseline, launches QEMU with x86_64 OVMF, and uses `logs/qemu-uefi.serial.log` by default. It requires QEMU/OVMF, Homebrew LLVM/LLD, `mtools`, the existing x86_64 cross toolchain, and `uv` for Python helper validation. Missing OVMF, mtools, LLVM/LLD, QEMU, the cross toolchain, or `uv` must be recorded as skipped or blocked with substitute checks and residual UEFI bootability risk.
 
 The expected default UEFI runtime marker is the same default init/user exec marker previously used by the Legacy BIOS headless path, currently `BIGOS_USER_EXEC`. Framebuffer handoff evidence should be recorded separately from the pass condition, using serial diagnostics such as `BIGOS_UEFI_FRAMEBUFFER` and the kernel/source-level checks that the framebuffer physical range is excluded from ordinary RAM and direct-map initialization. Glyph lookup font asset readiness should also be recorded separately: the validation notes should state whether `build/assets/fonts/unifont.bin` was generated as a glyph lookup payload, packaged to ESP `/boot/fonts/unifont.bin`, loaded by the UEFI backend with `BIGOS_UEFI_FONT`, and accepted by kernel-side validation with `BIGOS_FONT_LOOKUP ready` or rejected with an explicit unavailable stage. Missing framebuffer metadata, font metadata, or glyph lookup validation is a handoff/lookup fallback, not a default UEFI boot failure, as long as the bounded userland marker is reached. Missing `BIGOS_USER_EXEC` is a failed or blocked UEFI runtime-parity check, not a pass. Apple Silicon hosts may run x86_64 QEMU through TCG, so validation notes should record timeout values and performance-related residual risk when applicable.
 

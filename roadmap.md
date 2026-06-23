@@ -358,9 +358,9 @@ correct modern storage and networking on top.
 
 用户可见目标：块 I/O 不再依赖同步轮询，使其上的现代存储与网络能够正确构建。
 
-- [ ] Task M9.1: an interrupt-driven I/O completion model integrated with the
+- [x] Task M9.1: an interrupt-driven I/O completion model integrated with the
   existing block request layer and scheduler wakeups.
-- [ ] 任务 M9.1：与既有块请求层和调度唤醒集成的中断驱动 I/O 完成模型。
+- [x] 任务 M9.1：与既有块请求层和调度唤醒集成的中断驱动 I/O 完成模型。
 - [ ] Task M9.2: convert the existing block path off synchronous polling within
   bounded semantics, preserving current cache and writeback behavior.
 - [ ] 任务 M9.2：在有界语义内将现有块路径从同步轮询切换走，保持当前缓存与回写行为。

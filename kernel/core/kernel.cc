@@ -34,6 +34,9 @@
 #include <bigos/fs/bigfs.h>
 #include <bigos/cred.h>
 #endif
+#ifdef BIGOS_BLOCK_IO_REQUEST_SMOKE
+#include <string.h>
+#endif
 #ifdef BIGOS_PIPE_SMOKE
 #include <bigos/ipc/pipe.h>
 #include <bigos/sched.h>
@@ -162,8 +165,7 @@ namespace {
     }
 
     void tlb_shootdown_smoke_ap_worker(void *) noexcept {
-        if (g_tlb_shootdown_smoke_context == nullptr ||
-            !bigos::mm::enter_mm_context(g_tlb_shootdown_smoke_context)) {
+        if (g_tlb_shootdown_smoke_context == nullptr || !bigos::mm::enter_mm_context(g_tlb_shootdown_smoke_context)) {
             bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED ap-enter\n");
             return;
         }
@@ -266,8 +268,7 @@ namespace {
             bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED placement\n");
             return;
         }
-        if (g_multicore_hardening_context == nullptr ||
-            !bigos::mm::enter_mm_context(g_multicore_hardening_context)) {
+        if (g_multicore_hardening_context == nullptr || !bigos::mm::enter_mm_context(g_multicore_hardening_context)) {
             bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED ap-mm\n");
             return;
         }
@@ -594,6 +595,17 @@ namespace {
     uint8_t g_block_io_smoke_nested_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
     uint8_t g_block_io_smoke_peer_buf[driver::block::DEFAULT_SECTOR_SIZE] = {};
 
+    struct BlockIoCompletionSmoke {
+        bigos::block_io::Request request;
+        bigos::block_io::CompletionToken token;
+        driver::block::BlockDevice device;
+        uint8_t buffer[driver::block::DEFAULT_SECTOR_SIZE];
+        bigos::block_io::Status final_status;
+        bigos::block_io::Status producer_status;
+    };
+
+    BlockIoCompletionSmoke g_block_io_completion_smoke = {};
+
     driver::block::BlockStatus block_io_smoke_read(driver::block::BlockDevice *__device, uint64_t __lba,
         uint32_t __sector_count, void *__dst, size_t __dst_len) noexcept {
         if (__device == nullptr || __device->context == nullptr || __lba != 0 || __sector_count != 1 ||
@@ -672,6 +684,81 @@ namespace {
         const bool recovered = bigos::bcache::sync(block) == bigos::bcache::Status::Success && !block->dirty;
         bigos::bcache::put(block);
         return failed_dirty && recovered;
+    }
+
+    void block_io_completion_producer(void *__arg) noexcept {
+        BlockIoCompletionSmoke *ctx = (BlockIoCompletionSmoke *)__arg;
+        ctx->producer_status = bigos::block_io::complete_from_irq(&ctx->token, ctx->final_status);
+    }
+
+    void block_io_prepare_pending_smoke(
+        BlockIoCompletionSmoke *__ctx, bigos::block_io::Operation __operation) noexcept {
+        memset(__ctx, 0, sizeof(*__ctx));
+        __ctx->device.sector_size = driver::block::DEFAULT_SECTOR_SIZE;
+        __ctx->device.total_sectors = 16;
+        __ctx->device.context = __ctx;
+        __ctx->device.read_impl = &block_io_smoke_read;
+        __ctx->device.write_impl = &block_io_smoke_write;
+        __ctx->request.device = &__ctx->device;
+        __ctx->request.operation = __operation;
+        __ctx->request.lba = 0;
+        __ctx->request.sector_count = 1;
+        __ctx->request.buffer = __ctx->buffer;
+        __ctx->request.buffer_len = sizeof(__ctx->buffer);
+        __ctx->request.status = bigos::block_io::Status::InvalidRequest;
+        __ctx->request.state = bigos::block_io::RequestState::Invalid;
+        __ctx->request.queue_slot = UINT32_MAX;
+    }
+
+    bool block_io_smoke_completion_wait() noexcept {
+        BlockIoCompletionSmoke *ctx = &g_block_io_completion_smoke;
+        block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Read);
+        if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success ||
+            ctx->request.state != bigos::block_io::RequestState::Pending)
+            return false;
+        ctx->final_status = bigos::block_io::Status::Success;
+        ctx->producer_status = bigos::block_io::Status::InvalidRequest;
+        if (bigos::sched::create_kernel_thread(&block_io_completion_producer, ctx) == bigos::sched::INVALID_THREAD_ID)
+            return false;
+        const bigos::block_io::Status waited = bigos::block_io::wait_pending(&ctx->request, 20);
+        return waited == bigos::block_io::Status::Success && ctx->producer_status == bigos::block_io::Status::Success &&
+               ctx->request.state == bigos::block_io::RequestState::CompletedSuccess && !ctx->request.queued;
+    }
+
+    bool block_io_smoke_completion_edges() noexcept {
+        BlockIoCompletionSmoke *ctx = &g_block_io_completion_smoke;
+        block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Write);
+        if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success)
+            return false;
+        if (bigos::block_io::complete_from_irq(&ctx->token, bigos::block_io::Status::DeviceError) !=
+            bigos::block_io::Status::Success)
+            return false;
+        if (bigos::block_io::complete_from_irq(&ctx->token, bigos::block_io::Status::Success) !=
+            bigos::block_io::Status::CompletionRejected)
+            return false;
+        if (bigos::block_io::wait_pending(&ctx->request, 0) != bigos::block_io::Status::DeviceError)
+            return false;
+
+        block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Read);
+        if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success)
+            return false;
+        const bigos::block_io::CompletionToken stale = ctx->token;
+        if (bigos::block_io::wait_pending(&ctx->request, 1) != bigos::block_io::Status::PendingTimeout)
+            return false;
+        if (bigos::block_io::complete_from_irq(&stale, bigos::block_io::Status::Success) !=
+            bigos::block_io::Status::CompletionRejected)
+            return false;
+
+        block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Read);
+        if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success)
+            return false;
+        if (bigos::block_io::complete_from_irq(&stale, bigos::block_io::Status::Success) !=
+            bigos::block_io::Status::CompletionRejected)
+            return false;
+        if (bigos::block_io::complete_from_irq(&ctx->token, bigos::block_io::Status::Success) !=
+            bigos::block_io::Status::Success)
+            return false;
+        return bigos::block_io::wait_pending(&ctx->request, 0) == bigos::block_io::Status::Success;
     }
 
     void block_io_request_smoke() noexcept {
@@ -803,6 +890,14 @@ namespace {
         }
         if (!block_io_smoke_bcache_dirty_failure(ram_device)) {
             bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED ram-cache-dirty\n");
+            return;
+        }
+        if (!block_io_smoke_completion_wait()) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED completion-wait\n");
+            return;
+        }
+        if (!block_io_smoke_completion_edges()) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED completion-edges\n");
             return;
         }
 
@@ -1634,13 +1729,11 @@ void kernel(const BootInfoHeader *boot_info) {
     }
 #endif
 #ifdef BIGOS_TLB_SHOOTDOWN_SMOKE
-    if (bigos::sched::create_kernel_thread(&tlb_shootdown_smoke_bsp_worker, nullptr) ==
-        bigos::sched::INVALID_THREAD_ID)
+    if (bigos::sched::create_kernel_thread(&tlb_shootdown_smoke_bsp_worker, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_TLB_SHOOTDOWN_SMOKE_FAILED thread\n");
 #endif
 #ifdef BIGOS_MULTICORE_HARDENING_SMOKE
-    if (bigos::sched::create_kernel_thread(&multicore_hardening_bsp_worker, nullptr) ==
-        bigos::sched::INVALID_THREAD_ID)
+    if (bigos::sched::create_kernel_thread(&multicore_hardening_bsp_worker, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_MULTICORE_HARDENING_FAILED thread\n");
 #endif
 #ifdef BIGOS_BLOCKING_SMOKE

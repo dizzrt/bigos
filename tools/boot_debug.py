@@ -20,7 +20,7 @@ from typing import BinaryIO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = PROJECT_ROOT / 'build'
-LOG_DIR = PROJECT_ROOT / 'log'
+LOG_DIR = PROJECT_ROOT / 'logs'
 BOOT_ARTIFACT_DIR = BUILD_DIR / 'bin' / 'x86' / 'boot'
 UEFI_ARTIFACT_DIR = BUILD_DIR / 'bin' / 'x86' / 'uefi'
 DEFAULT_IMAGE = BUILD_DIR / 'test' / 'os.raw'
@@ -397,12 +397,13 @@ RUNTIME_SMOKE_MATRIX = (
         timeout_seconds=20.0,
         risk_area=(
             'bounded synchronous request validation, internal RAM block backend publication, '
-            'per-device queue exhaustion, cache round trip, and status propagation'
+            'per-device queue exhaustion, cache round trip, interrupt-driven completion, and status propagation'
         ),
         validation_markers=('BIGOS_BLOCK_IO_REQUEST_PASSED',),
         proc_boundary=(
-            'default-off kernel-thread smoke over internal block backends; no async I/O, '
-            'background worker, user-visible device node, or user ABI is exposed'
+            'default-off kernel-thread smoke over internal block backends; bounded kernel-internal '
+            'interrupt-driven completion only, with no complete async I/O, background worker, '
+            'user-visible device node, or user ABI exposed'
         ),
     ),
     RuntimeSmokeCase(
@@ -2270,7 +2271,7 @@ def make_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         '--serial-log',
-        help='COM1 output file; QEMU defaults under log/ when omitted',
+        help='COM1 output file; QEMU defaults under logs/ when omitted',
     )
     run_parser.add_argument(
         '--expect-serial-marker',

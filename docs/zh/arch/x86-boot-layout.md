@@ -148,6 +148,6 @@ VGA 文本内存中显示可见的 `U` 代码。
 `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu` 会构建/使用
 `build/bin/x86/uefi/BOOTX64.EFI`，生成 `build/test/uefi-esp.img`，准备 `build/test/uefi-root.raw`
 作为当前 exFAT runtime root 兼容镜像，复制 OVMF vars template 到
-`build/test/OVMF_VARS.uefi.fd`，并默认将 UEFI 串口输出写入 `log/qemu-uefi.serial.log`。
+`build/test/OVMF_VARS.uefi.fd`，并默认将 UEFI 串口输出写入 `logs/qemu-uefi.serial.log`。
 `xmake run qemu-uefi` 仍是显式别名。该路径使用 QEMU/OVMF 和 ESP/FAT image，并与 Bochs config、BIOS boot sectors
 和 `boot.bin` 保持隔离。
