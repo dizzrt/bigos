@@ -328,10 +328,10 @@ Legacy text console remains as a fallback.
   console/scrollback state stays reusable.
 - [x] 任务 M7.3：framebuffer 文本控制台后端，在既有控制台输出接口之后渲染字形、软件光标与
   滚动，使上层 console/scrollback 状态可复用。
-- [ ] Task M7.4: upgrade the console text model to UTF-8 decoding, codepoint-based
+- [x] Task M7.4: upgrade the console text model to UTF-8 decoding, codepoint-based
   cells, and double-width cell handling so non-ASCII text can be displayed; the
   Legacy text backend degrades non-ASCII codepoints deterministically.
-- [ ] 任务 M7.4：将控制台文本模型升级为 UTF-8 解码、基于 codepoint 的 cell 与双宽 cell
+- [x] 任务 M7.4：将控制台文本模型升级为 UTF-8 解码、基于 codepoint 的 cell 与双宽 cell
   处理以显示非 ASCII 文本；Legacy 文本后端对非 ASCII codepoint 做确定性降级显示。
 
 ### Milestone M8 — Multi-Core Hardening / 里程碑 M8 — 多核加固

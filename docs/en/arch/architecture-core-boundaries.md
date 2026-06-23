@@ -6,8 +6,9 @@ boot flow. The Legacy BIOS/MBR/exFAT path remains an explicit runnable
 compatibility backend for low-level BIOS, ATA, port-IO, and Bochs validation.
 Architecture boundary work keeps both paths clear and makes the split between
 kernel core concepts and x86_64 mechanisms explicit. It does not add Secure
-Boot, GOP framebuffer, ACPI handoff, UEFI Runtime Services, a non-x86 backend,
-a broad device model, dynamic linking, or complete POSIX coverage.
+Boot, a broad graphics stack beyond the bounded framebuffer text console, ACPI
+handoff, UEFI Runtime Services, a non-x86 backend, a broad device model,
+dynamic linking, or complete POSIX coverage.
 
 ## Boundary Rule
 

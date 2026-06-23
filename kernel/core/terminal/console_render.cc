@@ -19,6 +19,8 @@ namespace {
         uint32_t pixel_format;
         uint16_t cell_width;
         uint16_t cell_height;
+        uint8_t visible_columns;
+        uint8_t visible_rows;
         bool cursor_visible;
         uint8_t cursor_x;
         uint8_t cursor_y;
@@ -32,8 +34,17 @@ namespace {
 
     void vga_begin_viewport_redraw() noexcept {}
 
+    char vga_cell_char(const bigos::terminal::ConsoleRenderCell &__cell) noexcept {
+        if (__cell.role == bigos::terminal::ConsoleCellRole::Blank ||
+            __cell.role == bigos::terminal::ConsoleCellRole::WideTrailing)
+            return ' ';
+        if (__cell.codepoint >= 0x20u && __cell.codepoint <= 0x7eu)
+            return (char)__cell.codepoint;
+        return '?';
+    }
+
     void vga_draw_cell(uint8_t __x, uint8_t __y, const bigos::terminal::ConsoleRenderCell &__cell) noexcept {
-        bigos::device::fill_video_text_cell(__x, __y, __cell.ch, __cell.color);
+        bigos::device::fill_video_text_cell(__x, __y, vga_cell_char(__cell), __cell.color);
     }
 
     void vga_end_viewport_redraw() noexcept {}
@@ -47,6 +58,8 @@ namespace {
 
     const bigos::terminal::ConsoleRenderBackend g_vga_backend = {
         "vga-text",
+        bigos::terminal::CONSOLE_RENDER_VGA_WIDTH,
+        bigos::terminal::CONSOLE_RENDER_VGA_HEIGHT,
         &vga_clear,
         &vga_begin_viewport_redraw,
         &vga_draw_cell,
@@ -66,16 +79,18 @@ namespace {
         return ((uint32_t)red << 16) | ((uint32_t)green << 8) | blue;
     }
 
-    bool framebuffer_cell_range_valid(uint8_t __x, uint8_t __y) noexcept {
+    bool framebuffer_cell_range_valid(uint8_t __x, uint8_t __y, uint8_t __span = 1) noexcept {
         if (!g_framebuffer.ready)
             return false;
-        if (__x >= bigos::terminal::CONSOLE_RENDER_WIDTH || __y >= bigos::terminal::CONSOLE_RENDER_HEIGHT)
+        if (__x >= g_framebuffer.visible_columns || __y >= g_framebuffer.visible_rows)
+            return false;
+        if (__span == 0 || (uint32_t)__x + __span > g_framebuffer.visible_columns)
             return false;
         const uint64_t px = (uint64_t)__x * g_framebuffer.cell_width;
         const uint64_t py = (uint64_t)__y * g_framebuffer.cell_height;
-        const uint64_t row_bytes = (uint64_t)g_framebuffer.cell_width * g_framebuffer.bytes_per_pixel;
-        if (px + g_framebuffer.cell_width > g_framebuffer.width ||
-            py + g_framebuffer.cell_height > g_framebuffer.height)
+        const uint64_t cell_pixel_width = (uint64_t)g_framebuffer.cell_width * __span;
+        const uint64_t row_bytes = cell_pixel_width * g_framebuffer.bytes_per_pixel;
+        if (px + cell_pixel_width > g_framebuffer.width || py + g_framebuffer.cell_height > g_framebuffer.height)
             return false;
         const uint64_t row_start = py * g_framebuffer.stride_bytes + px * g_framebuffer.bytes_per_pixel;
         const uint64_t last_row_start =
@@ -103,15 +118,16 @@ namespace {
         }
     }
 
-    void framebuffer_fill_cell(uint8_t __x, uint8_t __y, uint32_t __rgb) noexcept {
-        if (!framebuffer_cell_range_valid(__x, __y))
+    void framebuffer_fill_cell(uint8_t __x, uint8_t __y, uint32_t __rgb, uint8_t __span = 1) noexcept {
+        if (!framebuffer_cell_range_valid(__x, __y, __span))
             return;
         const uint64_t start_x = (uint64_t)__x * g_framebuffer.cell_width;
         const uint64_t start_y = (uint64_t)__y * g_framebuffer.cell_height;
+        const uint64_t cell_pixel_width = (uint64_t)g_framebuffer.cell_width * __span;
         for (uint16_t row = 0; row < g_framebuffer.cell_height; ++row) {
             const uint64_t row_offset =
                 (start_y + row) * g_framebuffer.stride_bytes + start_x * g_framebuffer.bytes_per_pixel;
-            for (uint16_t col = 0; col < g_framebuffer.cell_width; ++col)
+            for (uint16_t col = 0; col < cell_pixel_width; ++col)
                 framebuffer_write_pixel(row_offset + (uint64_t)col * g_framebuffer.bytes_per_pixel, __rgb);
         }
     }
@@ -127,28 +143,34 @@ namespace {
         return (__glyph.bitmap[offset] & mask) != 0;
     }
 
-    bool lookup_render_glyph(char __ch, bigos::font::GlyphBitmap *__glyph) noexcept {
-        const uint8_t byte = (uint8_t)__ch;
-        if (byte < 0x20u || byte == 0x7fu)
+    bool lookup_render_glyph(uint32_t __codepoint, bigos::font::GlyphBitmap *__glyph) noexcept {
+        if (__codepoint < 0x20u || __codepoint == 0x7fu)
             return false;
-        if (bigos::font::lookup_glyph(byte, __glyph) == bigos::font::GlyphLookupStatus::Found)
+        if (bigos::font::lookup_glyph(__codepoint, __glyph) == bigos::font::GlyphLookupStatus::Found)
+            return true;
+        if (bigos::font::lookup_glyph(0xfffdu, __glyph) == bigos::font::GlyphLookupStatus::Found)
             return true;
         return bigos::font::lookup_glyph('?', __glyph) == bigos::font::GlyphLookupStatus::Found;
     }
 
     void framebuffer_draw_cell(
         uint8_t __x, uint8_t __y, const bigos::terminal::ConsoleRenderCell &__cell, bool __cursor) noexcept {
+        if (__cell.role == bigos::terminal::ConsoleCellRole::WideTrailing)
+            return;
+        const uint8_t span = __cell.role == bigos::terminal::ConsoleCellRole::WideLeading ? 2 : 1;
         const uint32_t fg = palette_color((uint8_t)(__cell.color & 0x0fu));
         const uint32_t bg = palette_color((uint8_t)((__cell.color >> 4) & 0x0fu));
         const uint32_t draw_fg = __cursor ? bg : fg;
         const uint32_t draw_bg = __cursor ? fg : bg;
-        framebuffer_fill_cell(__x, __y, draw_bg);
+        framebuffer_fill_cell(__x, __y, draw_bg, span);
+        if (__cell.role == bigos::terminal::ConsoleCellRole::Blank)
+            return;
 
         bigos::font::GlyphBitmap glyph = {};
-        if (!lookup_render_glyph(__cell.ch, &glyph))
+        if (!lookup_render_glyph(__cell.codepoint, &glyph))
             return;
         const uint16_t draw_width =
-            glyph.glyph_width < g_framebuffer.cell_width ? glyph.glyph_width : g_framebuffer.cell_width;
+            glyph.glyph_width < g_framebuffer.cell_width * span ? glyph.glyph_width : g_framebuffer.cell_width * span;
         const uint16_t draw_height =
             glyph.glyph_height < g_framebuffer.cell_height ? glyph.glyph_height : g_framebuffer.cell_height;
         const uint64_t start_x = (uint64_t)__x * g_framebuffer.cell_width;
@@ -164,9 +186,13 @@ namespace {
     }
 
     void framebuffer_clear() noexcept {
-        for (uint8_t y = 0; y < bigos::terminal::CONSOLE_RENDER_HEIGHT; ++y) {
-            for (uint8_t x = 0; x < bigos::terminal::CONSOLE_RENDER_WIDTH; ++x)
-                framebuffer_fill_cell(x, y, palette_color(0));
+        if (!g_framebuffer.ready)
+            return;
+        const uint32_t bg = palette_color(0);
+        for (uint32_t y = 0; y < g_framebuffer.height; ++y) {
+            const uint64_t row_offset = (uint64_t)y * g_framebuffer.stride_bytes;
+            for (uint32_t x = 0; x < g_framebuffer.pixels_per_scanline; ++x)
+                framebuffer_write_pixel(row_offset + (uint64_t)x * g_framebuffer.bytes_per_pixel, bg);
         }
     }
 
@@ -191,8 +217,10 @@ namespace {
         framebuffer_draw_cell(__x, __y, __cell, true);
     }
 
-    const bigos::terminal::ConsoleRenderBackend g_framebuffer_backend = {
+    bigos::terminal::ConsoleRenderBackend g_framebuffer_backend = {
         "framebuffer-text",
+        0,
+        0,
         &framebuffer_clear,
         &framebuffer_begin_viewport_redraw,
         &framebuffer_draw_cell_backend,
@@ -222,6 +250,45 @@ namespace {
         return true;
     }
 
+    bool checked_add_u64(uint64_t __a, uint64_t __b, uint64_t &__out) noexcept {
+        if (__b > ~0ull - __a)
+            return false;
+        __out = __a + __b;
+        return true;
+    }
+
+    uint8_t clamp_framebuffer_grid_dimension(uint64_t __value, uint8_t __max) noexcept {
+        return __value > __max ? __max : (uint8_t)__value;
+    }
+
+    bool framebuffer_pixel_rect_valid(uint64_t __x, uint64_t __y, uint64_t __width, uint64_t __height,
+        uint64_t __stride_bytes, uint64_t __bytes_per_pixel, uint64_t __byte_size) noexcept {
+        if (__width == 0 || __height == 0 || __bytes_per_pixel == 0)
+            return false;
+        uint64_t row_bytes = 0;
+        if (!checked_mul_u64(__width, __bytes_per_pixel, row_bytes))
+            return false;
+        uint64_t x_bytes = 0;
+        if (!checked_mul_u64(__x, __bytes_per_pixel, x_bytes))
+            return false;
+        uint64_t start_y_offset = 0;
+        if (!checked_mul_u64(__y, __stride_bytes, start_y_offset))
+            return false;
+        uint64_t row_start = 0;
+        if (!checked_add_u64(start_y_offset, x_bytes, row_start))
+            return false;
+        uint64_t last_y = 0;
+        if (!checked_add_u64(__y, __height - 1, last_y))
+            return false;
+        uint64_t last_y_offset = 0;
+        if (!checked_mul_u64(last_y, __stride_bytes, last_y_offset))
+            return false;
+        uint64_t last_row_start = 0;
+        if (!checked_add_u64(last_y_offset, x_bytes, last_row_start))
+            return false;
+        return row_start < __byte_size && last_row_start < __byte_size && row_bytes <= __byte_size - last_row_start;
+    }
+
     bool probe_framebuffer_backend() noexcept {
         g_framebuffer = {};
         const auto &fb = bigos::boot::early_framebuffer();
@@ -240,13 +307,15 @@ namespace {
         uint16_t cell_height = 0;
         if (!choose_cell_metrics(cell_width, cell_height))
             return false;
-        uint64_t grid_width = 0;
-        uint64_t grid_height = 0;
-        if (!checked_mul_u64(bigos::terminal::CONSOLE_RENDER_WIDTH, cell_width, grid_width) ||
-            !checked_mul_u64(bigos::terminal::CONSOLE_RENDER_HEIGHT, cell_height, grid_height))
+        const uint64_t raw_columns = metadata.width / cell_width;
+        const uint64_t raw_rows = metadata.height / cell_height;
+        if (raw_columns < bigos::terminal::CONSOLE_RENDER_MIN_WIDTH ||
+            raw_rows < bigos::terminal::CONSOLE_RENDER_MIN_HEIGHT)
             return false;
-        if (grid_width > metadata.width || grid_height > metadata.height)
-            return false;
+        const uint8_t visible_columns =
+            clamp_framebuffer_grid_dimension(raw_columns, bigos::terminal::CONSOLE_RENDER_MAX_WIDTH);
+        const uint8_t visible_rows =
+            clamp_framebuffer_grid_dimension(raw_rows, bigos::terminal::CONSOLE_RENDER_MAX_HEIGHT);
         uint64_t stride_bytes = 0;
         if (!checked_mul_u64(metadata.pixels_per_scanline, metadata.bytes_per_pixel, stride_bytes))
             return false;
@@ -255,12 +324,26 @@ namespace {
         uint64_t min_size = 0;
         if (!checked_mul_u64(metadata.height, stride_bytes, min_size) || min_size > metadata.byte_size)
             return false;
+        uint64_t grid_width = 0;
+        uint64_t grid_height = 0;
+        if (!checked_mul_u64(visible_columns, cell_width, grid_width) ||
+            !checked_mul_u64(visible_rows, cell_height, grid_height))
+            return false;
+        if (grid_width > metadata.width || grid_height > metadata.height)
+            return false;
+        if (!framebuffer_pixel_rect_valid(
+                0, 0, grid_width, grid_height, stride_bytes, metadata.bytes_per_pixel, metadata.byte_size))
+            return false;
+        if (!framebuffer_pixel_rect_valid(0, 0, metadata.pixels_per_scanline, metadata.height, stride_bytes,
+                metadata.bytes_per_pixel, metadata.byte_size))
+            return false;
         const auto policy = (metadata.attributes & BIGOS_BOOT_FRAMEBUFFER_ATTR_WRITE_COMBINE) != 0
                                 ? bigos::mm::DeviceMmioCachePolicy::WriteCombining
                                 : bigos::mm::DeviceMmioCachePolicy::Uncached;
         const bigos::mm::DeviceMmioMapping mapping =
             bigos::mm::map_device_mmio(metadata.physical_base, metadata.byte_size, policy);
-        if (!mapping.valid || mapping.vaddr == nullptr || mapping.length < metadata.byte_size)
+        if (!mapping.valid || mapping.vaddr == nullptr || mapping.length < metadata.byte_size ||
+            mapping.length < min_size)
             return false;
 
         g_framebuffer.ready = true;
@@ -274,6 +357,8 @@ namespace {
         g_framebuffer.pixel_format = metadata.pixel_format;
         g_framebuffer.cell_width = cell_width;
         g_framebuffer.cell_height = cell_height;
+        g_framebuffer.visible_columns = visible_columns;
+        g_framebuffer.visible_rows = visible_rows;
         return true;
     }
 }   // namespace
@@ -282,6 +367,9 @@ namespace bigos::terminal {
     void init_console_render_backend() noexcept {
         g_selected_backend = &g_vga_backend;
         if (probe_framebuffer_backend()) {
+            g_framebuffer_backend.visible_columns = g_framebuffer.visible_columns;
+            g_framebuffer_backend.visible_rows = g_framebuffer.visible_rows;
+            g_framebuffer_backend.clear();
             g_selected_backend = &g_framebuffer_backend;
             bigos::serial_puts("BIGOS_CONSOLE_RENDER backend=framebuffer-text\n");
         } else {

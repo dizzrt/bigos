@@ -52,7 +52,7 @@ Each case enables only the listed smoke switch and explicitly disables the other
 
 ## Behavior-Oriented Matrix
 
-The current bounded minimal usable system baseline promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the bounded minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. The default backend for these checks is now the x86_64 UEFI QEMU/OVMF path. Runtime parity remains bounded to the current init/shell/user-program baseline and does not imply Secure Boot, GOP framebuffer console, ACPI handoff, Runtime Services, OVMF parity beyond the tested path, virtio, AHCI/SATA, NVMe, new storage drivers, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
+The current bounded minimal usable system baseline promotes the runtime matrix from marker-only smoke coverage to behavior assertions for the bounded minimal usable system. Each row records the exercised capability, deterministic input, expected observable result, failure signal, validation layer, and environment dependency. The default backend for these checks is now the x86_64 UEFI QEMU/OVMF path. Runtime parity remains bounded to the current init/shell/user-program baseline and does not imply Secure Boot, graphical framebuffer evidence beyond separately recorded console backend checks, ACPI handoff, Runtime Services, OVMF parity beyond the tested path, virtio, AHCI/SATA, NVMe, new storage drivers, dynamic linking, job control, full shell grammar, or a complete POSIX libc.
 
 | Capability | Input or path | Expected observable result | Failure signal | Layer | Environment dependency |
 | --- | --- | --- | --- | --- | --- |
@@ -86,13 +86,17 @@ console-usability risk.
 Framebuffer console validation is separate from the default serial marker pass
 condition. When QEMU + OVMF graphical evidence is available, notes should record
 the framebuffer geometry, `BIGOS_CONSOLE_RENDER backend=framebuffer-text`,
+the computed visible columns/rows, full framebuffer background clear result,
 visible text, software cursor behavior, and PageUp/PageDown/Home/End viewport
-redraw behavior. Missing OVMF, QEMU, display/screenshot support, framebuffer
-metadata, or glyph lookup readiness should be marked as skipped or blocked with
-the VGA fallback, source-level checks, build result, and residual graphical
-console risk recorded. A successful framebuffer console check still does not
-claim UTF-8 decoding, CJK display, ANSI/VT, `termios`, multiple terminals, or a
-complete POSIX terminal.
+redraw behavior. Unicode console validation should additionally record bounded
+UTF-8/CJK sample output, double-width cell placement, and Legacy VGA fixed
+80x25 degradation when those checks are performed. Missing OVMF, QEMU,
+display/screenshot support, framebuffer metadata, or glyph lookup readiness
+should be marked as skipped or blocked with the VGA fallback, source-level
+checks, build result, and residual graphical console risk recorded. A successful
+framebuffer Unicode console check still does not claim ANSI/VT, `termios`,
+multiple terminals, locale, shaping, input methods, or a complete POSIX
+terminal.
 
 The `blocking-primitives` case emits intermediate markers `BIGOS_BLOCKING_WAIT_BLOCKED`, `BIGOS_BLOCKING_WAKE_SENT`, `BIGOS_BLOCKING_WAIT_RESUMED`, `BIGOS_BLOCKING_TIMEOUT_BLOCKED`, and `BIGOS_BLOCKING_TIMEOUT_EXPIRED` before the final pass marker. It uses a synthetic TTY producer, so automated QEMU headless validation does not require manual keyboard input; optional manual keyboard validation should be recorded separately when performed.
 
@@ -167,8 +171,9 @@ The runner writes a Markdown-first validation artifact to `build/test/runtime-sm
 - `failed stage`: preflight, build, image build, validation, or emulator marker stage.
 - `skip reason`, `alternative checks`, and `residual risk`: required for unavailable tools or skipped cross-validation.
 - `console backend evidence`: optional framebuffer/VGA backend selection,
-  framebuffer geometry, visible-text/cursor/scrollback notes, and skipped or
-  blocked graphical evidence.
+  framebuffer geometry, computed visible columns/rows, full-clear observation,
+  visible-text/cursor/scrollback notes, and skipped or blocked graphical
+  evidence.
 
 Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, or other required local dependencies must be recorded as skipped or blocked. A smoke that did not run must not be marked as passed.
 

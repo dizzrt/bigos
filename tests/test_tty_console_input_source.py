@@ -187,8 +187,14 @@ def test_console_api_uses_render_backend_without_serial_mirroring() -> None:
     assert 'void console_write(const char *s) noexcept;' in console_h
     assert 'void console_scroll_page_up() noexcept;' in console_h
     assert 'struct ConsoleRenderBackend' in render_h
-    assert 'ConsoleRenderCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_WIDTH];' in console
+    assert 'enum class ConsoleCellRole' in render_h
+    assert 'uint32_t codepoint;' in render_h
+    assert 'ConsoleCellRole role;' in render_h
+    assert 'uint8_t visible_columns;' in render_h
+    assert 'uint8_t visible_rows;' in render_h
+    assert 'ConsoleRenderCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_RENDER_MAX_WIDTH];' in console
     assert 'CONSOLE_SCROLLBACK_LINES = 256' in console
+    assert 'Utf8Decoder utf8;' in console
     assert 'console_render_backend()' in console
     assert 'bigos::device::fill_video_text_cell' not in console
     assert 'const bigos::terminal::ConsoleRenderBackend g_vga_backend' in render
@@ -231,15 +237,22 @@ def test_console_scrollback_state_viewport_follow_and_clear_policy() -> None:
     console = read_source('kernel/core/terminal/console.cc')
     render_h = read_source('include/bigos/console_render.h')
 
-    assert 'CONSOLE_WIDTH = 80' in console
-    assert 'CONSOLE_HEIGHT = 25' in console
-    assert 'CONSOLE_RENDER_WIDTH = 80' in render_h
-    assert 'CONSOLE_RENDER_HEIGHT = 25' in render_h
+    assert 'CONSOLE_RENDER_VGA_WIDTH = 80' in render_h
+    assert 'CONSOLE_RENDER_VGA_HEIGHT = 25' in render_h
+    assert 'CONSOLE_RENDER_MIN_WIDTH = CONSOLE_RENDER_VGA_WIDTH' in render_h
+    assert 'CONSOLE_RENDER_MAX_WIDTH = 240' in render_h
+    assert 'CONSOLE_RENDER_MAX_HEIGHT = 80' in render_h
     assert 'CONSOLE_SCROLLBACK_LINES = 256' in console
     assert 'uint64_t oldest_line;' in console
     assert 'uint64_t current_line;' in console
     assert 'uint64_t viewport_top;' in console
+    assert 'uint8_t visible_columns;' in console
+    assert 'uint8_t visible_rows;' in console
     assert 'uint8_t cursor_x;' in console
+    assert 'Utf8Decoder utf8;' in console
+    assert 'uint8_t visible_columns() noexcept' in console
+    assert 'uint8_t visible_rows() noexcept' in console
+    assert 'g_console.visible_columns = backend.visible_columns;' in console
     assert 'uint64_t bottom_viewport_top() noexcept' in console
     assert 'bool viewport_at_bottom() noexcept' in console
     assert 'void render_viewport() noexcept' in console
@@ -250,10 +263,50 @@ def test_console_scrollback_state_viewport_follow_and_clear_policy() -> None:
     assert 'g_console.current_line + 1 - CONSOLE_SCROLLBACK_LINES' in console
     assert 'if (follow)' in console
     assert 'console_scroll_page_up' in console
+    assert 'const uint64_t step = visible_rows() > 1 ? visible_rows() - 1 : 1;' in console
     assert 'console_scroll_page_down' in console
     assert 'console_scroll_home' in console
     assert 'console_scroll_end' in console
     assert 'Clear-screen discards retained runtime scrollback' in console
+    assert 'console_render_backend().clear();' in console
+
+
+def test_unicode_console_text_model_decodes_utf8_and_replacement() -> None:
+    console = read_source('kernel/core/terminal/console.cc')
+    render_h = read_source('include/bigos/console_render.h')
+
+    assert 'constexpr uint32_t REPLACEMENT_CODEPOINT = 0xfffd;' in console
+    assert 'struct Utf8Decoder' in console
+    assert 'uint32_t min_codepoint;' in console
+    assert 'uint8_t remaining;' in console
+    assert 'bool is_utf8_continuation(uint8_t byte) noexcept' in console
+    assert 'bool valid_unicode_scalar(uint32_t codepoint) noexcept' in console
+    assert 'void consume_output_byte(uint8_t byte) noexcept' in console
+    assert 'byte >= 0xc2u && byte <= 0xdfu' in console
+    assert 'byte >= 0xe0u && byte <= 0xefu' in console
+    assert 'byte >= 0xf0u && byte <= 0xf4u' in console
+    assert 'codepoint < min_codepoint || !valid_unicode_scalar(codepoint)' in console
+    assert 'emit_replacement();' in console
+    assert 'Replacement,' in render_h
+
+
+def test_unicode_console_cell_layout_width_backspace_and_tab_stop() -> None:
+    console = read_source('kernel/core/terminal/console.cc')
+    render_h = read_source('include/bigos/console_render.h')
+
+    assert 'WideLeading,' in render_h
+    assert 'WideTrailing,' in render_h
+    assert 'uint8_t codepoint_cell_width(uint32_t codepoint' in console
+    assert 'bigos::font::lookup_glyph(codepoint, &glyph)' in console
+    assert 'bigos::font::lookup_glyph(REPLACEMENT_CODEPOINT, &glyph)' in console
+    assert 'write_wide_cell(uint32_t codepoint' in console
+    assert 'cells[g_console.cursor_x + 1] = {codepoint, ConsoleCellRole::WideTrailing, CONSOLE_COLOR};' in console
+    assert 'if (g_console.cursor_x + 1 >= columns)' in console
+    assert 'void put_backspace() noexcept' in console
+    assert 'cells[g_console.cursor_x].role == ConsoleCellRole::WideTrailing' in console
+    assert 'constexpr uint8_t TAB_STOP_COLUMNS = 4;' in console
+    assert 'TAB_STOP_COLUMNS - (g_console.cursor_x % TAB_STOP_COLUMNS)' in console
+    assert 'put_codepoint(SPACE_CODEPOINT);' in console
 
 
 def test_default_user_stdout_and_stderr_reach_visible_console() -> None:

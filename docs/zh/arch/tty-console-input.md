@@ -52,19 +52,19 @@ blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-threa
 
 ## Console 输出边界
 
-普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装 `terminal::console_put()` 和 `terminal::console_write()`。runtime console 统一拥有固定 80x25 cell state、cursor position、256 行内核 scrollback buffer、viewport policy 和 clear policy。具体显示通过内部 render backend 完成：VGA text 仍是 Legacy fallback；UEFI framebuffer text backend 只有在 framebuffer metadata 已校验、通过显式 `map_device_mmio()` 完成映射、像素格式是受支持的 32-bit RGBX/BGRX，并且 glyph lookup view 可用时才会被选择。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到同一默认 console 路径；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
+普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装 `terminal::console_put()` 和 `terminal::console_write()`。runtime console 统一拥有固定容量 cell storage、cursor position、256 行内核 scrollback buffer、viewport policy 和 clear policy；可见列数和行数由选中的内部 render backend 提供。VGA text 仍是固定 80x25 Legacy fallback；UEFI framebuffer text backend 只有在 framebuffer metadata 已校验、通过显式 `map_device_mmio()` 完成映射、像素格式是受支持的 32-bit RGBX/BGRX、glyph lookup view 可用，并且能从 framebuffer 几何计算出有界完整 cell grid 时才会被选择。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到同一默认 console 路径；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
 
 基础控制字符行为：
 
 - `\n`：移动到下一行行首。
 - `\r`：移动到当前行行首。
-- `\t`：用确定性的空白 cell 向后移动 4 个字符位置。
-- `\b`：在可回退时回退一格并擦除该字符。
+- `\t`：用确定性的空白 cell 推进到下一个 4 列 tab stop。
+- `\b`：擦除前一个逻辑字符，必要时同时清理双宽字符的两个 cell。
 - Unsupported escape sequence：不解析 ANSI/VT 序列；Escape 作为普通字符写入或由上层决定忽略。
 
-当输出越过最后一个可见行时，runtime console 更新自己拥有的 scrollback state，并要求 backend 重绘完整可见 viewport。VGA backend 使用硬件 text cursor；framebuffer backend 从当前 `char` cell 渲染 glyph pixels，并以 backend state 绘制软件光标，不把 cursor byte 存入 scrollback。runtime console 在 viewport 位于底部时跟随最新输出；PageUp 或 Home 可以把 viewport 移到保留历史，之后 PageDown 或 End 会向最新输出返回。查看历史时产生的新输出不会破坏保留历史，也不会强制把 viewport 拉回底部。受支持的 console clear path 会通过选中的 backend 清空可见窗口、丢弃保留的 runtime scrollback，并把 viewport 重置到底部。
+当输出越过最后一个可见行时，runtime console 更新自己拥有的 scrollback state，并要求 backend 重绘完整可见 viewport。VGA backend 使用硬件 text cursor；framebuffer backend 在动态可见 grid 上从 console-owned Unicode codepoint cell 渲染 glyph pixels，并以 backend state 绘制软件光标，不把 cursor byte 存入 scrollback。PageUp/PageDown 使用由当前可见行数派生的有界步长；Home 可以把 viewport 移到保留历史，End 会向最新输出返回。查看历史时产生的新输出不会破坏保留历史，也不会强制把 viewport 拉回底部。受支持的 console clear path 会通过选中的 backend 清屏、丢弃保留的 runtime scrollback，并把 viewport 重置到底部；framebuffer backend 会覆盖整块已校验 mapped framebuffer，避免 text grid 外继续显示固件残留像素。
 
-framebuffer backend 只渲染当前有界 console cell bytes。缺失 glyph 使用确定性的 replacement-or-blank 策略，不支持的 control byte 在 renderer 边界渲染为空白。该能力不实现 UTF-8 decoding、CJK 显示、Unicode codepoint cell、双宽 terminal layout、ANSI/VT 解析、颜色属性状态机、多终端、`termios` 或完整 POSIX terminal 行为。
+runtime console 会把普通输出按有界 UTF-8 解码，存储 Unicode codepoint cell，并记录单宽、双宽 leading、双宽 trailing、空白或 replacement cell role。字形宽度优先使用 kernel glyph lookup 的 width class：半宽 glyph 占一个 cell，全宽 glyph 占两个 cell。缺失或无效 codepoint 优先使用 `U+FFFD` replacement glyph；若该 glyph 不可用，再确定性降级为 `?` 或 blank。framebuffer backend 通过 glyph lookup 渲染这些 console-owned cell；Legacy VGA text backend 直接显示 printable ASCII，并对非 ASCII 或 trailing cell 做确定性降级。该能力不实现 ANSI/VT 解析、颜色属性状态机、多终端、`termios`、locale、Unicode normalization、grapheme cluster、shaping、输入法或完整 POSIX terminal 行为。
 
 `kput()`、`kputs()`、`kprintf()`、`serial_puts()` 和 fatal/page-fault/memory self-test marker 路径保留 early direct output 语义，不依赖 TTY 初始化、framebuffer console 初始化、glyph lookup 可用性或 input buffer 状态。
 
@@ -103,4 +103,4 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 ## 非目标
 
-该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、termios、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、UTF-8 decoding、CJK 显示、Unicode codepoint cell、双宽 cell、持久化或无限历史、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O、新的用户可见 terminal syscall 或完整 POSIX terminal read。
+该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、termios、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O、新的用户可见 terminal syscall 或完整 POSIX terminal read。

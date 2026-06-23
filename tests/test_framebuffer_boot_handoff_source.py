@@ -79,26 +79,56 @@ def test_kernel_consumes_optional_metadata_without_framebuffer_direct_map_alias(
     assert 'phys_to_direct' not in render
 
 
-def test_framebuffer_console_backend_validates_geometry_and_renders_glyph_cells() -> None:
+def test_framebuffer_console_backend_reports_dynamic_grid_and_renders_glyph_cells() -> None:
     render_h = read_source('include/bigos/console_render.h')
     render = read_source('kernel/core/terminal/console_render.cc')
     console = read_source('kernel/core/terminal/console.cc')
 
     assert 'struct ConsoleRenderBackend' in render_h
-    assert 'CONSOLE_RENDER_WIDTH = 80' in render_h
-    assert 'CONSOLE_RENDER_HEIGHT = 25' in render_h
+    assert 'CONSOLE_RENDER_VGA_WIDTH = 80' in render_h
+    assert 'CONSOLE_RENDER_VGA_HEIGHT = 25' in render_h
+    assert 'CONSOLE_RENDER_MAX_WIDTH = 240' in render_h
+    assert 'CONSOLE_RENDER_MAX_HEIGHT = 80' in render_h
+    assert 'uint8_t visible_columns;' in render_h
+    assert 'uint8_t visible_rows;' in render_h
     assert 'init_console_render_backend();' in console
+    assert 'g_console.visible_columns = backend.visible_columns;' in console
+    assert 'ConsoleRenderCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_RENDER_MAX_WIDTH];' in console
     assert 'probe_framebuffer_backend()' in render
     assert 'bigos_boot_framebuffer_metadata_valid(&metadata)' in render
     assert 'metadata.pixel_format != BIGOS_BOOT_FRAMEBUFFER_PIXEL_FORMAT_BGRX8888' in render
     assert 'metadata.bits_per_pixel != 32 || metadata.bytes_per_pixel != 4' in render
-    assert 'checked_mul_u64(bigos::terminal::CONSOLE_RENDER_WIDTH, cell_width, grid_width)' in render
+    assert 'const uint64_t raw_columns = metadata.width / cell_width;' in render
+    assert 'const uint64_t raw_rows = metadata.height / cell_height;' in render
+    assert 'CONSOLE_RENDER_MIN_WIDTH' in render
+    assert 'CONSOLE_RENDER_MAX_WIDTH' in render
+    assert 'clamp_framebuffer_grid_dimension(raw_columns' in render
+    assert 'g_framebuffer_backend.visible_columns = g_framebuffer.visible_columns;' in render
     assert 'grid_width > metadata.width || grid_height > metadata.height' in render
     assert 'metadata.height, stride_bytes, min_size' in render
+    assert 'framebuffer_pixel_rect_valid' in render
     assert 'lookup_render_glyph' in render
+    assert 'bigos::font::lookup_glyph(__codepoint, __glyph)' in render
+    assert 'bigos::font::lookup_glyph(0xfffdu, __glyph)' in render
     assert "bigos::font::lookup_glyph('?', __glyph)" in render
+    assert 'ConsoleCellRole::WideTrailing' in render
+    assert 'const uint8_t span = __cell.role == bigos::terminal::ConsoleCellRole::WideLeading ? 2 : 1;' in render
+    assert 'framebuffer_fill_cell(__x, __y, draw_bg, span);' in render
     assert 'glyph_bit_set' in render
     assert 'framebuffer_set_cursor' in render
     assert 'framebuffer_draw_cell(__x, __y, __cell, true);' in render
     assert 'BIGOS_CONSOLE_RENDER backend=framebuffer-text' in render
     assert 'BIGOS_CONSOLE_RENDER backend=vga-text' in render
+
+
+def test_framebuffer_full_clear_stays_within_validated_mapping_bounds() -> None:
+    render = read_source('kernel/core/terminal/console_render.cc')
+
+    assert 'void framebuffer_clear() noexcept' in render
+    assert 'for (uint32_t y = 0; y < g_framebuffer.height; ++y)' in render
+    assert 'for (uint32_t x = 0; x < g_framebuffer.pixels_per_scanline; ++x)' in render
+    assert 'framebuffer_write_pixel(row_offset + (uint64_t)x * g_framebuffer.bytes_per_pixel, bg);' in render
+    assert '__offset + g_framebuffer.bytes_per_pixel > g_framebuffer.byte_size' in render
+    assert 'mapping.length < metadata.byte_size' in render
+    assert 'mapping.length < min_size' in render
+    assert 'framebuffer_pixel_rect_valid(0, 0, metadata.pixels_per_scanline, metadata.height' in render

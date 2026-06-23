@@ -203,3 +203,59 @@ BigOS SHALL treat console scrollback and backend rendering as bounded default te
 - **WHEN** early panic, page fault diagnostics, memory self-test markers, or fixed COM1 serial validation markers are emitted before or outside terminal readiness
 - **THEN** those paths MAY continue using existing direct VGA/COM1 diagnostic output APIs
 - **AND** those diagnostic paths MUST NOT depend on scrollback initialization, framebuffer console initialization, keyboard input, shell progress, or userland fd availability
+
+### Requirement: 默认控制台输出支持有界 Unicode 文本显示
+
+BigOS SHALL extend the default runtime console output state so ordinary terminal output can display bounded Unicode text through the selected render backend. This extension MUST remain a single default runtime text-console display feature and MUST NOT widen the terminal abstraction into a complete POSIX or ANSI/VT terminal.
+
+#### Scenario: 普通 stdout/stderr 可进入 Unicode console sink
+
+- **WHEN** `/bin/sh` or a simple user program writes bounded UTF-8 text to stdout or stderr connected to the default terminal
+- **THEN** BigOS MUST route that byte stream through the existing default terminal and runtime console output path
+- **AND** the path MUST decode and store visible text according to the bounded Unicode console text model
+
+#### Scenario: backend 选择对用户程序透明
+
+- **WHEN** ordinary userland or kernel runtime output is rendered through VGA text fallback or framebuffer text backend
+- **THEN** user programs, shell code, fd/syscall consumers, and TTY input producers MUST NOT need to know which display backend is active
+- **AND** backend-specific Unicode display or degradation MUST remain behind the runtime console render boundary
+
+#### Scenario: 最小终端语义不扩大
+
+- **WHEN** the default runtime console supports UTF-8 decoding, codepoint cells, and double-width cell handling
+- **THEN** the default terminal abstraction MUST still remain a bounded single-console text display path
+- **AND** it MUST NOT imply ANSI/VT100 compatibility, `termios`, locale, multiple terminals, pseudo-terminals, background read/write control, complete job control, complete POSIX terminal behavior, Unicode normalization, grapheme cluster handling, input method support, or a complete libc wide-character API
+
+#### Scenario: scrollback 继续由 console 统一拥有
+
+- **WHEN** Unicode text output enters the default runtime console and the user navigates retained history
+- **THEN** scrollback retention, viewport navigation, cursor cell state, clear-screen policy, bottom-follow policy, and Unicode cell layout MUST remain owned by the default runtime console state
+- **AND** display backends MUST NOT maintain independent user-visible Unicode histories that diverge from the default console state
+
+### Requirement: 默认控制台 viewport 使用 backend-provided visible grid
+
+BigOS SHALL allow the default runtime console's visible viewport size to come from the selected render backend. The terminal abstraction MUST remain a bounded single-console text display path and MUST NOT expose backend geometry as a new user-visible terminal ABI.
+
+#### Scenario: Framebuffer backend changes visible grid transparently
+
+- **WHEN** the framebuffer render backend reports a dynamic visible grid larger than 80x25
+- **THEN** ordinary stdout/stderr, shell prompt text, kernel runtime console output, cursor placement, and scrollback viewport redraw MUST use that grid
+- **AND** user programs and fd/syscall consumers MUST NOT need to know the active backend geometry
+
+#### Scenario: Legacy VGA keeps existing behavior
+
+- **WHEN** the selected backend is Legacy VGA text
+- **THEN** the default runtime console MUST use the fixed 80x25 visible grid
+- **AND** existing Legacy fallback behavior, serial diagnostics, and bounded userland baseline MUST remain available
+
+#### Scenario: Terminal semantics remain minimal
+
+- **WHEN** the default runtime console uses a dynamic framebuffer visible grid
+- **THEN** BigOS MUST still treat it as a bounded default console display feature
+- **AND** it MUST NOT imply ANSI/VT compatibility, `termios`, multiple terminals, pseudo-terminals, full graphical terminal behavior, dynamic font scaling, locale/shaping, or complete POSIX terminal behavior
+
+#### Scenario: Scrollback ownership remains in console state
+
+- **WHEN** backend-provided visible rows change the amount of text visible on screen
+- **THEN** scrollback retention, viewport navigation, clear-screen policy, bottom-follow policy, cursor state, and Unicode cell layout MUST remain owned by runtime console state
+- **AND** display backends MUST NOT maintain independent user-visible histories or terminal state

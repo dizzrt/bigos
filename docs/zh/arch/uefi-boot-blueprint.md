@@ -271,8 +271,11 @@ UEFI BootInfo metadata sections：
   和基本 metrics，但不解析 Unicode ranges、不搜索 glyph records、不分类 terminal cells，也不写 framebuffer
   pixels。kernel startup 会在暴露只读 lookup view 前校验 payload header、range table、glyph records、
   bitmap bounds、alignment 和 width classes，供后续 console code 使用。
-- Glyph lookup asset 当前记录 Unifont 8x16 半宽和 16x16 全宽 bitmap glyph。width class 只是字体资产属性；
-  它不是 UTF-8 decoding、Unicode terminal cell policy、CJK 显示或双宽 terminal layout。有界 runtime framebuffer console backend 可以使用可用 glyph bitmap 渲染当前 `char` cell 和软件光标，但这不会把默认 console 扩大为完整图形 terminal 或 POSIX terminal。
+- Glyph lookup asset 当前记录 Unifont 8x16 半宽和 16x16 全宽 bitmap glyph。runtime console
+  会把普通输出按有界 UTF-8 解码为 console-owned Unicode codepoint cell，并使用该 width class
+  布局半宽和全宽 glyph。framebuffer backend 可以用软件光标渲染这些 cell；Legacy VGA text backend
+  会对非 ASCII cell 做确定性降级。这仍是有界默认 console 能力，不会把默认 console 扩大为完整图形、
+  ANSI/VT、locale-aware、shaping 或 POSIX terminal。
 - Kernel 启动仍只依赖有效的 required `core` 与 `memory_map` sections；缺失或未知的
   optional section 仍可跳过。
 

@@ -52,7 +52,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 
 ## 行为导向矩阵
 
-当前有界最小可用系统基线将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为有界最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查的默认 backend 现在是 x86_64 UEFI QEMU/OVMF 路径。Runtime parity 仍限定在当前 init/shell/user-program baseline，不暗示 Secure Boot、GOP framebuffer console、ACPI handoff、Runtime Services、超出被测路径的 OVMF parity、virtio、AHCI/SATA、NVMe、新存储驱动、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
+当前有界最小可用系统基线将 runtime 矩阵从仅 marker 的 smoke 覆盖推进为有界最小可用系统的行为断言。每一行记录被验证的 capability、确定性输入、预期可观察结果、失败信号、验证层和环境依赖。这些检查的默认 backend 现在是 x86_64 UEFI QEMU/OVMF 路径。Runtime parity 仍限定在当前 init/shell/user-program baseline，不暗示 Secure Boot、超出单独 console backend 记录的图形 framebuffer 证据、ACPI handoff、Runtime Services、超出被测路径的 OVMF parity、virtio、AHCI/SATA、NVMe、新存储驱动、动态链接、作业控制、完整 shell grammar 或完整 POSIX libc。
 
 | Capability | 输入或路径 | 预期可观察结果 | 失败信号 | 验证层 | 环境依赖 |
 | --- | --- | --- | --- | --- | --- |
@@ -77,7 +77,7 @@ notes 应记录 backend、display/input method、输入命令、观察到的 pro
 source-level、build、headless 检查以及剩余 console-usability 风险。
 
 framebuffer console 验证与默认串口 marker 通过条件分开记录。若 QEMU + OVMF 图形证据可用，notes
-应记录 framebuffer geometry、`BIGOS_CONSOLE_RENDER backend=framebuffer-text`、可见文本、软件光标行为，以及 PageUp/PageDown/Home/End viewport 重绘行为。缺少 OVMF、QEMU、display/screenshot 支持、framebuffer metadata 或 glyph lookup readiness 时，应标记为 skipped 或 blocked，并记录 VGA fallback、source-level checks、构建结果和剩余图形 console 风险。framebuffer console 验证通过也不声明 UTF-8 decoding、CJK 显示、ANSI/VT、`termios`、多终端或完整 POSIX terminal。
+应记录 framebuffer geometry、`BIGOS_CONSOLE_RENDER backend=framebuffer-text`、计算出的可见 columns/rows、full framebuffer background clear 结果、可见文本、软件光标行为，以及 PageUp/PageDown/Home/End viewport 重绘行为。Unicode console 验证还应在执行时记录有界 UTF-8/CJK 样例输出、双宽 cell 布局和 Legacy VGA 固定 80x25 降级。缺少 OVMF、QEMU、display/screenshot 支持、framebuffer metadata 或 glyph lookup readiness 时，应标记为 skipped 或 blocked，并记录 VGA fallback、source-level checks、构建结果和剩余图形 console 风险。framebuffer Unicode console 验证通过也不声明 ANSI/VT、`termios`、多终端、locale、shaping、输入法或完整 POSIX terminal。
 
 `blocking-primitives` case 在最终 pass marker 前还会输出 `BIGOS_BLOCKING_WAIT_BLOCKED`、`BIGOS_BLOCKING_WAKE_SENT`、`BIGOS_BLOCKING_WAIT_RESUMED`、`BIGOS_BLOCKING_TIMEOUT_BLOCKED` 与 `BIGOS_BLOCKING_TIMEOUT_EXPIRED` 中间 marker。它使用 synthetic TTY producer，因此 QEMU headless 自动验证不依赖手工键盘输入；若执行可选手工键盘验证，需要单独记录。
 
@@ -141,7 +141,7 @@ uv run python tools/boot_debug.py run \
 - `status`：`passed`、`failed`、`skipped` 或 `blocked`。
 - `failed stage`：preflight、build、image build、validation 或 emulator marker 阶段。
 - `skip reason`、`alternative checks` 与 `residual risk`：工具不可用或跳过交叉验证时必须记录。
-- `console backend evidence`：可选记录 framebuffer/VGA backend selection、framebuffer geometry、可见文本/光标/scrollback notes，以及图形证据 skipped 或 blocked 状态。
+- `console backend evidence`：可选记录 framebuffer/VGA backend selection、framebuffer geometry、计算出的可见 columns/rows、full-clear observation、可见文本/光标/scrollback notes，以及图形证据 skipped 或 blocked 状态。
 
 缺少 `uv`、`xmake`、cross-binutils、QEMU、Bochs、ROM/display 配置或其他必要本地依赖时，必须记录为 skipped 或 blocked。未运行的 smoke 不得标记为 passed。
 

@@ -4,8 +4,8 @@ BigOS 当前只有一个默认具备 bounded userland baseline 内 runtime parit
 路径：通过 UEFI ESP/FAT 与 QEMU/OVMF 启动的 x86_64。Legacy BIOS/MBR/exFAT
 路径仍作为显式可运行兼容 backend 保留，用于低层 BIOS、ATA、port-IO 和 Bochs 验证。
 架构边界整理需要清晰保留两条路径，并明确区分 kernel core 概念与 x86_64 机制。本工作
-不新增 Secure Boot、GOP framebuffer、ACPI handoff、UEFI Runtime Services、non-x86
-backend、宽泛设备模型、动态链接或完整 POSIX 覆盖。
+不新增 Secure Boot、超出有界 framebuffer text console 的宽泛图形栈、ACPI handoff、
+UEFI Runtime Services、non-x86 backend、宽泛设备模型、动态链接或完整 POSIX 覆盖。
 
 ## 边界规则
 
