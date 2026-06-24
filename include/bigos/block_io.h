@@ -23,6 +23,7 @@ namespace block_io {
         DeviceNotReady,
         WouldBlock,
         PendingTimeout,
+        Cancelled,
         CompletionRejected,
         BufferTooSmall,
         Overflow,
@@ -39,6 +40,57 @@ namespace block_io {
         CompletedSuccess,
         CompletedError,
         TimeoutOrCancelled,
+    };
+
+    enum class TerminalReason : uint32_t {
+        None = 0,
+        Success,
+        InvalidRequest,
+        QueueFull,
+        IssueFailure,
+        DeviceError,
+        Timeout,
+        Cancelled,
+        CompletionRejected,
+    };
+
+    enum class CompletionRejectionReason : uint32_t {
+        None = 0,
+        NullToken,
+        InvalidStatus,
+        UnknownDevice,
+        InvalidSlot,
+        SlotEmpty,
+        RequestMismatch,
+        DeviceMismatch,
+        GenerationMismatch,
+        RequestGenerationMismatch,
+        NotPending,
+        DuplicateCompletion,
+        LateCompletion,
+        SlotReuseProtected,
+    };
+
+    struct DiagnosticsSnapshot {
+        uint32_t terminal_publish_count;
+        uint32_t success_count;
+        uint32_t invalid_request_count;
+        uint32_t queue_full_count;
+        uint32_t issue_failure_count;
+        uint32_t device_error_count;
+        uint32_t timeout_count;
+        uint32_t cancel_count;
+        uint32_t completion_rejected_count;
+        uint32_t rejection_count;
+        uint32_t late_completion_count;
+        uint32_t duplicate_completion_count;
+        uint32_t identity_mismatch_count;
+        uint32_t slot_reuse_protection_count;
+        TerminalReason last_terminal_reason;
+        CompletionRejectionReason last_rejection_reason;
+        Status last_status;
+        uint32_t last_slot;
+        uint32_t last_generation;
     };
 
     struct Request;
@@ -59,6 +111,8 @@ namespace block_io {
         size_t buffer_len;
         Status status;
         RequestState state;
+        TerminalReason terminal_reason;
+        CompletionRejectionReason rejection_reason;
         CompletionToken completion;
         sched::WaitQueue completion_wait;
         uint32_t queue_slot;
@@ -80,8 +134,12 @@ namespace block_io {
         size_t __dst_len) noexcept;
     Status write_role_sync(device::DeviceRole __role, uint64_t __lba, uint32_t __sector_count, const void *__src,
         size_t __src_len) noexcept;
+    void reset_diagnostics() noexcept;
+    void diagnostics_snapshot(DiagnosticsSnapshot *__out) noexcept;
     const char *status_name(Status __status) noexcept;
     const char *request_state_name(RequestState __state) noexcept;
+    const char *terminal_reason_name(TerminalReason __reason) noexcept;
+    const char *completion_rejection_reason_name(CompletionRejectionReason __reason) noexcept;
 }   // namespace block_io
 NAMESPACE_BIGOS_END
 

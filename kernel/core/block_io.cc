@@ -14,6 +14,7 @@ namespace {
 
     DeviceQueue g_queues[bigos::block_io::MAX_DEVICE_QUEUES] = {};
     volatile uint32_t g_queues_lock = 0;
+    bigos::block_io::DiagnosticsSnapshot g_diagnostics = {};
     constexpr bigos::timer::tick_t DEFAULT_SUBMIT_TIMEOUT_TICKS = 200;
 
     void spin_lock(volatile uint32_t *__lock) noexcept {
@@ -120,6 +121,119 @@ namespace {
         return Status::Success;
     }
 
+    void diagnostic_increment(uint32_t *__counter) noexcept {
+        __atomic_fetch_add(__counter, 1u, __ATOMIC_RELAXED);
+    }
+
+    void diagnostic_store_u32(uint32_t *__value, uint32_t __new_value) noexcept {
+        __atomic_store_n(__value, __new_value, __ATOMIC_RELAXED);
+    }
+
+    void record_terminal(bigos::block_io::TerminalReason __reason, bigos::block_io::Status __status, uint32_t __slot,
+        uint32_t __generation) noexcept {
+        using TerminalReason = bigos::block_io::TerminalReason;
+        diagnostic_increment(&g_diagnostics.terminal_publish_count);
+        switch (__reason) {
+            case TerminalReason::Success:
+                diagnostic_increment(&g_diagnostics.success_count);
+                break;
+            case TerminalReason::InvalidRequest:
+                diagnostic_increment(&g_diagnostics.invalid_request_count);
+                break;
+            case TerminalReason::QueueFull:
+                diagnostic_increment(&g_diagnostics.queue_full_count);
+                break;
+            case TerminalReason::IssueFailure:
+                diagnostic_increment(&g_diagnostics.issue_failure_count);
+                break;
+            case TerminalReason::DeviceError:
+                diagnostic_increment(&g_diagnostics.device_error_count);
+                break;
+            case TerminalReason::Timeout:
+                diagnostic_increment(&g_diagnostics.timeout_count);
+                break;
+            case TerminalReason::Cancelled:
+                diagnostic_increment(&g_diagnostics.cancel_count);
+                break;
+            case TerminalReason::CompletionRejected:
+                diagnostic_increment(&g_diagnostics.completion_rejected_count);
+                break;
+            case TerminalReason::None:
+            default:
+                break;
+        }
+        g_diagnostics.last_terminal_reason = __reason;
+        g_diagnostics.last_status = __status;
+        diagnostic_store_u32(&g_diagnostics.last_slot, __slot);
+        diagnostic_store_u32(&g_diagnostics.last_generation, __generation);
+    }
+
+    void record_rejection(bigos::block_io::CompletionRejectionReason __reason,
+        const bigos::block_io::CompletionToken *__token) noexcept {
+        using CompletionRejectionReason = bigos::block_io::CompletionRejectionReason;
+        diagnostic_increment(&g_diagnostics.rejection_count);
+        switch (__reason) {
+            case CompletionRejectionReason::LateCompletion:
+                diagnostic_increment(&g_diagnostics.late_completion_count);
+                break;
+            case CompletionRejectionReason::DuplicateCompletion:
+                diagnostic_increment(&g_diagnostics.duplicate_completion_count);
+                break;
+            case CompletionRejectionReason::RequestMismatch:
+            case CompletionRejectionReason::DeviceMismatch:
+                diagnostic_increment(&g_diagnostics.identity_mismatch_count);
+                break;
+            case CompletionRejectionReason::GenerationMismatch:
+            case CompletionRejectionReason::RequestGenerationMismatch:
+                diagnostic_increment(&g_diagnostics.identity_mismatch_count);
+                diagnostic_increment(&g_diagnostics.slot_reuse_protection_count);
+                break;
+            case CompletionRejectionReason::SlotReuseProtected:
+                diagnostic_increment(&g_diagnostics.slot_reuse_protection_count);
+                diagnostic_increment(&g_diagnostics.identity_mismatch_count);
+                break;
+            default:
+                break;
+        }
+        g_diagnostics.last_rejection_reason = __reason;
+        if (__token != nullptr) {
+            diagnostic_store_u32(&g_diagnostics.last_slot, __token->queue_slot);
+            diagnostic_store_u32(&g_diagnostics.last_generation, __token->generation);
+        } else {
+            diagnostic_store_u32(&g_diagnostics.last_slot, UINT32_MAX);
+            diagnostic_store_u32(&g_diagnostics.last_generation, 0);
+        }
+    }
+
+    bigos::block_io::TerminalReason terminal_reason_for_status(bigos::block_io::Status __status) noexcept {
+        using Status = bigos::block_io::Status;
+        using TerminalReason = bigos::block_io::TerminalReason;
+        switch (__status) {
+            case Status::Success:
+                return TerminalReason::Success;
+            case Status::InvalidRequest:
+                return TerminalReason::InvalidRequest;
+            case Status::QueueFull:
+                return TerminalReason::QueueFull;
+            case Status::PendingTimeout:
+            case Status::DeviceTimeout:
+                return TerminalReason::Timeout;
+            case Status::Cancelled:
+                return TerminalReason::Cancelled;
+            case Status::CompletionRejected:
+                return TerminalReason::CompletionRejected;
+            case Status::DeviceError:
+            case Status::DeviceNotReady:
+            case Status::BufferTooSmall:
+            case Status::Overflow:
+            case Status::Unsupported:
+            case Status::ShortRead:
+            case Status::WouldBlock:
+            default:
+                return TerminalReason::DeviceError;
+        }
+    }
+
     DeviceQueue *queue_for(driver::block::BlockDevice *__device) noexcept {
         bigos::irq::InterruptGuard irq_guard;
         spin_lock(&g_queues_lock);
@@ -168,6 +282,8 @@ namespace {
         __request->status = __status;
         __request->state = __status == bigos::block_io::Status::Success ? bigos::block_io::RequestState::Queued
                                                                         : bigos::block_io::RequestState::Invalid;
+        __request->terminal_reason = terminal_reason_for_status(__status);
+        __request->rejection_reason = bigos::block_io::CompletionRejectionReason::None;
         __request->completion = {};
         bigos::sched::init_wait_queue(&__request->completion_wait);
         __request->queue_slot = UINT32_MAX;
@@ -188,13 +304,20 @@ namespace {
                __status == Status::DeviceError || __status == Status::ShortRead;
     }
 
-    void set_terminal_state(bigos::block_io::Request *__request, bigos::block_io::Status __status) noexcept {
+    void set_terminal_state(bigos::block_io::Request *__request, bigos::block_io::Status __status,
+        bigos::block_io::TerminalReason __reason) noexcept {
         __request->status = __status;
-        if (__status == bigos::block_io::Status::PendingTimeout)
+        __request->terminal_reason = __reason;
+        if (__status == bigos::block_io::Status::PendingTimeout || __status == bigos::block_io::Status::Cancelled)
             __request->state = bigos::block_io::RequestState::TimeoutOrCancelled;
         else
             __request->state = terminal_status_is_success(__status) ? bigos::block_io::RequestState::CompletedSuccess
                                                                     : bigos::block_io::RequestState::CompletedError;
+        record_terminal(__reason, __status, __request->queue_slot, __request->completion_generation);
+    }
+
+    void set_terminal_state(bigos::block_io::Request *__request, bigos::block_io::Status __status) noexcept {
+        set_terminal_state(__request, __status, terminal_reason_for_status(__status));
     }
 
     bool completion_done_predicate(void *__arg) noexcept {
@@ -236,6 +359,8 @@ namespace {
         __request->completion_generation = generation;
         __request->queued = true;
         __request->state = __state;
+        __request->terminal_reason = bigos::block_io::TerminalReason::None;
+        __request->rejection_reason = bigos::block_io::CompletionRejectionReason::None;
         __request->completion = {__request, __request->device, slot, generation};
         if (__out_token != nullptr)
             *__out_token = __request->completion;
@@ -294,11 +419,15 @@ namespace block_io {
     Status submit_sync(Request *__request) noexcept {
         const Status validation = validate_request(__request);
         prepare_request_state(__request, validation);
-        if (validation != Status::Success)
+        if (validation != Status::Success) {
+            record_terminal(terminal_reason_for_status(validation), validation, UINT32_MAX, 0);
             return validation;
+        }
         if (!bigos::sched::can_block()) {
             __request->status = Status::WouldBlock;
             __request->state = RequestState::Invalid;
+            __request->terminal_reason = TerminalReason::DeviceError;
+            record_terminal(TerminalReason::DeviceError, Status::WouldBlock, UINT32_MAX, 0);
             return Status::WouldBlock;
         }
 
@@ -308,6 +437,8 @@ namespace block_io {
         if (enqueue_status != Status::Success) {
             __request->status = enqueue_status;
             __request->state = RequestState::Invalid;
+            __request->terminal_reason = terminal_reason_for_status(enqueue_status);
+            record_terminal(__request->terminal_reason, enqueue_status, UINT32_MAX, 0);
             return enqueue_status;
         }
         __request->status = Status::WouldBlock;
@@ -317,7 +448,7 @@ namespace block_io {
             bigos::irq::InterruptGuard irq_guard;
             spin_lock(&queue->lock);
             if (__request->state == RequestState::Pending) {
-                set_terminal_state(__request, issue_status);
+                set_terminal_state(__request, issue_status, TerminalReason::IssueFailure);
                 release_request_slot_locked(queue, __request);
             }
             spin_unlock(&queue->lock);
@@ -332,11 +463,15 @@ namespace block_io {
         prepare_request_state(__request, validation);
         if (__out_token != nullptr)
             *__out_token = {};
-        if (validation != Status::Success)
+        if (validation != Status::Success) {
+            record_terminal(terminal_reason_for_status(validation), validation, UINT32_MAX, 0);
             return validation;
+        }
         if (!bigos::sched::can_block()) {
             __request->status = Status::WouldBlock;
             __request->state = RequestState::Invalid;
+            __request->terminal_reason = TerminalReason::DeviceError;
+            record_terminal(TerminalReason::DeviceError, Status::WouldBlock, UINT32_MAX, 0);
             return Status::WouldBlock;
         }
         DeviceQueue *queue = queue_for(__request->device);
@@ -344,6 +479,8 @@ namespace block_io {
         if (enqueue_status != Status::Success) {
             __request->status = enqueue_status;
             __request->state = RequestState::Invalid;
+            __request->terminal_reason = terminal_reason_for_status(enqueue_status);
+            record_terminal(__request->terminal_reason, enqueue_status, UINT32_MAX, 0);
             return enqueue_status;
         }
         __request->status = Status::WouldBlock;
@@ -374,7 +511,7 @@ namespace block_io {
             bigos::irq::InterruptGuard irq_guard;
             spin_lock(&queue->lock);
             if (__request->state == RequestState::Pending) {
-                set_terminal_state(__request, Status::PendingTimeout);
+                set_terminal_state(__request, Status::PendingTimeout, TerminalReason::Timeout);
                 release_request_slot_locked(queue, __request);
             }
             spin_unlock(&queue->lock);
@@ -395,9 +532,10 @@ namespace block_io {
         spin_lock(&queue->lock);
         if (__request->state != RequestState::Pending) {
             spin_unlock(&queue->lock);
+            record_rejection(CompletionRejectionReason::NotPending, &__request->completion);
             return Status::CompletionRejected;
         }
-        set_terminal_state(__request, Status::PendingTimeout);
+        set_terminal_state(__request, Status::Cancelled, TerminalReason::Cancelled);
         release_request_slot_locked(queue, __request);
         if (!__request->wake_issued) {
             __request->wake_issued = true;
@@ -410,13 +548,19 @@ namespace block_io {
     }
 
     Status complete_from_irq(const CompletionToken *__token, Status __final_status) noexcept {
-        if (__token == nullptr || __token->request == nullptr || __token->device == nullptr)
+        if (__token == nullptr || __token->request == nullptr || __token->device == nullptr) {
+            record_rejection(CompletionRejectionReason::NullToken, __token);
             return Status::CompletionRejected;
-        if (!completion_status_allowed(__final_status))
+        }
+        if (!completion_status_allowed(__final_status)) {
+            record_rejection(CompletionRejectionReason::InvalidStatus, __token);
             return Status::CompletionRejected;
+        }
         DeviceQueue *queue = queue_lookup(__token->device);
-        if (queue == nullptr)
+        if (queue == nullptr) {
+            record_rejection(CompletionRejectionReason::UnknownDevice, __token);
             return Status::CompletionRejected;
+        }
 
         Request *request = __token->request;
         bool wake = false;
@@ -424,10 +568,32 @@ namespace block_io {
             bigos::irq::InterruptGuard irq_guard;
             spin_lock(&queue->lock);
             const uint32_t slot = __token->queue_slot;
-            if (slot >= QUEUE_CAPACITY_PER_DEVICE || queue->slots[slot] != request ||
-                queue->generations[slot] != __token->generation || request->device != __token->device ||
-                request->completion_generation != __token->generation || request->state != RequestState::Pending) {
+            CompletionRejectionReason rejection = CompletionRejectionReason::None;
+            if (slot >= QUEUE_CAPACITY_PER_DEVICE) {
+                rejection = CompletionRejectionReason::InvalidSlot;
+            } else if (queue->slots[slot] == nullptr) {
+                rejection = queue->generations[slot] == __token->generation ?
+                                CompletionRejectionReason::LateCompletion :
+                                CompletionRejectionReason::SlotReuseProtected;
+            } else if (queue->slots[slot] != request) {
+                rejection = queue->generations[slot] == __token->generation ?
+                                CompletionRejectionReason::RequestMismatch :
+                                CompletionRejectionReason::SlotReuseProtected;
+            } else if (request->device != __token->device) {
+                rejection = CompletionRejectionReason::DeviceMismatch;
+            } else if (queue->generations[slot] != __token->generation) {
+                rejection = CompletionRejectionReason::GenerationMismatch;
+            } else if (request->completion_generation != __token->generation) {
+                rejection = CompletionRejectionReason::RequestGenerationMismatch;
+            } else if (request->state != RequestState::Pending) {
+                rejection = request->state == RequestState::TimeoutOrCancelled ?
+                                CompletionRejectionReason::LateCompletion :
+                                CompletionRejectionReason::DuplicateCompletion;
+            }
+            if (rejection != CompletionRejectionReason::None) {
+                request->rejection_reason = rejection;
                 spin_unlock(&queue->lock);
+                record_rejection(rejection, __token);
                 return Status::CompletionRejected;
             }
             set_terminal_state(request, __final_status);
@@ -532,6 +698,17 @@ namespace block_io {
         return write_sync((driver::block::BlockDevice *)iface, __lba, __sector_count, __src, __src_len);
     }
 
+    void reset_diagnostics() noexcept {
+        g_diagnostics = {};
+        g_diagnostics.last_slot = UINT32_MAX;
+    }
+
+    void diagnostics_snapshot(DiagnosticsSnapshot *__out) noexcept {
+        if (__out == nullptr)
+            return;
+        *__out = g_diagnostics;
+    }
+
     const char *status_name(Status __status) noexcept {
         switch (__status) {
             case Status::Success:
@@ -546,6 +723,8 @@ namespace block_io {
                 return "would-block";
             case Status::PendingTimeout:
                 return "pending-timeout";
+            case Status::Cancelled:
+                return "cancelled";
             case Status::CompletionRejected:
                 return "completion-rejected";
             case Status::BufferTooSmall:
@@ -579,6 +758,66 @@ namespace block_io {
                 return "completed-error";
             case RequestState::TimeoutOrCancelled:
                 return "timeout-or-cancelled";
+            default:
+                return "unknown";
+        }
+    }
+
+    const char *terminal_reason_name(TerminalReason __reason) noexcept {
+        switch (__reason) {
+            case TerminalReason::None:
+                return "none";
+            case TerminalReason::Success:
+                return "success";
+            case TerminalReason::InvalidRequest:
+                return "invalid-request";
+            case TerminalReason::QueueFull:
+                return "queue-full";
+            case TerminalReason::IssueFailure:
+                return "issue-failure";
+            case TerminalReason::DeviceError:
+                return "device-error";
+            case TerminalReason::Timeout:
+                return "timeout";
+            case TerminalReason::Cancelled:
+                return "cancelled";
+            case TerminalReason::CompletionRejected:
+                return "completion-rejected";
+            default:
+                return "unknown";
+        }
+    }
+
+    const char *completion_rejection_reason_name(CompletionRejectionReason __reason) noexcept {
+        switch (__reason) {
+            case CompletionRejectionReason::None:
+                return "none";
+            case CompletionRejectionReason::NullToken:
+                return "null-token";
+            case CompletionRejectionReason::InvalidStatus:
+                return "invalid-status";
+            case CompletionRejectionReason::UnknownDevice:
+                return "unknown-device";
+            case CompletionRejectionReason::InvalidSlot:
+                return "invalid-slot";
+            case CompletionRejectionReason::SlotEmpty:
+                return "slot-empty";
+            case CompletionRejectionReason::RequestMismatch:
+                return "request-mismatch";
+            case CompletionRejectionReason::DeviceMismatch:
+                return "device-mismatch";
+            case CompletionRejectionReason::GenerationMismatch:
+                return "generation-mismatch";
+            case CompletionRejectionReason::RequestGenerationMismatch:
+                return "request-generation-mismatch";
+            case CompletionRejectionReason::NotPending:
+                return "not-pending";
+            case CompletionRejectionReason::DuplicateCompletion:
+                return "duplicate-completion";
+            case CompletionRejectionReason::LateCompletion:
+                return "late-completion";
+            case CompletionRejectionReason::SlotReuseProtected:
+                return "slot-reuse-protected";
             default:
                 return "unknown";
         }

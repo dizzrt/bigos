@@ -364,9 +364,9 @@ correct modern storage and networking on top.
 - [x] Task M9.2: convert the existing block path off synchronous polling within
   bounded semantics, preserving current cache and writeback behavior.
 - [x] 任务 M9.2：在有界语义内将现有块路径从同步轮询切换走，保持当前缓存与回写行为。
-- [ ] Task M9.3: bounded asynchronous request lifecycle and diagnostics that remain
+- [x] Task M9.3: bounded asynchronous request lifecycle and diagnostics that remain
   IRQ-safe and freestanding-safe.
-- [ ] 任务 M9.3：保持 IRQ-safe 与 freestanding-safe 的有界异步请求生命周期与诊断。
+- [x] 任务 M9.3：保持 IRQ-safe 与 freestanding-safe 的有界异步请求生命周期与诊断。
 
 ### Milestone M10 — Modern Storage Drivers / 里程碑 M10 — 现代存储驱动
 

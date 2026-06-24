@@ -27,14 +27,22 @@ def test_request_layer_defines_bounded_sync_contract() -> None:
     assert 'QueueFull' in header
     assert 'DeviceNotReady' in header
     assert 'PendingTimeout' in header
+    assert 'Cancelled' in header
     assert 'CompletionRejected' in header
     assert 'enum class RequestState' in header
+    assert 'enum class TerminalReason' in header
+    assert 'enum class CompletionRejectionReason' in header
+    assert 'struct DiagnosticsSnapshot' in header
     assert 'struct CompletionToken' in header
     assert 'struct Request' in header
+    assert 'TerminalReason terminal_reason;' in header
+    assert 'CompletionRejectionReason rejection_reason;' in header
     assert 'Status submit_sync(Request *__request) noexcept;' in header
     assert 'Status arm_pending(Request *__request, CompletionToken *__out_token) noexcept;' in header
     assert 'Status wait_pending(Request *__request, timer::tick_t __timeout_ticks = 0) noexcept;' in header
     assert 'Status complete_from_irq(const CompletionToken *__token, Status __final_status) noexcept;' in header
+    assert 'void reset_diagnostics() noexcept;' in header
+    assert 'void diagnostics_snapshot(DiagnosticsSnapshot *__out) noexcept;' in header
     assert 'Status read_role_sync(device::DeviceRole __role' in header
     assert 'Status write_role_sync(device::DeviceRole __role' in header
     assert 'using IssueRequestFn' in block_header
@@ -54,6 +62,12 @@ def test_request_layer_defines_bounded_sync_contract() -> None:
     assert 'bigos::sched::wake_all(&request->completion_wait)' in source
     assert 'Status::CompletionRejected' in source
     assert 'DEFAULT_SUBMIT_TIMEOUT_TICKS' in source
+    assert 'record_terminal' in source
+    assert 'record_rejection' in source
+    assert 'TerminalReason::IssueFailure' in source
+    assert 'CompletionRejectionReason::LateCompletion' in source
+    assert 'CompletionRejectionReason::DuplicateCompletion' in source
+    assert 'CompletionRejectionReason::SlotReuseProtected' in source
     assert 'issue_request(' in source
     assert 'enqueue_request(queue, __request, &token, RequestState::Pending)' in source
     assert '__request->device->issue_impl' in source
@@ -111,6 +125,8 @@ def test_interrupt_completion_contract_is_bounded_and_named() -> None:
         'CompletedError',
         'TimeoutOrCancelled',
         'request_state_name',
+        'terminal_reason_name',
+        'completion_rejection_reason_name',
     ):
         assert token in header
 
@@ -125,6 +141,8 @@ def test_interrupt_completion_contract_is_bounded_and_named() -> None:
         'request->state != RequestState::Pending',
         'queue->generations[slot] != __token->generation',
         'request->completion_generation != __token->generation',
+        'request->rejection_reason = rejection',
+        'g_diagnostics.device_error_count',
     ):
         assert token in source
 
@@ -177,6 +195,13 @@ def test_request_layer_smoke_is_default_off_and_in_matrix() -> None:
     assert 'Status::DeviceError' in kernel
     assert 'block_io_smoke_completion_wait' in kernel
     assert 'block_io_smoke_completion_edges' in kernel
+    assert 'block_io_smoke_issue_failure' in kernel
+    assert 'diagnostics_snapshot(&diagnostics)' in kernel
+    assert 'TerminalReason::IssueFailure' in kernel
+    assert 'TerminalReason::Cancelled' in kernel
+    assert 'CompletionRejectionReason::DuplicateCompletion' in kernel
+    assert 'CompletionRejectionReason::LateCompletion' in kernel
+    assert 'slot_reuse_protection_count' in kernel
     assert 'producer_status == bigos::block_io::Status::Success' not in kernel
     assert 'create_kernel_thread(&block_io_request_smoke_entry' in kernel
 
@@ -203,8 +228,13 @@ def test_ram_backend_smoke_covers_framework_request_cache_and_boundaries() -> No
         'ram-cache-dirty',
         'completion-wait',
         'completion-edges',
+        'Cancelled',
+        'IssueFailure',
+        'DuplicateCompletion',
+        'LateCompletion',
+        'SlotReuseProtected',
     ):
-        assert token in kernel
+        assert token in kernel or token in read_source('include/bigos/block_io.h')
 
     assert 'peer_accepted_under_pressure' in kernel
     assert 'bigos::bcache::invalidate_device(__ram)' in kernel

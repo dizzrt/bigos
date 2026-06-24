@@ -647,6 +647,11 @@ namespace {
         return driver::block::BlockStatus::Success;
     }
 
+    bigos::block_io::Status block_io_smoke_issue_failure(driver::block::BlockDevice *,
+        bigos::block_io::Request *, const bigos::block_io::CompletionToken *) noexcept {
+        return bigos::block_io::Status::DeviceError;
+    }
+
     bool block_io_smoke_bcache_round_trip(driver::block::BlockDevice *__ram) noexcept {
         bigos::bcache::BufferBlock *block = bigos::bcache::get(__ram, 9);
         if (block == nullptr)
@@ -711,6 +716,13 @@ namespace {
         __ctx->request.queue_slot = UINT32_MAX;
     }
 
+    bool block_io_smoke_edge_failed(const char *__reason) noexcept {
+        bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED completion-edges-");
+        bigos::serial_puts(__reason);
+        bigos::serial_puts("\n");
+        return false;
+    }
+
     bool block_io_smoke_completion_wait() noexcept {
         BlockIoCompletionSmoke *ctx = &g_block_io_completion_smoke;
         block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Read);
@@ -736,38 +748,87 @@ namespace {
 
     bool block_io_smoke_completion_edges() noexcept {
         BlockIoCompletionSmoke *ctx = &g_block_io_completion_smoke;
+        bigos::block_io::DiagnosticsSnapshot diagnostics = {};
+
+        bigos::block_io::reset_diagnostics();
         block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Write);
         if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success)
-            return false;
+            return block_io_smoke_edge_failed("arm-device-error");
         if (bigos::block_io::complete_from_irq(&ctx->token, bigos::block_io::Status::DeviceError) !=
             bigos::block_io::Status::Success)
-            return false;
+            return block_io_smoke_edge_failed("complete-device-error");
+        bigos::block_io::diagnostics_snapshot(&diagnostics);
+        if (diagnostics.device_error_count != 1 ||
+            diagnostics.last_terminal_reason != bigos::block_io::TerminalReason::DeviceError ||
+            ctx->request.terminal_reason != bigos::block_io::TerminalReason::DeviceError)
+            return block_io_smoke_edge_failed("diag-device-error");
         if (bigos::block_io::complete_from_irq(&ctx->token, bigos::block_io::Status::Success) !=
             bigos::block_io::Status::CompletionRejected)
-            return false;
+            return block_io_smoke_edge_failed("duplicate-reject");
+        bigos::block_io::diagnostics_snapshot(&diagnostics);
+        if (diagnostics.duplicate_completion_count != 1 ||
+            diagnostics.last_rejection_reason != bigos::block_io::CompletionRejectionReason::DuplicateCompletion ||
+            ctx->request.rejection_reason != bigos::block_io::CompletionRejectionReason::DuplicateCompletion)
+            return block_io_smoke_edge_failed("diag-duplicate");
         if (bigos::block_io::wait_pending(&ctx->request, 0) != bigos::block_io::Status::DeviceError)
-            return false;
+            return block_io_smoke_edge_failed("wait-device-error");
 
+        bigos::block_io::reset_diagnostics();
         block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Read);
         if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success)
-            return false;
+            return block_io_smoke_edge_failed("arm-timeout");
         const bigos::block_io::CompletionToken stale = ctx->token;
         if (bigos::block_io::wait_pending(&ctx->request, 1) != bigos::block_io::Status::PendingTimeout)
-            return false;
+            return block_io_smoke_edge_failed("wait-timeout");
+        bigos::block_io::diagnostics_snapshot(&diagnostics);
+        if (diagnostics.timeout_count != 1 || ctx->request.terminal_reason != bigos::block_io::TerminalReason::Timeout)
+            return block_io_smoke_edge_failed("diag-timeout");
         if (bigos::block_io::complete_from_irq(&stale, bigos::block_io::Status::Success) !=
             bigos::block_io::Status::CompletionRejected)
-            return false;
+            return block_io_smoke_edge_failed("late-reject");
+        bigos::block_io::diagnostics_snapshot(&diagnostics);
+        if (diagnostics.late_completion_count != 1 ||
+            diagnostics.last_rejection_reason != bigos::block_io::CompletionRejectionReason::LateCompletion)
+            return block_io_smoke_edge_failed("diag-late");
 
         block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Read);
         if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success)
-            return false;
+            return block_io_smoke_edge_failed("arm-reuse");
         if (bigos::block_io::complete_from_irq(&stale, bigos::block_io::Status::Success) !=
             bigos::block_io::Status::CompletionRejected)
-            return false;
+            return block_io_smoke_edge_failed("reuse-reject");
+        bigos::block_io::diagnostics_snapshot(&diagnostics);
+        if (diagnostics.slot_reuse_protection_count == 0 || diagnostics.identity_mismatch_count == 0)
+            return block_io_smoke_edge_failed("diag-reuse");
         if (bigos::block_io::complete_from_irq(&ctx->token, bigos::block_io::Status::Success) !=
             bigos::block_io::Status::Success)
-            return false;
-        return bigos::block_io::wait_pending(&ctx->request, 0) == bigos::block_io::Status::Success;
+            return block_io_smoke_edge_failed("complete-reuse");
+        if (bigos::block_io::wait_pending(&ctx->request, 0) != bigos::block_io::Status::Success)
+            return block_io_smoke_edge_failed("wait-reuse");
+
+        bigos::block_io::reset_diagnostics();
+        block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Read);
+        if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success)
+            return block_io_smoke_edge_failed("arm-cancel");
+        if (bigos::block_io::cancel_pending(&ctx->request) != bigos::block_io::Status::Success ||
+            ctx->request.status != bigos::block_io::Status::Cancelled ||
+            ctx->request.terminal_reason != bigos::block_io::TerminalReason::Cancelled)
+            return block_io_smoke_edge_failed("cancel");
+        bigos::block_io::diagnostics_snapshot(&diagnostics);
+        if (diagnostics.cancel_count != 1)
+            return block_io_smoke_edge_failed("diag-cancel");
+
+        bigos::block_io::reset_diagnostics();
+        driver::block::BlockDevice issue_fail = ctx->device;
+        issue_fail.issue_impl = &block_io_smoke_issue_failure;
+        if (bigos::block_io::read_sync(&issue_fail, 0, 1, ctx->buffer, sizeof(ctx->buffer)) !=
+            bigos::block_io::Status::DeviceError)
+            return block_io_smoke_edge_failed("issue-failure-status");
+        bigos::block_io::diagnostics_snapshot(&diagnostics);
+        if (diagnostics.issue_failure_count != 1 ||
+            diagnostics.last_terminal_reason != bigos::block_io::TerminalReason::IssueFailure)
+            return block_io_smoke_edge_failed("diag-issue-failure");
+        return true;
     }
 
     void block_io_request_smoke() noexcept {
