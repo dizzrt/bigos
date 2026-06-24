@@ -1368,7 +1368,10 @@ namespace mm {
         while (mapped_pages < mapped_len / PAGE_SIZE) {
             uint64_t phys = aligned_phys + mapped_pages * PAGE_SIZE;
             uint64_t virt = vaddr + mapped_pages * PAGE_SIZE;
-            if (!map_page(virt, phys, page_attr::PRESENT | page_attr::WRITABLE | page_attr::NO_EXECUTE)) {
+            PageAttr attr = page_attr::DEVICE_UNCACHED;
+            if (__cache_policy == DeviceMmioCachePolicy::WriteCombining)
+                attr = page_attr::KERNEL_DEFAULT | page_attr::NO_EXECUTE;
+            if (!map_page(virt, phys, attr)) {
                 while (mapped_pages != 0) {
                     mapped_pages--;
                     unmap_page(vaddr + mapped_pages * PAGE_SIZE);

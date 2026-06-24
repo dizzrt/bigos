@@ -61,6 +61,8 @@ namespace mm {
         constexpr PageAttr PRESENT = 1ull << 0;
         constexpr PageAttr WRITABLE = 1ull << 1;
         constexpr PageAttr USER = 1ull << 2;
+        constexpr PageAttr WRITE_THROUGH = 1ull << 3;
+        constexpr PageAttr CACHE_DISABLE = 1ull << 4;
         constexpr PageAttr GLOBAL = 1ull << 8;
         constexpr PageAttr NO_EXECUTE = 1ull << 63;
 
@@ -75,6 +77,7 @@ namespace mm {
         // Kernel default: present + writable, supervisor (user=0), executable
         // (NX=0). Bit-for-bit equivalent to the legacy DEFAULT_ATTR_PTE = 0x3.
         constexpr PageAttr KERNEL_DEFAULT = PRESENT | WRITABLE;
+        constexpr PageAttr DEVICE_UNCACHED = KERNEL_DEFAULT | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
         // User data page: user-accessible, writable, non-executable.
         constexpr PageAttr USER_DATA = PRESENT | WRITABLE | USER | NO_EXECUTE;
         // User code page: user-accessible, executable (NX cleared).

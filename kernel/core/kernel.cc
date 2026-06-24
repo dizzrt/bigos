@@ -27,6 +27,7 @@
 #include <ktl/buffer.h>
 #include <drivers/block/ram_block_device.h>
 #include <drivers/pci/config.h>
+#include <drivers/pci/msix.h>
 #include <drivers/video/vga.h>
 
 #if defined(BIGOS_BLOCK_IO_REQUEST_SMOKE) || defined(BIGOS_WRITABLE_FS_SMOKE) ||                                       \
@@ -1881,6 +1882,13 @@ void kernel(const BootInfoHeader *boot_info) {
     // enabled, but before user processes are created. It does not program
     // MSI/MSI-X, map BAR MMIO, or expose a user-visible device model.
     pci_config_vector_smoke();
+#endif
+
+#ifdef BIGOS_PCI_MSIX_SMOKE
+    // Validation-only MSI-X delivery smoke. It configures a synthetic table entry
+    // in ordinary kernel context and uses LAPIC fixed IPI as the controlled
+    // producer, so the IRQ path remains allocation-free and LAPIC-owned for EOI.
+    (void)driver::pci::msix::smoke();
 #endif
 
     // Establish the one-shot wall-clock baseline after the monotonic tick is

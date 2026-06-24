@@ -86,17 +86,17 @@ namespace irq::isr {
             bigos::input::handle_keyboard_scancode(scancode);
         }
 
-        implement_isr(primary_ide) {
-            (void)__frame;
-            driver::block::ata_pio_primary_irq();
-        }
-
         implement_isr(scheduler_nudge) {
             bigos::smp::handle_scheduler_nudge_ipi(__frame);
         }
 
         implement_isr(tlb_shootdown) {
             bigos::smp::handle_tlb_shootdown_ipi(__frame);
+        }
+
+        implement_isr(primary_ide) {
+            (void)__frame;
+            driver::block::ata_pio_primary_irq();
         }
 
         void init_isr_timer() {

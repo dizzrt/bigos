@@ -30,17 +30,6 @@ namespace driver::pci {
                    ((uint32_t)__address.function << 8) | (__offset & 0xfcu);
         }
 
-        Status write_config32(FunctionAddress __address, uint8_t __offset, uint32_t __value) noexcept {
-            if (!context_allows_config_access())
-                return Status::UnsupportedContext;
-            if (!valid_address(__address) || !valid_dword_offset(__offset))
-                return Status::InvalidArgument;
-
-            bigos::outl(CONFIG_ADDRESS_PORT, config_address(__address, __offset));
-            bigos::outl(CONFIG_DATA_PORT, __value);
-            return Status::Ok;
-        }
-
         uint64_t decode_bar_size(uint64_t __mask) noexcept {
             if (__mask == 0)
                 return 0;
@@ -106,6 +95,32 @@ namespace driver::pci {
 
         *__out = (uint8_t)((value >> ((__offset & 0x3u) * 8)) & 0xffu);
         return Status::Ok;
+    }
+
+    Status write_config32(FunctionAddress __address, uint8_t __offset, uint32_t __value) noexcept {
+        if (!context_allows_config_access())
+            return Status::UnsupportedContext;
+        if (!valid_address(__address) || !valid_dword_offset(__offset))
+            return Status::InvalidArgument;
+
+        bigos::outl(CONFIG_ADDRESS_PORT, config_address(__address, __offset));
+        bigos::outl(CONFIG_DATA_PORT, __value);
+        return Status::Ok;
+    }
+
+    Status write_config16(FunctionAddress __address, uint8_t __offset, uint16_t __value) noexcept {
+        if (__offset > 0xfe)
+            return Status::InvalidArgument;
+
+        uint32_t value = 0;
+        const uint8_t dword_offset = (uint8_t)(__offset & 0xfcu);
+        Status status = read_config32(__address, dword_offset, &value);
+        if (status != Status::Ok)
+            return status;
+
+        const uint32_t shift = (__offset & 0x2u) * 8;
+        value = (value & ~(0xffffu << shift)) | ((uint32_t)__value << shift);
+        return write_config32(__address, dword_offset, value);
     }
 
     Status probe_device(FunctionAddress __address, DeviceId *__out) noexcept {

@@ -59,6 +59,8 @@ namespace driver::pci {
     Status read_config32(FunctionAddress __address, uint8_t __offset, uint32_t *__out) noexcept;
     Status read_config16(FunctionAddress __address, uint8_t __offset, uint16_t *__out) noexcept;
     Status read_config8(FunctionAddress __address, uint8_t __offset, uint8_t *__out) noexcept;
+    Status write_config32(FunctionAddress __address, uint8_t __offset, uint32_t __value) noexcept;
+    Status write_config16(FunctionAddress __address, uint8_t __offset, uint16_t __value) noexcept;
     Status probe_device(FunctionAddress __address, DeviceId *__out) noexcept;
     Status read_capabilities(FunctionAddress __address, Capability *__out, uint8_t __capacity, uint8_t *__count) noexcept;
     Status read_bar(FunctionAddress __address, uint8_t __bar_index, BarInfo *__out) noexcept;

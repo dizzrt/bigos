@@ -72,7 +72,8 @@ def test_kernel_consumes_optional_metadata_without_framebuffer_direct_map_alias(
     assert 'bigos_boot_info_v2_framebuffer_metadata(__header)' in vmem
     assert 'DeviceMmioMapping map_device_mmio' in memory
     assert 'KDEVICE_MMIO_BASE' in vmem
-    assert 'map_page(virt, phys, page_attr::PRESENT | page_attr::WRITABLE | page_attr::NO_EXECUTE)' in vmem
+    assert 'DEVICE_UNCACHED' in memory
+    assert 'page_attr::DEVICE_UNCACHED' in vmem
     assert 'return (void *)(KDIRECT_BASE + __phys);' in vmem
     assert 'bigos::boot::early_framebuffer()' in render
     assert 'bigos::mm::map_device_mmio(metadata.physical_base, metadata.byte_size, policy)' in render
