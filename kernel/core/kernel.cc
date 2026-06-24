@@ -26,6 +26,7 @@
 #include <bigos/io.h>
 #include <ktl/buffer.h>
 #include <drivers/block/ram_block_device.h>
+#include <drivers/pci/config.h>
 #include <drivers/video/vga.h>
 
 #if defined(BIGOS_BLOCK_IO_REQUEST_SMOKE) || defined(BIGOS_WRITABLE_FS_SMOKE) ||                                       \
@@ -1685,6 +1686,145 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_PCI_CONFIG_VECTOR_SMOKE
+namespace {
+    void pci_vector_smoke_irq_handler(bigos::irq::InterruptFrame *__frame) noexcept {
+        (void)__frame;
+    }
+
+    bool pci_config_smoke() noexcept {
+        if (!driver::pci::context_allows_config_access()) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED pci-context\n");
+            return false;
+        }
+
+        driver::pci::DeviceId device = {};
+        driver::pci::Status status = driver::pci::probe_device({0xff, 31, 7}, &device);
+        if (status != driver::pci::Status::NoDevice) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED no-device\n");
+            return false;
+        }
+
+        driver::pci::FunctionAddress found = {};
+        bool found_device = false;
+        for (uint8_t dev = 0; dev < 32 && !found_device; dev++) {
+            for (uint8_t func = 0; func < 8; func++) {
+                const driver::pci::FunctionAddress address = {0, dev, func};
+                status = driver::pci::probe_device(address, &device);
+                if (status == driver::pci::Status::Ok) {
+                    found = address;
+                    found_device = true;
+                    break;
+                }
+            }
+        }
+        if (!found_device) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED probe\n");
+            return false;
+        }
+
+        uint32_t raw_id = 0;
+        uint16_t vendor = 0;
+        uint8_t first_byte = 0;
+        if (driver::pci::read_config32(found, 0x00, &raw_id) != driver::pci::Status::Ok ||
+            driver::pci::read_config16(found, 0x00, &vendor) != driver::pci::Status::Ok ||
+            driver::pci::read_config8(found, 0x00, &first_byte) != driver::pci::Status::Ok ||
+            vendor != (uint16_t)(raw_id & 0xffffu) || first_byte != (uint8_t)(raw_id & 0xffu)) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED derived-read\n");
+            return false;
+        }
+
+        driver::pci::Capability caps[driver::pci::MAX_CAPABILITIES] = {};
+        uint8_t cap_count = 0;
+        status = driver::pci::read_capabilities(found, caps, driver::pci::MAX_CAPABILITIES, &cap_count);
+        if (status != driver::pci::Status::Ok && status != driver::pci::Status::BadCapabilityList) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED caps\n");
+            return false;
+        }
+
+        driver::pci::BarInfo bar = {};
+        bool read_bar = false;
+        for (uint8_t dev = 0; dev < 32 && !read_bar; dev++) {
+            for (uint8_t func = 0; func < 8 && !read_bar; func++) {
+                const driver::pci::FunctionAddress address = {0, dev, func};
+                if (driver::pci::probe_device(address, &device) != driver::pci::Status::Ok)
+                    continue;
+                for (uint8_t index = 0; index < driver::pci::BAR_COUNT; index++) {
+                    status = driver::pci::read_bar(address, index, &bar);
+                    if (status == driver::pci::Status::Ok && bar.kind != driver::pci::BarKind::None) {
+                        read_bar = true;
+                        break;
+                    }
+                    if (status != driver::pci::Status::UnsupportedBar)
+                        break;
+                }
+            }
+        }
+        if (!read_bar) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED bar\n");
+            return false;
+        }
+
+        bigos::serial_puts("BIGOS_PCI_CONFIG_SMOKE_PASSED\n");
+        return true;
+    }
+
+    bool vector_alloc_smoke() noexcept {
+        if (!bigos::irq::context_allows_vector_allocation()) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED vector-context\n");
+            return false;
+        }
+
+        uint8_t first = 0;
+        if (bigos::irq::allocate_lapic_vector(&pci_vector_smoke_irq_handler, &first) !=
+            bigos::irq::VectorAllocStatus::Ok) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED vector-alloc\n");
+            return false;
+        }
+        if (first < bigos::irq::DYNAMIC_LAPIC_VECTOR_FIRST || first > bigos::irq::DYNAMIC_LAPIC_VECTOR_LAST) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED vector-range\n");
+            return false;
+        }
+        if (bigos::irq::release_lapic_vector(first) != bigos::irq::VectorAllocStatus::Ok ||
+            bigos::irq::release_lapic_vector(first) != bigos::irq::VectorAllocStatus::NotAllocated) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED vector-release\n");
+            return false;
+        }
+
+        uint8_t vectors[bigos::irq::DYNAMIC_LAPIC_VECTOR_COUNT] = {};
+        for (uint8_t i = 0; i < bigos::irq::DYNAMIC_LAPIC_VECTOR_COUNT; i++) {
+            if (bigos::irq::allocate_lapic_vector(&pci_vector_smoke_irq_handler, &vectors[i]) !=
+                bigos::irq::VectorAllocStatus::Ok) {
+                bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED vector-fill\n");
+                return false;
+            }
+        }
+
+        uint8_t extra = 0;
+        if (bigos::irq::allocate_lapic_vector(&pci_vector_smoke_irq_handler, &extra) !=
+            bigos::irq::VectorAllocStatus::Exhausted) {
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED vector-exhaust\n");
+            return false;
+        }
+
+        for (uint8_t i = 0; i < bigos::irq::DYNAMIC_LAPIC_VECTOR_COUNT; i++) {
+            if (bigos::irq::release_lapic_vector(vectors[i]) != bigos::irq::VectorAllocStatus::Ok) {
+                bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_FAILED vector-cleanup\n");
+                return false;
+            }
+        }
+
+        bigos::serial_puts("BIGOS_VECTOR_ALLOC_SMOKE_PASSED\n");
+        return true;
+    }
+
+    void pci_config_vector_smoke() noexcept {
+        if (pci_config_smoke() && vector_alloc_smoke())
+            bigos::serial_puts("BIGOS_PCI_CONFIG_VECTOR_PASSED\n");
+    }
+}   // namespace
+#endif
+
 void kernel(const BootInfoHeader *boot_info) {
     driver::video::vga::clear_screen();
     bigos::serial_init();
@@ -1733,6 +1873,14 @@ void kernel(const BootInfoHeader *boot_info) {
     // ABI register convention, dispatch routing, and unknown-number error return.
     // Runs from ring0 only; does not enter ring3 or switch CR3.
     syscall_smoke();
+#endif
+
+#ifdef BIGOS_PCI_CONFIG_VECTOR_SMOKE
+    // Validation-only PCI config and vector lifecycle smoke. Runs from ordinary
+    // kernel context after IDT/PIC/LAPIC ownership is initialized and IRQs are
+    // enabled, but before user processes are created. It does not program
+    // MSI/MSI-X, map BAR MMIO, or expose a user-visible device model.
+    pci_config_vector_smoke();
 #endif
 
     // Establish the one-shot wall-clock baseline after the monotonic tick is

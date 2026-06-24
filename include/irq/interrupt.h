@@ -33,6 +33,14 @@ namespace irq {
     constexpr uint8_t VECTOR_LAPIC_TIMER = 0xef;
     constexpr uint8_t VECTOR_SCHED_NUDGE = 0xee;
     constexpr uint8_t VECTOR_TLB_SHOOTDOWN = 0xed;
+    // Bounded dynamic external interrupt vectors for kernel-internal APIC/MSI-X
+    // consumers. This range deliberately avoids CPU exceptions 0x00-0x1f,
+    // legacy PIC remap 0x20-0x2f, syscall 0x80, fixed LAPIC/IPI vectors
+    // 0xed-0xef, and APIC spurious 0xff. Allocated entries are LAPIC-owned for
+    // EOI and use the existing InterruptFrame dispatch ABI.
+    constexpr uint8_t DYNAMIC_LAPIC_VECTOR_FIRST = 0xd0;
+    constexpr uint8_t DYNAMIC_LAPIC_VECTOR_LAST = 0xdf;
+    constexpr uint8_t DYNAMIC_LAPIC_VECTOR_COUNT = DYNAMIC_LAPIC_VECTOR_LAST - DYNAMIC_LAPIC_VECTOR_FIRST + 1;
 
     // Software-interrupt syscall entry vector. The default-off first user program
     // raises only this IDT gate to DPL=3 so CPL3 can trigger `int 0x80`; exception
@@ -49,6 +57,14 @@ namespace irq {
         Pic,
         Lapic,
         ApicSpurious,
+    };
+
+    enum class VectorAllocStatus : uint8_t {
+        Ok,
+        InvalidArgument,
+        UnsupportedContext,
+        Exhausted,
+        NotAllocated,
     };
 
     namespace __detail {
@@ -173,6 +189,10 @@ namespace irq {
     void initIRQ() noexcept;
     bool apic_default_delivery_active() noexcept;
     const char *vector_owner_name(VectorOwner __owner) noexcept;
+    bool context_allows_vector_allocation() noexcept;
+    VectorAllocStatus allocate_lapic_vector(IRQHandler __handler, uint8_t *__vector) noexcept;
+    VectorAllocStatus release_lapic_vector(uint8_t __vector) noexcept;
+    const char *vector_alloc_status_name(VectorAllocStatus __status) noexcept;
     void triggerPageFaultForValidation() noexcept;
 }   // namespace irq
 NAMESPACE_BIGOS_END

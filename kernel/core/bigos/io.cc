@@ -24,6 +24,13 @@ uint16_t bigos::inw(uint16_t port) {
     return ret;
 }
 
+uint32_t bigos::inl(uint16_t port) {
+    uint32_t ret;
+
+    asm volatile("inl %w1,%0" : "=a"(ret) : "d"(port));
+    return ret;
+}
+
 void bigos::outb(uint16_t port, uint8_t value) {
     asm volatile("outb %b1,%w0" : : "d"(port), "a"(value));
     return;
@@ -31,6 +38,11 @@ void bigos::outb(uint16_t port, uint8_t value) {
 
 void bigos::outw(uint16_t port, uint16_t value) {
     asm volatile("outw %w1,%w0" : : "d"(port), "a"(value));
+    return;
+}
+
+void bigos::outl(uint16_t port, uint32_t value) {
+    asm volatile("outl %0,%w1" : : "a"(value), "d"(port));
     return;
 }
 

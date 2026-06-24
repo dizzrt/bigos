@@ -26,7 +26,13 @@ namespace irq {
         INTRDescriptor kernel_idt[IRQ_COUNT];
         IRQHandler isr_list[IRQ_COUNT];
         VectorOwner vector_owners[IRQ_COUNT];
+        bool dynamic_vector_allocated[DYNAMIC_LAPIC_VECTOR_COUNT];
         bool g_apic_default_delivery_active = false;
+
+        static_assert(DYNAMIC_LAPIC_VECTOR_FIRST > I8259_VECTOR_LAST);
+        static_assert(DYNAMIC_LAPIC_VECTOR_FIRST != VECTOR_SYSCALL && DYNAMIC_LAPIC_VECTOR_LAST != VECTOR_SYSCALL);
+        static_assert(DYNAMIC_LAPIC_VECTOR_LAST < VECTOR_TLB_SHOOTDOWN);
+        static_assert(DYNAMIC_LAPIC_VECTOR_LAST < 0xff);
 
 #ifdef BIGOS_USER_PROCESS
         static uint64_t *iret_tail(InterruptFrame *__frame) noexcept {
@@ -170,6 +176,8 @@ namespace irq {
             else if (i == VECTOR_SYSCALL)
                 vector_owners[i] = VectorOwner::Syscall;
         }
+        for (uint8_t i = 0; i < DYNAMIC_LAPIC_VECTOR_COUNT; i++)
+            dynamic_vector_allocated[i] = false;
         vector_owners[0xff] = VectorOwner::ApicSpurious;
 
         const IDTPointer idt_ptr = {(uint16_t)(sizeof(kernel_idt) - 1), (uint64_t)&kernel_idt[0]};
@@ -316,6 +324,66 @@ namespace irq {
             case VectorOwner::ApicSpurious:
                 return "apic-spurious";
             case VectorOwner::Unknown:
+            default:
+                return "unknown";
+        }
+    }
+
+    bool context_allows_vector_allocation() noexcept {
+        const bigos::cpu::LocalState &local = bigos::cpu::current_state();
+        return local.irq_nesting_depth == 0 && local.nonblocking_depth == 0 && local.preemption_disable_depth == 0;
+    }
+
+    VectorAllocStatus allocate_lapic_vector(IRQHandler __handler, uint8_t *__vector) noexcept {
+        if (__handler == nullptr || __vector == nullptr)
+            return VectorAllocStatus::InvalidArgument;
+        if (!context_allows_vector_allocation())
+            return VectorAllocStatus::UnsupportedContext;
+
+        InterruptGuard guard;
+        for (uint8_t i = 0; i < DYNAMIC_LAPIC_VECTOR_COUNT; i++) {
+            if (__detail::dynamic_vector_allocated[i])
+                continue;
+
+            const uint8_t vector = DYNAMIC_LAPIC_VECTOR_FIRST + i;
+            __detail::dynamic_vector_allocated[i] = true;
+            irq::isr::register_isr(vector, __handler, VectorOwner::Lapic);
+            *__vector = vector;
+            return VectorAllocStatus::Ok;
+        }
+
+        return VectorAllocStatus::Exhausted;
+    }
+
+    VectorAllocStatus release_lapic_vector(uint8_t __vector) noexcept {
+        if (!context_allows_vector_allocation())
+            return VectorAllocStatus::UnsupportedContext;
+        if (__vector < DYNAMIC_LAPIC_VECTOR_FIRST || __vector > DYNAMIC_LAPIC_VECTOR_LAST)
+            return VectorAllocStatus::InvalidArgument;
+
+        InterruptGuard guard;
+        const uint8_t index = __vector - DYNAMIC_LAPIC_VECTOR_FIRST;
+        if (!__detail::dynamic_vector_allocated[index])
+            return VectorAllocStatus::NotAllocated;
+
+        __detail::dynamic_vector_allocated[index] = false;
+        __detail::setISRHandler(__vector, nullptr);
+        __detail::setVectorOwner(__vector, VectorOwner::Unknown);
+        return VectorAllocStatus::Ok;
+    }
+
+    const char *vector_alloc_status_name(VectorAllocStatus __status) noexcept {
+        switch (__status) {
+            case VectorAllocStatus::Ok:
+                return "ok";
+            case VectorAllocStatus::InvalidArgument:
+                return "invalid-argument";
+            case VectorAllocStatus::UnsupportedContext:
+                return "unsupported-context";
+            case VectorAllocStatus::Exhausted:
+                return "exhausted";
+            case VectorAllocStatus::NotAllocated:
+                return "not-allocated";
             default:
                 return "unknown";
         }
