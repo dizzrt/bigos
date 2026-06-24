@@ -1721,6 +1721,25 @@ def default_serial_log_for(emulator: str, boot_mode: str = 'legacy') -> Path | N
     return None
 
 
+def path_is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def require_log_path(path: Path, option_name: str) -> Path:
+    resolved = path.resolve()
+    log_root = LOG_DIR.resolve()
+    if resolved != log_root and not path_is_under(resolved, log_root):
+        raise StageError(
+            'argument validation',
+            f'{option_name} must be under logs/: {path}',
+        )
+    return resolved
+
+
 def run(args: argparse.Namespace) -> int:
     boot_mode = args.boot_mode
     image_arg = DEFAULT_UEFI_IMAGE if boot_mode == 'uefi' and args.image == str(DEFAULT_IMAGE) else Path(args.image)
@@ -1735,7 +1754,7 @@ def run(args: argparse.Namespace) -> int:
         raise StageError('argument validation', 'UEFI boot mode supports only the qemu emulator entry')
     display = resolve_display(emulator, args.display)
     default_serial_log = default_serial_log_for(emulator, boot_mode)
-    serial_log = Path(args.serial_log).resolve() if args.serial_log else default_serial_log
+    serial_log = require_log_path(Path(args.serial_log), '--serial-log') if args.serial_log else default_serial_log
     marker = args.expect_serial_marker
     ovmf_code = None
     ovmf_vars = None
@@ -2135,7 +2154,7 @@ def blocked_runtime_smoke_result(case: RuntimeSmokeCase, serial_log: Path, reaso
 
 
 def run_runtime_smoke_case(case: RuntimeSmokeCase, args: argparse.Namespace) -> RuntimeSmokeResult:
-    serial_log_dir = Path(args.serial_log_dir).resolve()
+    serial_log_dir = require_log_path(Path(args.serial_log_dir), '--serial-log-dir')
     serial_log = runtime_smoke_serial_log(case, serial_log_dir)
     image_path = runtime_smoke_image_path(case, Path(args.image_dir).resolve())
 
@@ -2192,8 +2211,9 @@ def runtime_smoke_matrix(args: argparse.Namespace) -> int:
     stopped_after_failure = False
     if missing_tools:
         reason = 'missing required tool(s): ' + ', '.join(missing_tools)
+        serial_log_dir = require_log_path(Path(args.serial_log_dir), '--serial-log-dir')
         for case in selected_cases:
-            serial_log = runtime_smoke_serial_log(case, Path(args.serial_log_dir))
+            serial_log = runtime_smoke_serial_log(case, serial_log_dir)
             results.append(blocked_runtime_smoke_result(case, serial_log, reason))
     else:
         for case in selected_cases:
@@ -2271,7 +2291,7 @@ def make_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         '--serial-log',
-        help='COM1 output file; QEMU defaults under logs/ when omitted',
+        help='COM1 output file under logs/; QEMU defaults under logs/ when omitted',
     )
     run_parser.add_argument(
         '--expect-serial-marker',
@@ -2337,7 +2357,7 @@ def make_parser() -> argparse.ArgumentParser:
     matrix_parser.add_argument(
         '--serial-log-dir',
         default=str(LOG_DIR / 'runtime-smoke'),
-        help='directory for per-case serial logs',
+        help='directory under logs/ for per-case serial logs',
     )
     matrix_parser.add_argument(
         '--image-dir',

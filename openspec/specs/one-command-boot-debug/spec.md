@@ -5,22 +5,22 @@ Define the required one-command local boot debug workflow for BigOS, including p
 ## Requirements
 
 ### Requirement: 默认日志目录使用 logs
-BigOS SHALL use `logs/` as the default repository-level directory for boot debug helper serial logs, emulator diagnostic logs, and xmake run-target serial log paths. Explicitly provided log paths MUST continue to be honored without automatic rewriting.
+BigOS SHALL use `logs/` as the repository-level directory for boot debug helper serial logs, emulator diagnostic logs, and xmake run-target serial log paths. Explicitly provided log paths MUST be under `logs/`; paths outside `logs/` MUST be rejected instead of silently rewritten.
 
 #### Scenario: Helper 默认串口日志落在 logs
 - **WHEN** the boot debug helper is invoked without an explicit `--serial-log`
 - **THEN** BigOS MUST choose the documented default serial log path under `logs/`
-- **AND** it MUST NOT create new default serial logs under `log/`
+- **AND** it MUST NOT create new default serial logs under `build/test/` or `log/`
 
 #### Scenario: xmake run target 使用 logs
 - **WHEN** a developer uses the documented xmake emulator run targets that pass helper-managed serial log paths
 - **THEN** those run targets MUST pass `logs/*.serial.log` paths
 - **AND** they MUST NOT pass `log/*.serial.log` as the default path
 
-#### Scenario: 显式日志路径保持原样
-- **WHEN** a developer explicitly passes `--serial-log`, `--output`, or another documented log output path
-- **THEN** the helper MUST use that path as provided
-- **AND** it MUST NOT rewrite a user-specified custom path from `log/` to `logs/`
+#### Scenario: 显式日志路径必须位于 logs
+- **WHEN** a developer explicitly passes `--serial-log`
+- **THEN** the helper MUST accept the path only when it resolves under `logs/`
+- **AND** it MUST reject paths under `build/test/`, `log/`, or any other non-`logs/` directory
 
 #### Scenario: 文档示例使用 logs
 - **WHEN** boot debug, memory validation, UEFI, or runtime smoke documentation shows current helper or xmake log-output examples
@@ -386,7 +386,8 @@ The boot debug workflow SHALL place generated images, emulator configs, serial l
 #### Scenario: QEMU serial log is generated
 
 - **WHEN** a QEMU backend is launched with serial logging enabled
-- **THEN** the serial log SHALL be written under a documented `build/test` path unless the developer explicitly specifies another path
+- **THEN** the serial log SHALL be written under a documented `logs/` path
+- **AND** an explicitly specified serial log path outside `logs/` SHALL be rejected
 
 ### Requirement: Runtime behavior preservation
 

@@ -10,6 +10,10 @@ BigOS 将现有默认关闭的 runtime smoke 产品化为一组面向当前有�
 - 串口日志：默认每个 case 一个文件，位于 `logs/runtime-smoke/`。
 - Image：默认每个 case 一个 UEFI ESP/FAT image 和一个 exFAT 兼容 root image，位于 `build/test/runtime-smoke/`。
 
+显式传入的 runtime smoke 串口日志目录也必须解析到 `logs/` 下。runner 会拒绝
+`build/test/`、`log/` 或其它非 `logs/` 目录下的 `--serial-log-dir`。`build/test/`
+只用于生成 image 和 emulator 配置文件，不用于串口日志。
+
 runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed flow 构建，准备默认 UEFI ESP/FAT image 和当前 exFAT 兼容 root image，使用 `--display none` 启动 QEMU/OVMF，并在 case-specific timeout 内等待预期 COM1 marker。
 
 ## 验证入口盘点

@@ -135,7 +135,7 @@ For bounded emulator smoke against memory markers:
 
 ```bash
 xmake f --mm_self_test=y
-uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log logs/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
 ```
 
 The self-test emits `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED`,
@@ -151,10 +151,11 @@ Notes:
 
 - Verify that `x86_64-elf-gcc`, `x86_64-elf-g++`, `x86_64-elf-ld`, and related
   binutils are installed before building.
-- Generated emulator outputs are written under `build/test/`. QEMU uses the
-  current Legacy BIOS/IDE raw image path by default; UEFI spike artifacts are
-  separate and do not provide runtime parity, storage/device parity, virtio,
-  AHCI/SATA, NVMe, or new storage drivers.
+- Generated emulator images and configs are written under `build/test/`; generated
+  serial logs, emulator diagnostic logs, and explicitly provided log paths must
+  stay under `logs/`. QEMU uses the current Legacy BIOS/IDE raw image path by
+  default; UEFI spike artifacts are separate and do not provide runtime parity,
+  storage/device parity, virtio, AHCI/SATA, NVMe, or new storage drivers.
 - Prefer QEMU with `--display none` for automated smoke tests, serial marker
   checks, and CI-like local validation, using either the `xmake run qemu -- --display none`
   wrapper or the equivalent Python helper path. Prefer graphical QEMU for quick
@@ -175,6 +176,9 @@ Notes:
 - For automated emulator smoke, serial marker checks, and CI-like local
   validation, prefer the QEMU headless helper path, for example `uv run python
   tools/boot_debug.py run --emulator qemu --display none ...`.
+- Keep all generated logs under `logs/`, including explicit `--serial-log` and
+  `--serial-log-dir` values. Use `build/test/` for generated images/configs, not
+  for serial logs or emulator diagnostic logs.
 - For quick local boot validation, prefer `xmake run qemu` or the equivalent
   graphical QEMU helper path unless Bochs-specific debugging is needed.
 - For early boot, BIOS, real-mode/protected-mode/long-mode transition, ATA PIO,

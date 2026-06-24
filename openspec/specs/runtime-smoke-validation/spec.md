@@ -4,7 +4,7 @@ Define productized runtime smoke validation for BigOS, including an explicit smo
 ## Requirements
 
 ### Requirement: runtime smoke 默认输出使用 logs
-BigOS SHALL use `logs/` as the default repository-level directory for runtime smoke validation artifacts and per-case serial logs. The runtime smoke runner MUST keep explicit `--output` and `--serial-log-dir` values unchanged when developers provide custom paths.
+BigOS SHALL use `logs/` as the default repository-level directory for runtime smoke validation artifacts and per-case serial logs. The runtime smoke runner MUST require explicit `--serial-log-dir` values to resolve under `logs/`; non-log artifact `--output` values MAY remain explicit custom paths.
 
 #### Scenario: Matrix artifact 默认写入 logs
 - **WHEN** the runtime smoke matrix runner is invoked without an explicit `--output`
@@ -16,10 +16,10 @@ BigOS SHALL use `logs/` as the default repository-level directory for runtime sm
 - **THEN** it MUST write per-case serial logs under `logs/runtime-smoke/`
 - **AND** each validation result MUST record the resulting `logs/` serial log path
 
-#### Scenario: 自定义 runtime smoke 输出路径不被改写
-- **WHEN** a developer passes an explicit `--output` or `--serial-log-dir`
-- **THEN** the runtime smoke runner MUST use the provided path
-- **AND** it MUST NOT silently rewrite custom paths that still include `log/`
+#### Scenario: 自定义 runtime smoke 串口日志目录必须位于 logs
+- **WHEN** a developer passes an explicit `--serial-log-dir`
+- **THEN** the runtime smoke runner MUST accept the directory only when it resolves under `logs/`
+- **AND** it MUST reject directories under `build/test/`, `log/`, or any other non-`logs/` directory
 
 #### Scenario: runtime smoke 文档同步 logs 默认值
 - **WHEN** runtime smoke validation documentation describes default artifact paths, serial log directories, or example commands

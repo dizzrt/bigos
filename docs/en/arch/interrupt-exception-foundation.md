@@ -90,8 +90,8 @@ Passed checks:
 
 Runtime smokes not completed:
 
-- Ordinary boot smoke: `uv run python tools/boot_debug.py run --serial-log log/serial.log --expect-serial-marker "BigOS kernel reached" --smoke-timeout 30` first failed because an existing Bochs process locked `build/test/os.raw`; an isolated image still did not produce the serial marker within 30 seconds.
-- Memory self-test runtime smoke: after configuring `xmake f --mm_self_test=y`, `uv run python tools/boot_debug.py run --image build/test/mem-smoke.raw --serial-log log/mem-smoke.serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED --smoke-timeout 30` did not produce the serial marker within 30 seconds, so this local Bochs/terminal GUI/serial combination was not a reliable oracle.
+- Ordinary boot smoke: `uv run python tools/boot_debug.py run --serial-log logs/serial.log --expect-serial-marker "BigOS kernel reached" --smoke-timeout 30` first failed because an existing Bochs process locked `build/test/os.raw`; an isolated image still did not produce the serial marker within 30 seconds.
+- Memory self-test runtime smoke: after configuring `xmake f --mm_self_test=y`, `uv run python tools/boot_debug.py run --image build/test/mem-smoke.raw --serial-log logs/mem-smoke.serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED --smoke-timeout 30` did not produce the serial marker within 30 seconds, so this local Bochs/terminal GUI/serial combination was not a reliable oracle.
 - `#PF` runtime smoke: the trigger build was verified, but because ordinary and memory self-test serial smokes were not observable, `BIGOS_PAGE_FAULT` runtime marker success was not claimed.
 - Keyboard IRQ1 runtime smoke: no manual Bochs keyboard input was performed; this change intentionally does not extend `tools/boot_debug.py` to inject keyboard input.
 

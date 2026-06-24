@@ -10,6 +10,11 @@ BigOS productizes the existing default-off runtime smokes as a narrow validation
 - Serial logs: one file per case under `logs/runtime-smoke/` by default.
 - Images: one UEFI ESP/FAT image and one exFAT compatibility root image per case under `build/test/runtime-smoke/` by default.
 
+Explicit runtime smoke serial log directories must also resolve under `logs/`.
+The runner rejects `--serial-log-dir` values under `build/test/`, `log/`, or
+any other non-`logs/` directory. `build/test/` remains reserved for generated
+images and emulator configuration files, not serial logs.
+
 The runner explicitly configures each case through `xmake f`, builds through the existing xmake-backed flow, prepares the default UEFI ESP/FAT image plus current exFAT compatibility root image, launches QEMU/OVMF with `--display none`, and waits for the expected COM1 marker within the case-specific timeout.
 
 ## Validation Inventory

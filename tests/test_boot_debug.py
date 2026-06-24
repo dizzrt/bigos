@@ -86,11 +86,29 @@ def test_default_log_paths_use_logs_directory() -> None:
             '--output',
             'log/custom-validation.md',
             '--serial-log-dir',
-            'log/custom-serial',
+            'logs/custom-serial',
         ]
     )
     assert custom.output == 'log/custom-validation.md'
-    assert custom.serial_log_dir == 'log/custom-serial'
+    assert custom.serial_log_dir == 'logs/custom-serial'
+
+
+def test_explicit_log_paths_must_stay_under_logs() -> None:
+    logs_serial = boot_debug.require_log_path(PROJECT_ROOT / 'logs' / 'manual.serial.log', '--serial-log')
+    logs_dir = boot_debug.require_log_path(PROJECT_ROOT / 'logs' / 'runtime-smoke', '--serial-log-dir')
+
+    assert logs_serial == PROJECT_ROOT / 'logs' / 'manual.serial.log'
+    assert logs_dir == PROJECT_ROOT / 'logs' / 'runtime-smoke'
+
+    with pytest.raises(boot_debug.StageError) as serial_error:
+        boot_debug.require_log_path(PROJECT_ROOT / 'build' / 'test' / 'manual.serial.log', '--serial-log')
+    assert serial_error.value.stage == 'argument validation'
+    assert '--serial-log must be under logs/' in serial_error.value.message
+
+    with pytest.raises(boot_debug.StageError) as dir_error:
+        boot_debug.require_log_path(PROJECT_ROOT / 'build' / 'test' / 'runtime-smoke', '--serial-log-dir')
+    assert dir_error.value.stage == 'argument validation'
+    assert '--serial-log-dir must be under logs/' in dir_error.value.message
 
 
 def test_disk_geometry_matches_default_image_size() -> None:
@@ -542,6 +560,7 @@ def test_runtime_smoke_artifact_records_blocked_tools_and_case_fields(tmp_path: 
 
 def test_runtime_smoke_matrix_blocks_when_required_tool_missing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(boot_debug.shutil, 'which', lambda tool: None if tool == 'uv' else f'/usr/bin/{tool}')
+    monkeypatch.setattr(boot_debug, 'LOG_DIR', tmp_path / 'logs')
     parser = boot_debug.make_parser()
     args = parser.parse_args(
         [
@@ -551,7 +570,7 @@ def test_runtime_smoke_matrix_blocks_when_required_tool_missing(tmp_path: Path, 
             '--output',
             str(tmp_path / 'validation.md'),
             '--serial-log-dir',
-            str(tmp_path / 'serial'),
+            str(tmp_path / 'logs' / 'serial'),
             '--image-dir',
             str(tmp_path / 'image'),
         ]
@@ -582,6 +601,7 @@ def test_runtime_smoke_matrix_runs_selected_case_and_writes_artifact(tmp_path: P
     monkeypatch.setattr(boot_debug.shutil, 'which', lambda tool: f'/usr/bin/{tool}')
     monkeypatch.setattr(boot_debug, 'run_command', fake_run_command)
     monkeypatch.setattr(boot_debug, 'run', fake_run)
+    monkeypatch.setattr(boot_debug, 'LOG_DIR', tmp_path / 'logs')
     parser = boot_debug.make_parser()
     args = parser.parse_args(
         [
@@ -591,7 +611,7 @@ def test_runtime_smoke_matrix_runs_selected_case_and_writes_artifact(tmp_path: P
             '--output',
             str(tmp_path / 'validation.md'),
             '--serial-log-dir',
-            str(tmp_path / 'serial'),
+            str(tmp_path / 'logs' / 'serial'),
             '--image-dir',
             str(tmp_path / 'image'),
         ]
