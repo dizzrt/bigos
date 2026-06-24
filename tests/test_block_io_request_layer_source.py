@@ -16,6 +16,7 @@ def read_source(relative: str) -> str:
 
 def test_request_layer_defines_bounded_sync_contract() -> None:
     header = read_source('include/bigos/block_io.h')
+    block_header = read_source('include/drivers/block/block_device.h')
     source = read_source('kernel/core/block_io.cc')
 
     assert 'QUEUE_CAPACITY_PER_DEVICE = 8' in header
@@ -36,6 +37,9 @@ def test_request_layer_defines_bounded_sync_contract() -> None:
     assert 'Status complete_from_irq(const CompletionToken *__token, Status __final_status) noexcept;' in header
     assert 'Status read_role_sync(device::DeviceRole __role' in header
     assert 'Status write_role_sync(device::DeviceRole __role' in header
+    assert 'using IssueRequestFn' in block_header
+    assert 'bigos::block_io::CompletionToken' in block_header
+    assert 'IssueRequestFn issue_impl;' in block_header
 
     assert 'g_queues' in source
     assert 'validate_request' in source
@@ -49,6 +53,51 @@ def test_request_layer_defines_bounded_sync_contract() -> None:
     assert 'bigos::sched::can_block()' in source
     assert 'bigos::sched::wake_all(&request->completion_wait)' in source
     assert 'Status::CompletionRejected' in source
+    assert 'DEFAULT_SUBMIT_TIMEOUT_TICKS' in source
+    assert 'issue_request(' in source
+    assert 'enqueue_request(queue, __request, &token, RequestState::Pending)' in source
+    assert '__request->device->issue_impl' in source
+    assert 'complete_from_irq(__token, final_status)' in source
+    assert 'return wait_pending(__request, DEFAULT_SUBMIT_TIMEOUT_TICKS);' in source
+    assert 'queue_lookup(__token->device)' in source
+    assert '__device->issue_impl != nullptr && __sector_count > 1' in source
+    assert 'dst + (size_t)sector * __device->sector_size' in source
+
+
+def test_ata_pio_uses_irq_completion_boundary() -> None:
+    header = read_source('include/drivers/block/ata_pio.h')
+    source = read_source('kernel/drivers/block/ata_pio.cc')
+    isr = read_source('kernel/core/irq/isr.cc')
+    interrupt = read_source('include/irq/interrupt.h')
+
+    for token in (
+        'enum class AtaPioPhase',
+        'irq_completion_enabled',
+        'active_token',
+        'ata_pio_primary_irq',
+    ):
+        assert token in header
+
+    assert 'ata_issue_irq' in source
+    assert '__device->block.issue_impl = __irq_completion ? ata_issue_irq : nullptr;' in source
+    assert '__request->sector_count != 1' in source
+    assert 'ATA_CMD_READ_SECTORS_EXT' in source
+    assert 'ATA_CMD_WRITE_SECTORS_EXT' in source
+    assert 'ATA_CMD_FLUSH_CACHE_EXT' in source
+    assert 'wait_for_data(__device)' in source
+    assert 'ata_read_sector(ata, ata->next_sector)' in source
+    assert 'ata_write_sector(ata, ata->next_sector)' in source
+    assert 'complete_from_irq(&token, final_status)' in source
+    assert 'send_eoi' not in source[source.index('void ata_pio_primary_irq') :]
+    assert 'kmalloc' not in source[source.index('void ata_pio_primary_irq') :]
+    assert 'free(' not in source[source.index('void ata_pio_primary_irq') :]
+
+    assert 'VECTOR_PRIMARY_IDE' in interrupt
+    assert 'I8259_MASTER_VECTOR_BASE + IRQ_LINE_PRIMARY_IDE' in interrupt
+    assert 'driver::block::ata_pio_primary_irq();' in isr
+    assert 'register_isr(VECTOR_PRIMARY_IDE, &isr_primary_ide, VectorOwner::Pic)' in isr
+    assert 'driver::irqchip::i8259::enable_irq(IRQ_LINE_SLAVE)' in isr
+    assert 'driver::irqchip::i8259::enable_irq(IRQ_LINE_PRIMARY_IDE)' in isr
 
 
 def test_interrupt_completion_contract_is_bounded_and_named() -> None:
@@ -128,6 +177,7 @@ def test_request_layer_smoke_is_default_off_and_in_matrix() -> None:
     assert 'Status::DeviceError' in kernel
     assert 'block_io_smoke_completion_wait' in kernel
     assert 'block_io_smoke_completion_edges' in kernel
+    assert 'producer_status == bigos::block_io::Status::Success' not in kernel
     assert 'create_kernel_thread(&block_io_request_smoke_entry' in kernel
 
     assert "'block_io_request_smoke'" in boot_debug

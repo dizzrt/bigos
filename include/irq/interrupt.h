@@ -28,6 +28,8 @@ namespace irq {
     constexpr uint8_t VECTOR_PAGE_FAULT = 0x0e;
     constexpr uint8_t VECTOR_TIMER = I8259_MASTER_VECTOR_BASE + IRQ_LINE_TIMER;
     constexpr uint8_t VECTOR_KEYBOARD = I8259_MASTER_VECTOR_BASE + IRQ_LINE_KEYBOARD;
+    constexpr uint8_t VECTOR_PRIMARY_IDE = I8259_MASTER_VECTOR_BASE + IRQ_LINE_PRIMARY_IDE;
+    constexpr uint8_t VECTOR_SECONDARY_IDE = I8259_MASTER_VECTOR_BASE + IRQ_LINE_SECONDARY_IDE;
     constexpr uint8_t VECTOR_LAPIC_TIMER = 0xef;
     constexpr uint8_t VECTOR_SCHED_NUDGE = 0xee;
     constexpr uint8_t VECTOR_TLB_SHOOTDOWN = 0xed;

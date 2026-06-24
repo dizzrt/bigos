@@ -3,6 +3,12 @@
 
 #include <bigos/types.h>
 
+namespace bigos::block_io {
+    struct Request;
+    struct CompletionToken;
+    enum class Status : uint32_t;
+}   // namespace bigos::block_io
+
 NAMESPACE_DRIVER_BEG
 namespace block {
     constexpr uint32_t DEFAULT_SECTOR_SIZE = 512;
@@ -26,6 +32,10 @@ namespace block {
     using WriteSectorsFn = BlockStatus (*)(
         BlockDevice *__device, uint64_t __lba, uint32_t __sector_count, const void *__src, size_t __src_len) noexcept;
 
+    using IssueRequestFn = bigos::block_io::Status (*)(
+        BlockDevice *__device, bigos::block_io::Request *__request,
+        const bigos::block_io::CompletionToken *__token) noexcept;
+
     struct BlockDevice {
         uint32_t sector_size;
         // Zero means the device does not expose a reliable sector-count limit.
@@ -36,6 +46,10 @@ namespace block {
         // write_impl marks the device read-only; write_sectors() then returns
         // Unsupported (mapped to -EROFS by upper layers).
         WriteSectorsFn write_impl;
+        // Optional nonpolling issue boundary. When present, block_io arms a
+        // request-layer completion token before calling this function; the
+        // backend must complete only that token through the request layer.
+        IssueRequestFn issue_impl;
     };
 
     // Synchronous, read-only, non-IRQ-handler-safe block read contract.

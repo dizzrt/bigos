@@ -51,6 +51,25 @@ def test_launch_init_degrades_deterministically_via_panic() -> None:
     assert 'bigos::kpanic(bigos::PanicCode::Generic, "launch_init");' in proc
 
 
+def test_exec_teardown_uses_stable_kernel_address_space_root() -> None:
+    proc = read_source('kernel/core/proc/proc.cc')
+
+    assert 'uint64_t g_kernel_address_space_root = bigos::mm::INVALID_PHYS_ADDR;' in proc
+    assert 'g_kernel_address_space_root = bigos::arch::vm_user::active_address_space_root();' in proc
+
+    activate_body = proc[
+        proc.index('void activate_process_kernel_address_space(') : proc.index('bool path_equal(')
+    ]
+    assert '__process->kernel_address_space_root != __process->address_space_root' in activate_body
+    assert 'bigos::arch::vm_user::activate_kernel_address_space(g_kernel_address_space_root);' in activate_body
+
+    exec_body = proc[proc.index('UserElfLoadError exec_current_from_elf_image(') : proc.index('void run_user_process(')]
+    assert 'process->kernel_address_space_root = g_kernel_address_space_root;' in exec_body
+    switch_index = exec_body.index('bigos::arch::vm_user::activate_kernel_address_space(g_kernel_address_space_root);')
+    teardown_index = exec_body.index('bigos::mm::teardown_user_address_space(old_root)')
+    assert switch_index < teardown_index
+
+
 def test_init_normal_exit_emits_exit_marker_then_idle_not_panic() -> None:
     proc = read_source('kernel/core/proc/proc.cc')
 

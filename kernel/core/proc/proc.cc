@@ -112,6 +112,7 @@ namespace {
     // storage today, while updates are mirrored into the CPU-local state boundary
     // so future SMP work can split it per CPU without changing proc callers.
     bigos::proc::Process *g_current_process = nullptr;
+    uint64_t g_kernel_address_space_root = bigos::mm::INVALID_PHYS_ADDR;
 
     void set_current_process_slot(bigos::proc::Process *__process) noexcept {
         g_current_process = __process;
@@ -165,8 +166,11 @@ namespace {
     }
 
     void activate_process_kernel_address_space(bigos::proc::Process *__process) noexcept {
-        if (__process != nullptr && __process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+        if (__process != nullptr && __process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
+            __process->kernel_address_space_root != __process->address_space_root)
             bigos::arch::vm_user::activate_kernel_address_space(__process->kernel_address_space_root);
+        else if (g_kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+            bigos::arch::vm_user::activate_kernel_address_space(g_kernel_address_space_root);
         bigos::mm::leave_current_mm_context();
     }
 
@@ -1748,6 +1752,7 @@ namespace bigos::proc {
         set_current_process_slot(nullptr);
         g_reap_head_pid = 0;
         g_next_pid = 1;
+        g_kernel_address_space_root = bigos::arch::vm_user::active_address_space_root();
         bigos::sched::init_wait_queue(&g_process_wait_queue);
         g_proc_initialized = true;
         bigos::serial_puts("BIGOS_PROC_INIT\n");
@@ -2200,6 +2205,7 @@ namespace bigos::proc {
 
         process->address_space_root = prepared->address_space_root;
         process->mm_context = prepared->mm_context;
+        process->kernel_address_space_root = g_kernel_address_space_root;
         process->entry = prepared->entry;
         process->code = prepared->code;
         process->data = prepared->data;
@@ -2220,15 +2226,20 @@ namespace bigos::proc {
 
         if (old_mm_context != nullptr)
             bigos::mm::mark_mm_context_dying(old_mm_context);
-        if (old_root != bigos::mm::INVALID_PHYS_ADDR &&
-            (!unmap_shared_file_backed_pages(old_root, &old_vmas) ||
-                !bigos::mm::teardown_user_address_space(old_root))) {
-            process->exit_code = EXEC_FAILURE_STATUS;
-            process->fault_reason = EXEC_FAILURE_STATUS;
-            mark_zombie_or_reap_pending(process);
-            if (old_mm_context != nullptr)
-                bigos::mm::release_mm_context(old_mm_context);
-            return UserElfLoadError::MapFailed;
+        if (g_kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR)
+            bigos::arch::vm_user::activate_kernel_address_space(g_kernel_address_space_root);
+        if (old_root != bigos::mm::INVALID_PHYS_ADDR) {
+            const bool unmapped_old_shared = unmap_shared_file_backed_pages(old_root, &old_vmas);
+            const bool tore_down_old_root =
+                unmapped_old_shared ? bigos::mm::teardown_user_address_space(old_root) : false;
+            if (!unmapped_old_shared || !tore_down_old_root) {
+                process->exit_code = EXEC_FAILURE_STATUS;
+                process->fault_reason = EXEC_FAILURE_STATUS;
+                mark_zombie_or_reap_pending(process);
+                if (old_mm_context != nullptr)
+                    bigos::mm::release_mm_context(old_mm_context);
+                return UserElfLoadError::MapFailed;
+            }
         }
         if (old_mm_context != nullptr)
             bigos::mm::release_mm_context(old_mm_context);

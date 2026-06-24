@@ -8,6 +8,7 @@
 #include <bigos/smp_ipi.h>
 #include <bigos/timer.h>
 #include <bigos/types.h>
+#include <drivers/block/ata_pio.h>
 #include <drivers/irqchip/i8259.h>
 #include <drivers/irqchip/ioapic.h>
 #include <drivers/irqchip/lapic.h>
@@ -22,6 +23,7 @@ namespace irq::isr {
 
         static void isr_timer(InterruptFrame *__frame);
         static void isr_keyboard(InterruptFrame *__frame);
+        static void isr_primary_ide(InterruptFrame *__frame);
 
         bool select_default_irq_target(bigos::cpu::CpuId *__target_cpu, uint32_t *__target_apic_id) noexcept {
             const bigos::cpu::CpuSlot &bsp = bigos::cpu::slot_for(bigos::cpu::BOOTSTRAP_CPU_ID);
@@ -82,6 +84,11 @@ namespace irq::isr {
             (void)__frame;
             const uint8_t scancode = inb(PS2_KEYBOARD_DATA_PORT);
             bigos::input::handle_keyboard_scancode(scancode);
+        }
+
+        implement_isr(primary_ide) {
+            (void)__frame;
+            driver::block::ata_pio_primary_irq();
         }
 
         implement_isr(scheduler_nudge) {
@@ -164,6 +171,12 @@ namespace irq::isr {
                 init_pic_keyboard_fallback();
             }
         }
+
+        void init_isr_ide() noexcept {
+            register_isr(VECTOR_PRIMARY_IDE, &isr_primary_ide, VectorOwner::Pic);
+            driver::irqchip::i8259::enable_irq(IRQ_LINE_SLAVE);
+            driver::irqchip::i8259::enable_irq(IRQ_LINE_PRIMARY_IDE);
+        }
     }   // namespace __detail
 
     void register_isr(uint64_t __vector, IRQHandler __isr) noexcept {
@@ -180,6 +193,7 @@ namespace irq::isr {
         register_isr(VECTOR_SCHED_NUDGE, &__detail::isr_scheduler_nudge, VectorOwner::Lapic);
         register_isr(VECTOR_TLB_SHOOTDOWN, &__detail::isr_tlb_shootdown, VectorOwner::Lapic);
         __detail::init_isr_keyboard();
+        __detail::init_isr_ide();
     }
 }   // namespace irq::isr
 NAMESPACE_BIGOS_END

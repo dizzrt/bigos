@@ -327,8 +327,8 @@ namespace sys {
             const uint32_t uid = process != nullptr ? process->uid : 0;
             const uint32_t gid = process != nullptr ? process->gid : 0;
             bigos::vfs::File *file = nullptr;
-            const bigos::vfs::Status open_status = bigos::vfs::open(
-                path, bigos::proc::current_cwd(), bigos::vfs::OPEN_WRONLY, 0, uid, gid, &file);
+            const bigos::vfs::Status open_status =
+                bigos::vfs::open(path, bigos::proc::current_cwd(), bigos::vfs::OPEN_WRONLY, 0, uid, gid, &file);
             if (open_status != bigos::vfs::Status::Success)
                 return vfs_status_to_syscall(open_status);
             const bigos::vfs::Status trunc_status = bigos::vfs::truncate(file, __length);
@@ -336,8 +336,8 @@ namespace sys {
             return vfs_status_to_syscall(trunc_status);
         }
 
-        static bool access_permitted(const bigos::Metadata &__metadata, uint32_t __uid, uint32_t __gid,
-            uint64_t __mode, bigos::cred::Access __access, uint64_t __bit) noexcept {
+        static bool access_permitted(const bigos::Metadata &__metadata, uint32_t __uid, uint32_t __gid, uint64_t __mode,
+            bigos::cred::Access __access, uint64_t __bit) noexcept {
             return (__mode & __bit) == 0 ||
                    bigos::cred::permits(__metadata.uid, __metadata.gid, __metadata.mode, __uid, __gid, __access);
         }
@@ -467,8 +467,7 @@ namespace sys {
             bigos::proc::Process *process = bigos::proc::current_process();
             const uint32_t uid = process != nullptr ? process->uid : 0;
             const uint32_t gid = process != nullptr ? process->gid : 0;
-            return vfs_status_to_syscall(
-                bigos::vfs::rename(old_path, new_path, bigos::proc::current_cwd(), uid, gid));
+            return vfs_status_to_syscall(bigos::vfs::rename(old_path, new_path, bigos::proc::current_cwd(), uid, gid));
         }
 
         static int64_t bigfs_status_to_syscall(bigos::bigfs::Status __status) noexcept {
@@ -512,9 +511,8 @@ namespace sys {
                 bigos::proc::readdir_fd_current((uint32_t)__fd, bounded, (size_t)__max_entries, &entries_read);
             if (status != bigos::vfs::Status::Success)
                 return vfs_status_to_syscall(status);
-            if (entries_read != 0 &&
-                !bigos::proc::copy_to_current_user_buffer(
-                    __entries, bounded, entries_read * sizeof(bigos::vfs::DirectoryEntry)))
+            if (entries_read != 0 && !bigos::proc::copy_to_current_user_buffer(
+                                         __entries, bounded, entries_read * sizeof(bigos::vfs::DirectoryEntry)))
                 return -bigos::EFAULT;
             return (int64_t)entries_read;
         }
@@ -723,8 +721,8 @@ namespace sys {
                 return -bigos::EFAULT;
 
             int64_t kernel_status = 0;
-            const int64_t waited_pid = bigos::proc::wait_current(
-                (uint32_t)__pid, __status_out != 0 ? &kernel_status : nullptr);
+            const int64_t waited_pid =
+                bigos::proc::wait_current((uint32_t)__pid, __status_out != 0 ? &kernel_status : nullptr);
             if (waited_pid < 0)
                 return waited_pid;
 
@@ -767,8 +765,8 @@ namespace sys {
         // __max_count) and the resulting kernel char* are written into __out.
         // Returns the element count on success, or a negative errno (-EFAULT on a
         // bad user pointer, -E2BIG when the bounds are exceeded).
-        static int64_t copy_user_string_vector(uint64_t __user_array, char **__out, char *__string_pool,
-            uint32_t __max_count) noexcept {
+        static int64_t copy_user_string_vector(
+            uint64_t __user_array, char **__out, char *__string_pool, uint32_t __max_count) noexcept {
             if (__user_array == 0) {
                 return 0;
             }
@@ -954,8 +952,7 @@ namespace sys {
                 result = __detail::sys_map_anon(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
             case SYS_MAP_FILE:
-                result = __detail::sys_map_file(
-                    __frame->rdi, __frame->rsi, __frame->rdx, __frame->r10, __frame->r8);
+                result = __detail::sys_map_file(__frame->rdi, __frame->rsi, __frame->rdx, __frame->r10, __frame->r8);
                 break;
             case SYS_UNMAP_ANON:
                 result = __detail::sys_unmap_anon(__frame->rdi, __frame->rsi);

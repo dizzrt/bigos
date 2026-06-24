@@ -14,6 +14,7 @@ namespace {
 
     DeviceQueue g_queues[bigos::block_io::MAX_DEVICE_QUEUES] = {};
     volatile uint32_t g_queues_lock = 0;
+    constexpr bigos::timer::tick_t DEFAULT_SUBMIT_TIMEOUT_TICKS = 200;
 
     void spin_lock(volatile uint32_t *__lock) noexcept {
         while (__atomic_exchange_n(__lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
@@ -104,6 +105,8 @@ namespace {
             return Status::InvalidRequest;
         if (__request->operation == Operation::Read && device->read_impl == nullptr)
             return Status::DeviceNotReady;
+        if (__request->operation == Operation::Write && device->write_impl == nullptr)
+            return Status::Unsupported;
         if (add_overflows_u64(__request->lba, __request->sector_count))
             return Status::Overflow;
         if (device->total_sectors != 0 && __request->lba + __request->sector_count > device->total_sectors)
@@ -145,12 +148,26 @@ namespace {
         return free_queue;
     }
 
+    DeviceQueue *queue_lookup(driver::block::BlockDevice *__device) noexcept {
+        bigos::irq::InterruptGuard irq_guard;
+        spin_lock(&g_queues_lock);
+        for (uint32_t i = 0; i < bigos::block_io::MAX_DEVICE_QUEUES; i++) {
+            DeviceQueue *queue = &g_queues[i];
+            if (queue->device == __device) {
+                spin_unlock(&g_queues_lock);
+                return queue;
+            }
+        }
+        spin_unlock(&g_queues_lock);
+        return nullptr;
+    }
+
     void prepare_request_state(bigos::block_io::Request *__request, bigos::block_io::Status __status) noexcept {
         if (__request == nullptr)
             return;
         __request->status = __status;
-        __request->state = __status == bigos::block_io::Status::Success ? bigos::block_io::RequestState::Queued :
-                                                                          bigos::block_io::RequestState::Invalid;
+        __request->state = __status == bigos::block_io::Status::Success ? bigos::block_io::RequestState::Queued
+                                                                        : bigos::block_io::RequestState::Invalid;
         __request->completion = {};
         bigos::sched::init_wait_queue(&__request->completion_wait);
         __request->queue_slot = UINT32_MAX;
@@ -165,9 +182,10 @@ namespace {
 
     bool completion_status_allowed(bigos::block_io::Status __status) noexcept {
         using Status = bigos::block_io::Status;
-        return __status == Status::Success || __status == Status::InvalidRequest || __status == Status::DeviceNotReady ||
-               __status == Status::BufferTooSmall || __status == Status::Overflow || __status == Status::Unsupported ||
-               __status == Status::DeviceTimeout || __status == Status::DeviceError || __status == Status::ShortRead;
+        return __status == Status::Success || __status == Status::InvalidRequest ||
+               __status == Status::DeviceNotReady || __status == Status::BufferTooSmall ||
+               __status == Status::Overflow || __status == Status::Unsupported || __status == Status::DeviceTimeout ||
+               __status == Status::DeviceError || __status == Status::ShortRead;
     }
 
     void set_terminal_state(bigos::block_io::Request *__request, bigos::block_io::Status __status) noexcept {
@@ -175,8 +193,8 @@ namespace {
         if (__status == bigos::block_io::Status::PendingTimeout)
             __request->state = bigos::block_io::RequestState::TimeoutOrCancelled;
         else
-            __request->state = terminal_status_is_success(__status) ? bigos::block_io::RequestState::CompletedSuccess :
-                                                                      bigos::block_io::RequestState::CompletedError;
+            __request->state = terminal_status_is_success(__status) ? bigos::block_io::RequestState::CompletedSuccess
+                                                                    : bigos::block_io::RequestState::CompletedError;
     }
 
     bool completion_done_predicate(void *__arg) noexcept {
@@ -186,9 +204,8 @@ namespace {
                request->state == bigos::block_io::RequestState::TimeoutOrCancelled;
     }
 
-    bigos::block_io::Status enqueue_request(
-        DeviceQueue *__queue, bigos::block_io::Request *__request, bigos::block_io::CompletionToken *__out_token,
-        bigos::block_io::RequestState __state) noexcept {
+    bigos::block_io::Status enqueue_request(DeviceQueue *__queue, bigos::block_io::Request *__request,
+        bigos::block_io::CompletionToken *__out_token, bigos::block_io::RequestState __state) noexcept {
         if (__queue == nullptr || __request == nullptr)
             return bigos::block_io::Status::InvalidRequest;
         bigos::irq::InterruptGuard irq_guard;
@@ -254,8 +271,21 @@ namespace {
             return map_block_status(driver::block::read_sectors(
                 __request->device, __request->lba, __request->sector_count, __request->buffer, __request->buffer_len));
         }
-        return map_block_status(driver::block::write_sectors(__request->device, __request->lba, __request->sector_count,
-            __request->buffer, __request->buffer_len));
+        return map_block_status(driver::block::write_sectors(
+            __request->device, __request->lba, __request->sector_count, __request->buffer, __request->buffer_len));
+    }
+
+    bigos::block_io::Status issue_request(
+        bigos::block_io::Request *__request, const bigos::block_io::CompletionToken *__token) noexcept {
+        if (__request == nullptr || __request->device == nullptr || __token == nullptr)
+            return bigos::block_io::Status::InvalidRequest;
+        if (__request->device->issue_impl != nullptr)
+            return __request->device->issue_impl(__request->device, __request, __token);
+
+        const bigos::block_io::Status final_status = dispatch_request(__request);
+        const bigos::block_io::Status completion_status = bigos::block_io::complete_from_irq(__token, final_status);
+        return completion_status == bigos::block_io::Status::Success ? bigos::block_io::Status::Success
+                                                                     : completion_status;
     }
 }   // namespace
 
@@ -266,7 +296,7 @@ namespace block_io {
         prepare_request_state(__request, validation);
         if (validation != Status::Success)
             return validation;
-        if (!bigos::sched::preemption_enabled()) {
+        if (!bigos::sched::can_block()) {
             __request->status = Status::WouldBlock;
             __request->state = RequestState::Invalid;
             return Status::WouldBlock;
@@ -274,18 +304,27 @@ namespace block_io {
 
         DeviceQueue *queue = queue_for(__request->device);
         CompletionToken token = {};
-        const Status enqueue_status = enqueue_request(queue, __request, &token, RequestState::Queued);
+        const Status enqueue_status = enqueue_request(queue, __request, &token, RequestState::Pending);
         if (enqueue_status != Status::Success) {
             __request->status = enqueue_status;
             __request->state = RequestState::Invalid;
             return enqueue_status;
         }
+        __request->status = Status::WouldBlock;
 
-        const Status status = dispatch_request(__request);
-        set_terminal_state(__request, status);
+        const Status issue_status = issue_request(__request, &token);
+        if (issue_status != Status::Success) {
+            bigos::irq::InterruptGuard irq_guard;
+            spin_lock(&queue->lock);
+            if (__request->state == RequestState::Pending) {
+                set_terminal_state(__request, issue_status);
+                release_request_slot_locked(queue, __request);
+            }
+            spin_unlock(&queue->lock);
+            return __request->status;
+        }
 
-        release_request_slot(queue, __request);
-        return status;
+        return wait_pending(__request, DEFAULT_SUBMIT_TIMEOUT_TICKS);
     }
 
     Status arm_pending(Request *__request, CompletionToken *__out_token) noexcept {
@@ -323,9 +362,8 @@ namespace block_io {
             return Status::InvalidRequest;
         if (!bigos::sched::can_block())
             return Status::WouldBlock;
-        const int wait_status =
-            bigos::sched::wait_queue_wait_until(&__request->completion_wait, &completion_done_predicate, __request,
-                __timeout_ticks);
+        const int wait_status = bigos::sched::wait_queue_wait_until(
+            &__request->completion_wait, &completion_done_predicate, __request, __timeout_ticks);
         if (wait_status == bigos::sched::WAIT_BLOCK_FORBIDDEN)
             return Status::WouldBlock;
         if (wait_status == bigos::sched::WAIT_INVALID)
@@ -376,7 +414,7 @@ namespace block_io {
             return Status::CompletionRejected;
         if (!completion_status_allowed(__final_status))
             return Status::CompletionRejected;
-        DeviceQueue *queue = queue_for(__token->device);
+        DeviceQueue *queue = queue_lookup(__token->device);
         if (queue == nullptr)
             return Status::CompletionRejected;
 
@@ -406,6 +444,26 @@ namespace block_io {
 
     Status read_sync(driver::block::BlockDevice *__device, uint64_t __lba, uint32_t __sector_count, void *__dst,
         size_t __dst_len) noexcept {
+        if (__device != nullptr && __device->issue_impl != nullptr && __sector_count > 1) {
+            if (__dst == nullptr || __device->sector_size == 0)
+                return Status::InvalidRequest;
+            if (add_overflows_u64(__lba, __sector_count))
+                return Status::Overflow;
+            size_t required = 0;
+            if (mul_overflows_size(__sector_count, __device->sector_size, &required))
+                return Status::Overflow;
+            if (__dst_len < required)
+                return Status::BufferTooSmall;
+            uint8_t *dst = (uint8_t *)__dst;
+            for (uint32_t sector = 0; sector < __sector_count; sector++) {
+                const Status status = read_sync(
+                    __device, __lba + sector, 1, dst + (size_t)sector * __device->sector_size, __device->sector_size);
+                if (status != Status::Success)
+                    return status;
+            }
+            return Status::Success;
+        }
+
         Request request = {};
         request.device = __device;
         request.operation = Operation::Read;
@@ -419,8 +477,28 @@ namespace block_io {
         return submit_sync(&request);
     }
 
-    Status write_sync(driver::block::BlockDevice *__device, uint64_t __lba, uint32_t __sector_count,
-        const void *__src, size_t __src_len) noexcept {
+    Status write_sync(driver::block::BlockDevice *__device, uint64_t __lba, uint32_t __sector_count, const void *__src,
+        size_t __src_len) noexcept {
+        if (__device != nullptr && __device->issue_impl != nullptr && __sector_count > 1) {
+            if (__src == nullptr || __device->sector_size == 0)
+                return Status::InvalidRequest;
+            if (add_overflows_u64(__lba, __sector_count))
+                return Status::Overflow;
+            size_t required = 0;
+            if (mul_overflows_size(__sector_count, __device->sector_size, &required))
+                return Status::Overflow;
+            if (__src_len < required)
+                return Status::BufferTooSmall;
+            const uint8_t *src = (const uint8_t *)__src;
+            for (uint32_t sector = 0; sector < __sector_count; sector++) {
+                const Status status = write_sync(
+                    __device, __lba + sector, 1, src + (size_t)sector * __device->sector_size, __device->sector_size);
+                if (status != Status::Success)
+                    return status;
+            }
+            return Status::Success;
+        }
+
         Request request = {};
         request.device = __device;
         request.operation = Operation::Write;
@@ -434,8 +512,8 @@ namespace block_io {
         return submit_sync(&request);
     }
 
-    Status read_role_sync(device::DeviceRole __role, uint64_t __lba, uint32_t __sector_count, void *__dst,
-        size_t __dst_len) noexcept {
+    Status read_role_sync(
+        device::DeviceRole __role, uint64_t __lba, uint32_t __sector_count, void *__dst, size_t __dst_len) noexcept {
         const void *iface = nullptr;
         const bigos::device::Status status =
             bigos::device::find_interface(bigos::device::DeviceClass::Block, __role, &iface);

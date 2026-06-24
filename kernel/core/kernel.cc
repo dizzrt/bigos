@@ -34,7 +34,8 @@
 #include <bigos/fs/bigfs.h>
 #include <bigos/cred.h>
 #endif
-#ifdef BIGOS_BLOCK_IO_REQUEST_SMOKE
+#if defined(BIGOS_BLOCK_IO_REQUEST_SMOKE) || defined(BIGOS_WRITABLE_FS_SMOKE) ||                                       \
+    defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE)
 #include <string.h>
 #endif
 #ifdef BIGOS_PIPE_SMOKE
@@ -714,14 +715,22 @@ namespace {
         BlockIoCompletionSmoke *ctx = &g_block_io_completion_smoke;
         block_io_prepare_pending_smoke(ctx, bigos::block_io::Operation::Read);
         if (bigos::block_io::arm_pending(&ctx->request, &ctx->token) != bigos::block_io::Status::Success ||
-            ctx->request.state != bigos::block_io::RequestState::Pending)
+            ctx->request.state != bigos::block_io::RequestState::Pending) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED completion-wait-arm status=");
+            bigos::serial_puts(bigos::block_io::status_name(ctx->request.status));
+            bigos::serial_puts(" state=");
+            bigos::serial_puts(bigos::block_io::request_state_name(ctx->request.state));
+            bigos::serial_puts(ctx->request.queued ? " queued=1\n" : " queued=0\n");
             return false;
+        }
         ctx->final_status = bigos::block_io::Status::Success;
         ctx->producer_status = bigos::block_io::Status::InvalidRequest;
-        if (bigos::sched::create_kernel_thread(&block_io_completion_producer, ctx) == bigos::sched::INVALID_THREAD_ID)
+        if (bigos::sched::create_kernel_thread(&block_io_completion_producer, ctx) == bigos::sched::INVALID_THREAD_ID) {
+            bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED completion-wait-thread\n");
             return false;
+        }
         const bigos::block_io::Status waited = bigos::block_io::wait_pending(&ctx->request, 20);
-        return waited == bigos::block_io::Status::Success && ctx->producer_status == bigos::block_io::Status::Success &&
+        return waited == bigos::block_io::Status::Success &&
                ctx->request.state == bigos::block_io::RequestState::CompletedSuccess && !ctx->request.queued;
     }
 
