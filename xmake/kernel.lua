@@ -141,6 +141,11 @@ if has_config("pci_msix_smoke") then
     add_defines("BIGOS_PCI_MSIX_SMOKE")
 end
 
+if has_config("virtio_blk_smoke") then
+    add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
+    add_defines("BIGOS_VIRTIO_BLK_SMOKE")
+end
+
 if has_config("demand_paging_smoke") then
     add_defines("BIGOS_DEMAND_PAGING_SMOKE")
 end

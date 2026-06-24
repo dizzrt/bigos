@@ -1,8 +1,10 @@
 #include <bigos/device.h>
 
+#include <bigos/io.h>
 #include <bigos/sched.h>
 #include <drivers/block/ata_pio.h>
 #include <drivers/block/ram_block_device.h>
+#include <drivers/block/virtio_blk.h>
 #include <drivers/timer/pit.h>
 #include <drivers/video/vga.h>
 
@@ -19,6 +21,7 @@ namespace {
     driver::block::AtaPioDevice g_boot_ata = {};
     driver::block::AtaPioDevice g_persistent_ata = {};
     driver::block::RamBlockDevice g_ram_validation_block = {};
+    driver::block::VirtioBlkDevice g_virtio_blk_validation = {};
     uint8_t g_ram_validation_storage
         [driver::block::RAM_BLOCK_DEFAULT_SECTORS * driver::block::DEFAULT_SECTOR_SIZE] = {};
 
@@ -91,6 +94,8 @@ namespace {
                 return __role == DeviceRole::BootBlock || __role == DeviceRole::PersistentWritableBlock;
             case DriverId::RamBlock:
                 return __role == DeviceRole::RamValidationBlock;
+            case DriverId::VirtioBlk:
+                return __role == DeviceRole::VirtioBlkValidationBlock;
             case DriverId::Pit:
                 return __role == DeviceRole::PitTimer;
             case DriverId::VgaText:
@@ -143,6 +148,24 @@ namespace {
         return bigos::device::publish(__device, &ram->block);
     }
 
+    bigos::device::Status virtio_blk_probe(bigos::device::Device *__device) noexcept {
+        if (__device == nullptr || __device->descriptor.role != bigos::device::DeviceRole::VirtioBlkValidationBlock)
+            return bigos::device::Status::InvalidArgument;
+        driver::block::VirtioBlkDevice *virtio =
+            (driver::block::VirtioBlkDevice *)__device->descriptor.private_data;
+        if (virtio == nullptr)
+            return bigos::device::Status::InvalidArgument;
+
+        const driver::block::VirtioBlkStatus status = driver::block::virtio_blk_init(virtio);
+        if (status != driver::block::VirtioBlkStatus::Ok) {
+            bigos::serial_puts("BIGOS_VIRTIO_BLK_UNAVAILABLE ");
+            bigos::serial_puts(driver::block::virtio_blk_status_name(status));
+            bigos::serial_puts("\n");
+            return bigos::device::Status::ProbeFailed;
+        }
+        return bigos::device::publish(__device, &virtio->block);
+    }
+
     bigos::device::Status pit_probe(bigos::device::Device *__device) noexcept {
         if (__device == nullptr || __device->descriptor.role != bigos::device::DeviceRole::PitTimer)
             return bigos::device::Status::InvalidArgument;
@@ -167,6 +190,7 @@ namespace {
             {DeviceClass::Block, DeviceRole::BootBlock, 0, 0, &g_boot_ata},
             {DeviceClass::Block, DeviceRole::PersistentWritableBlock, 1, 0, &g_persistent_ata},
             {DeviceClass::Block, DeviceRole::RamValidationBlock, 2, 0, &g_ram_validation_block},
+            {DeviceClass::Block, DeviceRole::VirtioBlkValidationBlock, 3, 0, &g_virtio_blk_validation},
             {DeviceClass::Timer, DeviceRole::PitTimer, 0, 0, nullptr},
             {DeviceClass::Video, DeviceRole::VgaText, 0, 0, nullptr},
             {DeviceClass::Rtc, DeviceRole::CmosRtc, 0, 0, nullptr},
@@ -180,6 +204,7 @@ namespace {
         const DriverDescriptor drivers[] = {
             {DeviceClass::Block, DriverId::AtaPio, &ata_probe, "ata-pio"},
             {DeviceClass::Block, DriverId::RamBlock, &ram_block_probe, "ram-block-validation"},
+            {DeviceClass::Block, DriverId::VirtioBlk, &virtio_blk_probe, "virtio-blk-modern-validation"},
             {DeviceClass::Timer, DriverId::Pit, &pit_probe, "pit"},
             {DeviceClass::Video, DriverId::VgaText, &vga_probe, "vga-text"},
             {DeviceClass::Rtc, DriverId::CmosRtc, &rtc_probe, "cmos-rtc"},
@@ -272,6 +297,9 @@ namespace device {
         for (uint32_t i = 0; i < g_registry.device_count; i++) {
             Device &device = g_registry.devices[i];
             if (device.state == DeviceState::Published)
+                continue;
+            if (__context == ProbeContext::KernelInit &&
+                device.descriptor.role == DeviceRole::VirtioBlkValidationBlock)
                 continue;
             const Status status = probe(device.descriptor.device_class, device.descriptor.role, __context);
             if (status != Status::Success && first_error == Status::Success)

@@ -375,9 +375,9 @@ async I/O framework, validating them with real hardware-style backends.
 
 用户可见目标：BigOS 通过设备与异步 I/O 框架驱动现代存储设备，以真实硬件风格后端验证它们。
 
-- [ ] Task M10.1: a modern block-storage driver such as virtio-blk or NVMe built on
+- [x] Task M10.1: a modern block-storage driver such as virtio-blk or NVMe built on
   the device framework and async I/O completion model.
-- [ ] 任务 M10.1：基于设备框架与异步 I/O 完成模型构建现代块存储驱动，如 virtio-blk 或 NVMe。
+- [x] 任务 M10.1：基于设备框架与异步 I/O 完成模型构建现代块存储驱动，如 virtio-blk 或 NVMe。
 - [ ] Task M10.2: integrate the new storage backend with the block layer, cache,
   and writeback path within bounded semantics.
 - [ ] 任务 M10.2：在有界语义内将新存储后端与块层、缓存和回写路径集成。

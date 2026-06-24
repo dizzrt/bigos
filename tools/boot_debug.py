@@ -235,6 +235,7 @@ SMOKE_OPTIONS = (
     'user_elf_smoke',
     'fs_smoke',
     'block_io_request_smoke',
+    'virtio_blk_smoke',
     'demand_paging_smoke',
     'file_backed_mapping_smoke',
     'shared_readonly_mappings_smoke',
@@ -404,6 +405,29 @@ RUNTIME_SMOKE_MATRIX = (
             'default-off kernel-thread smoke over internal block backends; bounded kernel-internal '
             'interrupt-driven completion only, with no complete async I/O, background worker, '
             'user-visible device node, or user ABI exposed'
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='modern-virtio-blk',
+        title='Modern virtio-blk block driver',
+        switches=('virtio_blk_smoke',),
+        expected_marker='BIGOS_VIRTIO_BLK_PASSED',
+        timeout_seconds=30.0,
+        risk_area='modern-only virtio PCI transport, split virtqueue, MSI-X completion, and block request tokens',
+        validation_markers=(
+            'BIGOS_VIRTIO_BLK_PUBLISHED',
+            'BIGOS_VIRTIO_BLK_PASSED',
+        ),
+        proc_boundary=(
+            'default-off kernel-thread smoke over an internal VirtioBlkValidationBlock role; requires a QEMU '
+            'modern virtio-blk PCI device with MSI-X and does not replace the default ATA boot device, expose '
+            'a user-visible device node, or claim legacy/transitional virtio support'
+        ),
+        qemu_extra=(
+            '-drive',
+            'if=none,id=virtioblk,file=build/test/virtio-blk.raw,format=raw',
+            '-device',
+            'virtio-blk-pci,drive=virtioblk,disable-modern=off',
         ),
     ),
     RuntimeSmokeCase(

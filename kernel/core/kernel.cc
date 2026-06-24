@@ -26,6 +26,7 @@
 #include <bigos/io.h>
 #include <ktl/buffer.h>
 #include <drivers/block/ram_block_device.h>
+#include <drivers/block/virtio_blk.h>
 #include <drivers/pci/config.h>
 #include <drivers/pci/msix.h>
 #include <drivers/video/vga.h>
@@ -1687,6 +1688,14 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_VIRTIO_BLK_SMOKE
+namespace {
+    void virtio_blk_smoke_entry(void *) noexcept {
+        (void)driver::block::virtio_blk_smoke();
+    }
+}   // namespace
+#endif
+
 #ifdef BIGOS_PCI_CONFIG_VECTOR_SMOKE
 namespace {
     void pci_vector_smoke_irq_handler(bigos::irq::InterruptFrame *__frame) noexcept {
@@ -1917,6 +1926,14 @@ void kernel(const BootInfoHeader *boot_info) {
     // claiming async I/O, user-visible devices or new hardware storage support.
     if (bigos::sched::create_kernel_thread(&block_io_request_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_VIRTIO_BLK_SMOKE
+    // Validation-only modern virtio-blk smoke. Probe runs from a blockable
+    // kernel thread after IRQ/LAPIC/MSI-X dispatch is initialized; default boot
+    // roles remain ATA-backed and do not depend on this internal validation role.
+    if (bigos::sched::create_kernel_thread(&virtio_blk_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_VIRTIO_BLK_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_WRITABLE_FS_SMOKE

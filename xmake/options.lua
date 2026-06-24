@@ -120,6 +120,12 @@ option("pci_msix_smoke")
     set_description("enable validation-only PCI MSI-X interrupt delivery smoke marker")
 option_end()
 
+option("virtio_blk_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only modern virtio-blk MSI-X block driver smoke marker")
+option_end()
+
 option("demand_paging_smoke")
     set_default(false)
     set_showmenu(true)
