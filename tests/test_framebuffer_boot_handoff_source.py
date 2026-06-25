@@ -34,7 +34,7 @@ def test_bootinfo_framebuffer_and_font_sections_are_versioned_and_checked() -> N
 def test_uefi_loader_collects_gop_and_font_without_claiming_console_ready() -> None:
     loader = read_source('kernel/arch/x86/uefi/loader.cc')
     uefi = read_source('kernel/arch/x86/uefi/uefi.h')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     assert 'EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID' in uefi
     assert 'struct EFI_GRAPHICS_OUTPUT_PROTOCOL' in uefi

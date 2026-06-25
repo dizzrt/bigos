@@ -68,7 +68,7 @@ A default-off xmake option `user_vmem_smoke` defines `BIGOS_USER_VMEM_SMOKE`. Wh
 
 Source-level tests in `tests/test_user_address_space_vmem_source.py` pin explicit primitive attributes, kernel default supervisor `present+writable` equivalence, user/NX policy, derived-root high/low-half invariants, and the boundary that derivation does not implicitly write CR3 while the process runtime path explicitly activates the root.
 
-If `tools/boot_debug.py` needs changes to inject this option and observe markers, that should be handled as a separate cross-cutting engineering item. Bochs runtime smoke depends on local ROMs, image locks, serial oracle, and interactive capability; when unavailable, validation should record why it was not run and the remaining bootability risk.
+If `tools.bigosdev` needs changes to inject this option and observe markers, that should be handled as a separate cross-cutting engineering item. Bochs runtime smoke depends on local ROMs, image locks, serial oracle, and interactive capability; when unavailable, validation should record why it was not run and the remaining bootability risk.
 
 ## Bounded Read-Only File-Backed Mapping
 

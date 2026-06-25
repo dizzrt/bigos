@@ -145,7 +145,7 @@ BigOS SHALL validate the keyboard/TTY/console change with source-level checks, c
 
 - **WHEN** Bochs, ROM paths, disk image generation, VGA/serial oracle, and manual keyboard input are available
 - **THEN** validation records bounded evidence that keyboard input reaches the TTY path and visible console output or marker appears
-- **AND** validation MUST NOT require `tools/boot_debug.py` automatic keyboard scancode injection during this change
+- **AND** validation MUST NOT require `tools.bigosdev` automatic keyboard scancode injection during this change
 - **AND** if runtime smoke cannot run, validation records the missing dependency and remaining keyboard/TTY runtime risk
 
 ### Requirement: TTY provides non-interrupt blocking input wait

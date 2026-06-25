@@ -56,9 +56,7 @@ def test_bigfs_metadata_commit_plan_orders_selected_blocks_before_durable_succes
         'metadata_commit_inode(__parent_inode)'
     )
 
-    growth_commit = bigfs[
-        bigfs.index('Status metadata_commit_growth') : bigfs.index('Status metadata_commit_truncate')
-    ]
+    growth_commit = bigfs[bigfs.index('Status metadata_commit_growth') : bigfs.index('Status metadata_commit_truncate')]
     assert growth_commit.index('metadata_commit_inode_data(__file)') < growth_commit.index(
         'metadata_commit_inode(__inode)'
     )

@@ -125,7 +125,9 @@ def test_fork_clone_and_cow_split_implemented() -> None:
     fork_body = proc[proc.index('int64_t fork_current(') : proc.index('int64_t install_fd_current(')]
     assert 'child->kernel_address_space_root = parent->kernel_address_space_root;' in fork_body
 
-    child_entry = proc[proc.index('void fork_child_entry(') : proc.index('}   // namespace', proc.index('void fork_child_entry('))]
+    child_entry = proc[
+        proc.index('void fork_child_entry(') : proc.index('}   // namespace', proc.index('void fork_child_entry('))
+    ]
     assert 'activate_kernel_address_space(child->kernel_address_space_root)' in child_entry
     assert 'child->kernel_address_space_root = bigos::mm::read_cr3()' not in child_entry
 

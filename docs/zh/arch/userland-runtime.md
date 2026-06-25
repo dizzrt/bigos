@@ -189,7 +189,7 @@ runtime 边界内：
 
 ```bash
 xmake f --userland_smoke=y
-uv run python tools/boot_debug.py run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
+uv run python -m tools.bigosdev run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
 ```
 
 `BIGOS_USERLAND_PASSED` 验证非交互运行时路径。简单 C 程序基线增加面向 smoke-only

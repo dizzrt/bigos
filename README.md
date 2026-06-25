@@ -251,7 +251,7 @@ configuration, QEMU launch command inspection, serial-marker checks, and
 no-launch/offline validation:
 
 ```bash
-uv run python tools/boot_debug.py run
+uv run python -m tools.bigosdev run
 ```
 
 The helper runs preflight checks, can build the kernel and boot artifacts when
@@ -274,13 +274,13 @@ Generated boot-debug artifacts are isolated under `build/` by default:
 Useful options:
 
 ```bash
-uv run python tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
-uv run python tools/boot_debug.py run --no-launch
-uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
-uv run python tools/boot_debug.py run --emulator qemu-gdb
-uv run python tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
-uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
-uv run python tools/boot_debug.py validate-image --image build/test/os.raw
+uv run python -m tools.bigosdev run --image build/test/debug.raw --image-size 128M
+uv run python -m tools.bigosdev image create
+uv run python -m tools.bigosdev run --emulator qemu --display none --serial-log logs/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python -m tools.bigosdev run --emulator qemu-gdb
+uv run python -m tools.bigosdev run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
+uv run python -m tools.bigosdev run --serial-log logs/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python -m tools.bigosdev image validate --image build/test/os.raw
 ```
 
 Use `xmake f ...=y` to configure smoke switches before invoking xmake run
@@ -389,7 +389,7 @@ BIOS/MBR/exFAT path.
 - `kernel/arch/x86/boot/exdbr_exfat.s`: extended exFAT boot code.
 - `kernel/arch/x86/boot/boot.s`: mode switching, early page tables, and transfer to long mode.
 - `kernel/arch/x86/boot/boot.cc`: ATA disk reads, exFAT directory scan, and ELF64 load.
-- `tools/install.py`: helper for writing boot sectors into a virtual disk image.
+- `tools.bigosdev image patch`: helper for writing boot sectors into a virtual disk image.
 
 ### Kernel Entry
 

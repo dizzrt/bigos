@@ -94,7 +94,7 @@ IRQ 交错，不得从 IRQ handler 调用，也不在 IRQ handler 中触发动�
 等价 supervisor `present+writable`、user/NX 策略、派生根高/低半区不变量，以及“派生不隐式写 CR3、
 只有进程运行路径显式激活”的边界。
 
-若需调整 `tools/boot_debug.py` 才能注入该开关并观测 marker，应作为独立横切工程化项处理，不混入
+若需调整 `tools.bigosdev` 才能注入该开关并观测 marker，应作为独立横切工程化项处理，不混入
 本 change。Bochs runtime smoke 依赖本机 ROM、image lock、serial oracle 与交互能力；不可用时按
 既有惯例记录未运行原因与剩余 bootability 风险。
 

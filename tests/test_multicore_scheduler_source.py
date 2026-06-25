@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -57,7 +56,9 @@ def test_ap_tick_and_irq_return_use_cpu_local_scheduler_domain() -> None:
     assert 'g_boot_cpu_sched' not in sched
     assert 'current_domain()' in sched
 
-    lapic_branch = interrupt[interrupt.index('if (__detail::is_lapic_external_irq') : interrupt.index('if (__detail::is_syscall_vector')]
+    lapic_branch = interrupt[
+        interrupt.index('if (__detail::is_lapic_external_irq') : interrupt.index('if (__detail::is_syscall_vector')
+    ]
     assert 'bigos::cpu::is_bootstrap_cpu()' not in lapic_branch
     assert 'bigos::sched::maybe_preempt_on_irq_return(__frame);' in lapic_branch
 
@@ -66,7 +67,7 @@ def test_multicore_scheduler_smoke_is_default_off_and_bounded() -> None:
     options = read_source('xmake/options.lua')
     kernel_lua = read_source('xmake/kernel.lua')
     kernel = read_source('kernel/core/kernel.cc')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     option_index = options.index('option("scheduler_smp_smoke")')
     default_index = options.index('set_default(false)', option_index)

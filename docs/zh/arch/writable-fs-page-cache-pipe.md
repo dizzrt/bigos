@@ -170,7 +170,7 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
 
 ```bash
 xmake f --writable_fs_smoke=y
-uv run python tools/boot_debug.py run --emulator qemu --display none \
+uv run python -m tools.bigosdev run --emulator qemu --display none \
   --serial-log logs/serial.log --expect-serial-marker BIGOS_WRITABLE_FS_PASSED
 ```
 

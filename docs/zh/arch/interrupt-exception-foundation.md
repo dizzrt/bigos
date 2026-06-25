@@ -90,9 +90,9 @@ handler 只读取 PS/2 data port `0x60` 的一个 scancode byte，执行 bounded
 
 无法完成的 runtime smoke：
 
-- 普通 boot smoke：`uv run python tools/boot_debug.py run --serial-log logs/serial.log --expect-serial-marker "BigOS kernel reached" --smoke-timeout 30` 先因既有 Bochs 进程锁定 `build/test/os.raw` 失败；改用隔离 image 后仍未在 30 秒内生成 serial marker。
-- memory self-test runtime smoke：先配置 `xmake f --mm_self_test=y`，再执行 `uv run python tools/boot_debug.py run --image build/test/mem-smoke.raw --serial-log logs/mem-smoke.serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED --smoke-timeout 30`，未在 30 秒内生成 serial marker，说明当前本机 Bochs/term GUI/serial 组合无法作为可靠 oracle。
+- 普通 boot smoke：`uv run python -m tools.bigosdev run --serial-log logs/serial.log --expect-serial-marker "BigOS kernel reached" --smoke-timeout 30` 先因既有 Bochs 进程锁定 `build/test/os.raw` 失败；改用隔离 image 后仍未在 30 秒内生成 serial marker。
+- memory self-test runtime smoke：先配置 `xmake f --mm_self_test=y`，再执行 `uv run python -m tools.bigosdev run --image build/test/mem-smoke.raw --serial-log logs/mem-smoke.serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED --smoke-timeout 30`，未在 30 秒内生成 serial marker，说明当前本机 Bochs/term GUI/serial 组合无法作为可靠 oracle。
 - `#PF` runtime smoke：trigger build 已验证，但由于普通 serial smoke 和 memory self-test serial smoke 均不可观测，未继续声明 `BIGOS_PAGE_FAULT` runtime marker 通过。
-- keyboard IRQ1 runtime smoke：未做人工 Bochs 键盘输入；本 change 按设计不扩展 `tools/boot_debug.py` 自动注入键盘输入。
+- keyboard IRQ1 runtime smoke：未做人工 Bochs 键盘输入；本 change 按设计不扩展 `tools.bigosdev` 自动注入键盘输入。
 
 剩余风险：当前源码级检查和交叉构建覆盖了 IDT/ISR/PIC/keyboard/#PF 的关键静态不变量，但普通 boot、page fault halt 和人工 keyboard IRQ delivery 仍需要在可稳定观测 VGA/serial 的 Bochs 环境中复核。

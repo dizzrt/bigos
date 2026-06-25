@@ -1,9 +1,7 @@
 ## Purpose
 
 Define the required repository source layout, public header boundaries, tooling paths, and validation guarantees for BigOS implementation source organization.
-
 ## Requirements
-
 ### Requirement: Kernel implementation sources live under kernel
 
 BigOS SHALL keep concrete kernel implementation sources for kernel runtime, architecture-specific boot code, memory management, device drivers, and startup runtime objects under top-level `kernel/`, while keeping freestanding user programs under top-level `user/` and the freestanding C++ support library under top-level `cpp/`.
@@ -71,7 +69,7 @@ BigOS SHALL keep public kernel headers, freestanding C header subsets, and C++ s
 
 ### Requirement: Non-source project assets stay at semantic top-level locations
 
-BigOS SHALL keep project assets that are not concrete implementation sources at top-level semantic locations unless a specific asset has a subsystem-local reason to move.
+BigOS SHALL keep project assets that are not concrete implementation sources at top-level semantic locations unless a specific asset has a subsystem-local reason to move. Developer Python tooling SHALL live under top-level `tools/`, and the active BigOS developer tooling entry SHALL be the `tools/bigosdev/` executable package rather than standalone legacy helper scripts.
 
 #### Scenario: Developer locates project entry assets
 
@@ -88,12 +86,18 @@ BigOS SHALL keep project assets that are not concrete implementation sources at 
 - **AND** the cross-toolchain definition formerly kept in root `toolchains.lua` is discoverable under top-level `xmake/`
 - **AND** the repository root does not expose additional xmake entry files beside root `xmake.lua`
 
-#### Scenario: Boot install helper lives with developer tools
+#### Scenario: BigOS developer tooling lives under tools
 
-- **WHEN** the boot disk-image install helper references boot artifacts after the migration
-- **THEN** it is discoverable under top-level `tools/`
-- **AND** its documentation or path handling continues to identify the related `kernel/arch/x86/boot` inputs and disk-image assumptions
-- **AND** it does not rely on stale former boot source-root paths
+- **WHEN** the Python developer tooling references boot artifacts, emulator configuration, runtime smoke cases, or generated disk images after the migration
+- **THEN** it MUST be discoverable under top-level `tools/bigosdev/`
+- **AND** its documentation or path handling MUST identify the related `kernel/arch/x86/boot` inputs and disk-image assumptions where applicable
+- **AND** it MUST NOT rely on stale former boot source-root paths
+
+#### Scenario: Legacy helper scripts are removed from active tooling
+
+- **WHEN** the developer tooling migration is complete
+- **THEN** top-level `tools/boot_debug.py` and `tools/install.py` MUST NOT remain as active standalone helper scripts
+- **AND** active documentation MUST point to `python -m tools.bigosdev` helper commands instead
 
 ### Requirement: Runtime behavior remains unchanged
 
@@ -170,3 +174,4 @@ BigOS SHALL validate the kernel source-root migration with the narrowest useful 
 - **WHEN** Python helper files or Python path configuration are changed as part of the kernel source-root migration
 - **THEN** `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, and `uv run pytest` are run when Python tooling is available
 - **AND** unavailable Python validation is recorded with reasons and remaining risk
+

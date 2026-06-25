@@ -104,4 +104,4 @@ syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU excep
 
 ## 横切工程化项
 
-本 change 未修改 `tools/boot_debug.py`。若后续需要它自动注入 `syscall_smoke` 开关并观测 `BIGOS_SYSCALL_*` marker，应作为单独的横切工程化项处理，不把 Python 修改混入本 change，除非明确扩展任务范围。
+本 change 未修改 `tools.bigosdev`。若后续需要它自动注入 `syscall_smoke` 开关并观测 `BIGOS_SYSCALL_*` marker，应作为单独的横切工程化项处理，不把 Python 修改混入本 change，除非明确扩展任务范围。

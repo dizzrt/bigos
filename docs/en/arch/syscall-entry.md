@@ -190,4 +190,4 @@ The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) conti
 
 ## Cross-Cutting Engineering Items
 
-This change did not modify `tools/boot_debug.py`. If later work needs it to inject `syscall_smoke` automatically and observe `BIGOS_SYSCALL_*` markers, that should be a separate cross-cutting engineering item rather than mixed into this change unless task scope is explicitly extended.
+This change did not modify `tools.bigosdev`. If later work needs it to inject `syscall_smoke` automatically and observe `BIGOS_SYSCALL_*` markers, that should be a separate cross-cutting engineering item rather than mixed into this change unless task scope is explicitly extended.

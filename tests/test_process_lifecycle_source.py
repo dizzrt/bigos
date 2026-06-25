@@ -106,6 +106,9 @@ def test_wait_exit_zombie_reap_and_nonblocking_context_rules() -> None:
     assert 'static int64_t sys_waitpid(uint64_t __pid, uint64_t __status_out, uint64_t __options) noexcept' in syscall
     assert 'bigos::proc::wait_current(' in syscall
     assert '(__options & ~bigos::proc::WAIT_OPTION_WNOHANG) != 0' in proc
-    assert 'return 0;' in proc[proc.index('int64_t wait_current(uint32_t __pid, int64_t *__status, uint32_t __options) noexcept'):]
+    assert (
+        'return 0;'
+        in proc[proc.index('int64_t wait_current(uint32_t __pid, int64_t *__status, uint32_t __options) noexcept') :]
+    )
     assert 'validate_user_io_buffer(__status_out, sizeof(int))' in syscall
     assert 'copy_to_current_user_buffer(__status_out, &user_status, sizeof(user_status))' in syscall

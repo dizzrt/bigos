@@ -35,7 +35,9 @@ def test_bigfs_growth_and_truncate_stage_state_before_publication() -> None:
     assert 'rollback_allocated_blocks(allocated, allocated_count);' in write_body
     assert 'memset(g_write_staged[block_count], 0, BLOCK_SIZE);' in write_body
     assert 'bigos::bcache::BufferBlock *inode_block = bigos::bcache::get(&g_device, inode_block_no);' in write_body
-    assert write_body.index('inode_block == nullptr') < write_body.index('memcpy(pinned[i]->data, g_write_staged[i], BLOCK_SIZE);')
+    assert write_body.index('inode_block == nullptr') < write_body.index(
+        'memcpy(pinned[i]->data, g_write_staged[i], BLOCK_SIZE);'
+    )
     assert write_body.index('memcpy(pinned[i]->data, g_write_staged[i], BLOCK_SIZE);') < write_body.index(
         'memcpy(inode_block->data + inode_off, &committed, sizeof(DiskInode));'
     )

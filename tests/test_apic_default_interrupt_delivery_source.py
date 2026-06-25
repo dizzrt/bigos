@@ -20,16 +20,19 @@ def test_vector_ownership_table_drives_eoi_selection() -> None:
     assert 'VectorOwner vector_owners[IRQ_COUNT];' in interrupt
 
     pic_branch = interrupt[
-        interrupt.index('if (__detail::is_pic_external_irq(__frame->vector))') :
-        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))')
+        interrupt.index('if (__detail::is_pic_external_irq(__frame->vector))') : interrupt.index(
+            'if (__detail::is_lapic_external_irq(__frame->vector))'
+        )
     ]
     lapic_branch = interrupt[
-        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))') :
-        interrupt.index('if (__detail::is_apic_spurious_vector(__frame->vector))')
+        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))') : interrupt.index(
+            'if (__detail::is_apic_spurious_vector(__frame->vector))'
+        )
     ]
     syscall_branch = interrupt[
-        interrupt.index('if (__detail::is_syscall_vector(__frame->vector))') :
-        interrupt.index('__detail::unknown_vector_handler(__frame);')
+        interrupt.index('if (__detail::is_syscall_vector(__frame->vector))') : interrupt.index(
+            '__detail::unknown_vector_handler(__frame);'
+        )
     ]
 
     assert 'driver::irqchip::i8259::send_eoi(irq_line);' in pic_branch
@@ -98,8 +101,9 @@ def test_apic_default_hard_irq_paths_remain_nonblocking() -> None:
     timer_body = isr[isr.index('implement_isr(timer)') : isr.index('implement_isr(keyboard)')]
     keyboard_body = isr[isr.index('implement_isr(keyboard)') : isr.index('implement_isr(scheduler_nudge)')]
     lapic_branch = interrupt[
-        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))') :
-        interrupt.index('if (__detail::is_apic_spurious_vector(__frame->vector))')
+        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))') : interrupt.index(
+            'if (__detail::is_apic_spurious_vector(__frame->vector))'
+        )
     ]
 
     for body in (timer_body, keyboard_body, lapic_branch):

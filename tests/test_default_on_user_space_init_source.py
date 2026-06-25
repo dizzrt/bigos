@@ -57,9 +57,7 @@ def test_exec_teardown_uses_stable_kernel_address_space_root() -> None:
     assert 'uint64_t g_kernel_address_space_root = bigos::mm::INVALID_PHYS_ADDR;' in proc
     assert 'g_kernel_address_space_root = bigos::arch::vm_user::active_address_space_root();' in proc
 
-    activate_body = proc[
-        proc.index('void activate_process_kernel_address_space(') : proc.index('bool path_equal(')
-    ]
+    activate_body = proc[proc.index('void activate_process_kernel_address_space(') : proc.index('bool path_equal(')]
     assert '__process->kernel_address_space_root != __process->address_space_root' in activate_body
     assert 'bigos::arch::vm_user::activate_kernel_address_space(g_kernel_address_space_root);' in activate_body
 

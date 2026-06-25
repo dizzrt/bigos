@@ -135,7 +135,7 @@ For bounded emulator smoke against memory markers:
 
 ```bash
 xmake f --mm_self_test=y
-uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log logs/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python -m tools.bigosdev run --emulator qemu --display none --serial-log logs/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
 ```
 
 The self-test emits `BIGOS_MM_SELF_TEST_PASSED` / `BIGOS_MM_SELF_TEST_FAILED`,
@@ -175,7 +175,7 @@ Notes:
   when the environment is configured.
 - For automated emulator smoke, serial marker checks, and CI-like local
   validation, prefer the QEMU headless helper path, for example `uv run python
-  tools/boot_debug.py run --emulator qemu --display none ...`.
+  tools.bigosdev run --emulator qemu --display none ...`.
 - Keep all generated logs under `logs/`, including explicit `--serial-log` and
   `--serial-log-dir` values. Use `build/test/` for generated images/configs, not
   for serial logs or emulator diagnostic logs.

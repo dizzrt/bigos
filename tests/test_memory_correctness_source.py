@@ -363,7 +363,7 @@ def test_perfect_fit_dynamic_cache_creation_is_disabled() -> None:
 
 
 def test_boot_debug_supports_bounded_serial_memory_smoke() -> None:
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     assert "MM_SELF_TEST_SUCCESS_MARKER = 'BIGOS_MM_SELF_TEST_PASSED'" in boot_debug
     assert "'--memory-self-test'" not in boot_debug

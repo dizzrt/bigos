@@ -45,7 +45,7 @@ def extract_c_function(source: str, signature: str) -> str:
         elif source[index] == '}':
             depth -= 1
             if depth == 0:
-                return source[start:index + 1]
+                return source[start : index + 1]
     raise AssertionError(f'function body not found for {signature}')
 
 

@@ -194,7 +194,7 @@ def test_anonymous_lifecycle_unmap_and_protect_are_bounded_and_staged() -> None:
     assert 'syscall2(SYS_UNMAP_ANON' in user_sys
     assert 'syscall3(SYS_PROTECT_ANON' in user_sys
     assert 'option("anonymous_lifecycle_smoke")' in xmake
-    assert 'set_default(false)' in xmake[xmake.index('option("anonymous_lifecycle_smoke")'):]
+    assert 'set_default(false)' in xmake[xmake.index('option("anonymous_lifecycle_smoke")') :]
     assert 'anonymous_lifecycle_smoke.c' in xmake
     assert 'BIGOS_ANON_LIFECYCLE_PASSED' in smoke
     assert 'access-after-unmap' in smoke

@@ -85,7 +85,11 @@ def test_runtime_filesystem_maturity_truncate_commits_metadata_before_freeing_ol
 
     assert 'const Status trunc_status = truncate(inode_num, 0, __uid, __gid);' in trunc_body
     assert 'if (trunc_status != Status::Success)' in trunc_body
-    truncate_impl = bigfs[bigfs.index('Status truncate(uint32_t __inode') : bigfs.index('Status mkdir(', bigfs.index('Status truncate(uint32_t __inode'))]
+    truncate_impl = bigfs[
+        bigfs.index('Status truncate(uint32_t __inode') : bigfs.index(
+            'Status mkdir(', bigfs.index('Status truncate(uint32_t __inode')
+        )
+    ]
     assert 'committed.direct[i] = 0;' in truncate_impl
     assert 'committed.size = __length;' in truncate_impl
     assert 'if (!store_inode(__inode, &committed))' in truncate_impl
@@ -128,7 +132,7 @@ def test_runtime_filesystem_maturity_dedicated_filesystem_maturity_smoke_is_defa
     kernel = read_source('xmake/kernel.lua')
     package = read_source('xmake/user_package.lua')
     smoke = read_source('user/smoke/userland_smoke.c')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
     docs_en = read_source('docs/en/arch/runtime-smoke-validation.md')
     docs_zh = read_source('docs/zh/arch/runtime-smoke-validation.md')
 

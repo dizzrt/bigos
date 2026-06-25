@@ -223,7 +223,7 @@ Python helper 仍用于 raw image 生成、Bochs 配置生成、QEMU 启动命�
 serial marker 检查和 no-launch/offline validation：
 
 ```bash
-uv run python tools/boot_debug.py run
+uv run python -m tools.bigosdev run
 ```
 
 helper 会执行 preflight 检查；如果不是从 xmake run target 调用，也可以构建 kernel
@@ -244,13 +244,13 @@ region、`/boot/boot.bin`、根目录 `kernel`、`/boot/fs_smoke.txt`、
 常用参数示例：
 
 ```bash
-uv run python tools/boot_debug.py run --image build/test/debug.raw --image-size 128M
-uv run python tools/boot_debug.py run --no-launch
-uv run python tools/boot_debug.py run --emulator qemu --display none --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
-uv run python tools/boot_debug.py run --emulator qemu-gdb
-uv run python tools/boot_debug.py run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
-uv run python tools/boot_debug.py run --serial-log build/test/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
-uv run python tools/boot_debug.py validate-image --image build/test/os.raw
+uv run python -m tools.bigosdev run --image build/test/debug.raw --image-size 128M
+uv run python -m tools.bigosdev image create
+uv run python -m tools.bigosdev run --emulator qemu --display none --serial-log logs/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python -m tools.bigosdev run --emulator qemu-gdb
+uv run python -m tools.bigosdev run --romimage /path/to/BIOS-bochs-latest --vgaromimage /path/to/VGABIOS-lgpl-latest
+uv run python -m tools.bigosdev run --serial-log logs/serial.log --expect-serial-marker BIGOS_MM_SELF_TEST_PASSED
+uv run python -m tools.bigosdev image validate --image build/test/os.raw
 ```
 
 运行 xmake target 前，使用 `xmake f ...=y` 配置 smoke 开关。Python helper 不是
@@ -351,7 +351,7 @@ spike，但它不是 Legacy BIOS/MBR/exFAT 路径的 runtime-parity 替代。
 - `kernel/arch/x86/boot/exdbr_exfat.s`：扩展 exFAT 引导代码。
 - `kernel/arch/x86/boot/boot.s`：模式切换、早期页表、转入长模式。
 - `kernel/arch/x86/boot/boot.cc`：ATA 磁盘读取、exFAT 目录扫描、ELF64 加载。
-- `tools/install.py`：用于将引导扇区写入虚拟磁盘镜像的辅助工具。
+- `tools.bigosdev image patch`：用于将引导扇区写入虚拟磁盘镜像的辅助工具。
 
 ### 内核入口
 

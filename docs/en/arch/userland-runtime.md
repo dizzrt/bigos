@@ -230,7 +230,7 @@ with:
 
 ```bash
 xmake f --userland_smoke=y
-uv run python tools/boot_debug.py run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
+uv run python -m tools.bigosdev run --emulator qemu --display none --expect-serial-marker BIGOS_USERLAND_PASSED
 ```
 
 `BIGOS_USERLAND_PASSED` validates the non-interactive runtime path. The simple C

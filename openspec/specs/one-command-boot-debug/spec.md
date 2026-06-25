@@ -1,9 +1,7 @@
 ## Purpose
 
 Define the required one-command local boot debug workflow for BigOS, including preflight validation, kernel and boot artifact orchestration, deterministic raw disk image generation, QEMU and Bochs launch behavior, artifact isolation, preservation of existing boot runtime semantics, and xmake-owned smoke configuration.
-
 ## Requirements
-
 ### Requirement: 默认日志目录使用 logs
 BigOS SHALL use `logs/` as the repository-level directory for boot debug helper serial logs, emulator diagnostic logs, and xmake run-target serial log paths. Explicitly provided log paths MUST be under `logs/`; paths outside `logs/` MUST be rejected instead of silently rewritten.
 
@@ -296,7 +294,6 @@ BigOS SHALL 将 Legacy BIOS/MBR/exFAT/Bochs/QEMU 调试语义迁移到 xmake 入
 - **AND** 文档 MUST 将 `xmake run qemu -- --display none` 描述为 QEMU headless 调试入口
 - **AND** 文档 MUST 将 `xmake f` 描述为 smoke 开关配置入口
 
-
 ### Requirement: Python helper 不提供 smoke 快捷配置
 
 BigOS 的 Python boot debug helper SHALL 不再提供 `--memory-self-test`、`--user-program-smoke` 或等价 smoke 快捷配置参数；开发者 MUST 先使用 `xmake f` 配置 smoke 开关。
@@ -315,30 +312,30 @@ BigOS 的 Python boot debug helper SHALL 不再提供 `--memory-self-test`、`--
 
 ### Requirement: xmake run target 负责启动
 
-BigOS 的 `bochs`、`qemu` 和 `qemu-gdb` xmake run target SHALL 表示构建并启动对应 emulator backend，并 SHALL 将 `--` 后的 target arguments 转发给 Python helper。xmake run target 不提供 `--no-launch` run argument；离线 image 生成和校验 SHALL 继续通过 Python helper 路径提供。
+BigOS 的 `bochs`、`qemu`、`qemu-legacy`、`qemu-gdb` 和 `qemu-uefi` xmake run target SHALL 表示构建并启动对应 emulator backend，并 SHALL 将 `--` 后的 target arguments 转发给 `tools.bigosdev` Python helper。xmake run target 不提供 `--no-launch` run argument；离线 image 生成和校验 SHALL 继续通过 `tools.bigosdev` helper 路径提供。
 
 #### Scenario: run target 启动 emulator
 
-- **WHEN** 开发者运行 `xmake run bochs`、`xmake run qemu` 或 `xmake run qemu-gdb`
+- **WHEN** 开发者运行 `xmake run bochs`、`xmake run qemu`、`xmake run qemu-legacy`、`xmake run qemu-gdb` 或 `xmake run qemu-uefi`
 - **THEN** 对应 target MUST 在生成调试镜像后启动选定 emulator
 - **AND** target MUST NOT 将 `--no-launch` 作为稳定 run argument
 
 #### Scenario: run target 转发 display 参数
 
 - **WHEN** 开发者运行 `xmake run bochs -- --display none` 或 `xmake run qemu -- --display none`
-- **THEN** 对应 target MUST 将 `--display none` 转发给 Python helper
+- **THEN** 对应 target MUST 将 `--display none` 转发给 `tools.bigosdev` Python helper
 - **AND** display 校验和 emulator 命令生成 MUST 由 Python helper 负责
 
 #### Scenario: run target 转发 helper 参数
 
 - **WHEN** 开发者运行 `xmake run qemu -- --display none` 或 `xmake run bochs -- --display none`
-- **THEN** 对应 target MUST 将 helper 参数转发给 Python helper
+- **THEN** 对应 target MUST 将 helper 参数转发给 `tools.bigosdev` Python helper
 - **AND** target MUST preserve argument boundaries without shell re-splitting in `xmake.lua`
 
 #### Scenario: 开发者只生成 image
 
-- **WHEN** 开发者需要只生成和校验 raw image 而不启动 Bochs
-- **THEN** 文档 MUST 指向 `tools/boot_debug.py` 的 no-launch helper 路径或迁移后的等价 Python helper 命令
+- **WHEN** 开发者需要只生成和校验 raw image 而不启动 emulator
+- **THEN** 文档 MUST 指向 `uv run python -m tools.bigosdev image create`、`uv run python -m tools.bigosdev image validate` 或等价 Python helper 命令
 
 ### Requirement: Unified emulator display argument validation
 
@@ -521,3 +518,17 @@ BigOS SHALL keep UEFI debug outputs separate from existing Legacy BIOS debug out
 - **WHEN** both Legacy BIOS and UEFI debug entries are used in the same workspace
 - **THEN** generated raw images, ESP images, firmware vars copies, emulator configs, and serial logs MUST use distinct documented paths
 - **AND** rerunning one backend MUST NOT silently delete or overwrite the other backend's generated outputs except through documented cleanup behavior
+
+### Requirement: Python helper path uses bigosdev package
+BigOS SHALL use `uv run python -m tools.bigosdev` as the stable documented Python helper entry for local image generation, emulator launch, marker waiting, and image validation.
+
+#### Scenario: Documentation shows direct helper commands
+- **WHEN** active README, docs, AGENTS guidance, or OpenSpec specs show direct Python helper commands for boot image generation or emulator launch
+- **THEN** the commands MUST use `uv run python -m tools.bigosdev`
+- **AND** they MUST NOT use `uv run python tools/boot_debug.py` as an active supported command
+
+#### Scenario: Helper supports no-launch workflow through image subcommands
+- **WHEN** a developer needs to generate or validate a boot image without launching an emulator
+- **THEN** the helper MUST provide documented image-only subcommands under `tools.bigosdev image`
+- **AND** those subcommands MUST preserve the existing Legacy and UEFI image validation behavior
+

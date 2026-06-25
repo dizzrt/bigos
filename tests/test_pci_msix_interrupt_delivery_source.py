@@ -90,8 +90,9 @@ def test_msix_vectors_reuse_lapic_owned_dispatch_and_default_off_smoke() -> None
     assert 'bigos::irq::release_lapic_vector(vector)' in alloc_body
 
     lapic_branch = interrupt[
-        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))') :
-        interrupt.index('if (__detail::is_apic_spurious_vector(__frame->vector))')
+        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))') : interrupt.index(
+            'if (__detail::is_apic_spurious_vector(__frame->vector))'
+        )
     ]
     assert 'driver::irqchip::lapic::send_eoi();' in lapic_branch
     assert 'driver::irqchip::i8259::send_eoi' not in lapic_branch

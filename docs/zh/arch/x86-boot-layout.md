@@ -145,7 +145,7 @@ VGA 文本内存中显示可见的 `U` 代码。
 这些入口不要求 `BOOTX64.EFI`、ESP/FAT 镜像、QEMU/OVMF、Secure Boot、GOP framebuffer、ACPI handoff、Runtime Services、virtio、AHCI/SATA、NVMe 或新存储驱动。
 
 默认 UEFI 调试路径是 `xmake run qemu` 或
-`uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu` 会构建/使用
+`uv run python -m tools.bigosdev run --boot-mode uefi --emulator qemu` 会构建/使用
 `build/bin/x86/uefi/BOOTX64.EFI`，生成 `build/test/uefi-esp.img`，准备 `build/test/uefi-root.raw`
 作为当前 exFAT runtime root 兼容镜像，复制 OVMF vars template 到
 `build/test/OVMF_VARS.uefi.fd`，并将 UEFI 串口输出写入 `logs/qemu-uefi.serial.log`。

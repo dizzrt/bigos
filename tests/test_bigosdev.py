@@ -1,4 +1,5 @@
-import importlib.util
+# ruff: noqa: E402
+
 import re
 import struct
 import sys
@@ -7,14 +8,12 @@ from pathlib import Path
 
 import pytest
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / 'tools' / 'boot_debug.py'
-PROJECT_ROOT = MODULE_PATH.parents[1]
-spec = importlib.util.spec_from_file_location('boot_debug', MODULE_PATH)
-assert spec is not None
-boot_debug = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-sys.modules[spec.name] = boot_debug
-spec.loader.exec_module(boot_debug)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from tools.bigosdev import cli as bigosdev_cli
+from tools.bigosdev import core as boot_debug
+from tools.bigosdev.image.patch import patch_image
 
 
 def write_bytes(path: Path, data: bytes) -> Path:
@@ -75,14 +74,15 @@ def test_default_log_paths_use_logs_directory() -> None:
     assert boot_debug.DEFAULT_QEMU_GDB_SERIAL_LOG == PROJECT_ROOT / 'logs' / 'qemu-gdb.serial.log'
     assert boot_debug.DEFAULT_QEMU_UEFI_SERIAL_LOG == PROJECT_ROOT / 'logs' / 'qemu-uefi.serial.log'
 
-    parser = boot_debug.make_parser()
-    args = parser.parse_args(['runtime-smoke-matrix'])
+    parser = bigosdev_cli.build_parser()
+    args = parser.parse_args(['smoke', 'matrix'])
     assert args.output == str(PROJECT_ROOT / 'logs' / 'runtime-smoke-validation.md')
     assert args.serial_log_dir == str(PROJECT_ROOT / 'logs' / 'runtime-smoke')
 
     custom = parser.parse_args(
         [
-            'runtime-smoke-matrix',
+            'smoke',
+            'matrix',
             '--output',
             'log/custom-validation.md',
             '--serial-log-dir',
@@ -125,6 +125,41 @@ def test_create_image_and_validate_layout(tmp_path: Path) -> None:
     assert image.stat().st_size == boot_debug.DEFAULT_IMAGE_SIZE
     assert layout.partition_lba == boot_debug.PARTITION_LBA
     boot_debug.validate_image(image)
+
+
+def test_image_patch_updates_existing_boot_artifacts(tmp_path: Path) -> None:
+    image = tmp_path / 'os.raw'
+    boot_debug.create_image(image, boot_debug.DEFAULT_IMAGE_SIZE, make_artifacts(tmp_path))
+    mbr_data = bytearray(boot_debug.SECTOR_SIZE)
+    mbr_data[0] = 0xFA
+    mbr_data[boot_debug.MBR_SIGNATURE_OFFSET : boot_debug.MBR_SIGNATURE_OFFSET + 2] = b'\x55\xaa'
+    mbr = write_bytes(tmp_path / 'new-mbr.bin', bytes(mbr_data))
+    dbr = bytearray(boot_debug.SECTOR_SIZE)
+    dbr[0:3] = b'\xeb\x76\x90'
+    dbr[0x78:0x7B] = b'NEW'
+    dbr = write_bytes(tmp_path / 'new-dbr.bin', bytes(dbr))
+    exdbr = write_bytes(tmp_path / 'new-exdbr.bin', b'EXDBR2' + bytes(128))
+    boot = write_bytes(tmp_path / 'new-boot.bin', b'new-boot')
+
+    patch_image(image, mbr_path=mbr, dbr_path=dbr, exdbr_path=exdbr, boot_path=boot)
+
+    raw = image.read_bytes()
+    assert raw[0] == 0xFA
+    assert raw[boot_debug.MBR_SIGNATURE_OFFSET : boot_debug.MBR_SIGNATURE_OFFSET + 2] == b'\x55\xaa'
+    assert b'new-boot' in raw
+    boot_debug.validate_image(image)
+
+
+def test_image_patch_rejects_oversized_boot_without_partial_update(tmp_path: Path) -> None:
+    image = tmp_path / 'os.raw'
+    boot_debug.create_image(image, boot_debug.DEFAULT_IMAGE_SIZE, make_artifacts(tmp_path))
+    before = image.read_bytes()
+    oversized_boot = write_bytes(tmp_path / 'oversized-boot.bin', b'x' * (boot_debug.BOOT_MAX_LOAD_BYTES + 1))
+
+    with pytest.raises(boot_debug.StageError, match=re.escape('boot.bin exceeds supported bootloader load range')):
+        patch_image(image, boot_path=oversized_boot)
+
+    assert image.read_bytes() == before
 
 
 def test_create_image_can_package_user_init_elf(tmp_path: Path) -> None:
@@ -399,7 +434,7 @@ def test_image_artifact_discovery_requires_default_userland(monkeypatch, tmp_pat
 
 
 def test_run_parser_rejects_smoke_shortcuts() -> None:
-    parser = boot_debug.make_parser()
+    parser = bigosdev_cli.build_parser()
 
     for shortcut in ('--memory-self-test', '--user-program-smoke'):
         try:
@@ -411,7 +446,7 @@ def test_run_parser_rejects_smoke_shortcuts() -> None:
 
 
 def test_run_parser_rejects_removed_bochs_sdl2_backend() -> None:
-    parser = boot_debug.make_parser()
+    parser = bigosdev_cli.build_parser()
 
     with pytest.raises(SystemExit) as error:
         parser.parse_args(['run', '--emulator', 'bochs-sdl2'])
@@ -420,7 +455,7 @@ def test_run_parser_rejects_removed_bochs_sdl2_backend() -> None:
 
 
 def test_run_parser_accepts_skip_build() -> None:
-    parser = boot_debug.make_parser()
+    parser = bigosdev_cli.build_parser()
 
     args = parser.parse_args(['run', '--skip-build', '--emulator', 'qemu', '--display', 'none'])
 
@@ -606,10 +641,11 @@ def test_modern_storage_preflight_blocks_missing_device_model(monkeypatch) -> No
 def test_runtime_smoke_matrix_blocks_when_required_tool_missing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(boot_debug.shutil, 'which', lambda tool: None if tool == 'uv' else f'/usr/bin/{tool}')
     monkeypatch.setattr(boot_debug, 'LOG_DIR', tmp_path / 'logs')
-    parser = boot_debug.make_parser()
+    parser = bigosdev_cli.build_parser()
     args = parser.parse_args(
         [
-            'runtime-smoke-matrix',
+            'smoke',
+            'matrix',
             '--case',
             'memory-self-test',
             '--output',
@@ -647,10 +683,11 @@ def test_runtime_smoke_matrix_runs_selected_case_and_writes_artifact(tmp_path: P
     monkeypatch.setattr(boot_debug, 'run_command', fake_run_command)
     monkeypatch.setattr(boot_debug, 'run', fake_run)
     monkeypatch.setattr(boot_debug, 'LOG_DIR', tmp_path / 'logs')
-    parser = boot_debug.make_parser()
+    parser = bigosdev_cli.build_parser()
     args = parser.parse_args(
         [
-            'runtime-smoke-matrix',
+            'smoke',
+            'matrix',
             '--case',
             'memory-self-test',
             '--output',
@@ -799,6 +836,8 @@ def test_xmake_exposes_bochs_targets_and_boot_artifact_rules() -> None:
     assert 'target("qemu-uefi")' in xmake
     assert 'target("qemu-headless")' not in xmake
     assert 'target("boot-artifacts")' in xmake
+    assert '"-m", "tools.bigosdev", "run"' in xmake
+    assert 'tools/boot_debug.py' not in xmake
     assert 'build/bin/x86/boot' not in xmake
     assert 'path.join(boot_bindir, "mbr.bin")' in xmake and 'bytes > 512 bytes' in xmake
     assert 'path.join(boot_bindir, "dbr.bin")' in xmake and 'bytes > 512 bytes' in xmake

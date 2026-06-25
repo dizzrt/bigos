@@ -4,9 +4,9 @@ BigOS 将现有默认关闭的 runtime smoke 产品化为一组面向当前有�
 
 ## 矩阵 Runner
 
-- 首选自动化命令：`uv run python tools/boot_debug.py runtime-smoke-matrix`
-- 单 case 命令：`uv run python tools/boot_debug.py runtime-smoke-matrix --case memory-self-test`
-- Artifact 覆盖路径：`uv run python tools/boot_debug.py runtime-smoke-matrix --output logs/runtime-smoke-validation.md`
+- 首选自动化命令：`uv run python -m tools.bigosdev smoke matrix`
+- 单 case 命令：`uv run python -m tools.bigosdev smoke matrix --case memory-self-test`
+- Artifact 覆盖路径：`uv run python -m tools.bigosdev smoke matrix --output logs/runtime-smoke-validation.md`
 - 串口日志：默认每个 case 一个文件，位于 `logs/runtime-smoke/`。
 - Image：默认每个 case 一个 UEFI ESP/FAT image 和一个 exFAT 兼容 root image，位于 `build/test/runtime-smoke/`。
 
@@ -124,7 +124,7 @@ wrapper 断言覆盖 portable libc subset，并向 `/bin/sh` 输入确定性命�
 
 ```bash
 xmake f --mm_self_test=y
-uv run python tools/boot_debug.py run \
+uv run python -m tools.bigosdev run \
   --emulator qemu \
   --display none \
   --serial-log logs/runtime-smoke/memory-self-test.serial.log \
@@ -160,7 +160,7 @@ uv run python tools/boot_debug.py run \
 x86_64 UEFI boot backend 是默认 smoke 入口。可运行
 `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`，
 或直接使用 helper：
-`uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log logs/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`。`xmake run qemu-uefi` 仍是同一 backend 的显式别名。
+`uv run python -m tools.bigosdev run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log logs/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`。`xmake run qemu-uefi` 仍是同一 backend 的显式别名。
 
 UEFI smoke 会构建/使用 `BOOTX64.EFI`，创建包含 kernel、PID-1 init、`/bin/sh`、有界
 `/bin/*` 和 `/boot/fonts/unifont.bin` 的 ESP/FAT image，并为当前 VFS baseline 准备 exFAT 兼容 root image，使用 x86_64 OVMF 启动 QEMU，并默认使用

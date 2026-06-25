@@ -1,8 +1,7 @@
 {
   "include": [
     "bigos.py",
-    "tools/boot_debug.py",
-    "tools/install.py",
+    "tools/bigosdev",
     "tests"
   ],
   "exclude": [

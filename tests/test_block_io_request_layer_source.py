@@ -174,7 +174,7 @@ def test_normal_storage_consumers_use_request_layer() -> None:
 def test_request_layer_smoke_is_default_off_and_in_matrix() -> None:
     xmake = read_source('xmake.lua')
     kernel = read_source('kernel/core/kernel.cc')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     assert 'option("block_io_request_smoke")' in xmake
     option_index = xmake.index('option("block_io_request_smoke")')
@@ -214,7 +214,7 @@ def test_request_layer_smoke_is_default_off_and_in_matrix() -> None:
 
 def test_ram_backend_smoke_covers_framework_request_cache_and_boundaries() -> None:
     kernel = read_source('kernel/core/kernel.cc')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     for token in (
         'ram-publish',

@@ -19,7 +19,7 @@ flat blob。
 - loader 仍显式映射 code、data/BSS 和 stack，便于验证权限边界；data/BSS 页当前为清零页。
 
 ELF smoke 使用 `xmake build user-init-elf` 构建的静态 freestanding ELF64
-`ET_EXEC` 镜像，并可由 `tools/boot_debug.py` 打包到 `/boot/user/init.elf`。
+`ET_EXEC` 镜像，并可由 `tools.bigosdev` 打包到 `/boot/user/init.elf`。
 该 ELF 镜像通过 `SYS_WRITE` 输出 `BIGOS_USER_ELF_WRITE\n`，随后执行
 `SYS_EXIT(0)`。
 

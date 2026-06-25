@@ -48,14 +48,14 @@ BigOS SHALL provide an explicit runtime smoke validation matrix that lists each 
 
 ### Requirement: Runtime smoke runner uses QEMU headless marker checks
 
-BigOS SHALL provide a validation runner as a `tools/boot_debug.py` subcommand or equivalent documented helper flow that executes matrix cases through the existing Legacy BIOS/MBR/exFAT image path and prefers QEMU headless serial-marker checks for automated validation.
+BigOS SHALL provide a validation runner through `tools.bigosdev smoke matrix` or an equivalent documented helper flow that executes matrix cases through the supported generated image paths and prefers QEMU headless serial-marker checks for automated validation.
 
 #### Scenario: Runner executes a matrix case
 
 - **WHEN** the runner executes a runtime smoke matrix case
 - **THEN** it MUST configure the case-specific smoke switches through `xmake f`
 - **AND** it MUST build the configured kernel and boot artifacts through the xmake-backed flow
-- **AND** it MUST launch the QEMU backend with headless display mode or an equivalent `tools/boot_debug.py` QEMU headless helper path
+- **AND** it MUST launch the QEMU backend with headless display mode or an equivalent `tools.bigosdev run --emulator qemu --display none` helper path
 - **AND** it MUST wait for the case's expected serial marker within the case-specific bounded timeout
 
 #### Scenario: Expected marker is observed
@@ -643,3 +643,12 @@ BigOS SHALL record modern storage validation as staged results in the runtime sm
 - **WHEN** the runtime smoke runner records modern storage validation
 - **THEN** it MUST record whether normal boot without the modern storage validation path was executed, skipped, or blocked
 - **AND** it MUST keep that result separate from the modern backend read/write result
+
+### Requirement: Runtime smoke documentation uses bigosdev entry
+BigOS runtime smoke validation documentation SHALL use `uv run python -m tools.bigosdev smoke matrix` and `uv run python -m tools.bigosdev run` as the active Python helper examples.
+
+#### Scenario: Documentation shows runtime smoke commands
+- **WHEN** runtime smoke validation documentation, AGENTS guidance, README examples, or OpenSpec active specs show current runtime smoke commands
+- **THEN** they MUST use `tools.bigosdev` helper paths
+- **AND** they MUST NOT show `tools/boot_debug.py runtime-smoke-matrix` as an active supported command
+

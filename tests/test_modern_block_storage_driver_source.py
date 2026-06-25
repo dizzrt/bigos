@@ -15,7 +15,6 @@ def read_source(relative: str) -> str:
 
 
 def test_virtio_blk_is_modern_only_and_uses_pci_capabilities() -> None:
-    header = read_source('include/drivers/block/virtio_blk.h')
     source = read_source('kernel/drivers/block/virtio_blk.cc')
 
     assert 'VIRTIO_PCI_MODERN_BLK_DEVICE_ID = 0x1042' in source
@@ -74,15 +73,24 @@ def test_msix_completion_path_is_irq_safe_and_lapic_owned() -> None:
     assert 'set_entry_mask(' in source
 
     irq_body = source[source.index('void virtio_blk_irq') : source.index('const char *virtio_blk_status_name')]
-    for token in ('kmalloc', 'alloc_kernel_pages', 'alloc_physical_order', 'map_device_mmio', 'read_bar', 'read_capabilities', 'wait_pending'):
+    for token in (
+        'kmalloc',
+        'alloc_kernel_pages',
+        'alloc_physical_order',
+        'map_device_mmio',
+        'read_bar',
+        'read_capabilities',
+        'wait_pending',
+    ):
         assert token not in irq_body
     assert 'complete_from_irq(&token, __status)' in source
     assert 'send_eoi' not in irq_body
     assert 'driver::irqchip::i8259' not in irq_body
     assert 'bigos::irq::allocate_lapic_vector(__handler, &vector)' in msix
     lapic_branch = interrupt[
-        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))') :
-        interrupt.index('if (__detail::is_apic_spurious_vector(__frame->vector))')
+        interrupt.index('if (__detail::is_lapic_external_irq(__frame->vector))') : interrupt.index(
+            'if (__detail::is_apic_spurious_vector(__frame->vector))'
+        )
     ]
     assert 'driver::irqchip::lapic::send_eoi();' in lapic_branch
     assert 'driver::irqchip::i8259::send_eoi' not in lapic_branch
@@ -94,7 +102,7 @@ def test_device_role_and_smoke_are_internal_and_default_off() -> None:
     kernel = read_source('kernel/core/kernel.cc')
     xmake = read_source('xmake.lua')
     syscall_h = read_source('include/bigos/syscall.h')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     assert 'VirtioBlkValidationBlock' in device_h
     assert 'DriverId::VirtioBlk' in device
@@ -120,7 +128,7 @@ def test_modern_storage_backend_smoke_covers_cache_and_dirty_failure() -> None:
     source = read_source('kernel/drivers/block/virtio_blk.cc')
     kernel = read_source('kernel/core/kernel.cc')
     xmake = read_source('xmake.lua')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     assert 'option("modern_storage_backend_smoke")' in xmake
     option_index = xmake.index('option("modern_storage_backend_smoke")')
@@ -145,7 +153,7 @@ def test_modern_backend_can_be_explicit_persistent_rw_backing() -> None:
     bigfs = read_source('kernel/core/fs/bigfs.cc')
     kernel = read_source('kernel/core/kernel.cc')
     xmake = read_source('xmake.lua')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     assert 'option("persistent_writable_fs_modern_backend")' in xmake
     option_index = xmake.index('option("persistent_writable_fs_modern_backend")')

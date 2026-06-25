@@ -4,9 +4,9 @@ BigOS productizes the existing default-off runtime smokes as a narrow validation
 
 ## Matrix Runner
 
-- Preferred automated command: `uv run python tools/boot_debug.py runtime-smoke-matrix`
-- Single case command: `uv run python tools/boot_debug.py runtime-smoke-matrix --case memory-self-test`
-- Artifact override: `uv run python tools/boot_debug.py runtime-smoke-matrix --output logs/runtime-smoke-validation.md`
+- Preferred automated command: `uv run python -m tools.bigosdev smoke matrix`
+- Single case command: `uv run python -m tools.bigosdev smoke matrix --case memory-self-test`
+- Artifact override: `uv run python -m tools.bigosdev smoke matrix --output logs/runtime-smoke-validation.md`
 - Serial logs: one file per case under `logs/runtime-smoke/` by default.
 - Images: one UEFI ESP/FAT image and one exFAT compatibility root image per case under `build/test/runtime-smoke/` by default.
 
@@ -154,7 +154,7 @@ Example:
 
 ```bash
 xmake f --mm_self_test=y
-uv run python tools/boot_debug.py run \
+uv run python -m tools.bigosdev run \
   --emulator qemu \
   --display none \
   --serial-log logs/runtime-smoke/memory-self-test.serial.log \
@@ -195,7 +195,7 @@ Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, s
 
 ## Default UEFI Smoke
 
-The x86_64 UEFI boot backend is the default smoke entry. Use `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` or the direct helper form `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log logs/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`. `xmake run qemu-uefi` remains an explicit alias for the same backend.
+The x86_64 UEFI boot backend is the default smoke entry. Use `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40` or the direct helper form `uv run python -m tools.bigosdev run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log logs/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`. `xmake run qemu-uefi` remains an explicit alias for the same backend.
 
 The UEFI smoke builds/uses `BOOTX64.EFI`, creates an ESP/FAT image with the kernel, PID-1 init, `/bin/sh`, bounded `/bin/*`, and `/boot/fonts/unifont.bin`, prepares an exFAT compatibility root image for the current VFS baseline, launches QEMU with x86_64 OVMF, and uses `logs/qemu-uefi.serial.log` by default. It requires QEMU/OVMF, Homebrew LLVM/LLD, `mtools`, the existing x86_64 cross toolchain, and `uv` for Python helper validation. Missing OVMF, mtools, LLVM/LLD, QEMU, the cross toolchain, or `uv` must be recorded as skipped or blocked with substitute checks and residual UEFI bootability risk.
 

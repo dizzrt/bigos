@@ -211,7 +211,7 @@ UEFI `GetMemoryMap` 初步映射方向：
 
 ## 调试入口与镜像规划
 
-`xmake run qemu` 和 `uv run python tools/boot_debug.py run` 是默认 UEFI/QEMU/OVMF 启动入口。`xmake run qemu-uefi` 仍是同一后端的显式别名。`xmake run qemu-legacy`、`xmake run qemu-gdb` 和带 `--display sdl2|none` 的 `xmake run bochs` 是显式 Legacy BIOS/MBR/exFAT 调试路径：
+`xmake run qemu` 和 `uv run python -m tools.bigosdev run` 是默认 UEFI/QEMU/OVMF 启动入口。`xmake run qemu-uefi` 仍是同一后端的显式别名。`xmake run qemu-legacy`、`xmake run qemu-gdb` 和带 `--display sdl2|none` 的 `xmake run bochs` 是显式 Legacy BIOS/MBR/exFAT 调试路径：
 
 - 构建 MBR、DBR、extended DBR、`boot.bin` 和 root `kernel`。
 - 生成 raw exFAT disk image。
@@ -229,7 +229,7 @@ UEFI `GetMemoryMap` 初步映射方向：
 - `xmake run qemu -- --display none --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
   会准备 `build/test/uefi-esp.img`，并准备 `build/test/uefi-root.raw` 作为当前 exFAT runtime root 兼容镜像，复制可写 OVMF vars 文件到
   `build/test/OVMF_VARS.uefi.fd`，并启动 QEMU/OVMF。
-- `uv run python tools/boot_debug.py run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log logs/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
+- `uv run python -m tools.bigosdev run --boot-mode uefi --emulator qemu --display none --image build/test/uefi-esp.img --uefi-root-image build/test/uefi-root.raw --serial-log logs/qemu-uefi.serial.log --expect-serial-marker BIGOS_USER_EXEC --smoke-timeout 40`
   是直接 helper 形式。
 
 UEFI 产物隔离策略：

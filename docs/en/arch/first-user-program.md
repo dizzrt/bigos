@@ -19,7 +19,7 @@ The first user program uses an embedded flat blob rather than ELF64 or filesyste
 - The loader still maps code, data/BSS, and stack explicitly to validate permission boundaries; data/BSS pages are currently zero-filled pages.
 
 The ELF smoke uses a static freestanding ELF64 `ET_EXEC` image built by
-`xmake build user-init-elf` and optionally packaged by `tools/boot_debug.py` at
+`xmake build user-init-elf` and optionally packaged by `tools.bigosdev` at
 `/boot/user/init.elf`. The ELF image writes `BIGOS_USER_ELF_WRITE\n` with
 `SYS_WRITE`, then calls `SYS_EXIT(0)`.
 

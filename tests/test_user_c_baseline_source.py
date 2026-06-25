@@ -9,7 +9,7 @@ def read_source(relative: str) -> str:
 
 def test_smoke_probe_programs_are_packaged_only_for_userland_smoke() -> None:
     xmake = read_source('xmake/user_package.lua')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
 
     for name in ('args', 'env', 'out', 'errno', 'exit', 'libc_subset'):
         assert f'"{name}"' in xmake
@@ -207,7 +207,7 @@ def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:
 
 def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     smoke = read_source('user/smoke/userland_smoke.c')
-    boot_debug = read_source('tools/boot_debug.py')
+    boot_debug = read_source('tools/bigosdev/core.py')
     proc = read_source('kernel/core/proc/proc.cc')
 
     assert 'run_program("/bin/smoke/args"' in smoke

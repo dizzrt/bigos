@@ -1,9 +1,7 @@
 ## Purpose
 
 Define the project-level quality assurance requirements for BigOS OpenSpec changes, including impact-scoped validation, C++ clang/clangd auxiliary checks, authoritative GCC cross-toolchain builds, low-level kernel review points, and explicit records for unavailable validation.
-
 ## Requirements
-
 ### Requirement: Change 必须按影响范围声明质量验证
 
 每个 OpenSpec change 必须（MUST）包含与其影响的子系统、语言和构建产物匹配的验证任务。验证任务必须（MUST）足够具体，能够判断该 change 已执行检查、因明确原因跳过检查，或被不可用工具阻塞。
@@ -119,12 +117,12 @@ C++ 质量验证不得（MUST NOT）用 clang/clangd 结果替代预期的 `xmak
 
 ### Requirement: Emulator smoke 优先级必须按场景声明
 
-BigOS 的项目级 Agent 指南 SHALL 为 QEMU 与 Bochs 的 smoke/debug 使用场景定义明确优先级，避免将任一 emulator 描述为所有调试场景的唯一默认选择。指南 SHALL 使用当前受支持的 xmake run target 和 display 参数形态，不得继续把 `bochs-sdl2` 描述为稳定入口。
+BigOS 的项目级 Agent 指南 SHALL 为 QEMU 与 Bochs 的 smoke/debug 使用场景定义明确优先级，避免将任一 emulator 描述为所有调试场景的唯一默认选择。指南 SHALL 使用当前受支持的 xmake run target、display 参数形态和 `tools.bigosdev` helper 路径，不得继续把 `bochs-sdl2`、`tools/boot_debug.py` 或 `tools/install.py` 描述为稳定入口。
 
 #### Scenario: Agent 执行自动化 smoke 或串口 marker 验证
 
 - **WHEN** Agent 需要执行自动化 smoke test、串口 marker 检查或 CI-like 本地验证
-- **THEN** 项目级指南 MUST 要求优先使用 `xmake run qemu -- --display none` 对应的 QEMU headless display helper 路径，或直接使用 Python helper 的 `--emulator qemu --display none` 等价参数
+- **THEN** 项目级指南 MUST 要求优先使用 `xmake run qemu -- --display none` 对应的 QEMU headless display helper 路径，或直接使用 `uv run python -m tools.bigosdev run --emulator qemu --display none` 等价参数
 - **AND** 指南 MUST 要求在 QEMU 不可用时显式记录缺失依赖和剩余风险
 
 #### Scenario: Agent 执行快速本地启动验证
@@ -197,3 +195,12 @@ BigOS 的项目级 Agent 指南 SHALL 为 QEMU 与 Bochs 的 smoke/debug 使用�
 #### Scenario: 质量检查发现 roadmap 编号
 - **WHEN** targeted search 在新建 change、归档 change 或相关文档更新中发现 roadmap stage/task 编号引用
 - **THEN** change MUST 在标记完成前将其替换为能力/行为表述，或记录该命中不是 roadmap 编号的明确依据
+
+### Requirement: Python tooling changes must validate package entry points
+OpenSpec changes that modify `tools/bigosdev/**` SHALL include Python package entry, parser, static analysis, and targeted unit validation tasks.
+
+#### Scenario: Change modifies bigosdev Python modules
+- **WHEN** a change modifies `tools/bigosdev/**`
+- **THEN** its tasks MUST include `uv run python -m tools.bigosdev --help` or an equivalent package-entry parser check
+- **AND** its tasks MUST include targeted Python tests, `uv run ruff check`, `uv run ruff format --check`, and `uv run pyright` when those tools are available
+

@@ -1,7 +1,7 @@
 ---@diagnostic disable: undefined-global
 
 local function run_boot_debug(emulator, serial_log, target_args, process, base_args)
-    local args = {"tools/boot_debug.py", "run", "--emulator", emulator, "--skip-build", "--serial-log", serial_log}
+    local args = {"-m", "tools.bigosdev", "run", "--emulator", emulator, "--skip-build", "--serial-log", serial_log}
     for _, arg in ipairs(base_args or {}) do
         table.insert(args, arg)
     end
