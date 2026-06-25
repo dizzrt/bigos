@@ -174,6 +174,14 @@ The runner writes a Markdown-first validation artifact to `logs/runtime-smoke-va
 - `blocking markers`: for the blocking case, intermediate wait/wake/timeout markers when present in the serial log.
 - `scheduler semantics markers`: for the scheduler semantics case, delayed-preemption and IRQ-return-preempted markers when present in the serial log.
 - `serial log path`: generated log used as the source of truth.
+- `modern storage device configuration`: for modern storage cases, the exact
+  QEMU device and drive arguments requested by the matrix.
+- `boot image category`: records that the validation still uses the existing
+  UEFI ESP/FAT plus exFAT root image, or the Legacy BIOS/MBR/exFAT raw image
+  when a legacy case is selected.
+- `modern storage stage results`: separate backend publication, request
+  completion, cache/writeback round-trip, default boot regression, and
+  cross-validation entries.
 - `timeout` and `exit status`: bounded wait and failure context.
 - `status`: `passed`, `failed`, `skipped`, or `blocked`.
 - `failed stage`: preflight, build, image build, validation, or emulator marker stage.
@@ -183,7 +191,7 @@ The runner writes a Markdown-first validation artifact to `logs/runtime-smoke-va
   visible-text/cursor/scrollback notes, and skipped or blocked graphical
   evidence.
 
-Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, or other required local dependencies must be recorded as skipped or blocked. A smoke that did not run must not be marked as passed.
+Missing `uv`, `xmake`, cross-binutils, QEMU, Bochs, ROM/display configuration, serial capture, disk image generation, modern storage device-model support, or other required local dependencies must be recorded as skipped or blocked. A smoke that did not run must not be marked as passed. Modern storage validation must record the `default-init` regression separately; if it was not selected or run, the artifact records that regression as skipped instead of folding it into the modern backend result.
 
 ## Default UEFI Smoke
 

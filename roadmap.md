@@ -381,9 +381,9 @@ async I/O framework, validating them with real hardware-style backends.
 - [x] Task M10.2: integrate the new storage backend with the block layer, cache,
   and writeback path within bounded semantics.
 - [x] 任务 M10.2：在有界语义内将新存储后端与块层、缓存和回写路径集成。
-- [ ] Task M10.3: storage driver validation through the emulator path without adding
+- [x] Task M10.3: storage driver validation through the emulator path without adding
   a new ISA.
-- [ ] 任务 M10.3：通过仿真器路径验证存储驱动，不接入新 ISA。
+- [x] 任务 M10.3：通过仿真器路径验证存储驱动，不接入新 ISA。
 
 ### Milestone M11 — Networking Stack / 里程碑 M11 — 网络栈
 

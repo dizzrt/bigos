@@ -558,6 +558,51 @@ def test_runtime_smoke_artifact_records_blocked_tools_and_case_fields(tmp_path: 
     assert 'missing required tool(s): uv' in artifact
 
 
+def test_runtime_smoke_artifact_records_modern_storage_fields(tmp_path: Path) -> None:
+    case = boot_debug.case_by_id('modern-storage-backend')
+    result = boot_debug.RuntimeSmokeResult(
+        case=case,
+        status='passed',
+        expected_marker=case.expected_marker,
+        observed_marker=case.expected_marker,
+        serial_log=tmp_path / 'modern-storage.serial.log',
+        timeout_seconds=case.timeout_seconds,
+        exit_status='0',
+        failed_stage='',
+        skip_reason='',
+        alternative_checks='',
+        residual_risk='',
+        observed_markers=('BIGOS_VIRTIO_BLK_PUBLISHED', case.expected_marker),
+    )
+
+    artifact = boot_debug.format_runtime_smoke_artifact(
+        [result],
+        [boot_debug.ToolAvailability('qemu-system-x86_64', True, '/usr/bin/qemu-system-x86_64')],
+        [case],
+        stopped_after_failure=False,
+        bochs_note='not checked',
+    )
+
+    assert '## Modern Storage Emulator Validation' in artifact
+    assert 'virtio-blk-pci,drive=virtioblk,disable-modern=off' in artifact
+    assert 'default UEFI ESP/FAT image plus exFAT compatibility root image' in artifact
+    assert '| `modern-storage-backend` | passed | passed | passed | skipped: run `default-init` separately' in artifact
+
+
+def test_modern_storage_preflight_blocks_missing_device_model(monkeypatch) -> None:
+    monkeypatch.setattr(boot_debug.shutil, 'which', lambda tool: f'/usr/bin/{tool}')
+
+    def fake_run(command, **kwargs):
+        _ = command, kwargs
+        return boot_debug.subprocess.CompletedProcess(command, 0, stdout='name "e1000"\n')
+
+    monkeypatch.setattr(boot_debug.subprocess, 'run', fake_run)
+
+    reason = boot_debug.modern_storage_preflight(boot_debug.case_by_id('modern-storage-backend'))
+
+    assert reason == 'QEMU does not report virtio-blk-pci device model support'
+
+
 def test_runtime_smoke_matrix_blocks_when_required_tool_missing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(boot_debug.shutil, 'which', lambda tool: None if tool == 'uv' else f'/usr/bin/{tool}')
     monkeypatch.setattr(boot_debug, 'LOG_DIR', tmp_path / 'logs')

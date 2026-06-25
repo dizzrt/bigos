@@ -144,13 +144,16 @@ uv run python tools/boot_debug.py run \
 - `blocking markers`：blocking case 的串口日志中出现的 wait/wake/timeout 中间 marker。
 - `scheduler semantics markers`：scheduler semantics case 的 delayed-preemption 与 IRQ-return-preempted 中间 marker。
 - `serial log path`：作为 source of truth 的生成日志。
+- `modern storage device configuration`：现代存储 case 请求的精确 QEMU device/drive 参数。
+- `boot image category`：记录验证仍使用现有 UEFI ESP/FAT 加 exFAT root image，或在 legacy case 中使用 Legacy BIOS/MBR/exFAT raw image。
+- `modern storage stage results`：分开记录 backend publication、request completion、cache/writeback round trip、default boot regression 和 cross-validation。
 - `timeout` 与 `exit status`：有界等待和失败上下文。
 - `status`：`passed`、`failed`、`skipped` 或 `blocked`。
 - `failed stage`：preflight、build、image build、validation 或 emulator marker 阶段。
 - `skip reason`、`alternative checks` 与 `residual risk`：工具不可用或跳过交叉验证时必须记录。
 - `console backend evidence`：可选记录 framebuffer/VGA backend selection、framebuffer geometry、计算出的可见 columns/rows、full-clear observation、可见文本/光标/scrollback notes，以及图形证据 skipped 或 blocked 状态。
 
-缺少 `uv`、`xmake`、cross-binutils、QEMU、Bochs、ROM/display 配置或其他必要本地依赖时，必须记录为 skipped 或 blocked。未运行的 smoke 不得标记为 passed。
+缺少 `uv`、`xmake`、cross-binutils、QEMU、Bochs、ROM/display 配置、serial capture、disk image generation、现代存储 device model 支持或其他必要本地依赖时，必须记录为 skipped 或 blocked。未运行的 smoke 不得标记为 passed。现代存储验证必须单独记录 `default-init` 回归；如果未选择或未运行该回归，artifact 将其记录为 skipped，而不是合并到 modern backend 结果里。
 
 ## 默认 UEFI Smoke
 

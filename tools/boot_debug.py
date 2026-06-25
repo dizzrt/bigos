@@ -2021,6 +2021,57 @@ def ensure_runtime_smoke_extra_images(case: RuntimeSmokeCase) -> None:
             return
 
 
+def runtime_smoke_modern_storage_device_config(case: RuntimeSmokeCase) -> str:
+    if not case.qemu_extra:
+        return 'none'
+    return ' '.join(case.qemu_extra)
+
+
+def runtime_smoke_boot_image_category(case: RuntimeSmokeCase) -> str:
+    if case.boot_mode == 'uefi':
+        return 'default UEFI ESP/FAT image plus exFAT compatibility root image'
+    return 'Legacy BIOS/MBR/exFAT raw boot image with ATA-compatible default disk exposure'
+
+
+def runtime_smoke_case_support_status(result: RuntimeSmokeResult) -> str:
+    if result.status == 'passed':
+        return 'available'
+    if result.status in ('blocked', 'skipped'):
+        return result.status
+    if result.failed_stage in ('modern storage preflight', 'persistent image', 'image build', 'uefi esp build'):
+        return 'blocked'
+    return 'runtime-failed'
+
+
+def modern_storage_validation_case(case: RuntimeSmokeCase) -> bool:
+    return any('virtio-blk-pci' in arg for arg in case.qemu_extra)
+
+
+def modern_storage_preflight(case: RuntimeSmokeCase) -> str:
+    if not modern_storage_validation_case(case):
+        return ''
+    qemu = shutil.which('qemu-system-x86_64')
+    if qemu is None:
+        return 'missing required tool(s): qemu-system-x86_64'
+    try:
+        result = subprocess.run(
+            [qemu, '-device', 'help'],
+            cwd=PROJECT_ROOT,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f'cannot query QEMU device models: {exc}'
+    if result.returncode != 0:
+        return f'cannot query QEMU device models: exit {result.returncode}'
+    if 'virtio-blk-pci' not in result.stdout:
+        return 'QEMU does not report virtio-blk-pci device model support'
+    return ''
+
+
 def collect_tool_availability(include_bochs: bool) -> list[ToolAvailability]:
     tools = ['uv', *BUILD_TOOLS, *UEFI_BUILD_TOOLS, *UEFI_ESP_TOOLS, 'qemu-system-x86_64']
     if include_bochs:
@@ -2106,6 +2157,80 @@ def format_runtime_smoke_artifact(
             )
             + ' |'
         )
+
+    modern_results = [result for result in results if modern_storage_validation_case(result.case)]
+    if modern_results:
+        lines.extend(
+            [
+                '',
+                '## Modern Storage Emulator Validation',
+                '',
+                (
+                    '| Case | Emulator | Display | Modern storage device configuration | Boot image category | '
+                    'Support status | Serial log |'
+                ),
+                '| --- | --- | --- | --- | --- | --- | --- |',
+            ]
+        )
+        for result in modern_results:
+            lines.append(
+                '| '
+                + ' | '.join(
+                    [
+                        f'`{result.case.case_id}`',
+                        '`qemu`',
+                        '`none`',
+                        f'`{markdown_escape(runtime_smoke_modern_storage_device_config(result.case))}`',
+                        markdown_escape(runtime_smoke_boot_image_category(result.case)),
+                        f'`{runtime_smoke_case_support_status(result)}`',
+                        f'`{result.serial_log}`',
+                    ]
+                )
+                + ' |'
+            )
+
+        lines.extend(
+            [
+                '',
+                '### Modern Storage Stage Results',
+                '',
+                (
+                    '| Case | Backend publication | Request completion | Cache/writeback round trip | '
+                    'Default boot regression | Cross-validation | Residual risk |'
+                ),
+                '| --- | --- | --- | --- | --- | --- | --- |',
+            ]
+        )
+        default_init_result = next((result for result in results if result.case.case_id == 'default-init'), None)
+        default_boot_status = (
+            default_init_result.status
+            if default_init_result is not None
+            else 'skipped: run `default-init` separately or include it in the matrix selection'
+        )
+        for result in modern_results:
+            observed = set(result.observed_markers)
+            terminal_pass = result.expected_marker in observed or result.observed_marker == result.expected_marker
+            if result.status in ('blocked', 'skipped'):
+                backend = request = cache = result.status
+            else:
+                backend = 'passed' if 'BIGOS_VIRTIO_BLK_PUBLISHED' in observed else 'failed'
+                request = 'passed' if terminal_pass else 'failed'
+                cache = 'passed' if terminal_pass else 'failed'
+            lines.append(
+                '| '
+                + ' | '.join(
+                    [
+                        f'`{result.case.case_id}`',
+                        markdown_escape(backend),
+                        markdown_escape(request),
+                        markdown_escape(cache),
+                        markdown_escape(default_boot_status),
+                        markdown_escape(bochs_note),
+                        markdown_escape(result.residual_risk or 'none'),
+                    ]
+                )
+                + ' |'
+            )
 
     lines.extend(
         [
@@ -2218,6 +2343,22 @@ def run_runtime_smoke_case(case: RuntimeSmokeCase, args: argparse.Namespace) -> 
     image_path = runtime_smoke_image_path(case, Path(args.image_dir).resolve())
 
     try:
+        modern_preflight_reason = modern_storage_preflight(case)
+        if modern_preflight_reason:
+            return RuntimeSmokeResult(
+                case=case,
+                status='blocked',
+                expected_marker=case.expected_marker,
+                observed_marker='',
+                serial_log=serial_log,
+                timeout_seconds=case.timeout_seconds,
+                exit_status='not run',
+                failed_stage='modern storage preflight',
+                skip_reason=modern_preflight_reason,
+                alternative_checks='tool availability and source-level modern storage checks were recorded',
+                residual_risk='modern storage emulator marker was not observed',
+                observed_markers=(),
+            )
         run_command('runtime smoke config', runtime_smoke_xmake_config(case), PROJECT_ROOT)
         ensure_runtime_smoke_extra_images(case)
         run(runtime_smoke_run_args(case, image_path, serial_log, args.image_size))
