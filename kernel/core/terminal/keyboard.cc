@@ -17,9 +17,14 @@ namespace bigos::input {
         constexpr uint8_t SCANCODE_CTRL = 0x1d;
         constexpr uint8_t SCANCODE_ALT = 0x38;
         constexpr uint8_t SCANCODE_HOME = 0x47;
+        constexpr uint8_t SCANCODE_ARROW_UP = 0x48;
         constexpr uint8_t SCANCODE_PAGE_UP = 0x49;
+        constexpr uint8_t SCANCODE_ARROW_LEFT = 0x4b;
+        constexpr uint8_t SCANCODE_ARROW_RIGHT = 0x4d;
         constexpr uint8_t SCANCODE_END = 0x4f;
+        constexpr uint8_t SCANCODE_ARROW_DOWN = 0x50;
         constexpr uint8_t SCANCODE_PAGE_DOWN = 0x51;
+        constexpr uint8_t SCANCODE_DELETE = 0x53;
 
         struct KeyMapEntry {
             char normal;
@@ -124,23 +129,39 @@ namespace bigos::input {
             ++g_state.unsupported;
         }
 
-        bool make_scroll_record(uint8_t base_scancode, TerminalInputRecord *out) noexcept {
+        bool make_navigation_record(uint8_t base_scancode, TerminalInputRecord *out) noexcept {
             if (out == nullptr)
                 return false;
 
             TerminalControl control = TerminalControl::Unsupported;
             switch (base_scancode) {
                 case SCANCODE_HOME:
-                    control = TerminalControl::ScrollHome;
+                    control = TerminalControl::NavigateHome;
+                    break;
+                case SCANCODE_ARROW_UP:
+                    control = TerminalControl::NavigateUp;
+                    break;
+                case SCANCODE_ARROW_LEFT:
+                    control = TerminalControl::NavigateLeft;
+                    break;
+                case SCANCODE_ARROW_RIGHT:
+                    control = TerminalControl::NavigateRight;
                     break;
                 case SCANCODE_END:
-                    control = TerminalControl::ScrollEnd;
+                    control = TerminalControl::NavigateEnd;
+                    break;
+                case SCANCODE_ARROW_DOWN:
+                    control = TerminalControl::NavigateDown;
                     break;
                 case SCANCODE_PAGE_UP:
-                    control = TerminalControl::ScrollPageUp;
+                    control = g_state.shift ? TerminalControl::KernelScrollPageUp : TerminalControl::NavigatePageUp;
                     break;
                 case SCANCODE_PAGE_DOWN:
-                    control = TerminalControl::ScrollPageDown;
+                    control =
+                        g_state.shift ? TerminalControl::KernelScrollPageDown : TerminalControl::NavigatePageDown;
+                    break;
+                case SCANCODE_DELETE:
+                    control = TerminalControl::NavigateDelete;
                     break;
                 default:
                     return false;
@@ -166,7 +187,7 @@ namespace bigos::input {
                 g_state.extended = false;
                 if (released)
                     return false;
-                if (make_scroll_record(base_scancode, out))
+                if (make_navigation_record(base_scancode, out))
                     return true;
                 record_unsupported();
                 return false;

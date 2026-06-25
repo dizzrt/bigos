@@ -21,20 +21,24 @@ namespace bigos::terminal {
         uint32_t g_foreground_pgid = 0;
         TerminalInputMode g_input_mode = TerminalInputMode::Canonical;
 
-        struct RawSequenceState {
+        struct PendingSequenceState {
             char bytes[4];
             uint8_t len;
             uint8_t index;
         };
 
-        RawSequenceState g_raw_sequence;
+        PendingSequenceState g_pending_sequence;
 
         size_t next_index(size_t index) noexcept {
             return (index + 1) % TTY_INPUT_CAPACITY;
         }
 
         bool input_available(void *) noexcept {
-            return g_raw_sequence.index < g_raw_sequence.len || g_input.tail != g_input.head;
+            return g_pending_sequence.index < g_pending_sequence.len || g_input.tail != g_input.head;
+        }
+
+        bool input_record_available(void *) noexcept {
+            return g_input.tail != g_input.head;
         }
 
         TerminalInputRecord make_record(char ch) noexcept {
@@ -51,6 +55,58 @@ namespace bigos::terminal {
             Eof,
             Ignored,
         };
+
+        void set_pending_sequence(const char *bytes, uint8_t len) noexcept {
+            g_pending_sequence.len = len;
+            g_pending_sequence.index = 0;
+            for (uint8_t i = 0; i < len && i < sizeof(g_pending_sequence.bytes); ++i)
+                g_pending_sequence.bytes[i] = bytes[i];
+        }
+
+        bool take_pending_sequence_byte(char *out) noexcept {
+            if (out == nullptr || g_pending_sequence.index >= g_pending_sequence.len)
+                return false;
+            *out = g_pending_sequence.bytes[g_pending_sequence.index++];
+            if (g_pending_sequence.index >= g_pending_sequence.len) {
+                g_pending_sequence.index = 0;
+                g_pending_sequence.len = 0;
+            }
+            return true;
+        }
+
+        bool set_navigation_sequence(TerminalControl control) noexcept {
+            switch (control) {
+                case TerminalControl::NavigateUp:
+                    set_pending_sequence("\x1b[A", 3);
+                    return true;
+                case TerminalControl::NavigateDown:
+                    set_pending_sequence("\x1b[B", 3);
+                    return true;
+                case TerminalControl::NavigateRight:
+                    set_pending_sequence("\x1b[C", 3);
+                    return true;
+                case TerminalControl::NavigateLeft:
+                    set_pending_sequence("\x1b[D", 3);
+                    return true;
+                case TerminalControl::NavigateHome:
+                    set_pending_sequence("\x1b[H", 3);
+                    return true;
+                case TerminalControl::NavigateEnd:
+                    set_pending_sequence("\x1b[F", 3);
+                    return true;
+                case TerminalControl::NavigateDelete:
+                    set_pending_sequence("\x1b[3~", 4);
+                    return true;
+                case TerminalControl::NavigatePageUp:
+                    set_pending_sequence("\x1b[5~", 4);
+                    return true;
+                case TerminalControl::NavigatePageDown:
+                    set_pending_sequence("\x1b[6~", 4);
+                    return true;
+                default:
+                    return false;
+            }
+        }
 
         ConsumeResult consume_record_as_char(const TerminalInputRecord &record, char *out) noexcept {
             if (out == nullptr)
@@ -78,17 +134,23 @@ namespace bigos::terminal {
                         (void)bigos::proc::signal_process_group_from_current(g_foreground_pgid, bigos::signal::SIGINT);
                     *out = 0x03;
                     return ConsumeResult::Character;
-                case TerminalControl::ScrollPageUp:
+                case TerminalControl::NavigateUp:
+                case TerminalControl::NavigateDown:
+                case TerminalControl::NavigateRight:
+                case TerminalControl::NavigateLeft:
+                case TerminalControl::NavigateHome:
+                case TerminalControl::NavigateEnd:
+                case TerminalControl::NavigateDelete:
+                case TerminalControl::NavigatePageUp:
+                case TerminalControl::NavigatePageDown:
+                    if (set_navigation_sequence(record.control) && take_pending_sequence_byte(out))
+                        return ConsumeResult::Character;
+                    return ConsumeResult::Ignored;
+                case TerminalControl::KernelScrollPageUp:
                     console_scroll_page_up();
                     return ConsumeResult::Ignored;
-                case TerminalControl::ScrollPageDown:
+                case TerminalControl::KernelScrollPageDown:
                     console_scroll_page_down();
-                    return ConsumeResult::Ignored;
-                case TerminalControl::ScrollHome:
-                    console_scroll_home();
-                    return ConsumeResult::Ignored;
-                case TerminalControl::ScrollEnd:
-                    console_scroll_end();
                     return ConsumeResult::Ignored;
                 case TerminalControl::Unsupported:
                     return ConsumeResult::Ignored;
@@ -98,24 +160,6 @@ namespace bigos::terminal {
 
             *out = record.ch;
             return ConsumeResult::Character;
-        }
-
-        void set_raw_sequence(const char *bytes, uint8_t len) noexcept {
-            g_raw_sequence.len = len;
-            g_raw_sequence.index = 0;
-            for (uint8_t i = 0; i < len && i < sizeof(g_raw_sequence.bytes); ++i)
-                g_raw_sequence.bytes[i] = bytes[i];
-        }
-
-        bool take_raw_sequence_byte(char *out) noexcept {
-            if (out == nullptr || g_raw_sequence.index >= g_raw_sequence.len)
-                return false;
-            *out = g_raw_sequence.bytes[g_raw_sequence.index++];
-            if (g_raw_sequence.index >= g_raw_sequence.len) {
-                g_raw_sequence.index = 0;
-                g_raw_sequence.len = 0;
-            }
-            return true;
         }
 
         bool consume_record_as_raw_char(const TerminalInputRecord &record, char *out) noexcept {
@@ -143,18 +187,19 @@ namespace bigos::terminal {
                 case TerminalControl::InterruptLike:
                     *out = 0x03;
                     return true;
-                case TerminalControl::ScrollPageUp:
-                    set_raw_sequence("\x1b[5~", 4);
-                    return take_raw_sequence_byte(out);
-                case TerminalControl::ScrollPageDown:
-                    set_raw_sequence("\x1b[6~", 4);
-                    return take_raw_sequence_byte(out);
-                case TerminalControl::ScrollHome:
-                    set_raw_sequence("\x1b[H", 3);
-                    return take_raw_sequence_byte(out);
-                case TerminalControl::ScrollEnd:
-                    set_raw_sequence("\x1b[F", 3);
-                    return take_raw_sequence_byte(out);
+                case TerminalControl::NavigateUp:
+                case TerminalControl::NavigateDown:
+                case TerminalControl::NavigateRight:
+                case TerminalControl::NavigateLeft:
+                case TerminalControl::NavigateHome:
+                case TerminalControl::NavigateEnd:
+                case TerminalControl::NavigateDelete:
+                case TerminalControl::NavigatePageUp:
+                case TerminalControl::NavigatePageDown:
+                    return set_navigation_sequence(record.control) && take_pending_sequence_byte(out);
+                case TerminalControl::KernelScrollPageUp:
+                case TerminalControl::KernelScrollPageDown:
+                    return false;
                 case TerminalControl::Unsupported:
                     return false;
                 case TerminalControl::None:
@@ -198,7 +243,7 @@ namespace bigos::terminal {
         g_input.tail = 0;
         g_input.dropped = 0;
         g_input_mode = TerminalInputMode::Canonical;
-        g_raw_sequence = {};
+        g_pending_sequence = {};
         g_foreground_pgid = 0;
         sched::init_wait_queue(&g_input_wait);
         init_console();
@@ -251,13 +296,13 @@ namespace bigos::terminal {
         if (!current_process_may_set_mode(requested))
             return -bigos::EPERM;
         g_input_mode = requested;
-        g_raw_sequence = {};
+        g_pending_sequence = {};
         return 0;
     }
 
     int64_t force_canonical_input_mode() noexcept {
         g_input_mode = TerminalInputMode::Canonical;
-        g_raw_sequence = {};
+        g_pending_sequence = {};
         return 0;
     }
 
@@ -318,6 +363,9 @@ namespace bigos::terminal {
     }
 
     bool read_char(char *out) noexcept {
+        if (take_pending_sequence_byte(out))
+            return true;
+
         TerminalInputRecord record{};
         while (read_input_record(&record)) {
             const ConsumeResult result = consume_record_as_char(record, out);
@@ -330,7 +378,7 @@ namespace bigos::terminal {
     }
 
     bool read_raw_char(char *out) noexcept {
-        if (take_raw_sequence_byte(out))
+        if (take_pending_sequence_byte(out))
             return true;
 
         TerminalInputRecord record{};
@@ -360,7 +408,8 @@ namespace bigos::terminal {
                 return 1;
             }
 
-            const int wait = sched::wait_queue_wait_until(&g_input_wait, &input_available, nullptr, timeout_ticks);
+            const int wait =
+                sched::wait_queue_wait_until(&g_input_wait, &input_record_available, nullptr, timeout_ticks);
             if (wait < 0)
                 return wait;
         }
@@ -371,6 +420,9 @@ namespace bigos::terminal {
             return sched::WAIT_INVALID;
 
         while (true) {
+            if (take_pending_sequence_byte(out))
+                return 1;
+
             TerminalInputRecord record{};
             const int read = read_input_record_blocking(&record, timeout_ticks);
             if (read < 0)

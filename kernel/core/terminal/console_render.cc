@@ -43,8 +43,12 @@ namespace {
         return '?';
     }
 
+    uint8_t vga_color_byte(const bigos::terminal::ConsoleDisplayAttr &__attr) noexcept {
+        return (uint8_t)(((__attr.background & 0x0fu) << 4) | (__attr.foreground & 0x0fu));
+    }
+
     void vga_draw_cell(uint8_t __x, uint8_t __y, const bigos::terminal::ConsoleRenderCell &__cell) noexcept {
-        bigos::device::fill_video_text_cell(__x, __y, vga_cell_char(__cell), __cell.color);
+        bigos::device::fill_video_text_cell(__x, __y, vga_cell_char(__cell), vga_color_byte(__cell.attr));
     }
 
     void vga_end_viewport_redraw() noexcept {}
@@ -158,8 +162,8 @@ namespace {
         if (__cell.role == bigos::terminal::ConsoleCellRole::WideTrailing)
             return;
         const uint8_t span = __cell.role == bigos::terminal::ConsoleCellRole::WideLeading ? 2 : 1;
-        const uint32_t fg = palette_color((uint8_t)(__cell.color & 0x0fu));
-        const uint32_t bg = palette_color((uint8_t)((__cell.color >> 4) & 0x0fu));
+        const uint32_t fg = palette_color((uint8_t)(__cell.attr.foreground & 0x0fu));
+        const uint32_t bg = palette_color((uint8_t)(__cell.attr.background & 0x0fu));
         const uint32_t draw_fg = __cursor ? bg : fg;
         const uint32_t draw_bg = __cursor ? fg : bg;
         framebuffer_fill_cell(__x, __y, draw_bg, span);

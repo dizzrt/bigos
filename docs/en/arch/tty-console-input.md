@@ -28,7 +28,8 @@ The current decoder supports a minimal US-layout PS/2 set 1 subset:
 - Enter, Backspace, Tab, and Escape.
 - Shift, Ctrl, and Alt make/break state updates; modifier scancodes do not emit characters themselves.
 - Ctrl emits C0 control characters for representative letters and a small set of control keys.
-- `0xe0` extended Home, End, PageUp, and PageDown are represented as bounded terminal-control events for scrollback navigation.
+- `0xe0` extended arrow keys, Home, End, Delete, PageUp, and PageDown are represented as bounded terminal-control events that expand to documented ANSI escape byte sequences for the foreground program.
+- `Shift+PageUp` and `Shift+PageDown` are the reserved kernel scrollback shortcuts. They are consumed as private kernel scrollback events and never leak PageUp/PageDown escape bytes to stdin.
 
 Unsupported extended scancode sequences and unmapped scancodes are counted as unsupported and dropped. The decoder does not panic, allocate, block, redraw VGA output, or write unknown scancodes into the TTY buffer.
 
@@ -36,7 +37,15 @@ Unsupported extended scancode sequences and unmapped scancodes are counted as un
 
 The TTY input buffer is a static fixed-capacity ring buffer with capacity `TTY_INPUT_CAPACITY`. The IRQ producer writes through `terminal::enqueue_input()` or `terminal::enqueue_input_record()`; non-interrupt consumers may read the raw bounded record through `terminal::read_input_record()` or use the byte-compatible `terminal::read_char()` and `terminal::drain()` helpers.
 
-Each `TerminalInputRecord` is either a character record or a control record. The bounded control subset is line end, backspace, delete-like, EOF-like, interrupt-like, scrollback PageUp/PageDown/Home/End, and unsupported control. `\r` is normalized to line end for the byte-compatible consumer, EOF-like input becomes a deterministic empty-read result on default console stdin, interrupt-like input is delivered as the bounded `0x03` byte for the shell to cancel the current line, scrollback controls are consumed by non-interrupt character consumers to adjust the console viewport, and unsupported controls are consumed as deterministic no-ops by the terminal consumer.
+Each `TerminalInputRecord` is either a character record or a control record. The bounded control subset is line end, backspace, delete-like, EOF-like, interrupt-like, navigation-key events, private kernel scrollback PageUp/PageDown events, and unsupported control. `\r` is normalized to line end for the byte-compatible consumer, EOF-like input becomes a deterministic empty-read result on default console stdin, interrupt-like input is delivered as the bounded `0x03` byte for the shell to cancel the current line, navigation controls expand to fixed escape sequences, `Shift+PageUp`/`Shift+PageDown` scrollback controls are consumed by non-interrupt character consumers to adjust the console viewport, and unsupported controls are consumed as deterministic no-ops by the terminal consumer.
+
+Navigation sequence policy:
+
+- Arrow keys: `ESC [ A`, `ESC [ B`, `ESC [ C`, `ESC [ D`.
+- Home and End: `ESC [ H`, `ESC [ F`.
+- Delete: `ESC [ 3 ~`.
+- PageUp and PageDown: `ESC [ 5 ~`, `ESC [ 6 ~`.
+- Sequence expansion uses fixed pending state in the TTY consumer. If the ring cannot accept the fixed control record, the whole key event is dropped and no partial escape sequence is exposed.
 
 Overflow is deterministic: when the ring buffer is full, new input is dropped and the drop counter increments; unread input is not overwritten. Empty-buffer reads return `false` or `0` and do not sleep, wait for the scheduler, or depend on processes or user mode.
 
@@ -60,8 +69,10 @@ more currently available bytes after at least one byte is present; they do not
 wait to fill the whole user buffer or wait for Enter. Raw mode does not perform
 ordinary echo, does not convert EOF-like input to an empty read, does not
 automatically signal the foreground group for Ctrl-C, and does not consume
-supported navigation keys as scrollback. PageUp/PageDown/Home/End are exposed as
-bounded escape-like byte sequences for userland ownership.
+supported default navigation keys as scrollback. Arrow keys, Home/End, Delete,
+PageUp, and PageDown are exposed as bounded ANSI escape byte sequences for
+userland ownership; only `Shift+PageUp` and `Shift+PageDown` remain kernel
+scrollback shortcuts.
 
 Mode changes use `SYS_TCGETMODE` and `SYS_TCSETMODE`, exposed in libc as
 `bigos_tcgetmode()` and `bigos_tcsetmode()` with `struct bigos_terminal_mode`.
@@ -90,7 +101,7 @@ Interactive console usability connects the same blocking consumers to default us
 
 ## Console Output Boundary
 
-Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps `terminal::console_put()` and `terminal::console_write()`. The runtime console owns fixed-capacity cell storage, cursor position, a 256-line in-kernel scrollback buffer, viewport policy, and clear policy. Its visible columns and rows come from the selected internal render backend: VGA text remains the fixed 80x25 Legacy fallback, while a UEFI framebuffer text backend may be selected only after validated framebuffer metadata, an explicit `map_device_mmio()` mapping, a supported 32-bit RGBX/BGRX pixel format, a usable glyph lookup view, and a bounded complete-cell grid computed from framebuffer geometry. Interactive console usability routes user writes to fd `1` or fd `2` through this same default console path when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
+Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps `terminal::console_put()` and `terminal::console_write()`. The runtime console owns fixed-capacity cell storage, display attributes, a bounded ANSI/CSI parser, UTF-8 decoder state, cursor position, saved cursor coordinates, a 256-line in-kernel scrollback buffer, viewport policy, and clear policy. Its visible columns and rows come from the selected internal render backend: VGA text remains the fixed 80x25 Legacy fallback, while a UEFI framebuffer text backend may be selected only after validated framebuffer metadata, an explicit `map_device_mmio()` mapping, a supported 32-bit RGBX/BGRX pixel format, a usable glyph lookup view, and a bounded complete-cell grid computed from framebuffer geometry. Interactive console usability routes user writes to fd `1` or fd `2` through this same default console path when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
 
 Basic control-character behavior:
 
@@ -98,11 +109,12 @@ Basic control-character behavior:
 - `\r`: move to the beginning of the current line.
 - `\t`: advance to the next 4-column tab stop using deterministic blank cells.
 - `\b`: erase the previous logical character, including both cells of a double-width character when needed.
-- Unsupported escape sequences: ANSI/VT sequences are not parsed; Escape is written as an ordinary character or ignored by an upper layer.
+- Supported ANSI/CSI output subset: SGR reset/default, foreground `30-37`, background `40-47`, bright foreground `90-97`, bright background `100-107`, cursor movement `CUU/CUD/CUF/CUB`, one-based `CUP/HVP`, erase display `ED`, erase line `EL`, `CSI s/u`, and `ESC 7/8`.
+- Unsupported or malformed escape sequences: the bounded parser resets to ordinary text state or discards the unsupported control sequence; subsequent ordinary UTF-8 output resumes without requiring a terminal reset.
 
-When output moves past the last visible row, the runtime console updates its owned scrollback state and asks the backend to redraw the complete visible viewport. The VGA backend uses the hardware text cursor; the framebuffer backend renders glyph pixels from console-owned Unicode codepoint cells over its dynamic visible grid and draws a software cursor from backend state without storing cursor bytes in scrollback. PageUp and PageDown use a bounded step derived from the current visible row count; Home can move the viewport into retained history, and End returns toward the newest output. New output while viewing history does not corrupt retained history or force the viewport back to the bottom. The supported console clear path clears through the selected backend, discards retained runtime scrollback, and resets the viewport to the bottom; on framebuffer this clear covers the full validated mapped framebuffer so firmware pixels outside the text grid do not remain visible.
+When output moves past the last visible row, the runtime console updates its owned scrollback state and asks the backend to redraw the complete visible viewport. The VGA backend uses the hardware text cursor; the framebuffer backend renders glyph pixels from console-owned Unicode codepoint cells over its dynamic visible grid and draws a software cursor from backend state without storing cursor bytes in scrollback. The reserved `Shift+PageUp` and `Shift+PageDown` shortcuts use a bounded step derived from the current visible row count. New output while viewing history does not corrupt retained history or force the viewport back to the bottom. The supported console clear path clears through the selected backend, discards retained runtime scrollback, and resets the viewport to the bottom; on framebuffer this clear covers the full validated mapped framebuffer so firmware pixels outside the text grid do not remain visible.
 
-The runtime console decodes ordinary output as bounded UTF-8, stores Unicode codepoint cells, and records single-width, double-width leading, double-width trailing, blank, or replacement cell roles. Glyph width uses the kernel glyph lookup width class when available: half-width glyphs occupy one cell and full-width glyphs occupy two cells. Missing or invalid codepoints prefer the `U+FFFD` replacement glyph, then deterministically degrade to `?` or blank if that glyph is unavailable. The framebuffer backend renders those console-owned cells through glyph lookup; the Legacy VGA text backend directly displays printable ASCII and deterministically degrades non-ASCII or trailing cells. This does not implement ANSI/VT parsing, color attribute state, multiple terminals, `termios`, locale, Unicode normalization, grapheme clusters, shaping, input methods, or complete POSIX terminal behavior.
+The runtime console decodes ordinary output as bounded UTF-8 after escape parser classification, stores Unicode codepoint cells, and records single-width, double-width leading, double-width trailing, blank, or replacement cell roles. Newly written cells copy the current SGR-derived display attributes; existing cells keep their stored attributes until rewritten or erased. Glyph width uses the kernel glyph lookup width class when available: half-width glyphs occupy one cell and full-width glyphs occupy two cells. Missing or invalid codepoints prefer the `U+FFFD` replacement glyph, then deterministically degrade to `?` or blank if that glyph is unavailable. The framebuffer backend renders those console-owned cells and attributes through glyph lookup and deterministic RGB colors; the Legacy VGA text backend directly displays printable ASCII, maps the same foreground/background attributes into a deterministic VGA color byte, and degrades non-ASCII or trailing cells. Render backends do not own ANSI parser, UTF-8 decoder, scrollback, TTY input, or terminal mode state.
 
 `kput()`, `kputs()`, `kprintf()`, `serial_puts()`, and fatal/page-fault/memory self-test marker paths keep early direct-output semantics and do not depend on TTY initialization, framebuffer console initialization, glyph lookup availability, or input-buffer state.
 
@@ -132,7 +144,7 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 The default interactive shell path intentionally stays below POSIX terminal scope:
 
 - Keyboard IRQ1 only decodes and enqueues fixed-size input records, then performs the bounded TTY wakeup.
-- Scrollback navigation keys are fixed-size TTY control records; viewport movement and whole-screen redraw occur only when a non-interrupt terminal consumer processes those records.
+- Default navigation keys are fixed-size TTY control records that expand to ANSI escape bytes for userland; only `Shift+PageUp` and `Shift+PageDown` are private kernel scrollback controls. Viewport movement and whole-screen redraw occur only when a non-interrupt terminal consumer processes those private controls.
 - Printable input, newline feedback, backspace feedback, EOF-like exit, interrupt-like line cancellation, and unsupported-control no-op behavior are produced by the non-interrupt terminal or shell consumer after `read(0, ...)` returns.
 - The default terminal keeps one numeric foreground `pgid`. It is queried and
   changed only from ordinary syscall/user-process context; IRQ1 never performs
@@ -150,7 +162,7 @@ The default interactive shell path intentionally stays below POSIX terminal scop
 
 ## Non-Goals
 
-This path does not implement multiple TTYs, full ANSI/VT terminal behavior,
+This path does not implement multiple TTYs, complete xterm/VT100/VT220 behavior,
 command history, complete POSIX `termios`, pseudo-terminals, complete job control, background
 read/write control, USB HID, full graphical terminal behavior, locale,
 Unicode normalization, grapheme clusters, shaping, input methods, persistent or

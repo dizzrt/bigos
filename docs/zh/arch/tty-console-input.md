@@ -28,7 +28,8 @@ keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并�
 - Enter、Backspace、Tab、Escape。
 - Shift、Ctrl、Alt 的 make/break 状态更新；modifier scancode 本身不产生字符。
 - Ctrl 仅对代表性字母和少量控制键输出 C0 控制字符。
-- `0xe0` 扩展 Home、End、PageUp 和 PageDown 会表示为有界 terminal-control event，用于 scrollback navigation。
+- `0xe0` 扩展方向键、Home、End、Delete、PageUp 和 PageDown 会表示为有界 terminal-control event，并在前台程序读取时展开为文档化的 ANSI escape byte sequence。
+- `Shift+PageUp` 和 `Shift+PageDown` 是保留的内核 scrollback 快捷键，会作为私有 kernel scrollback event 消费，不向 stdin 泄漏 PageUp/PageDown escape bytes。
 
 不支持的扩展 scancode 序列和未映射 scancode 会记录到 unsupported counter 并丢弃。decoder 不 panic、不分配、不阻塞、不重绘 VGA 输出，也不会把未知 scancode 写入 TTY buffer。
 
@@ -36,7 +37,15 @@ keyboard ISR 只读取一个 scancode byte，更新固定 decoder 状态，并�
 
 TTY 输入缓冲是静态固定容量 ring buffer，容量为 `TTY_INPUT_CAPACITY`。IRQ producer 使用 `terminal::enqueue_input()` 或 `terminal::enqueue_input_record()` 写入；非中断 consumer 可以通过 `terminal::read_input_record()` 读取原始有界 record，也可以继续使用 byte-compatible 的 `terminal::read_char()` 和 `terminal::drain()` helper。
 
-每个 `TerminalInputRecord` 要么是 character record，要么是 control record。有界 control 子集包括 line end、backspace、delete-like、EOF-like、interrupt-like、scrollback PageUp/PageDown/Home/End 和 unsupported control。byte-compatible consumer 会把 `\r` 归一为 line end，EOF-like input 在默认 console stdin 上表现为确定性的 empty-read result，interrupt-like input 以有界 `0x03` byte 交给 shell 取消当前行，scrollback control 由非中断 character consumer 消费并调整 console viewport，unsupported control 由 terminal consumer 作为确定性 no-op 消费。
+每个 `TerminalInputRecord` 要么是 character record，要么是 control record。有界 control 子集包括 line end、backspace、delete-like、EOF-like、interrupt-like、navigation-key event、私有 kernel scrollback PageUp/PageDown event 和 unsupported control。byte-compatible consumer 会把 `\r` 归一为 line end，EOF-like input 在默认 console stdin 上表现为确定性的 empty-read result，interrupt-like input 以有界 `0x03` byte 交给 shell 取消当前行，navigation control 会展开为固定 escape sequence，`Shift+PageUp`/`Shift+PageDown` scrollback control 由非中断 character consumer 消费并调整 console viewport，unsupported control 由 terminal consumer 作为确定性 no-op 消费。
+
+Navigation sequence 策略：
+
+- 方向键：`ESC [ A`、`ESC [ B`、`ESC [ C`、`ESC [ D`。
+- Home 和 End：`ESC [ H`、`ESC [ F`。
+- Delete：`ESC [ 3 ~`。
+- PageUp 和 PageDown：`ESC [ 5 ~`、`ESC [ 6 ~`。
+- Sequence expansion 使用 TTY consumer 内的固定 pending state；如果 ring 无法接收固定 control record，则丢弃整个 key event，不向用户态暴露 partial escape sequence。
 
 Overflow 策略是确定性的：当 ring buffer 满时丢弃新输入并递增 drop counter，不覆盖 unread input。空 buffer 读取返回 `false` 或 `0`，不 sleep、不等待 scheduler，也不依赖进程或用户态。
 
@@ -56,8 +65,9 @@ Raw mode 是 BigOS-specific 的前台程序输入归属边界。当 fd `0` 仍�
 fast path 时，raw read 在至少有一个 byte 可用后返回一个或多个当前可用 byte；它不
 等待填满整个用户缓冲，也不等待 Enter。Raw mode 不做普通 echo，不把 EOF-like input
 转换成 empty read，不为 Ctrl-C 自动向 foreground group 发 signal，也不把受支持
-navigation key 消费为 scrollback。PageUp/PageDown/Home/End 会以有界 escape-like
-byte sequence 暴露给用户态。
+默认 navigation key 消费为 scrollback。方向键、Home/End、Delete、PageUp 和
+PageDown 会以有界 ANSI escape byte sequence 暴露给用户态；只有
+`Shift+PageUp` 与 `Shift+PageDown` 保留为内核 scrollback 快捷键。
 
 模式控制使用 `SYS_TCGETMODE` 和 `SYS_TCSETMODE`，libc 暴露为
 `bigos_tcgetmode()` 与 `bigos_tcsetmode()`，并使用 `struct bigos_terminal_mode`。
@@ -83,7 +93,7 @@ blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-threa
 
 ## Console 输出边界
 
-普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装 `terminal::console_put()` 和 `terminal::console_write()`。runtime console 统一拥有固定容量 cell storage、cursor position、256 行内核 scrollback buffer、viewport policy 和 clear policy；可见列数和行数由选中的内部 render backend 提供。VGA text 仍是固定 80x25 Legacy fallback；UEFI framebuffer text backend 只有在 framebuffer metadata 已校验、通过显式 `map_device_mmio()` 完成映射、像素格式是受支持的 32-bit RGBX/BGRX、glyph lookup view 可用，并且能从 framebuffer 几何计算出有界完整 cell grid 时才会被选择。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到同一默认 console 路径；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
+普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装 `terminal::console_put()` 和 `terminal::console_write()`。runtime console 统一拥有固定容量 cell storage、display attributes、有界 ANSI/CSI parser、UTF-8 decoder state、cursor position、saved cursor coordinates、256 行内核 scrollback buffer、viewport policy 和 clear policy；可见列数和行数由选中的内部 render backend 提供。VGA text 仍是固定 80x25 Legacy fallback；UEFI framebuffer text backend 只有在 framebuffer metadata 已校验、通过显式 `map_device_mmio()` 完成映射、像素格式是受支持的 32-bit RGBX/BGRX、glyph lookup view 可用，并且能从 framebuffer 几何计算出有界完整 cell grid 时才会被选择。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到同一默认 console 路径；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
 
 基础控制字符行为：
 
@@ -91,11 +101,12 @@ blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-threa
 - `\r`：移动到当前行行首。
 - `\t`：用确定性的空白 cell 推进到下一个 4 列 tab stop。
 - `\b`：擦除前一个逻辑字符，必要时同时清理双宽字符的两个 cell。
-- Unsupported escape sequence：不解析 ANSI/VT 序列；Escape 作为普通字符写入或由上层决定忽略。
+- 支持的 ANSI/CSI 输出子集：SGR reset/default、前景色 `30-37`、背景色 `40-47`、bright 前景色 `90-97`、bright 背景色 `100-107`、光标移动 `CUU/CUD/CUF/CUB`、one-based `CUP/HVP`、erase display `ED`、erase line `EL`、`CSI s/u` 和 `ESC 7/8`。
+- Unsupported 或 malformed escape sequence：有界 parser 会 reset 到普通文本状态或丢弃不支持的 control sequence；后续普通 UTF-8 输出不需要 terminal reset 即可恢复。
 
-当输出越过最后一个可见行时，runtime console 更新自己拥有的 scrollback state，并要求 backend 重绘完整可见 viewport。VGA backend 使用硬件 text cursor；framebuffer backend 在动态可见 grid 上从 console-owned Unicode codepoint cell 渲染 glyph pixels，并以 backend state 绘制软件光标，不把 cursor byte 存入 scrollback。PageUp/PageDown 使用由当前可见行数派生的有界步长；Home 可以把 viewport 移到保留历史，End 会向最新输出返回。查看历史时产生的新输出不会破坏保留历史，也不会强制把 viewport 拉回底部。受支持的 console clear path 会通过选中的 backend 清屏、丢弃保留的 runtime scrollback，并把 viewport 重置到底部；framebuffer backend 会覆盖整块已校验 mapped framebuffer，避免 text grid 外继续显示固件残留像素。
+当输出越过最后一个可见行时，runtime console 更新自己拥有的 scrollback state，并要求 backend 重绘完整可见 viewport。VGA backend 使用硬件 text cursor；framebuffer backend 在动态可见 grid 上从 console-owned Unicode codepoint cell 渲染 glyph pixels，并以 backend state 绘制软件光标，不把 cursor byte 存入 scrollback。保留的 `Shift+PageUp` 与 `Shift+PageDown` 快捷键使用由当前可见行数派生的有界步长。查看历史时产生的新输出不会破坏保留历史，也不会强制把 viewport 拉回底部。受支持的 console clear path 会通过选中的 backend 清屏、丢弃保留的 runtime scrollback，并把 viewport 重置到底部；framebuffer backend 会覆盖整块已校验 mapped framebuffer，避免 text grid 外继续显示固件残留像素。
 
-runtime console 会把普通输出按有界 UTF-8 解码，存储 Unicode codepoint cell，并记录单宽、双宽 leading、双宽 trailing、空白或 replacement cell role。字形宽度优先使用 kernel glyph lookup 的 width class：半宽 glyph 占一个 cell，全宽 glyph 占两个 cell。缺失或无效 codepoint 优先使用 `U+FFFD` replacement glyph；若该 glyph 不可用，再确定性降级为 `?` 或 blank。framebuffer backend 通过 glyph lookup 渲染这些 console-owned cell；Legacy VGA text backend 直接显示 printable ASCII，并对非 ASCII 或 trailing cell 做确定性降级。该能力不实现 ANSI/VT 解析、颜色属性状态机、多终端、`termios`、locale、Unicode normalization、grapheme cluster、shaping、输入法或完整 POSIX terminal 行为。
+runtime console 会在 escape parser 分类后把普通输出按有界 UTF-8 解码，存储 Unicode codepoint cell，并记录单宽、双宽 leading、双宽 trailing、空白或 replacement cell role。新写入 cell 会复制当前 SGR 派生的 display attributes；已有 cell 在被重写或擦除前保持自己的属性。字形宽度优先使用 kernel glyph lookup 的 width class：半宽 glyph 占一个 cell，全宽 glyph 占两个 cell。缺失或无效 codepoint 优先使用 `U+FFFD` replacement glyph；若该 glyph 不可用，再确定性降级为 `?` 或 blank。framebuffer backend 通过 glyph lookup 和确定性 RGB color 渲染这些 console-owned cell 与属性；Legacy VGA text backend 直接显示 printable ASCII，把同一前景/背景属性映射为确定性 VGA color byte，并对非 ASCII 或 trailing cell 做确定性降级。render backend 不拥有 ANSI parser、UTF-8 decoder、scrollback、TTY input 或 terminal mode state。
 
 `kput()`、`kputs()`、`kprintf()`、`serial_puts()` 和 fatal/page-fault/memory self-test marker 路径保留 early direct output 语义，不依赖 TTY 初始化、framebuffer console 初始化、glyph lookup 可用性或 input buffer 状态。
 
@@ -125,7 +136,7 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 默认交互 shell 路径刻意保持在 POSIX terminal 范围以下：
 
 - Keyboard IRQ1 只解码并入队固定大小 input record，然后执行 bounded TTY wakeup。
-- Scrollback navigation key 是固定大小 TTY control record；viewport 移动和整屏重绘只在非中断 terminal consumer 处理这些 record 时发生。
+- 默认 navigation key 是固定大小 TTY control record，会展开为给用户态的 ANSI escape byte；只有 `Shift+PageUp` 和 `Shift+PageDown` 是私有 kernel scrollback control。viewport 移动和整屏重绘只在非中断 terminal consumer 处理这些私有 control 时发生。
 - Printable input、newline feedback、backspace feedback、EOF-like exit、interrupt-like line cancellation 和 unsupported-control no-op 行为由 `read(0, ...)` 返回后的非中断 terminal 或 shell consumer 产生。
 - 默认终端保存一个数值型 foreground `pgid`。查询和变更只在普通 syscall/用户进程上下文执行；IRQ1 不遍历 process group、不执行 shell 策略、不分配、不阻塞，也不做文件系统 I/O。
 - Interrupt-like input 在 canonical mode 下仍向 consumer 返回有界 `0x03` byte，并尝试向当前 foreground group 进行有界 `SIGINT` 投递；raw mode 只把该 byte 交给用户态，不自动 signal。foreground group 缺失或为空时只产生确定性 no-op/错误结果，不解引用悬垂进程对象。
@@ -135,4 +146,4 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 ## 非目标
 
-该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、完整 POSIX `termios`、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。
+该路径不实现多 TTY、完整 xterm/VT100/VT220 行为、命令历史、完整 POSIX `termios`、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。

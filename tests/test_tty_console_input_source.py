@@ -104,15 +104,22 @@ def test_scancode_decoder_covers_minimal_set1_mapping_and_modifiers() -> None:
     assert 'record_unsupported();' in keyboard
 
 
-def test_scancode_decoder_classifies_scrollback_extended_keys_as_control_records() -> None:
+def test_scancode_decoder_classifies_navigation_extended_keys_as_control_records() -> None:
     keyboard = read_source('kernel/core/terminal/keyboard.cc')
     tty_h = read_source('include/bigos/tty.h')
 
     expected_controls = (
-        'ScrollPageUp',
-        'ScrollPageDown',
-        'ScrollHome',
-        'ScrollEnd',
+        'NavigateUp',
+        'NavigateDown',
+        'NavigateRight',
+        'NavigateLeft',
+        'NavigateHome',
+        'NavigateEnd',
+        'NavigateDelete',
+        'NavigatePageUp',
+        'NavigatePageDown',
+        'KernelScrollPageUp',
+        'KernelScrollPageDown',
     )
     for control in expected_controls:
         assert control in tty_h
@@ -120,12 +127,19 @@ def test_scancode_decoder_classifies_scrollback_extended_keys_as_control_records
 
     assert 'SCANCODE_EXTENDED_E0 = 0xe0' in keyboard
     assert 'SCANCODE_HOME = 0x47' in keyboard
+    assert 'SCANCODE_ARROW_UP = 0x48' in keyboard
     assert 'SCANCODE_PAGE_UP = 0x49' in keyboard
+    assert 'SCANCODE_ARROW_LEFT = 0x4b' in keyboard
+    assert 'SCANCODE_ARROW_RIGHT = 0x4d' in keyboard
     assert 'SCANCODE_END = 0x4f' in keyboard
+    assert 'SCANCODE_ARROW_DOWN = 0x50' in keyboard
     assert 'SCANCODE_PAGE_DOWN = 0x51' in keyboard
-    assert 'bool make_scroll_record(uint8_t base_scancode, TerminalInputRecord *out) noexcept' in keyboard
+    assert 'SCANCODE_DELETE = 0x53' in keyboard
+    assert 'bool make_navigation_record(uint8_t base_scancode, TerminalInputRecord *out) noexcept' in keyboard
     assert '*out = {TerminalInputKind::Control, 0, control};' in keyboard
-    assert 'if (make_scroll_record(base_scancode, out))' in keyboard
+    assert 'g_state.shift ? TerminalControl::KernelScrollPageUp : TerminalControl::NavigatePageUp' in keyboard
+    assert 'g_state.shift ? TerminalControl::KernelScrollPageDown : TerminalControl::NavigatePageDown' in keyboard
+    assert 'if (make_navigation_record(base_scancode, out))' in keyboard
     assert '(void)terminal::enqueue_input_record(record);' in keyboard
 
 
@@ -169,18 +183,23 @@ def test_terminal_mode_state_is_fixed_size_and_canonical_by_default() -> None:
         assert token not in mode_body
 
 
-def test_tty_char_consumers_handle_scrollback_events_without_byte_leakage() -> None:
+def test_tty_char_consumers_expand_navigation_and_keep_shift_page_scrollback_private() -> None:
     tty = read_source('kernel/core/terminal/tty.cc')
 
-    assert 'case TerminalControl::ScrollPageUp:' in tty
+    assert 'struct PendingSequenceState' in tty
+    assert 'PendingSequenceState g_pending_sequence;' in tty
+    assert 'bool set_navigation_sequence(TerminalControl control) noexcept' in tty
+    for sequence in ('"\\x1b[A"', '"\\x1b[B"', '"\\x1b[C"', '"\\x1b[D"', '"\\x1b[H"', '"\\x1b[F"', '"\\x1b[3~"', '"\\x1b[5~"', '"\\x1b[6~"'):
+        assert sequence in tty
+    assert 'case TerminalControl::NavigatePageUp:' in tty
+    assert 'case TerminalControl::NavigatePageDown:' in tty
+    assert 'case TerminalControl::KernelScrollPageUp:' in tty
     assert 'console_scroll_page_up();' in tty
-    assert 'case TerminalControl::ScrollPageDown:' in tty
+    assert 'case TerminalControl::KernelScrollPageDown:' in tty
     assert 'console_scroll_page_down();' in tty
-    assert 'case TerminalControl::ScrollHome:' in tty
-    assert 'console_scroll_home();' in tty
-    assert 'case TerminalControl::ScrollEnd:' in tty
-    assert 'console_scroll_end();' in tty
-    assert tty.count('return ConsumeResult::Ignored;') >= 5
+    raw_body = tty[tty.index('bool consume_record_as_raw_char') : tty.index('bool mode_object_valid')]
+    assert 'console_scroll_page_up' not in raw_body
+    assert 'console_scroll_page_down' not in raw_body
 
 
 def test_raw_mode_delivers_control_bytes_without_canonical_side_effects() -> None:
@@ -193,7 +212,7 @@ def test_raw_mode_delivers_control_bytes_without_canonical_side_effects() -> Non
     assert 'consume_record_as_raw_char' in tty
     assert '*out = 0x03;' in tty
     assert '*out = 0x04;' in tty
-    assert 'set_raw_sequence("\\x1b[5~", 4);' in tty
+    assert 'set_pending_sequence("\\x1b[5~", 4);' in tty
     assert 'console_scroll_page_up();' in tty
     raw_body = tty[tty.index('bool consume_record_as_raw_char') : tty.index('bool mode_object_valid')]
     assert 'signal_process_group_from_current' not in raw_body
@@ -231,6 +250,8 @@ def test_console_api_uses_render_backend_without_serial_mirroring() -> None:
     assert 'enum class ConsoleCellRole' in render_h
     assert 'uint32_t codepoint;' in render_h
     assert 'ConsoleCellRole role;' in render_h
+    assert 'struct ConsoleDisplayAttr' in render_h
+    assert 'ConsoleDisplayAttr attr;' in render_h
     assert 'uint8_t visible_columns;' in render_h
     assert 'uint8_t visible_rows;' in render_h
     assert 'ConsoleRenderCell lines[CONSOLE_SCROLLBACK_LINES][CONSOLE_RENDER_MAX_WIDTH];' in console
@@ -290,6 +311,10 @@ def test_console_scrollback_state_viewport_follow_and_clear_policy() -> None:
     assert 'uint8_t visible_columns;' in console
     assert 'uint8_t visible_rows;' in console
     assert 'uint8_t cursor_x;' in console
+    assert 'ConsoleDisplayAttr current_attr;' in console
+    assert 'uint8_t saved_cursor_x;' in console
+    assert 'uint8_t saved_cursor_y;' in console
+    assert 'VtParser parser;' in console
     assert 'Utf8Decoder utf8;' in console
     assert 'uint8_t visible_columns() noexcept' in console
     assert 'uint8_t visible_rows() noexcept' in console
@@ -341,7 +366,7 @@ def test_unicode_console_cell_layout_width_backspace_and_tab_stop() -> None:
     assert 'bigos::font::lookup_glyph(codepoint, &glyph)' in console
     assert 'bigos::font::lookup_glyph(REPLACEMENT_CODEPOINT, &glyph)' in console
     assert 'write_wide_cell(uint32_t codepoint' in console
-    assert 'cells[g_console.cursor_x + 1] = {codepoint, ConsoleCellRole::WideTrailing, CONSOLE_COLOR};' in console
+    assert 'cells[g_console.cursor_x + 1] = {codepoint, ConsoleCellRole::WideTrailing, g_console.current_attr};' in console
     assert 'if (g_console.cursor_x + 1 >= columns)' in console
     assert 'void put_backspace() noexcept' in console
     assert 'cells[g_console.cursor_x].role == ConsoleCellRole::WideTrailing' in console
@@ -376,3 +401,40 @@ def test_keyboard_irq_echo_stays_in_non_interrupt_shell_consumer() -> None:
     assert 'console_write' not in body
     assert 'console_scroll' not in body
     assert 'fill_cell' not in body
+
+
+def test_vt_ansi_console_parser_supports_bounded_sgr_cursor_erase_and_recovery() -> None:
+    console = read_source('kernel/core/terminal/console.cc')
+
+    assert 'enum class VtParserState' in console
+    assert 'Ground' in console
+    assert 'Escape' in console
+    assert 'Csi' in console
+    assert 'CSI_MAX_PARAMS = 8' in console
+    assert 'CSI_PARAM_MAX = 999u' in console
+    assert 'if (byte == 0x1bu)' in console
+    assert "if (byte == '[')" in console
+    assert "if (byte == '7')" in console
+    assert "if (byte == '8')" in console
+    assert 'reset_decoder();' in console
+    assert 'void consume_csi_byte(uint8_t byte) noexcept' in console
+    assert 'g_console.parser.overflow = true;' in console
+    assert 'reset_vt_parser();' in console
+    assert 'void apply_sgr() noexcept' in console
+    for token in ('param >= 30 && param <= 37', 'param >= 40 && param <= 47', 'param >= 90 && param <= 97', 'param >= 100 && param <= 107'):
+        assert token in console
+    assert "case 'A':" in console
+    assert "case 'B':" in console
+    assert "case 'C':" in console
+    assert "case 'D':" in console
+    assert "case 'H':" in console
+    assert "case 'f':" in console
+    assert "case 'J':" in console
+    assert "case 'K':" in console
+    assert "case 's':" in console
+    assert "case 'u':" in console
+    assert 'void erase_display(uint16_t mode) noexcept' in console
+    assert 'void erase_current_line(uint16_t mode) noexcept' in console
+    assert 'void save_cursor() noexcept' in console
+    assert 'void restore_cursor() noexcept' in console
+    assert 'set_cursor_visible(0, 0);' in console

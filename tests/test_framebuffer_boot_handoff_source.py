@@ -86,6 +86,8 @@ def test_framebuffer_console_backend_reports_dynamic_grid_and_renders_glyph_cell
     console = read_source('kernel/core/terminal/console.cc')
 
     assert 'struct ConsoleRenderBackend' in render_h
+    assert 'struct ConsoleDisplayAttr' in render_h
+    assert 'ConsoleDisplayAttr attr;' in render_h
     assert 'CONSOLE_RENDER_VGA_WIDTH = 80' in render_h
     assert 'CONSOLE_RENDER_VGA_HEIGHT = 25' in render_h
     assert 'CONSOLE_RENDER_MAX_WIDTH = 240' in render_h
@@ -115,6 +117,9 @@ def test_framebuffer_console_backend_reports_dynamic_grid_and_renders_glyph_cell
     assert 'ConsoleCellRole::WideTrailing' in render
     assert 'const uint8_t span = __cell.role == bigos::terminal::ConsoleCellRole::WideLeading ? 2 : 1;' in render
     assert 'framebuffer_fill_cell(__x, __y, draw_bg, span);' in render
+    assert '__cell.attr.foreground' in render
+    assert '__cell.attr.background' in render
+    assert 'vga_color_byte' in render
     assert 'glyph_bit_set' in render
     assert 'framebuffer_set_cursor' in render
     assert 'framebuffer_draw_cell(__x, __y, __cell, true);' in render

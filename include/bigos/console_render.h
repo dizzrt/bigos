@@ -19,10 +19,15 @@ namespace bigos::terminal {
         Replacement,
     };
 
+    struct ConsoleDisplayAttr {
+        uint8_t foreground;
+        uint8_t background;
+    };
+
     struct ConsoleRenderCell {
         uint32_t codepoint;
         ConsoleCellRole role;
-        uint8_t color;
+        ConsoleDisplayAttr attr;
     };
 
     struct ConsoleRenderBackend {
