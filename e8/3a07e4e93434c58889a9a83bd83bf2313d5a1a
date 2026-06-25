@@ -1,0 +1,1107 @@
+xmake/options.lua
+  s_c486c3967d56f8::t_94e076ce3dba19 219-224 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e89afbbe98c045e7b78","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[219,224]}]}]}
+user/libc/syscall.c
+  s_c486c3967d56f8::t_78e2746bd69d5e 13-15,19,80-82,92-94,125,433-457 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e68afbbe98c045e7b37","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[13,15]},{"Single":19},{"Range":[80,82]},{"Range":[92,94]},{"Single":125},{"Range":[433,457]}]}]}
+openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/design.md
+  s_c486c3967d56f8::t_441f7e7f77903d 1-125 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,125]}]}]}
+openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/specs/bounded-syscall-surface/spec.md
+  s_c486c3967d56f8::t_441f7e7f77903d 1-19 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,19]}]}]}
+openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/.openspec.yaml
+  s_c486c3967d56f8::t_441f7e7f77903d 1-2 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,2]}]}]}
+include/bigos/syscall.h
+  s_c486c3967d56f8::t_2763ad5d7b7c77 107-110 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e25afbbe98c045e7a66","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[107,110]}]}]}
+openspec/specs/blocking-sleep-syscall/spec.md
+  s_c486c3967d56f8::t_441f7e7f77903d 1-86 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,86]}]}]}
+user/libc/include/sys_nr.h
+  s_c486c3967d56f8::t_e5a3fe3dae04db 64 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e4bafbbe98c045e7ae4","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":64}]}]}
+kernel/core/syscall/syscall.cc
+  s_c486c3967d56f8::t_cb59768d9544fa 66-107,925-926 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e30afbbe98c045e7a87","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[66,107]},{"Range":[925,926]}]}]}
+tools/bigosdev/core.py
+  s_c486c3967d56f8::t_c1be68fdee1371 545 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1f51afbbe98c045e7d87","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Single":545}]}]}
+  s_c486c3967d56f8::t_a1e5b4ac59b558 254,538-544,546-549 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e9dafbbe98c045e7bb8","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":254},{"Range":[538,544]},{"Range":[546,549]}]}]}
+user/libc/include/unistd.h
+  s_c486c3967d56f8::t_83b455a09ac4c8 6-8,66-67 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e54afbbe98c045e7afe","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[6,8]},{"Range":[66,67]}]}]}
+user/smoke/sleep_syscall_smoke.c
+  s_c486c3967d56f8::t_76c3495f1a7686 1-53 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e78afbbe98c045e7b55","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[1,53]}]}]}
+tests/test_syscall_entry_source.py
+  s_c486c3967d56f8::t_88b79edc088b35 104,205-235 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1ee2afbbe98c045e7c29","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":104},{"Range":[205,235]}]}]}
+xmake/user_package.lua
+  s_c486c3967d56f8::t_71471b0afd1773 117,125-126 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e93afbbe98c045e7b91","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":117},{"Range":[125,126]}]}]}
+openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/proposal.md
+  s_c486c3967d56f8::t_441f7e7f77903d 1-40 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,40]}]}]}
+openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/specs/blocking-sleep-syscall/spec.md
+  s_c486c3967d56f8::t_441f7e7f77903d 1-82 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,82]}]}]}
+openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/specs/runtime-smoke-validation/spec.md
+  s_c486c3967d56f8::t_441f7e7f77903d 1-25 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,25]}]}]}
+openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/specs/portable-libc-subset/spec.md
+  s_c486c3967d56f8::t_441f7e7f77903d 1-25 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,25]}]}]}
+openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/tasks.md
+  s_c486c3967d56f8::t_441f7e7f77903d 1-42 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,42]}]}]}
+openspec/specs/bounded-syscall-surface/spec.md
+  s_c486c3967d56f8::t_441f7e7f77903d 159-176 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[159,176]}]}]}
+user/libc/include/time.h
+  s_c486c3967d56f8::t_7d7d6b2accda13 4-5 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1e61afbbe98c045e7b1c","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[4,5]}]}]}
+openspec/specs/portable-libc-subset/spec.md
+  s_c486c3967d56f8::t_441f7e7f77903d 152-175 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[152,175]}]}]}
+tests/test_bigosdev.py
+  s_c486c3967d56f8::t_952d9289816a61 482,500-501 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d1ef7afbbe98c045e7c65","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":482},{"Range":[500,501]}]}]}
+openspec/specs/runtime-smoke-validation/spec.md
+  s_c486c3967d56f8::t_441f7e7f77903d 655-678 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a3d20dbafbbe98c045e8146","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[655,678]}]}]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e83a07e4e93434c58889a9a83bd83bf2313d5a1a",
+  "prompts": {},
+  "sessions": {
+    "s_c486c3967d56f8": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a3d17baafbbe98c045e737a",
+        "model": "gpt-5.5__max",
+        "display_model_name": "GPT-5.5"
+      },
+      "human_author": "Dizzrt <dizzrt.s@qq.com>"
+    }
+  },
+  "attestation_metadata": {
+    "include/bigos/syscall.h": [
+      {
+        "hash": "s_c486c3967d56f8::t_2763ad5d7b7c77",
+        "line_ranges": [
+          {
+            "Range": [
+              107,
+              110
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e25afbbe98c045e7a66",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  107,
+                  110
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "kernel/core/syscall/syscall.cc": [
+      {
+        "hash": "s_c486c3967d56f8::t_cb59768d9544fa",
+        "line_ranges": [
+          {
+            "Range": [
+              66,
+              107
+            ]
+          },
+          {
+            "Range": [
+              925,
+              926
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e30afbbe98c045e7a87",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  66,
+                  107
+                ]
+              },
+              {
+                "Range": [
+                  925,
+                  926
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/.openspec.yaml": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              2
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  2
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/design.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              125
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  125
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/proposal.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              40
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  40
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/specs/blocking-sleep-syscall/spec.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              82
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  82
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/specs/bounded-syscall-surface/spec.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              19
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  19
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/specs/portable-libc-subset/spec.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              25
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  25
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/specs/runtime-smoke-validation/spec.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              25
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  25
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-06-25-add-blocking-sleep-syscall/tasks.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              42
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  42
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/blocking-sleep-syscall/spec.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              86
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  86
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/bounded-syscall-surface/spec.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              159,
+              176
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  159,
+                  176
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/portable-libc-subset/spec.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              152,
+              175
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  152,
+                  175
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/runtime-smoke-validation/spec.md": [
+      {
+        "hash": "s_c486c3967d56f8::t_441f7e7f77903d",
+        "line_ranges": [
+          {
+            "Range": [
+              655,
+              678
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d20dbafbbe98c045e8146",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  655,
+                  678
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "tests/test_bigosdev.py": [
+      {
+        "hash": "s_c486c3967d56f8::t_952d9289816a61",
+        "line_ranges": [
+          {
+            "Single": 482
+          },
+          {
+            "Range": [
+              500,
+              501
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1ef7afbbe98c045e7c65",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 482
+              },
+              {
+                "Range": [
+                  500,
+                  501
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "tests/test_syscall_entry_source.py": [
+      {
+        "hash": "s_c486c3967d56f8::t_88b79edc088b35",
+        "line_ranges": [
+          {
+            "Single": 104
+          },
+          {
+            "Range": [
+              205,
+              235
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1ee2afbbe98c045e7c29",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 104
+              },
+              {
+                "Range": [
+                  205,
+                  235
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "tools/bigosdev/core.py": [
+      {
+        "hash": "s_c486c3967d56f8::t_c1be68fdee1371",
+        "line_ranges": [
+          {
+            "Single": 545
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1f51afbbe98c045e7d87",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Single": 545
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "hash": "s_c486c3967d56f8::t_a1e5b4ac59b558",
+        "line_ranges": [
+          {
+            "Single": 254
+          },
+          {
+            "Range": [
+              538,
+              544
+            ]
+          },
+          {
+            "Range": [
+              546,
+              549
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e9dafbbe98c045e7bb8",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 254
+              },
+              {
+                "Range": [
+                  538,
+                  544
+                ]
+              },
+              {
+                "Range": [
+                  546,
+                  549
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/include/sys_nr.h": [
+      {
+        "hash": "s_c486c3967d56f8::t_e5a3fe3dae04db",
+        "line_ranges": [
+          {
+            "Single": 64
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e4bafbbe98c045e7ae4",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 64
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/include/time.h": [
+      {
+        "hash": "s_c486c3967d56f8::t_7d7d6b2accda13",
+        "line_ranges": [
+          {
+            "Range": [
+              4,
+              5
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e61afbbe98c045e7b1c",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  4,
+                  5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/include/unistd.h": [
+      {
+        "hash": "s_c486c3967d56f8::t_83b455a09ac4c8",
+        "line_ranges": [
+          {
+            "Range": [
+              6,
+              8
+            ]
+          },
+          {
+            "Range": [
+              66,
+              67
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e54afbbe98c045e7afe",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  6,
+                  8
+                ]
+              },
+              {
+                "Range": [
+                  66,
+                  67
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/syscall.c": [
+      {
+        "hash": "s_c486c3967d56f8::t_78e2746bd69d5e",
+        "line_ranges": [
+          {
+            "Range": [
+              13,
+              15
+            ]
+          },
+          {
+            "Single": 19
+          },
+          {
+            "Range": [
+              80,
+              82
+            ]
+          },
+          {
+            "Range": [
+              92,
+              94
+            ]
+          },
+          {
+            "Single": 125
+          },
+          {
+            "Range": [
+              433,
+              457
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e68afbbe98c045e7b37",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  13,
+                  15
+                ]
+              },
+              {
+                "Single": 19
+              },
+              {
+                "Range": [
+                  80,
+                  82
+                ]
+              },
+              {
+                "Range": [
+                  92,
+                  94
+                ]
+              },
+              {
+                "Single": 125
+              },
+              {
+                "Range": [
+                  433,
+                  457
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/smoke/sleep_syscall_smoke.c": [
+      {
+        "hash": "s_c486c3967d56f8::t_76c3495f1a7686",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              53
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e78afbbe98c045e7b55",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  53
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "xmake/options.lua": [
+      {
+        "hash": "s_c486c3967d56f8::t_94e076ce3dba19",
+        "line_ranges": [
+          {
+            "Range": [
+              219,
+              224
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e89afbbe98c045e7b78",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  219,
+                  224
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "xmake/user_package.lua": [
+      {
+        "hash": "s_c486c3967d56f8::t_71471b0afd1773",
+        "line_ranges": [
+          {
+            "Single": 117
+          },
+          {
+            "Range": [
+              125,
+              126
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a3d1e93afbbe98c045e7b91",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 117
+              },
+              {
+                "Range": [
+                  125,
+                  126
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_c486c3967d56f8": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_160bc876cc3798": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_2763ad5d7b7c77": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_2c5047be686b54": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_441f7e7f77903d": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_461faa3462ce33": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_46e406bae2983c": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_54a7f412898132": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_5a8b39c06ea75e": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_637a7f8afe438f": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_71471b0afd1773": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_73c6ad30c3356f": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_76c3495f1a7686": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_78e2746bd69d5e": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_7d7d6b2accda13": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_83b455a09ac4c8": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_88b79edc088b35": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_94e076ce3dba19": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_952d9289816a61": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_a00bec791b7054": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_a1e5b4ac59b558": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_a9910f58943b4b": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_ac4358d6fc5bda": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_c1be68fdee1371": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_cb59768d9544fa": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_d265fca3342c1c": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_d8a77c40f9139f": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_df309bfb1e5f5b": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_e5a3fe3dae04db": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_f842e648e46e29": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c486c3967d56f8::t_fe6fb765376c94": {
+      "tool": "trae",
+      "conversation_id": "6a3d17baafbbe98c045e737a",
+      "session_id": "6a3d17baafbbe98c045e737a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
