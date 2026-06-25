@@ -69,11 +69,16 @@ inode 数、仅直接块的文件（有界 `MAX_FILE_SIZE`）、定长目录项�
 metadata 与目录枚举可见性，以及 `fsync` 加缓存淘汰后再读一致）。
 
 `BIGOS_PERSISTENT_WRITABLE_FS` 会选择独立测试磁盘上的可选 persistent `/rw`
-backend。持久布局复用同一组有界 BigFS 限制，并增加显式 superblock
-magic/version/block-size/capacity/root metadata checksum。Normal boot 只在识别既有
-兼容卷且有界 metadata validation 成功后挂载；invalid magic、unsupported version、非法
-容量、inode 或 directory-entry 越界、block mapping 冲突、data bitmap 所有权矛盾会降
-级到 RAM-backed `/rw`，不会自动格式化、repair 或 migrate。持久 metadata 更新使用有
+backend。默认 persistent test disk 是 ATA primary-slave role；默认关闭的
+`BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND` 配置会改为选择内核内部 modern
+virtio-blk validation role。两种选择都保持 `/rw` I/O 只经过 VFS、page/buffer
+cache 和 block request layer；不提供 modern driver 私有 filesystem hook、设备节点、
+mount ABI，也不替换默认启动盘。持久布局复用同一组有界 BigFS 限制，并增加显式
+superblock magic/version/block-size/capacity/root metadata checksum。Normal boot 只在
+识别既有兼容卷且有界 metadata validation 成功后挂载；invalid magic、unsupported
+version、非法容量、inode 或 directory-entry 越界、block mapping 冲突、data bitmap
+所有权矛盾在默认 ATA 配置下降级到 RAM-backed `/rw`，不会自动格式化、repair 或
+migrate。持久 metadata 更新使用有
 界 ordered commit unit 回写选定 cache blocks：新初始化的数据块或目录块会先于发布它
 们的 inode/目录 metadata 同步；释放块前会先同步 inode 引用移除，再把块记录为可持久
 复用。受限 `/bin/mkfs_bigfs` 工具调用 BigOS 专用的显式格式化 hook，只面向配置好的
@@ -151,6 +156,15 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
   复用同一 persistent image 并等待 `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED`。
   检查状态覆盖目录项、inode metadata、file size、block mapping、free-space bitmap
   effects、stable growth/truncate 行为以及只读 exFAT 隔离。
+- `xmake f --modern_storage_backend_smoke=y` 启用
+  `BIGOS_MODERN_STORAGE_BACKEND_SMOKE`，选择内核内部 modern virtio-blk role，并验证
+  request-layer 读写、经 cache 写读往返，以及写回失败保留 dirty state。它要求显式
+  modern virtio-blk 设备，且独立于默认 ATA boot。
+- `xmake f --persistent_writable_fs_smoke=y --persistent_writable_fs_modern_backend=y`
+  会在 emulator 提供兼容 virtio-blk image 时，把同一有界 clean-sync persistent `/rw`
+  smoke 跑在 modern backend 上。成功只覆盖经 cache write-back 和 request-layer
+  terminal success 同步的数据与 metadata；不声明 crash consistency 或 power-loss
+  recovery。
 
 无界 QEMU 串口 marker smoke 示例：
 

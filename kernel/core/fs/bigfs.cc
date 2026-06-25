@@ -919,10 +919,34 @@ namespace {
         return false;
     }
 
+    bigos::device::DeviceRole persistent_block_role() noexcept {
+#ifdef BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND
+        return bigos::device::DeviceRole::VirtioBlkValidationBlock;
+#else
+        return bigos::device::DeviceRole::PersistentWritableBlock;
+#endif
+    }
+
+    driver::block::BlockDevice *select_persistent_device() noexcept {
+#ifdef BIGOS_PERSISTENT_WRITABLE_FS
+#ifdef BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND
+        const bigos::device::DeviceRole role = persistent_block_role();
+        const bigos::device::Status probe_status =
+            bigos::device::probe(bigos::device::DeviceClass::Block, role, bigos::device::ProbeContext::OrdinaryBlockable);
+        if (probe_status != bigos::device::Status::Success && probe_status != bigos::device::Status::ProbeFailed)
+            return nullptr;
+        return bigos::device::block(role);
+#else
+        return bigos::device::block(bigos::device::DeviceRole::PersistentWritableBlock);
+#endif
+#else
+        return nullptr;
+#endif
+    }
+
     bool publish_persistent_if_valid() noexcept {
 #ifdef BIGOS_PERSISTENT_WRITABLE_FS
-        driver::block::BlockDevice *persistent_device =
-            bigos::device::block(bigos::device::DeviceRole::PersistentWritableBlock);
+        driver::block::BlockDevice *persistent_device = select_persistent_device();
         if (persistent_device == nullptr)
             return false;
         g_device = *persistent_device;
@@ -981,7 +1005,11 @@ namespace bigfs {
             return true;
         if (publish_persistent_if_valid())
             return true;
+#ifdef BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND
+        return false;
+#else
         return publish_ram_formatted();
+#endif
     }
 
     Status format_persistent() noexcept {
@@ -992,8 +1020,7 @@ namespace bigfs {
             return Status::AccessDenied;
         if (g_initialized && bigos::bcache::invalidate_device(&g_device) != bigos::bcache::Status::Success)
             return Status::IoError;
-        driver::block::BlockDevice *persistent_device =
-            bigos::device::block(bigos::device::DeviceRole::PersistentWritableBlock);
+        driver::block::BlockDevice *persistent_device = select_persistent_device();
         if (persistent_device == nullptr)
             return Status::IoError;
         g_device = *persistent_device;

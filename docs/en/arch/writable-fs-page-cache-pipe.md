@@ -89,12 +89,18 @@ and directory enumeration visibility, and read-back after `fsync` plus cache
 eviction).
 
 `BIGOS_PERSISTENT_WRITABLE_FS` selects an optional persistent `/rw` backend over
-an independent test disk. The persistent layout keeps the same bounded BigFS
-limits and adds an explicit superblock magic/version/block-size/capacity/root
-metadata checksum. Normal boot mounts an existing compatible volume only after
-recognition and bounded metadata validation succeed; invalid magic, unsupported
-version, invalid capacity, inode or directory-entry bounds errors, block mapping
-conflicts, or data-bitmap ownership contradictions fall back to RAM-backed `/rw`
+an independent test disk. By default that persistent test disk is the ATA
+primary-slave role; the default-off `BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND`
+configuration instead selects the internal modern virtio-blk validation role.
+Both choices keep all `/rw` I/O flowing through VFS, the page/buffer cache, and
+the block request layer; there are no modern-driver private filesystem hooks,
+device nodes, mount ABI, or default boot replacement. The persistent layout keeps
+the same bounded BigFS limits and adds an explicit superblock
+magic/version/block-size/capacity/root metadata checksum. Normal boot mounts an
+existing compatible volume only after recognition and bounded metadata validation
+succeed; invalid magic, unsupported version, invalid capacity, inode or
+directory-entry bounds errors, block mapping conflicts, or data-bitmap ownership
+contradictions fall back to RAM-backed `/rw` for the default ATA configuration
 without auto-formatting, auto-repair, or migration. Persistent metadata updates
 use a bounded ordered commit unit over selected cache blocks: newly initialized
 data or directory blocks are synchronized before inode or directory metadata that
@@ -197,6 +203,17 @@ unchanged.
   checked state includes directory entries, inode metadata, file sizes, block
   mappings, free-space bitmap effects, stable growth/truncate behavior, and
   read-only exFAT isolation.
+- `xmake f --modern_storage_backend_smoke=y` enables
+  `BIGOS_MODERN_STORAGE_BACKEND_SMOKE`, selecting the internal modern virtio-blk
+  role and validating request-layer read/write, cache-mediated write/read
+  round-trip, and writeback failure dirty-state retention. It requires an
+  explicit modern virtio-blk device and remains independent of default ATA boot.
+- `xmake f --persistent_writable_fs_smoke=y --persistent_writable_fs_modern_backend=y`
+  runs the same bounded clean-sync persistent `/rw` smoke over the modern
+  backend when the emulator supplies a compatible virtio-blk image. Success only
+  covers data and metadata synchronized through cache write-back and
+  request-layer terminal success; it does not claim crash consistency or
+  power-loss recovery.
 
 Run the headless QEMU serial-marker smoke with, for example:
 

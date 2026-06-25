@@ -110,7 +110,7 @@ namespace block {
     void virtio_blk_irq() noexcept;
     const char *virtio_blk_status_name(VirtioBlkStatus __status) noexcept;
 
-#ifdef BIGOS_VIRTIO_BLK_SMOKE
+#if defined(BIGOS_VIRTIO_BLK_SMOKE) || defined(BIGOS_MODERN_STORAGE_BACKEND_SMOKE)
     bool virtio_blk_smoke() noexcept;
 #endif
 }   // namespace block

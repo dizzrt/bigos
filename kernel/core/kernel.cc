@@ -1522,12 +1522,22 @@ namespace {
         const char *path = "/rw/persist.txt";
         const char *payload = "BIGOS_PERSISTENT_WRITABLE_FS_PAYLOAD";
 
+        bool formatted_from_empty = false;
         if (!bigos::bigfs::init()) {
+#ifdef BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND
+            if (bigos::bigfs::format_persistent() == bigos::bigfs::Status::Success) {
+                formatted_from_empty = true;
+            } else {
+                bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_FAILED init\n");
+                return;
+            }
+#else
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_FAILED init\n");
             return;
+#endif
         }
 
-        if (bigos::bigfs::persistent()) {
+        if (bigos::bigfs::persistent() && !formatted_from_empty) {
             if (!pfs_read_file(path, payload)) {
                 bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_FAILED readback\n");
                 return;
@@ -1688,7 +1698,7 @@ namespace {
 }   // namespace
 #endif
 
-#ifdef BIGOS_VIRTIO_BLK_SMOKE
+#if defined(BIGOS_VIRTIO_BLK_SMOKE) || defined(BIGOS_MODERN_STORAGE_BACKEND_SMOKE)
 namespace {
     void virtio_blk_smoke_entry(void *) noexcept {
         (void)driver::block::virtio_blk_smoke();
@@ -1928,7 +1938,7 @@ void kernel(const BootInfoHeader *boot_info) {
         bigos::serial_puts("BIGOS_BLOCK_IO_REQUEST_FAILED thread\n");
 #endif
 
-#ifdef BIGOS_VIRTIO_BLK_SMOKE
+#if defined(BIGOS_VIRTIO_BLK_SMOKE) || defined(BIGOS_MODERN_STORAGE_BACKEND_SMOKE)
     // Validation-only modern virtio-blk smoke. Probe runs from a blockable
     // kernel thread after IRQ/LAPIC/MSI-X dispatch is initialized; default boot
     // roles remain ATA-backed and do not depend on this internal validation role.

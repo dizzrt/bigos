@@ -378,9 +378,9 @@ async I/O framework, validating them with real hardware-style backends.
 - [x] Task M10.1: a modern block-storage driver such as virtio-blk or NVMe built on
   the device framework and async I/O completion model.
 - [x] 任务 M10.1：基于设备框架与异步 I/O 完成模型构建现代块存储驱动，如 virtio-blk 或 NVMe。
-- [ ] Task M10.2: integrate the new storage backend with the block layer, cache,
+- [x] Task M10.2: integrate the new storage backend with the block layer, cache,
   and writeback path within bounded semantics.
-- [ ] 任务 M10.2：在有界语义内将新存储后端与块层、缓存和回写路径集成。
+- [x] 任务 M10.2：在有界语义内将新存储后端与块层、缓存和回写路径集成。
 - [ ] Task M10.3: storage driver validation through the emulator path without adding
   a new ISA.
 - [ ] 任务 M10.3：通过仿真器路径验证存储驱动，不接入新 ISA。

@@ -39,6 +39,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `syscall` | `--syscall_smoke=y` | `BIGOS_SYSCALL_SMOKE_PASSED` | 10s | `int 0x80` 最小 syscall ABI 路径。 |
 | `filesystem-read` | `--fs_smoke=y` | `BIGOS_FS_EXFAT_READ_PASSED` | 20s | ATA PIO 加只读 exFAT backend 上的 VFS open/read/release 路径。 |
 | `block-io-request-layer` | `--block_io_request_smoke=y` | `BIGOS_BLOCK_IO_REQUEST_PASSED` | 20s | 有界同步请求提交、校验失败、单设备队列耗尽、unsupported 写入、设备错误传播和内核内部 interrupt-driven completion；不声明完整 async I/O 或用户 ABI。 |
+| `modern-storage-backend` | `--modern_storage_backend_smoke=y` | `BIGOS_MODERN_STORAGE_BACKEND_PASSED` | 30s | 显式选择 modern virtio-blk backend，经 request layer、cache 写读往返和写回失败保留 dirty state；默认 boot 仍为 ATA-backed，不声明 crash consistency、power-loss recovery、设备节点或 async I/O。 |
 | `first-user-program` | `--user_program_smoke=y` | `BIGOS_USER_EXIT` | 20s | 以 lifecycle-core 进程运行 embedded flat image；smoke entry 仍默认关闭。 |
 | `filesystem-user-elf` | `--user_elf_smoke=y` | `BIGOS_USER_EXIT` | 30s | 打包 `/boot/user/init.elf` 并通过可复用 ELF exec prepare 路径运行；smoke entry 仍默认关闭。 |
 | `demand-paging` | `--demand_paging_smoke=y` | `BIGOS_DEMAND_PAGING_PASSED` | 30s | VMA-backed lazy anonymous 物化和确定性 fault 处理。 |
@@ -48,6 +49,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`、page/buffer cache、append/cross-block/seek-past-EOF 增长、zero gap、truncate、块复用、fsync 和权限。 |
 | `persistent-writable-fs-write` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` | 40s | 带 `--persistent-image` 的第一次 boot：显式格式化独立测试磁盘、有界增长/截断、`fsync` 与缓存淘汰后读回。 |
 | `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | 复用同一 `--persistent-image` 的第二次 boot：mount-existing 并在 clean reboot 后读回已同步 `/rw` 增长/截断状态。 |
+| `persistent-writable-fs-modern` | `--persistent_writable_fs_smoke=y --persistent_writable_fs_modern_backend=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` / `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | emulator 提供 modern device image 时，在显式 modern virtio-blk validation role 上运行同一有界 clean-sync persistent `/rw` 流程；不声明默认存储替换或 power-loss recovery。 |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
 | `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity 当前运行期文件系统语义，覆盖只读 exFAT、RAM-backed `/rw`、fd/VFS、metadata、cwd-relative path、libc errno 与 shell-visible tools；不声明重启持久化。 |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno/error text、ctype、有界 time/assert、`snprintf`/formatter、`strtol`/`strtoul`/`atoi`、无隐藏状态 search helper、`calloc`/`realloc`、有界 `DIR*` wrapper、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和有界 `/rw` 运行时文件操作。 |

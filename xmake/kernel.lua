@@ -146,6 +146,11 @@ if has_config("virtio_blk_smoke") then
     add_defines("BIGOS_VIRTIO_BLK_SMOKE")
 end
 
+if has_config("modern_storage_backend_smoke") then
+    add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
+    add_defines("BIGOS_MODERN_STORAGE_BACKEND_SMOKE")
+end
+
 if has_config("demand_paging_smoke") then
     add_defines("BIGOS_DEMAND_PAGING_SMOKE")
 end
@@ -180,6 +185,12 @@ end
 
 if has_config("persistent_writable_fs") or has_config("persistent_writable_fs_smoke") then
     add_defines("BIGOS_PERSISTENT_WRITABLE_FS")
+end
+
+if has_config("persistent_writable_fs_modern_backend") then
+    add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
+    add_defines("BIGOS_PERSISTENT_WRITABLE_FS")
+    add_defines("BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND")
 end
 
 if has_config("persistent_writable_fs_smoke") then

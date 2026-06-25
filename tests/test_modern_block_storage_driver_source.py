@@ -114,3 +114,49 @@ def test_device_role_and_smoke_are_internal_and_default_off() -> None:
     assert "case_id='modern-virtio-blk'" in boot_debug
     assert 'virtio-blk-pci,drive=virtioblk,disable-modern=off' in boot_debug
     assert 'does not replace the default ATA boot device' in boot_debug
+
+
+def test_modern_storage_backend_smoke_covers_cache_and_dirty_failure() -> None:
+    source = read_source('kernel/drivers/block/virtio_blk.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    xmake = read_source('xmake.lua')
+    boot_debug = read_source('tools/boot_debug.py')
+
+    assert 'option("modern_storage_backend_smoke")' in xmake
+    option_index = xmake.index('option("modern_storage_backend_smoke")')
+    assert 'set_default(false)' in xmake[option_index : option_index + 240]
+    assert 'add_defines("BIGOS_MODERN_STORAGE_BACKEND_SMOKE")' in xmake
+    assert 'BIGOS_MODERN_STORAGE_BACKEND_PASSED' in source
+    assert 'virtio_cache_round_trip' in source
+    assert 'bigos::bcache::get(__block, block_no)' in source
+    assert 'bigos::bcache::sync(block)' in source
+    assert 'bigos::bcache::invalidate_device(__block)' in source
+    assert 'virtio_cache_dirty_failure_retains_state' in source
+    assert '__block->total_sectors = block_no;' in source
+    assert 'failed_sync != bigos::bcache::Status::Success && block->dirty' in source
+    assert 'defined(BIGOS_MODERN_STORAGE_BACKEND_SMOKE)' in kernel
+    assert "case_id='modern-storage-backend'" in boot_debug
+    assert 'BIGOS_MODERN_STORAGE_BACKEND_PASSED' in boot_debug
+    assert 'ensure_runtime_smoke_extra_images' in boot_debug
+    assert 'does not replace default ATA boot' in boot_debug
+
+
+def test_modern_backend_can_be_explicit_persistent_rw_backing() -> None:
+    bigfs = read_source('kernel/core/fs/bigfs.cc')
+    kernel = read_source('kernel/core/kernel.cc')
+    xmake = read_source('xmake.lua')
+    boot_debug = read_source('tools/boot_debug.py')
+
+    assert 'option("persistent_writable_fs_modern_backend")' in xmake
+    option_index = xmake.index('option("persistent_writable_fs_modern_backend")')
+    assert 'set_default(false)' in xmake[option_index : option_index + 260]
+    assert 'add_defines("BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND")' in xmake
+    assert "'persistent_writable_fs_modern_backend'" in boot_debug
+    assert 'persistent_block_role()' in bigfs
+    assert 'DeviceRole::VirtioBlkValidationBlock' in bigfs
+    assert 'DeviceRole::PersistentWritableBlock' in bigfs
+    assert 'select_persistent_device()' in bigfs
+    assert 'ProbeContext::OrdinaryBlockable' in bigfs
+    assert 'return false;' in bigfs[bigfs.index('bool init() noexcept') : bigfs.index('Status format_persistent')]
+    assert 'formatted_from_empty' in kernel
+    assert 'BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND' in kernel

@@ -3,6 +3,7 @@
 #include "../../mm/buddy.h"
 
 #include <bigos/device.h>
+#include <bigos/fs/bcache.h>
 #include <bigos/io.h>
 #include <drivers/irqchip/lapic.h>
 #include <string.h>
@@ -497,6 +498,59 @@ namespace {
         }
         return true;
     }
+
+    bool virtio_cache_round_trip(driver::block::BlockDevice *__block) noexcept {
+        if (__block == nullptr)
+            return false;
+        const uint64_t block_no = 2;
+        const uint8_t pattern = 0x5a;
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(__block, block_no);
+        if (block == nullptr)
+            return false;
+        for (uint32_t i = 0; i < driver::block::VIRTIO_BLK_SECTOR_SIZE; i++)
+            block->data[i] = (uint8_t)(pattern ^ i);
+        bigos::bcache::mark_dirty(block);
+        if (bigos::bcache::sync(block) != bigos::bcache::Status::Success) {
+            bigos::bcache::put(block);
+            return false;
+        }
+        bigos::bcache::put(block);
+        if (bigos::bcache::invalidate_device(__block) != bigos::bcache::Status::Success)
+            return false;
+        block = bigos::bcache::get(__block, block_no);
+        if (block == nullptr)
+            return false;
+        bool ok = true;
+        for (uint32_t i = 0; i < driver::block::VIRTIO_BLK_SECTOR_SIZE; i++) {
+            if (block->data[i] != (uint8_t)(pattern ^ i)) {
+                ok = false;
+                break;
+            }
+        }
+        bigos::bcache::put(block);
+        return ok;
+    }
+
+    bool virtio_cache_dirty_failure_retains_state(driver::block::BlockDevice *__block) noexcept {
+        if (__block == nullptr)
+            return false;
+        const uint64_t block_no = 3;
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(__block, block_no);
+        if (block == nullptr)
+            return false;
+        block->data[0] ^= 0xff;
+        bigos::bcache::mark_dirty(block);
+
+        const uint64_t saved_total_sectors = __block->total_sectors;
+        __block->total_sectors = block_no;
+        const bigos::bcache::Status failed_sync = bigos::bcache::sync(block);
+        const bool dirty_retained = failed_sync != bigos::bcache::Status::Success && block->dirty;
+        __block->total_sectors = saved_total_sectors;
+
+        const bigos::bcache::Status recovery_sync = bigos::bcache::sync(block);
+        bigos::bcache::put(block);
+        return dirty_retained && recovery_sync == bigos::bcache::Status::Success;
+    }
 }   // namespace
 
 NAMESPACE_DRIVER_BEG
@@ -619,7 +673,7 @@ namespace block {
         }
     }
 
-#ifdef BIGOS_VIRTIO_BLK_SMOKE
+#if defined(BIGOS_VIRTIO_BLK_SMOKE) || defined(BIGOS_MODERN_STORAGE_BACKEND_SMOKE)
     bool virtio_blk_smoke() noexcept {
         const bigos::device::Status probe_status = bigos::device::probe(bigos::device::DeviceClass::Block,
             bigos::device::DeviceRole::VirtioBlkValidationBlock, bigos::device::ProbeContext::OrdinaryBlockable);
@@ -651,6 +705,14 @@ namespace block {
             bigos::serial_puts("BIGOS_VIRTIO_BLK_FAILED readback\n");
             return false;
         }
+        if (!virtio_cache_round_trip(block)) {
+            bigos::serial_puts("BIGOS_VIRTIO_BLK_FAILED cache-round-trip\n");
+            return false;
+        }
+        if (!virtio_cache_dirty_failure_retains_state(block)) {
+            bigos::serial_puts("BIGOS_VIRTIO_BLK_FAILED dirty-failure\n");
+            return false;
+        }
 
         bigos::block_io::Request timeout = {};
         timeout.device = block;
@@ -667,6 +729,9 @@ namespace block {
         }
 
         bigos::serial_puts("BIGOS_VIRTIO_BLK_PASSED\n");
+#ifdef BIGOS_MODERN_STORAGE_BACKEND_SMOKE
+        bigos::serial_puts("BIGOS_MODERN_STORAGE_BACKEND_PASSED\n");
+#endif
         return true;
     }
 #endif
