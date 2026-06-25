@@ -479,6 +479,7 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
         'first-user-program',
         'filesystem-user-elf',
         'default-init',
+        'sleep-syscall',
     } <= case_ids
     for case in boot_debug.RUNTIME_SMOKE_MATRIX:
         assert case.expected_marker
@@ -496,6 +497,8 @@ def test_runtime_smoke_matrix_cases_are_narrow_and_document_proc_boundaries() ->
     assert 'kernel/core/proc/**' in boot_debug.case_by_id('filesystem-user-elf').proc_boundary
     assert 'synthetic TTY producer' in boot_debug.case_by_id('blocking-primitives').proc_boundary
     assert 'BIGOS_BLOCKING_TIMEOUT_EXPIRED' in boot_debug.case_by_id('blocking-primitives').validation_markers
+    assert boot_debug.case_by_id('sleep-syscall').expected_marker == 'BIGOS_SLEEP_SYSCALL_PASSED'
+    assert 'sleep_syscall_smoke' in boot_debug.case_by_id('sleep-syscall').switches
     apic_case = boot_debug.case_by_id('apic-default-interrupt-delivery')
     assert apic_case.qemu_extra == ('-cpu', 'max', '-smp', '2')
     assert 'BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE' in apic_case.validation_markers

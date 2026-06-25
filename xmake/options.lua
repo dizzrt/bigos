@@ -216,6 +216,12 @@ option("userland_smoke")
     set_description("enable validation-only userland runtime (crt0/libc/shell) smoke marker")
 option_end()
 
+option("sleep_syscall_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only blocking sleep syscall user smoke marker")
+option_end()
+
 option("filesystem_maturity_smoke")
     set_default(false)
     set_showmenu(true)

@@ -251,6 +251,7 @@ SMOKE_OPTIONS = (
     'persistent_writable_fs_smoke',
     'pipe_smoke',
     'userland_smoke',
+    'sleep_syscall_smoke',
     'filesystem_maturity_smoke',
 )
 RUNTIME_SMOKE_MATRIX = (
@@ -532,6 +533,20 @@ RUNTIME_SMOKE_MATRIX = (
             'default-off userland_smoke build; packages the userland validation program as /boot/user/init.elf and '
             'runs it as PID-1 with deterministic non-interactive assertions over bounded /bin/smoke C programs '
             '(no manual stdin)'
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='sleep-syscall',
+        title='Blocking sleep syscall',
+        switches=('sleep_syscall_smoke',),
+        expected_marker='BIGOS_SLEEP_SYSCALL_PASSED',
+        timeout_seconds=20.0,
+        risk_area='int 0x80 sleep syscall, coarse PIT tick conversion, and scheduler timeout resume',
+        validation_markers=('BIGOS_SLEEP_SYSCALL_PASSED',),
+        proc_boundary=(
+            'default-off sleep_syscall_smoke build; packages a narrow PID-1 user smoke that validates '
+            'bigos_sleep_ms() zero/range behavior and tick lower-bound blocking, not full POSIX sleep, '
+            'nanosleep, signal interruption, alarm, timerfd, or high-resolution timing'
         ),
     ),
 )

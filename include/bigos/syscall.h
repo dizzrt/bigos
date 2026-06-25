@@ -104,6 +104,10 @@ namespace bigos::sys {
         SYS_TRUNCATE = 50,      // (path, length) -> bounded /rw regular-file truncate by path, or negative errno
         SYS_TCGETMODE = 51,     // (struct TerminalMode *out) -> default terminal canonical/raw mode snapshot
         SYS_TCSETMODE = 52,     // (const struct TerminalMode *mode) -> set default terminal mode with foreground checks
+        SYS_SLEEP_MS = 53,      // (milliseconds) -> 0 after coarse tick-based blocking sleep, or errno.
+                                // Bounded BigOS sleep: not nanosleep, alarm,
+                                // timerfd, high-resolution timer, or
+                                // signal-interruptible POSIX sleep.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

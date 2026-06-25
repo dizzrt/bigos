@@ -10,12 +10,13 @@
 
 int errno = 0;
 
-#define BIGOS_SIG_MIN 1
-#define BIGOS_SIG_MAX 31
-#define BIGOS_SIG_COUNT BIGOS_SIG_MAX
+#define BIGOS_SIG_MIN           1
+#define BIGOS_SIG_MAX           31
+#define BIGOS_SIG_COUNT         BIGOS_SIG_MAX
 #define BIGOS_SIGACTION_DEFAULT 0
 #define BIGOS_SIGACTION_IGNORE  1
 #define BIGOS_SIGACTION_HANDLER 2
+#define BIGOS_TIMER_HZ          100ul
 
 struct bigos_signal_disp {
     unsigned long action;
@@ -76,9 +77,9 @@ long syscall5(long n, long a0, long a1, long a2, long a3, long a4) {
     register long r10 __asm__("r10") = a3;
     register long r8 __asm__("r8") = a4;
     __asm__ volatile("int $0x80"
-                     : "=a"(ret)
-                     : "a"(n), "D"(a0), "S"(a1), "d"(a2), "r"(r10), "r"(r8)
-                     : "rcx", "r11", "memory");
+        : "=a"(ret)
+        : "a"(n), "D"(a0), "S"(a1), "d"(a2), "r"(r10), "r"(r8)
+        : "rcx", "r11", "memory");
     return ret;
 }
 
@@ -88,9 +89,9 @@ long syscall6(long n, long a0, long a1, long a2, long a3, long a4, long a5) {
     register long r8 __asm__("r8") = a4;
     register long r9 __asm__("r9") = a5;
     __asm__ volatile("int $0x80"
-                     : "=a"(ret)
-                     : "a"(n), "D"(a0), "S"(a1), "d"(a2), "r"(r10), "r"(r8), "r"(r9)
-                     : "rcx", "r11", "memory");
+        : "=a"(ret)
+        : "a"(n), "D"(a0), "S"(a1), "d"(a2), "r"(r10), "r"(r8), "r"(r9)
+        : "rcx", "r11", "memory");
     return ret;
 }
 
@@ -121,8 +122,7 @@ int close(int fd) {
 
 void exit(int code) {
     syscall1(SYS_EXIT, (long)code);
-    for (;;) {
-    }
+    for (;;) {}
 }
 
 pid_t fork(void) {
@@ -428,6 +428,33 @@ time_t time(time_t *out) {
 
 unsigned long get_tick(void) {
     return (unsigned long)syscall0(SYS_GET_TICK);
+}
+
+int bigos_sleep_ms(unsigned long milliseconds) {
+    return (int)errno_translate(syscall1(SYS_SLEEP_MS, (long)milliseconds));
+}
+
+unsigned int sleep(unsigned int seconds) {
+    if (seconds == 0)
+        return 0;
+
+    const unsigned long max_ul = ~0ul;
+    if ((unsigned long)seconds > max_ul / 1000ul) {
+        errno = EINVAL;
+        return seconds;
+    }
+
+    const unsigned long start_tick = get_tick();
+    const int result = bigos_sleep_ms((unsigned long)seconds * 1000ul);
+    const unsigned long end_tick = get_tick();
+    if (result == 0)
+        return 0;
+
+    const unsigned long elapsed_ticks = end_tick - start_tick;
+    const unsigned long elapsed_seconds = elapsed_ticks / BIGOS_TIMER_HZ;
+    if (elapsed_seconds >= (unsigned long)seconds)
+        return 0;
+    return (unsigned int)((unsigned long)seconds - elapsed_seconds);
 }
 
 static int valid_user_signo(int signo) {

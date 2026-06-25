@@ -101,6 +101,7 @@ def test_user_libc_syscall_and_errno_mirrors_match_kernel_headers() -> None:
     assert user_syscalls['SYS_TRUNCATE'] == 50
     assert user_syscalls['SYS_TCGETMODE'] == 51
     assert user_syscalls['SYS_TCSETMODE'] == 52
+    assert user_syscalls['SYS_SLEEP_MS'] == 53
     assert user_errno['ENOENT'] == 2
     assert user_errno['E2BIG'] == 7
     assert user_errno['ENOEXEC'] == 8
@@ -201,6 +202,37 @@ def test_syscall_dispatch_reads_rax_and_routes_known_numbers() -> None:
     assert 'sys_tcgetmode(__frame->rdi)' in syscall
     assert 'case SYS_TCSETMODE:' in syscall
     assert 'sys_tcsetmode(__frame->rdi)' in syscall
+    assert 'case SYS_SLEEP_MS:' in syscall
+    assert 'sys_sleep_ms(__frame->rdi)' in syscall
+
+
+def test_blocking_sleep_syscall_is_bounded_and_tick_based() -> None:
+    syscall_h = read_source('include/bigos/syscall.h')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    user_sys_nr = read_source('user/libc/include/sys_nr.h')
+    unistd = read_source('user/libc/include/unistd.h')
+    libc = read_source('user/libc/syscall.c')
+    xmake = read_source('xmake.lua')
+    smoke = read_source('user/smoke/sleep_syscall_smoke.c')
+    bigosdev = read_source('tools/bigosdev/core.py')
+
+    assert 'SYS_SLEEP_MS = 53' in syscall_h
+    assert '#define SYS_SLEEP_MS    53' in user_sys_nr
+    assert 'sleep_ms_to_ticks' in syscall
+    assert '__milliseconds > (MAX_U64 - ROUND_UP_BIAS) / HZ' in syscall
+    assert 'ticks > MAX_U64 - now' in syscall
+    assert 'bigos::timer::sleep_for(ticks)' in syscall
+    assert 'WAIT_BLOCK_FORBIDDEN' in syscall
+    assert 'int bigos_sleep_ms(unsigned long milliseconds);' in unistd
+    assert 'unsigned int sleep(unsigned int seconds);' in unistd
+    assert 'syscall1(SYS_SLEEP_MS, (long)milliseconds)' in libc
+    assert 'const unsigned long start_tick = get_tick();' in libc
+    assert 'return (unsigned int)((unsigned long)seconds - elapsed_seconds);' in libc
+    assert 'option("sleep_syscall_smoke")' in xmake
+    assert 'sleep_syscall_smoke.c' in xmake
+    assert 'BIGOS_SLEEP_SYSCALL_PASSED' in smoke
+    assert "'sleep_syscall_smoke'" in bigosdev
+    assert "'BIGOS_SLEEP_SYSCALL_PASSED'" in bigosdev
 
 
 def test_terminal_mode_syscall_and_libc_contract_is_bigos_specific() -> None:

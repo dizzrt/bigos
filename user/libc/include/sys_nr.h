@@ -61,5 +61,6 @@
 #define SYS_TRUNCATE    50
 #define SYS_TCGETMODE   51
 #define SYS_TCSETMODE   52
+#define SYS_SLEEP_MS    53
 
 #endif /* _BIGOS_USER_SYS_H */

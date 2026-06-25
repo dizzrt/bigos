@@ -63,6 +63,48 @@ namespace sys {
             return bigos::time::current_unix_time();
         }
 
+        static bool sleep_ms_to_ticks(uint64_t __milliseconds, timer::tick_t *__out_ticks) noexcept {
+            if (__out_ticks == nullptr)
+                return false;
+            if (__milliseconds == 0) {
+                *__out_ticks = 0;
+                return true;
+            }
+
+            constexpr uint64_t MAX_U64 = ~(uint64_t)0;
+            constexpr uint64_t HZ = bigos::timer::TIMER_HZ;
+            constexpr uint64_t ROUND_UP_BIAS = 999;
+            if (__milliseconds > (MAX_U64 - ROUND_UP_BIAS) / HZ)
+                return false;
+
+            const uint64_t ticks = (__milliseconds * HZ + ROUND_UP_BIAS) / 1000;
+            if (ticks == 0)
+                return false;
+            const uint64_t now = bigos::timer::ticks();
+            if (ticks > MAX_U64 - now)
+                return false;
+
+            *__out_ticks = ticks;
+            return true;
+        }
+
+        static int64_t sys_sleep_ms(uint64_t __milliseconds) noexcept {
+            timer::tick_t ticks = 0;
+            if (!sleep_ms_to_ticks(__milliseconds, &ticks))
+                return -bigos::EINVAL;
+            if (ticks == 0)
+                return 0;
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+
+            const int sleep_result = bigos::timer::sleep_for(ticks);
+            if (sleep_result == bigos::sched::WAIT_TIMEOUT || sleep_result == bigos::sched::WAIT_OK)
+                return 0;
+            if (sleep_result == bigos::sched::WAIT_BLOCK_FORBIDDEN)
+                return -bigos::EWOULDBLOCK;
+            return -bigos::EIO;
+        }
+
 #ifdef BIGOS_USER_PROCESS
         static int64_t vfs_status_to_syscall(bigos::vfs::Status __status) noexcept {
             return (int64_t)__status;
@@ -879,6 +921,9 @@ namespace sys {
                 break;
             case SYS_GET_TIME:
                 result = __detail::sys_get_time();
+                break;
+            case SYS_SLEEP_MS:
+                result = __detail::sys_sleep_ms(__frame->rdi);
                 break;
 #ifdef BIGOS_USER_PROCESS
             case SYS_WRITE:
