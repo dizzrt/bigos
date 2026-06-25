@@ -13,8 +13,8 @@ keyboard IRQ1
   -> PS/2 set-1 bounded decode
   -> terminal::enqueue_input() / terminal::enqueue_input_record()
   -> fixed TerminalInputRecord ring
-  -> non-interrupt consumer read_input_record()/read_char()/drain()
-  -> optional blocking consumer read_char_blocking()
+  -> default terminal mode gate
+  -> canonical read_char()/read_char_blocking() 或 raw read_raw_available_blocking()
   -> fd 0 未安装文件时的默认用户态 stdin
 ```
 
@@ -40,6 +40,37 @@ TTY 输入缓冲是静态固定容量 ring buffer，容量为 `TTY_INPUT_CAPACIT
 
 Overflow 策略是确定性的：当 ring buffer 满时丢弃新输入并递增 drop counter，不覆盖 unread input。空 buffer 读取返回 `false` 或 `0`，不 sleep、不等待 scheduler，也不依赖进程或用户态。
 
+## Terminal 输入模式
+
+单一默认 console terminal 拥有固定大小的 BigOS terminal mode state。
+`terminal::init_tty()` 会把它初始化为 canonical mode；该状态不依赖动态分配、
+filesystem 访问、用户态进度或当前选择的显示 backend。
+
+Canonical mode 是默认 shell 模式。它保留既有 line-oriented 行为：普通可打印输入
+按字节返回给 shell，newline 与 backspace/delete-like feedback 由非中断 consumer
+处理，EOF-like input 可以变成 empty read，interrupt-like input 可以向当前
+foreground group 投递有界 `SIGINT`，受支持 scrollback control 可以被消费为
+console viewport 操作。
+
+Raw mode 是 BigOS-specific 的前台程序输入归属边界。当 fd `0` 仍使用默认 console
+fast path 时，raw read 在至少有一个 byte 可用后返回一个或多个当前可用 byte；它不
+等待填满整个用户缓冲，也不等待 Enter。Raw mode 不做普通 echo，不把 EOF-like input
+转换成 empty read，不为 Ctrl-C 自动向 foreground group 发 signal，也不把受支持
+navigation key 消费为 scrollback。PageUp/PageDown/Home/End 会以有界 escape-like
+byte sequence 暴露给用户态。
+
+模式控制使用 `SYS_TCGETMODE` 和 `SYS_TCSETMODE`，libc 暴露为
+`bigos_tcgetmode()` 与 `bigos_tcsetmode()`，并使用 `struct bigos_terminal_mode`。
+该对象包含 size、version、mode 与 flags 字段；未知 size、version、flag 或 mode
+会确定性失败，且不改变旧模式。设置 mode 要求调用者属于当前默认终端 foreground
+process group。session leader recovery path 只能恢复 canonical mode，使 `/bin/sh`
+在前台命令退出或失败后可以恢复。`fork` 与 `execve` 不创建私有 terminal mode
+object；子进程和替换后的镜像观察同一个默认终端状态。
+
+该接口不是 POSIX `termios`：它不暴露 baud rate、`VMIN/VTIME`、serial line
+discipline、pseudo-terminal、terminal database、多终端设备、后台读写控制或完整
+job-control 行为。
+
 ## Blocking Consumer
 
 blocking primitives and timer ownership capability 以 additive 方式增加 `terminal::read_char_blocking()` 非中断 API。它会先尝试既有 non-blocking `read_char()` 路径；如果输入缓冲为空，则通过 `sched::wait_queue_wait_until()` 挂入 TTY input wait queue，并在 IRQ disabled 状态下检查 predicate，避免 empty check 和入队之间漏掉 producer wakeup。
@@ -48,7 +79,7 @@ blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-threa
 
 自动化 blocking smoke 使用 synthetic producer 调用 `terminal::enqueue_input()`，因此不依赖手工键盘输入也能覆盖同一 TTY wakeup 路径。手工键盘验证仍是可选项，使用时需要记录 emulator input capability。
 
-交互控制台可用性将同一个 blocking consumer 接到默认用户态 stdin：当用户进程读取 fd `0` 且该描述符没有安装文件或 pipe 时，`SYS_READ` 会在 TTY ring 上阻塞，并向用户态返回一个有界 byte。如果 fd `0` 通过 `dup2()` 或重定向替换为 pipe/file，读取会走普通 fd/VFS 路径，而不是默认 console。
+交互控制台可用性将同一组 blocking consumer 接到默认用户态 stdin：当用户进程读取 fd `0` 且该描述符没有安装文件或 pipe 时，`SYS_READ` 会在 TTY ring 上阻塞，并根据 terminal mode 返回 canonical byte 或 raw 当前可用 byte。如果 fd `0` 通过 `dup2()` 或重定向替换为 pipe/file，读取会走普通 fd/VFS 路径，而不是默认 console。
 
 ## Console 输出边界
 
@@ -97,10 +128,11 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 - Scrollback navigation key 是固定大小 TTY control record；viewport 移动和整屏重绘只在非中断 terminal consumer 处理这些 record 时发生。
 - Printable input、newline feedback、backspace feedback、EOF-like exit、interrupt-like line cancellation 和 unsupported-control no-op 行为由 `read(0, ...)` 返回后的非中断 terminal 或 shell consumer 产生。
 - 默认终端保存一个数值型 foreground `pgid`。查询和变更只在普通 syscall/用户进程上下文执行；IRQ1 不遍历 process group、不执行 shell 策略、不分配、不阻塞，也不做文件系统 I/O。
-- Interrupt-like input 仍向 consumer 返回有界 `0x03` byte，并尝试向当前 foreground group 进行有界 `SIGINT` 投递。foreground group 缺失或为空时只产生确定性 no-op/错误结果，不解引用悬垂进程对象。
+- Interrupt-like input 在 canonical mode 下仍向 consumer 返回有界 `0x03` byte，并尝试向当前 foreground group 进行有界 `SIGINT` 投递；raw mode 只把该 byte 交给用户态，不自动 signal。foreground group 缺失或为空时只产生确定性 no-op/错误结果，不解引用悬垂进程对象。
+- `/bin/sh` 在前台命令或 pipeline 结束并恢复 shell foreground group 后，会把单一默认终端恢复为 canonical mode。
 - `/bin/sh` 只在 fd `0` 与 fd `1` 仍绑定到默认 console fast path 时显示确定性的 `$ ` prompt；pipe 或重定向文件会抑制 prompt。
 - 当 fd `1` 与 fd `2` 未被重定向时，stdout 和 stderr 会通过选中的默认 console render backend 可见。
 
 ## 非目标
 
-该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、termios、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O、新的用户可见 terminal syscall 或完整 POSIX terminal read。
+该路径不实现多 TTY、完整 ANSI/VT terminal、命令历史、完整 POSIX `termios`、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。

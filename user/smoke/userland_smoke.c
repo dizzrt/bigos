@@ -917,6 +917,42 @@ static void test_process_session_terminal(void) {
         fail("setsid-child-status");
 }
 
+static void test_terminal_mode(void) {
+    struct bigos_terminal_mode mode;
+    if (bigos_tcgetmode(&mode) != 0)
+        fail("tcgetmode");
+    if (mode.size != sizeof(mode) || mode.version != BIGOS_TERMINAL_MODE_ABI_VERSION ||
+        mode.flags != BIGOS_TERMINAL_MODE_FLAG_NONE)
+        fail("tcgetmode-shape");
+    if (mode.mode != BIGOS_TERMINAL_MODE_CANONICAL)
+        fail("tcgetmode-default");
+
+    struct bigos_terminal_mode raw = {
+        sizeof(struct bigos_terminal_mode),
+        BIGOS_TERMINAL_MODE_ABI_VERSION,
+        BIGOS_TERMINAL_MODE_RAW,
+        BIGOS_TERMINAL_MODE_FLAG_NONE,
+    };
+    if (bigos_tcsetmode(&raw) != 0)
+        fail("tcsetmode-raw");
+    if (bigos_tcgetmode(&mode) != 0 || mode.mode != BIGOS_TERMINAL_MODE_RAW)
+        fail("tcgetmode-raw");
+
+    struct bigos_terminal_mode bad = raw;
+    bad.flags = 1;
+    errno = 0;
+    if (bigos_tcsetmode(&bad) != -1 || errno != EINVAL)
+        fail("tcsetmode-bad-flags");
+    if (bigos_tcgetmode(&mode) != 0 || mode.mode != BIGOS_TERMINAL_MODE_RAW)
+        fail("tcsetmode-bad-preserve");
+
+    mode.mode = BIGOS_TERMINAL_MODE_CANONICAL;
+    if (bigos_tcsetmode(&mode) != 0)
+        fail("tcsetmode-canonical");
+    if (bigos_tcgetmode(&mode) != 0 || mode.mode != BIGOS_TERMINAL_MODE_CANONICAL)
+        fail("tcgetmode-canonical");
+}
+
 static void test_error_text(void) {
     if (strcmp(strerror(ENOENT), "No such file or directory") != 0)
         fail("strerror-known");
@@ -1099,6 +1135,7 @@ int main(int argc, char **argv, char **envp) {
     test_time_identity();
     test_wait_wrappers(envp);
     test_process_session_terminal();
+    test_terminal_mode();
     test_error_text();
     test_signal_handler_return();
     test_smoke_programs(envp);

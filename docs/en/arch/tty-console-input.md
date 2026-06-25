@@ -13,8 +13,8 @@ keyboard IRQ1
   -> PS/2 set-1 bounded decode
   -> terminal::enqueue_input() / terminal::enqueue_input_record()
   -> fixed TerminalInputRecord ring
-  -> non-interrupt consumer read_input_record()/read_char()/drain()
-  -> optional blocking consumer read_char_blocking()
+  -> default terminal mode gate
+  -> canonical read_char()/read_char_blocking() or raw read_raw_available_blocking()
   -> default user stdin when fd 0 has no installed file
 ```
 
@@ -40,6 +40,44 @@ Each `TerminalInputRecord` is either a character record or a control record. The
 
 Overflow is deterministic: when the ring buffer is full, new input is dropped and the drop counter increments; unread input is not overwritten. Empty-buffer reads return `false` or `0` and do not sleep, wait for the scheduler, or depend on processes or user mode.
 
+## Terminal Input Mode
+
+The single default console terminal owns a fixed-size BigOS terminal mode state.
+It is initialized to canonical mode by `terminal::init_tty()` and does not depend
+on dynamic allocation, filesystem access, userland progress, or the selected
+display backend.
+
+Canonical mode is the default shell mode. It preserves the existing line-oriented
+behavior: ordinary printable input is returned one byte at a time to the shell,
+newline and backspace/delete-like feedback are handled by the non-interrupt
+consumer, EOF-like input can become an empty read, interrupt-like input can
+deliver bounded `SIGINT` to the current foreground group, and supported
+scrollback controls may be consumed as console viewport operations.
+
+Raw mode is a BigOS-specific input ownership boundary for foreground programs.
+When fd `0` still uses the default console fast path, raw reads return one or
+more currently available bytes after at least one byte is present; they do not
+wait to fill the whole user buffer or wait for Enter. Raw mode does not perform
+ordinary echo, does not convert EOF-like input to an empty read, does not
+automatically signal the foreground group for Ctrl-C, and does not consume
+supported navigation keys as scrollback. PageUp/PageDown/Home/End are exposed as
+bounded escape-like byte sequences for userland ownership.
+
+Mode changes use `SYS_TCGETMODE` and `SYS_TCSETMODE`, exposed in libc as
+`bigos_tcgetmode()` and `bigos_tcsetmode()` with `struct bigos_terminal_mode`.
+The object carries size, version, mode, and flags fields; unknown sizes,
+versions, flags, or modes fail deterministically and leave the old mode intact.
+Setting mode requires the caller to be in the current default terminal
+foreground process group. A session leader recovery path may restore only
+canonical mode, so `/bin/sh` can recover after a foreground command exits or
+fails. `fork` and `execve` do not create private terminal mode objects; child
+and replacement images observe the same default terminal state.
+
+This interface is intentionally not POSIX `termios`: it does not expose baud
+rates, `VMIN/VTIME`, serial line discipline, pseudo-terminals, terminal
+databases, multiple terminal devices, background read/write control, or complete
+job-control behavior.
+
 ## Blocking Consumer
 
 blocking primitives and timer ownership capability adds `terminal::read_char_blocking()` as an additive non-interrupt API. It first tries the existing non-blocking `read_char()` path. If the input buffer is empty, it waits on the TTY input wait queue through `sched::wait_queue_wait_until()`, using a predicate checked with IRQs disabled so a producer wakeup cannot be missed between the empty check and enqueue.
@@ -48,7 +86,7 @@ The blocking API is valid only from ordinary running kernel-thread context where
 
 The automated blocking smoke uses a synthetic producer that calls `terminal::enqueue_input()` and therefore exercises the same TTY wakeup path without requiring manual keyboard input. Manual keyboard validation remains optional and should record emulator input capability when used.
 
-Interactive console usability connects the same blocking consumer to default user stdin: when a user process reads fd `0` and no file or pipe is installed there, `SYS_READ` blocks on the TTY ring and returns one bounded byte to user space. If fd `0` is replaced by a pipe or file through `dup2()` or redirection, reads use the normal fd/VFS path instead of the default console.
+Interactive console usability connects the same blocking consumers to default user stdin: when a user process reads fd `0` and no file or pipe is installed there, `SYS_READ` blocks on the TTY ring and returns canonical bytes or raw currently available bytes according to the terminal mode. If fd `0` is replaced by a pipe or file through `dup2()` or redirection, reads use the normal fd/VFS path instead of the default console.
 
 ## Console Output Boundary
 
@@ -100,19 +138,23 @@ The default interactive shell path intentionally stays below POSIX terminal scop
   changed only from ordinary syscall/user-process context; IRQ1 never performs
   process-group traversal, shell policy, allocation, blocking, or filesystem I/O.
 - Interrupt-like input still returns the bounded `0x03` byte to the consumer and
-  also attempts bounded `SIGINT` delivery to the current foreground group. If the
-  foreground group is missing or empty, the result is deterministic no-op/error
-  handling, never a dangling process-object dereference.
+  also attempts bounded `SIGINT` delivery to the current foreground group while
+  canonical mode is active. Raw mode delivers the byte to userland without
+  automatic signal delivery. If the foreground group is missing or empty, the
+  result is deterministic no-op/error handling, never a dangling process-object
+  dereference.
+- `/bin/sh` restores the single default terminal to canonical mode when it
+  regains the foreground group after a foreground command or pipeline.
 - `/bin/sh` shows its deterministic `$ ` prompt only when fd `0` and fd `1` are still bound to the default console fast paths; pipes or redirected files suppress the prompt.
 - stdout and stderr are visible through the selected default console render backend through fd `1` and fd `2` when those descriptors are not redirected.
 
 ## Non-Goals
 
 This path does not implement multiple TTYs, full ANSI/VT terminal behavior,
-command history, termios, pseudo-terminals, complete job control, background
+command history, complete POSIX `termios`, pseudo-terminals, complete job control, background
 read/write control, USB HID, full graphical terminal behavior, locale,
 Unicode normalization, grapheme clusters, shaping, input methods, persistent or
 unbounded history, APIC/IOAPIC, SMP, or internationalized keyboard layouts. The minimal fd
 integration covers only the default console fast paths for bounded userland and
 does not introduce `/dev/tty`, a general character-device filesystem, async I/O,
-new user-visible terminal syscalls, or full POSIX terminal reads.
+or full POSIX terminal reads.

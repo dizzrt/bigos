@@ -59,5 +59,7 @@
 #define SYS_FCNTL       48
 #define SYS_ACCESS      49
 #define SYS_TRUNCATE    50
+#define SYS_TCGETMODE   51
+#define SYS_TCSETMODE   52
 
 #endif /* _BIGOS_USER_SYS_H */

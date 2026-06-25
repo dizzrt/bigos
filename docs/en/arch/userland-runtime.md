@@ -101,7 +101,8 @@ The shell is intentionally small:
 - Foreground control: before running an external command or one-stage pipe, the
   shell places the child process or pipeline in a bounded process group, binds
   the single default terminal foreground group to it, waits, and then restores
-  the shell process group. This is only BigOS foreground-command behavior.
+  the shell process group and canonical terminal input mode. This is only BigOS
+  foreground-command behavior.
 - Redirection: one input `< file` and one output `> file` per command.
 - Cwd behavior: relative command paths containing `/`, redirection paths, and
   small tools such as `/bin/pwd` use the kernel cwd contract.
@@ -123,7 +124,7 @@ The user libc exposes a documented bounded subset for simple static C programs:
 
 - Headers: `assert.h`, `ctype.h`, `stdio.h`, `stdlib.h`, `string.h`,
   `errno.h`, `time.h`, `unistd.h`, `fcntl.h`, `sys/types.h`, `sys/wait.h`,
-  `sys/stat.h`, `bigos_dirent.h`, plus the compatibility umbrella `libc.h`.
+  `sys/stat.h`, `bigos_dirent.h`, `bigos_terminal.h`, plus the compatibility umbrella `libc.h`.
   Raw syscall primitives are opt-in through `bigos_syscall.h`, not exported by
   the ordinary umbrella header.
 - Types and constants: `size_t`, `ssize_t`, `off_t`, `pid_t`, `NULL`, the
@@ -144,6 +145,10 @@ The user libc exposes a documented bounded subset for simple static C programs:
   or rewrite an existing `errno` value. POSIX-like names such as `waitpid`,
   `fcntl`, `access`, `stat`, `fstat`, `truncate`, and `ftruncate` are BigOS
   bounded subsets, not claims of complete POSIX behavior.
+- Terminal mode wrappers: `bigos_tcgetmode` and `bigos_tcsetmode` expose the
+  BigOS-specific canonical/raw mode object for the single default terminal.
+  They do not declare POSIX `tcgetattr`/`tcsetattr`, complete `termios`, baud
+  rates, `VMIN/VTIME`, pseudo-terminals, or terminal database behavior.
 - BigOS-specific helpers: `wait_status`, `bigos_readdir`, `brk_raw`,
   `mmap_anon`, `time_now`, and `get_tick` are public bounded ABI helpers because
   current shell, smoke, libc, or packaged user-program paths use them. Raw

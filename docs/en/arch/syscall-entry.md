@@ -72,6 +72,18 @@ not change the `int 0x80` register ABI, syscall vector, IDT DPL, or EOI rules.
 They are not complete POSIX job control, `tcsetpgrp(3)` semantics, `termios`,
 multiple terminals, background jobs, or a complete POSIX process model.
 
+Default-terminal mode controls are appended at numbers 51..52:
+`SYS_TCGETMODE` and `SYS_TCSETMODE`. They use `rdi` as a user pointer to the
+fixed BigOS terminal-mode object and expose only canonical/raw input mode for
+the single default console terminal. `SYS_TCGETMODE` copies out a deterministic
+snapshot and does not mutate terminal, fd, process, or foreground state.
+`SYS_TCSETMODE` validates object size/version/flags/mode and requires the
+caller to be in the current foreground process group, except that a session
+leader recovery path may restore canonical mode only. The syscalls are
+append-only and do not imply POSIX `tcgetattr`/`tcsetattr`, complete `termios`,
+baud rates, `VMIN/VTIME`, pseudo-terminals, background read/write control, or
+complete job control.
+
 `SYS_KILL` (16), `SYS_SIGACTION` (17), `SYS_SIGPROCMASK` (18), `SYS_SIGRETURN`
 (19), `SYS_LSEEK` (20), `SYS_PIPE` (21), `SYS_DUP` (22), `SYS_DUP2` (23),
 `SYS_FSYNC` (24), `SYS_MKDIR` (25), and `SYS_UNLINK` (26) follow.

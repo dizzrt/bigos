@@ -65,6 +65,16 @@ errno，不改变 `int 0x80` 寄存器 ABI、syscall vector、IDT DPL 或 EOI �
 表示完整 POSIX job control、`tcsetpgrp(3)` 语义、`termios`、多终端、后台作业或完
 整 POSIX 进程模型。
 
+默认终端 mode control 追加在 number 51..52：`SYS_TCGETMODE` 和
+`SYS_TCSETMODE`。它们用 `rdi` 传入固定 BigOS terminal-mode object 的用户指针，
+只暴露单一默认 console terminal 的 canonical/raw 输入模式。`SYS_TCGETMODE`
+复制确定性快照，不修改 terminal、fd、process 或 foreground state。
+`SYS_TCSETMODE` 校验 object size/version/flags/mode，并要求调用者属于当前
+foreground process group；session leader recovery path 只能恢复 canonical mode。
+这些 syscall 是 append-only，不表示 POSIX `tcgetattr`/`tcsetattr`、完整
+`termios`、baud rate、`VMIN/VTIME`、pseudo-terminal、后台读写控制或完整 job
+control。
+
 其后是 `SYS_KILL`（16）、`SYS_SIGACTION`（17）、`SYS_SIGPROCMASK`（18）、`SYS_SIGRETURN`（19）、`SYS_LSEEK`（20）、`SYS_PIPE`（21）、`SYS_DUP`（22）、`SYS_DUP2`（23）、`SYS_FSYNC`（24）、`SYS_MKDIR`（25）、`SYS_UNLINK`（26）。
 
 - `SYS_EXECVE`（number=27）：以 append-only 方式把内核内已有的当前进程镜像替换路径（`exec_current_from_elf_image` + 只读 VFS 读路径）暴露给 CPL3。ABI：`rdi` = 用户 `path`，`rsi` = `argv`（NULL 结尾用户指针数组），`rdx` = `envp`。path 受 `SYS_PATH_MAX_LEN` 约束，argv/envp 向量受 `EXEC_MAX_ARGC` / `EXEC_MAX_ENVC` / `EXEC_MAX_STRING_BYTES` 约束；所有用户缓冲先经 VMA-backed 校验拷入再使用。成功时以新 ELF64 `ET_EXEC` 镜像替换当前进程地址空间并进入新程序入口，因此不返回调用点。失败时返回确定性负 errno（`-ENOENT`、`-EACCES`、`-ENOEXEC`、`-E2BIG`、`-EFAULT`、`-ENOMEM`、`-EWOULDBLOCK`、`-EIO`），调用镜像可继续执行。与其他 fd/VFS syscall 一样，它在分配或进入同步存储 IO 前检查 `sched::can_block()` 守卫；不改动任何既有 syscall 号、寄存器约定、`VECTOR_SYSCALL` / DPL 布局或「syscall 不发 EOI」规则。

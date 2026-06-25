@@ -85,7 +85,7 @@ Shell 有意保持很小：
 - 管道：支持一个 `a | b` 单级管道。
 - 前台控制：运行外部命令或单级管道前，shell 会把子进程或管道放入有界 process
   group，把单一默认终端 foreground group 绑定到该组，等待完成后恢复 shell 自身
-  process group。这只是 BigOS 的 foreground-command 子集。
+  process group 和 canonical terminal input mode。这只是 BigOS 的 foreground-command 子集。
 - 重定向：每条命令最多一个输入 `< file` 和一个输出 `> file`。
 - cwd 行为：包含 `/` 的相对命令路径、重定向路径和 `/bin/pwd` 等小工具都使用内核 cwd 契约。
 - 输出：builtin、子进程 stdout 和确定性的可恢复错误都使用现有 fd/syscall 路径；未重定向时，默认 fd `1` 与 fd `2` 会到达可见 console。
@@ -101,7 +101,7 @@ Shell 有意保持很小：
 
 - 头文件：`assert.h`、`ctype.h`、`stdio.h`、`stdlib.h`、`string.h`、
   `errno.h`、`time.h`、`unistd.h`、`fcntl.h`、`sys/types.h`、`sys/wait.h`、
-  `sys/stat.h`、`bigos_dirent.h`，以及兼容用 umbrella 头 `libc.h`。Raw syscall
+  `sys/stat.h`、`bigos_dirent.h`、`bigos_terminal.h`，以及兼容用 umbrella 头 `libc.h`。Raw syscall
   primitive 需要显式包含 `bigos_syscall.h`，不会从普通 umbrella 头导出。
 - 类型与常量：`size_t`、`ssize_t`、`off_t`、`pid_t`、`NULL`、已实现的
   open flags、有界 fd-control 常量（`F_GETFD`、`F_SETFD`、`F_DUPFD`、
@@ -118,6 +118,10 @@ Shell 有意保持很小：
   接口文档化的失败哨兵；成功 wrapper 不会清零或改写既有 `errno`。`waitpid`、
   `fcntl`、`access`、`stat`、`fstat`、`truncate` 和 `ftruncate` 等 POSIX-like
   名称都是 BigOS 有界子集，不表示完整 POSIX 行为。
+- Terminal mode wrapper：`bigos_tcgetmode` 和 `bigos_tcsetmode` 暴露单一默认
+  terminal 的 BigOS-specific canonical/raw mode object。它们不声明 POSIX
+  `tcgetattr`/`tcsetattr`、完整 `termios`、baud rate、`VMIN/VTIME`、
+  pseudo-terminal 或 terminal database 行为。
 - BigOS-specific helper：`wait_status`、`bigos_readdir`、`brk_raw`、
   `mmap_anon`、`time_now` 和 `get_tick` 是 public bounded ABI helper，因为当前
   shell、smoke、libc 或打包用户程序路径会使用它们。Raw `syscall0` 到 `syscall6`

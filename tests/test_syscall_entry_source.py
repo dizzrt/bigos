@@ -99,6 +99,8 @@ def test_user_libc_syscall_and_errno_mirrors_match_kernel_headers() -> None:
     assert user_syscalls['SYS_FCNTL'] == 48
     assert user_syscalls['SYS_ACCESS'] == 49
     assert user_syscalls['SYS_TRUNCATE'] == 50
+    assert user_syscalls['SYS_TCGETMODE'] == 51
+    assert user_syscalls['SYS_TCSETMODE'] == 52
     assert user_errno['ENOENT'] == 2
     assert user_errno['E2BIG'] == 7
     assert user_errno['ENOEXEC'] == 8
@@ -156,7 +158,8 @@ def test_irq_dispatch_recognizes_syscall_vector_without_eoi() -> None:
     interrupt = read_source('kernel/core/irq/interrupt.cc')
 
     assert 'is_syscall_vector' in interrupt
-    assert '__vector == VECTOR_SYSCALL' in interrupt
+    assert 'vector_owners[__vector] == VectorOwner::Syscall' in interrupt
+    assert 'if (i == VECTOR_SYSCALL)' in interrupt
 
     syscall_start = interrupt.index('if (__detail::is_syscall_vector(__frame->vector))')
     syscall_end = interrupt.index('unknown_vector_handler(__frame);', syscall_start)
@@ -194,6 +197,41 @@ def test_syscall_dispatch_reads_rax_and_routes_known_numbers() -> None:
     assert 'sys_access(__frame->rdi, __frame->rsi)' in syscall
     assert 'case SYS_TRUNCATE:' in syscall
     assert 'sys_truncate(__frame->rdi, __frame->rsi)' in syscall
+    assert 'case SYS_TCGETMODE:' in syscall
+    assert 'sys_tcgetmode(__frame->rdi)' in syscall
+    assert 'case SYS_TCSETMODE:' in syscall
+    assert 'sys_tcsetmode(__frame->rdi)' in syscall
+
+
+def test_terminal_mode_syscall_and_libc_contract_is_bigos_specific() -> None:
+    syscall_h = read_source('include/bigos/syscall.h')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    user_sys_nr = read_source('user/libc/include/sys_nr.h')
+    terminal_h = read_source('user/libc/include/bigos_terminal.h')
+    libc = read_source('user/libc/syscall.c')
+    shell = read_source('user/sh/sh.c')
+    smoke = read_source('user/smoke/userland_smoke.c')
+
+    assert 'SYS_TCGETMODE = 51' in syscall_h
+    assert 'SYS_TCSETMODE = 52' in syscall_h
+    assert '#define SYS_TCGETMODE   51' in user_sys_nr
+    assert '#define SYS_TCSETMODE   52' in user_sys_nr
+    assert 'validate_user_io_buffer(__out, sizeof(bigos::terminal::TerminalMode))' in syscall
+    assert 'validate_user_buffer(__mode, sizeof(bigos::terminal::TerminalMode))' in syscall
+    assert 'bigos::terminal::set_input_mode(mode)' in syscall
+    assert 'int bigos_tcgetmode(struct bigos_terminal_mode *out);' in terminal_h
+    assert 'int bigos_tcsetmode(const struct bigos_terminal_mode *mode);' in terminal_h
+    assert 'not POSIX termios' in terminal_h
+    assert 'tcgetattr' not in terminal_h
+    assert 'tcsetattr' not in terminal_h
+    assert '#define VMIN' not in terminal_h
+    assert '#define VTIME' not in terminal_h
+    assert 'syscall1(SYS_TCGETMODE, (long)out)' in libc
+    assert 'syscall1(SYS_TCSETMODE, (long)mode)' in libc
+    assert 'restore_terminal_canonical' in shell
+    assert 'BIGOS_TERMINAL_MODE_CANONICAL' in shell
+    assert 'test_terminal_mode' in smoke
+    assert 'tcsetmode-bad-flags' in smoke
 
 
 def test_syscall_dispatch_unknown_number_returns_deterministic_error() -> None:

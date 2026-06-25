@@ -179,15 +179,18 @@ namespace sys {
             // TTY keyboard input ring (blocking until at least one byte). This
             // lets the interactive shell read commands without a backing vnode.
             if (__fd == 0 && bigos::proc::file_for_fd_current(0) == nullptr) {
-                char ch = 0;
-                const int r = bigos::terminal::read_char_blocking(&ch, 0);
+                char bounded[SYS_IO_MAX_LEN];
+                const bool raw_mode = bigos::terminal::input_mode() == bigos::terminal::TerminalInputMode::Raw;
+                const int r = raw_mode
+                                  ? bigos::terminal::read_raw_available_blocking(bounded, (size_t)__len, 0)
+                                  : bigos::terminal::read_char_blocking(bounded, 0);
                 if (r < 0)
                     return -bigos::EIO;
                 if (r == 0)
                     return 0;
-                if (!bigos::proc::copy_to_current_user_buffer(__buffer, &ch, 1))
+                if (!bigos::proc::copy_to_current_user_buffer(__buffer, bounded, (size_t)r))
                     return -bigos::EFAULT;
-                return 1;
+                return r;
             }
 
             char bounded[SYS_IO_MAX_LEN];
@@ -654,6 +657,27 @@ namespace sys {
             return bigos::terminal::set_foreground_pgid((uint32_t)__pgid);
         }
 
+        static int64_t sys_tcgetmode(uint64_t __out) noexcept {
+            if (!bigos::proc::validate_user_io_buffer(__out, sizeof(bigos::terminal::TerminalMode)))
+                return -bigos::EFAULT;
+            bigos::terminal::TerminalMode mode{};
+            const int64_t status = bigos::terminal::get_input_mode(&mode);
+            if (status < 0)
+                return status;
+            if (!bigos::proc::copy_to_current_user_buffer(__out, &mode, sizeof(mode)))
+                return -bigos::EFAULT;
+            return 0;
+        }
+
+        static int64_t sys_tcsetmode(uint64_t __mode) noexcept {
+            if (!bigos::proc::validate_user_buffer(__mode, sizeof(bigos::terminal::TerminalMode)))
+                return -bigos::EFAULT;
+            bigos::terminal::TerminalMode mode{};
+            if (!bigos::proc::copy_current_user_buffer(__mode, &mode, sizeof(mode)))
+                return -bigos::EFAULT;
+            return bigos::terminal::set_input_mode(mode);
+        }
+
         // sys_kill: deliver signo to the target pid after enforcing the
         // cred::may_signal decision (the single permission enforcement point).
         // Target lookup precedes the permission check: an absent target is
@@ -998,6 +1022,12 @@ namespace sys {
                 break;
             case SYS_TCSETPGRP:
                 result = __detail::sys_tcsetpgrp(__frame->rdi);
+                break;
+            case SYS_TCGETMODE:
+                result = __detail::sys_tcgetmode(__frame->rdi);
+                break;
+            case SYS_TCSETMODE:
+                result = __detail::sys_tcsetmode(__frame->rdi);
                 break;
             case SYS_KILL:
                 result = __detail::sys_kill(__frame->rdi, __frame->rsi);

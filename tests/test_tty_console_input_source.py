@@ -148,6 +148,27 @@ def test_tty_ring_buffer_is_fixed_capacity_fifo_and_drops_new_input() -> None:
         assert token not in enqueue_body
 
 
+def test_terminal_mode_state_is_fixed_size_and_canonical_by_default() -> None:
+    tty_h = read_source('include/bigos/tty.h')
+    tty = read_source('kernel/core/terminal/tty.cc')
+
+    assert 'TERMINAL_MODE_ABI_VERSION = 1' in tty_h
+    assert 'TERMINAL_MODE_CANONICAL = 0' in tty_h
+    assert 'TERMINAL_MODE_RAW = 1' in tty_h
+    assert 'enum class TerminalInputMode : uint32_t' in tty_h
+    assert 'struct TerminalMode' in tty_h
+    assert 'TerminalInputMode g_input_mode = TerminalInputMode::Canonical;' in tty
+    assert 'g_input_mode = TerminalInputMode::Canonical;' in tty
+    assert 'mode.size != sizeof(TerminalMode)' in tty
+    assert 'mode.version != TERMINAL_MODE_ABI_VERSION' in tty
+    assert 'mode.flags != TERMINAL_MODE_FLAG_NONE' in tty
+    assert 'return -bigos::EINVAL;' in tty
+
+    mode_body = tty[tty.index('int64_t set_input_mode') : tty.index('uint32_t foreground_pgid')]
+    for token in ('kmalloc', 'alloc_kernel_pages', 'bigos::vfs', 'console_render_backend'):
+        assert token not in mode_body
+
+
 def test_tty_char_consumers_handle_scrollback_events_without_byte_leakage() -> None:
     tty = read_source('kernel/core/terminal/tty.cc')
 
@@ -160,6 +181,26 @@ def test_tty_char_consumers_handle_scrollback_events_without_byte_leakage() -> N
     assert 'case TerminalControl::ScrollEnd:' in tty
     assert 'console_scroll_end();' in tty
     assert tty.count('return ConsumeResult::Ignored;') >= 5
+
+
+def test_raw_mode_delivers_control_bytes_without_canonical_side_effects() -> None:
+    tty_h = read_source('include/bigos/tty.h')
+    tty = read_source('kernel/core/terminal/tty.cc')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+
+    assert 'bool read_raw_char(char *out) noexcept;' in tty_h
+    assert 'int read_raw_available_blocking(char *out, size_t capacity, timer::tick_t timeout_ticks = 0) noexcept;' in tty_h
+    assert 'consume_record_as_raw_char' in tty
+    assert '*out = 0x03;' in tty
+    assert '*out = 0x04;' in tty
+    assert 'set_raw_sequence("\\x1b[5~", 4);' in tty
+    assert 'console_scroll_page_up();' in tty
+    raw_body = tty[tty.index('bool consume_record_as_raw_char') : tty.index('bool mode_object_valid')]
+    assert 'signal_process_group_from_current' not in raw_body
+    assert 'console_scroll_page_up' not in raw_body
+    assert 'console_scroll_page_down' not in raw_body
+    assert 'read_raw_available_blocking(bounded, (size_t)__len, 0)' in syscall
+    assert 'input_mode() == bigos::terminal::TerminalInputMode::Raw' in syscall
 
 
 def test_tty_blocking_consumer_is_additive_and_uses_wait_queue() -> None:

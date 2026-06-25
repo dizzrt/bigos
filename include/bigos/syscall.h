@@ -102,6 +102,8 @@ namespace bigos::sys {
         SYS_FCNTL = 48,         // bounded fd-control: F_GETFD/F_SETFD/F_DUPFD over process-local fd entries
         SYS_ACCESS = 49,        // (path, mode) -> bounded path visibility/permission check through VFS metadata/open rules
         SYS_TRUNCATE = 50,      // (path, length) -> bounded /rw regular-file truncate by path, or negative errno
+        SYS_TCGETMODE = 51,     // (struct TerminalMode *out) -> default terminal canonical/raw mode snapshot
+        SYS_TCSETMODE = 52,     // (const struct TerminalMode *mode) -> set default terminal mode with foreground checks
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

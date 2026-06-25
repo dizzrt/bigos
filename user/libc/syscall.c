@@ -387,6 +387,22 @@ int tcsetpgrp(int fd, pid_t pgid) {
     return (int)errno_translate(syscall1(SYS_TCSETPGRP, (long)pgid));
 }
 
+int bigos_tcgetmode(struct bigos_terminal_mode *out) {
+    if (out == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (int)errno_translate(syscall1(SYS_TCGETMODE, (long)out));
+}
+
+int bigos_tcsetmode(const struct bigos_terminal_mode *mode) {
+    if (mode == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (int)errno_translate(syscall1(SYS_TCSETMODE, (long)mode));
+}
+
 int getuid(void) {
     return (int)errno_translate(syscall0(SYS_GETUID));
 }

@@ -12,10 +12,10 @@
  * variable expansion, globbing, or scripting control flow. */
 #include "libc.h"
 
-#define SH_MAX_LINE     256
-#define SH_MAX_ARGC     32
-#define SH_PATH_MAX     256
-#define SH_DEFAULT_PATH "/bin"
+#define SH_MAX_LINE            256
+#define SH_MAX_ARGC            32
+#define SH_PATH_MAX            256
+#define SH_DEFAULT_PATH        "/bin"
 #define SH_READ_LINE_TOO_LONG  (-1)
 #define SH_READ_LINE_EOF       (-2)
 #define SH_READ_LINE_INTERRUPT (-3)
@@ -51,17 +51,33 @@ static void restore_child_signal_policy(void) {
     sigaction(SIGINT, &act, NULL);
 }
 
+static int restore_terminal_canonical(void) {
+    struct bigos_terminal_mode mode = {
+        sizeof(struct bigos_terminal_mode),
+        BIGOS_TERMINAL_MODE_ABI_VERSION,
+        BIGOS_TERMINAL_MODE_CANONICAL,
+        BIGOS_TERMINAL_MODE_FLAG_NONE,
+    };
+    if (bigos_tcsetmode(&mode) != 0) {
+        sh_errno_error("sh: terminal mode restore failed", NULL, errno);
+        return -1;
+    }
+    return 0;
+}
+
 static void setup_shell_foreground(void) {
     (void)setsid();
     pid_t pgid = getpgrp();
     if (pgid > 0 && tcsetpgrp(0, pgid) != 0)
         sh_errno_error("sh: foreground setup failed", NULL, errno);
+    (void)restore_terminal_canonical();
 }
 
 static void restore_shell_foreground(void) {
     pid_t pgid = getpgrp();
     if (pgid > 0 && tcsetpgrp(0, pgid) != 0)
         sh_errno_error("sh: foreground restore failed", NULL, errno);
+    (void)restore_terminal_canonical();
 }
 
 static void write_all(int fd, const char *s) {
