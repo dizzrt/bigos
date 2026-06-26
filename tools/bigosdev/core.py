@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import platform
 import shlex
 import shutil
 import signal
@@ -266,6 +267,7 @@ SMOKE_OPTIONS = (
     'fs_smoke',
     'block_io_request_smoke',
     'virtio_blk_smoke',
+    'virtio_net_smoke',
     'modern_storage_backend_smoke',
     'demand_paging_smoke',
     'file_backed_mapping_smoke',
@@ -461,6 +463,29 @@ RUNTIME_SMOKE_MATRIX = (
             'if=none,id=virtioblk,file=build/test/virtio-blk.raw,format=raw',
             '-device',
             'virtio-blk-pci,drive=virtioblk,disable-modern=off',
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='modern-virtio-net',
+        title='Modern virtio-net network driver',
+        switches=('virtio_net_smoke',),
+        expected_marker='BIGOS_VIRTIO_NET_PASSED',
+        timeout_seconds=35.0,
+        risk_area='modern-only virtio PCI transport, split RX/TX virtqueues, MSI-X completion, and TAP-backed frames',
+        validation_markers=(
+            'BIGOS_VIRTIO_NET_PUBLISHED',
+            'BIGOS_VIRTIO_NET_PASSED',
+        ),
+        proc_boundary=(
+            'default-off kernel-thread smoke over an internal VirtioNetValidation role; requires a QEMU '
+            'modern virtio-net PCI device with MSI-X and a prepared TAP backend, and does not expose sockets, '
+            'fd types, device nodes, network configuration commands, or protocol-stack semantics'
+        ),
+        qemu_extra=(
+            '-netdev',
+            'tap,id=bigosnet,ifname=bigos-tap0,script=no,downscript=no',
+            '-device',
+            'virtio-net-pci,netdev=bigosnet,disable-modern=off,mac=52:54:00:12:34:56',
         ),
     ),
     RuntimeSmokeCase(
@@ -2092,8 +2117,12 @@ def modern_storage_validation_case(case: RuntimeSmokeCase) -> bool:
     return any('virtio-blk-pci' in arg for arg in case.qemu_extra)
 
 
+def modern_network_validation_case(case: RuntimeSmokeCase) -> bool:
+    return any('virtio-net-pci' in arg for arg in case.qemu_extra)
+
+
 def modern_storage_preflight(case: RuntimeSmokeCase) -> str:
-    if not modern_storage_validation_case(case):
+    if not modern_storage_validation_case(case) and not modern_network_validation_case(case):
         return ''
     qemu = shutil.which('qemu-system-x86_64')
     if qemu is None:
@@ -2112,8 +2141,22 @@ def modern_storage_preflight(case: RuntimeSmokeCase) -> str:
         return f'cannot query QEMU device models: {exc}'
     if result.returncode != 0:
         return f'cannot query QEMU device models: exit {result.returncode}'
-    if 'virtio-blk-pci' not in result.stdout:
+    if modern_storage_validation_case(case) and 'virtio-blk-pci' not in result.stdout:
         return 'QEMU does not report virtio-blk-pci device model support'
+    if modern_network_validation_case(case) and 'virtio-net-pci' not in result.stdout:
+        return 'QEMU does not report virtio-net-pci device model support'
+    if modern_network_validation_case(case) and not (PROJECT_ROOT / 'tools' / 'virtio_net_tap.py').exists():
+        return 'missing TAP setup helper: tools/virtio_net_tap.py'
+    if modern_network_validation_case(case) and platform.system().lower() != 'linux':
+        return (
+            'TAP-backed virtio-net smoke requires Linux host TAP support; '
+            'run tools/virtio_net_tap.py prepare on a supported host'
+        )
+    if modern_network_validation_case(case) and not Path('/dev/net/tun').exists():
+        return (
+            'missing /dev/net/tun for TAP-backed virtio-net smoke; '
+            'run tools/virtio_net_tap.py prepare with sufficient permissions'
+        )
     return ''
 
 
@@ -2400,8 +2443,8 @@ def run_runtime_smoke_case(case: RuntimeSmokeCase, args: argparse.Namespace) -> 
                 exit_status='not run',
                 failed_stage='modern storage preflight',
                 skip_reason=modern_preflight_reason,
-                alternative_checks='tool availability and source-level modern storage checks were recorded',
-                residual_risk='modern storage emulator marker was not observed',
+                alternative_checks='tool availability and source-level modern virtio checks were recorded',
+                residual_risk='modern virtio emulator marker was not observed',
                 observed_markers=(),
             )
         run_command('runtime smoke config', runtime_smoke_xmake_config(case), PROJECT_ROOT)

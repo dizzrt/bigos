@@ -5,6 +5,7 @@
 #include <drivers/block/ata_pio.h>
 #include <drivers/block/ram_block_device.h>
 #include <drivers/block/virtio_blk.h>
+#include <drivers/net/virtio_net.h>
 #include <drivers/timer/pit.h>
 #include <drivers/video/vga.h>
 
@@ -22,6 +23,7 @@ namespace {
     driver::block::AtaPioDevice g_persistent_ata = {};
     driver::block::RamBlockDevice g_ram_validation_block = {};
     driver::block::VirtioBlkDevice g_virtio_blk_validation = {};
+    driver::net::VirtioNetDevice g_virtio_net_validation = {};
     uint8_t g_ram_validation_storage
         [driver::block::RAM_BLOCK_DEFAULT_SECTORS * driver::block::DEFAULT_SECTOR_SIZE] = {};
 
@@ -102,6 +104,8 @@ namespace {
                 return __role == DeviceRole::VgaText;
             case DriverId::CmosRtc:
                 return __role == DeviceRole::CmosRtc;
+            case DriverId::VirtioNet:
+                return __role == DeviceRole::VirtioNetValidation;
             default:
                 return false;
         }
@@ -184,6 +188,24 @@ namespace {
         return bigos::device::publish(__device, &g_rtc_interface);
     }
 
+    bigos::device::Status virtio_net_probe(bigos::device::Device *__device) noexcept {
+        if (__device == nullptr || __device->descriptor.role != bigos::device::DeviceRole::VirtioNetValidation)
+            return bigos::device::Status::InvalidArgument;
+        driver::net::VirtioNetDevice *virtio =
+            (driver::net::VirtioNetDevice *)__device->descriptor.private_data;
+        if (virtio == nullptr)
+            return bigos::device::Status::InvalidArgument;
+
+        const driver::net::VirtioNetStatus status = driver::net::virtio_net_init(virtio);
+        if (status != driver::net::VirtioNetStatus::Ok) {
+            bigos::serial_puts("BIGOS_VIRTIO_NET_UNAVAILABLE ");
+            bigos::serial_puts(driver::net::virtio_net_status_name(status));
+            bigos::serial_puts("\n");
+            return bigos::device::Status::ProbeFailed;
+        }
+        return bigos::device::publish(__device, &virtio->net);
+    }
+
     void register_builtin_devices() noexcept {
         using namespace bigos::device;
         const DeviceDescriptor devices[] = {
@@ -194,6 +216,7 @@ namespace {
             {DeviceClass::Timer, DeviceRole::PitTimer, 0, 0, nullptr},
             {DeviceClass::Video, DeviceRole::VgaText, 0, 0, nullptr},
             {DeviceClass::Rtc, DeviceRole::CmosRtc, 0, 0, nullptr},
+            {DeviceClass::Network, DeviceRole::VirtioNetValidation, 0, 0, &g_virtio_net_validation},
         };
         for (uint32_t i = 0; i < sizeof(devices) / sizeof(devices[0]); i++)
             (void)register_device(&devices[i]);
@@ -208,6 +231,7 @@ namespace {
             {DeviceClass::Timer, DriverId::Pit, &pit_probe, "pit"},
             {DeviceClass::Video, DriverId::VgaText, &vga_probe, "vga-text"},
             {DeviceClass::Rtc, DriverId::CmosRtc, &rtc_probe, "cmos-rtc"},
+            {DeviceClass::Network, DriverId::VirtioNet, &virtio_net_probe, "virtio-net-modern-validation"},
         };
         for (uint32_t i = 0; i < sizeof(drivers) / sizeof(drivers[0]); i++)
             (void)register_driver(&drivers[i]);
@@ -296,14 +320,15 @@ namespace device {
         Status first_error = Status::Success;
         for (uint32_t i = 0; i < g_registry.device_count; i++) {
             Device &device = g_registry.devices[i];
-            if (device.state == DeviceState::Published)
-                continue;
-            if (__context == ProbeContext::KernelInit &&
-                device.descriptor.role == DeviceRole::VirtioBlkValidationBlock)
-                continue;
-            const Status status = probe(device.descriptor.device_class, device.descriptor.role, __context);
-            if (status != Status::Success && first_error == Status::Success)
-                first_error = status;
+            const bool skip_validation_role =
+                __context == ProbeContext::KernelInit &&
+                (device.descriptor.role == DeviceRole::VirtioBlkValidationBlock ||
+                    device.descriptor.role == DeviceRole::VirtioNetValidation);
+            if (device.state != DeviceState::Published && !skip_validation_role) {
+                const Status status = probe(device.descriptor.device_class, device.descriptor.role, __context);
+                if (status != Status::Success && first_error == Status::Success)
+                    first_error = status;
+            }
         }
         return first_error;
     }
@@ -359,6 +384,13 @@ namespace device {
         if (find_interface(DeviceClass::Rtc, __role, &iface) != Status::Success)
             return nullptr;
         return (const RtcInterface *)iface;
+    }
+
+    NetworkDevice *network(DeviceRole __role) noexcept {
+        const void *iface = nullptr;
+        if (find_interface(DeviceClass::Network, __role, &iface) != Status::Success)
+            return nullptr;
+        return (NetworkDevice *)iface;
     }
 
     void init_pit_timer() noexcept {

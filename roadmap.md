@@ -392,9 +392,9 @@ a minimal socket interface.
 
 用户可见目标：用户程序可通过最小 socket 接口进行基础网络通信。
 
-- [ ] Task M11.1: a network device driver such as virtio-net on the device and
+- [x] Task M11.1: a network device driver such as virtio-net on the device and
   interrupt-driven I/O framework.
-- [ ] 任务 M11.1：基于设备与中断驱动 I/O 框架的网络设备驱动，如 virtio-net。
+- [x] 任务 M11.1：基于设备与中断驱动 I/O 框架的网络设备驱动，如 virtio-net。
 - [ ] Task M11.2: a bounded network protocol path sufficient for basic
   communication, without claiming a complete network stack.
 - [ ] 任务 M11.2：足以支撑基础通信的有界网络协议路径，不声称完整网络栈。

@@ -6,6 +6,7 @@
 #include <drivers/block/block_device.h>
 #include <drivers/pci/config.h>
 #include <drivers/pci/msix.h>
+#include <drivers/virtio/pci.h>
 
 NAMESPACE_DRIVER_BEG
 namespace block {
@@ -28,13 +29,6 @@ namespace block {
         DeviceError,
     };
 
-    struct VirtqDesc {
-        uint64_t addr;
-        uint32_t len;
-        uint16_t flags;
-        uint16_t next;
-    } __attribute__((packed));
-
     struct VirtqAvail {
         uint16_t flags;
         uint16_t idx;
@@ -42,15 +36,10 @@ namespace block {
         uint16_t used_event;
     } __attribute__((packed));
 
-    struct VirtqUsedElem {
-        uint32_t id;
-        uint32_t len;
-    } __attribute__((packed));
-
     struct VirtqUsed {
         uint16_t flags;
         uint16_t idx;
-        VirtqUsedElem ring[VIRTIO_BLK_QUEUE_SIZE];
+        driver::virtio::VirtqUsedElem ring[VIRTIO_BLK_QUEUE_SIZE];
         uint16_t avail_event;
     } __attribute__((packed));
 
@@ -78,6 +67,8 @@ namespace block {
     struct VirtioBlkDevice {
         BlockDevice block;
         driver::pci::FunctionAddress pci_address;
+        driver::virtio::Transport transport;
+        driver::virtio::QueueRef queue_ref;
         volatile uint32_t lock;
         bool initialized;
         bool msix_enabled;
@@ -97,7 +88,7 @@ namespace block {
         volatile void *device_cfg;
         uint64_t queue_phys;
         uint8_t *queue_mem;
-        VirtqDesc *desc;
+        driver::virtio::VirtqDesc *desc;
         VirtqAvail *avail;
         VirtqUsed *used;
         VirtioBlkSlot slots[VIRTIO_BLK_REQUEST_SLOTS];

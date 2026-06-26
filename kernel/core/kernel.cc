@@ -27,6 +27,7 @@
 #include <ktl/buffer.h>
 #include <drivers/block/ram_block_device.h>
 #include <drivers/block/virtio_blk.h>
+#include <drivers/net/virtio_net.h>
 #include <drivers/pci/config.h>
 #include <drivers/pci/msix.h>
 #include <drivers/video/vga.h>
@@ -1714,6 +1715,14 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_VIRTIO_NET_SMOKE
+namespace {
+    void virtio_net_smoke_entry(void *) noexcept {
+        (void)driver::net::virtio_net_smoke();
+    }
+}   // namespace
+#endif
+
 #ifdef BIGOS_PCI_CONFIG_VECTOR_SMOKE
 namespace {
     void pci_vector_smoke_irq_handler(bigos::irq::InterruptFrame *__frame) noexcept {
@@ -1952,6 +1961,13 @@ void kernel(const BootInfoHeader *boot_info) {
     // roles remain ATA-backed and do not depend on this internal validation role.
     if (bigos::sched::create_kernel_thread(&virtio_blk_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_VIRTIO_BLK_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_VIRTIO_NET_SMOKE
+    // Validation-only modern virtio-net smoke. Default boot, storage,
+    // filesystem, and userland remain independent of this internal network role.
+    if (bigos::sched::create_kernel_thread(&virtio_net_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_VIRTIO_NET_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_WRITABLE_FS_SMOKE

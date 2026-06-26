@@ -15,6 +15,7 @@ namespace device {
         Timer,
         Video,
         Rtc,
+        Network,
     };
 
     // Kernel-internal stable roles. These are registry keys only; they are not
@@ -27,6 +28,7 @@ namespace device {
         PitTimer,
         VgaText,
         CmosRtc,
+        VirtioNetValidation,
     };
 
     enum class DeviceState : uint32_t {
@@ -60,6 +62,7 @@ namespace device {
         Pit,
         VgaText,
         CmosRtc,
+        VirtioNet,
     };
 
     struct Device;
@@ -104,6 +107,59 @@ namespace device {
         bool (*read_time)(driver::rtc::DateTime *__out) noexcept;
     };
 
+    enum class NetworkTxStatus : uint32_t {
+        Success = 0,
+        InvalidFrame,
+        NoSlot,
+        NotReady,
+        IssueFailure,
+        Timeout,
+        DeviceError,
+    };
+
+    enum class NetworkRxStatus : uint32_t {
+        Success = 0,
+        NoFrame,
+        InvalidArgument,
+        NotReady,
+        Malformed,
+        StaleGeneration,
+        OwnershipError,
+        DeviceError,
+    };
+
+    struct NetworkRxFrame {
+        const uint8_t *data;
+        uint32_t length;
+        uint16_t slot;
+        uint32_t generation;
+    };
+
+    struct NetworkDiagnostics {
+        uint32_t tx_submitted;
+        uint32_t tx_completed;
+        uint32_t tx_timeout;
+        uint32_t tx_rejected;
+        uint32_t rx_completed;
+        uint32_t rx_malformed;
+        uint32_t completion_rejected;
+        NetworkTxStatus last_tx_status;
+        NetworkRxStatus last_rx_status;
+    };
+
+    struct NetworkDevice {
+        void *context;
+        bool (*ready)(NetworkDevice *__device) noexcept;
+        bool (*link_up)(NetworkDevice *__device) noexcept;
+        const uint8_t *(*mac)(NetworkDevice *__device) noexcept;
+        uint16_t (*mtu)(NetworkDevice *__device) noexcept;
+        NetworkTxStatus (*transmit)(
+            NetworkDevice *__device, const void *__frame, uint32_t __len, uint64_t __timeout_ticks) noexcept;
+        NetworkRxStatus (*poll_rx)(NetworkDevice *__device, NetworkRxFrame *__out) noexcept;
+        NetworkRxStatus (*return_rx)(NetworkDevice *__device, const NetworkRxFrame *__frame) noexcept;
+        void (*diagnostics)(NetworkDevice *__device, NetworkDiagnostics *__out) noexcept;
+    };
+
     // Bounded kernel-internal registration/probe boundary only. This is not a
     // hotplug layer, PCI/ACPI enumeration, complete bus model, async I/O layer,
     // SMP-safe registry, or user-visible device node API.
@@ -120,6 +176,7 @@ namespace device {
     const TimerInterface *timer(DeviceRole __role) noexcept;
     const VideoTextInterface *video_text(DeviceRole __role) noexcept;
     const RtcInterface *rtc(DeviceRole __role) noexcept;
+    NetworkDevice *network(DeviceRole __role) noexcept;
 
     void init_pit_timer() noexcept;
     void clear_video_text() noexcept;

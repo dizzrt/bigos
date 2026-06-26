@@ -146,6 +146,11 @@ if has_config("virtio_blk_smoke") then
     add_defines("BIGOS_VIRTIO_BLK_SMOKE")
 end
 
+if has_config("virtio_net_smoke") then
+    add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
+    add_defines("BIGOS_VIRTIO_NET_SMOKE")
+end
+
 if has_config("modern_storage_backend_smoke") then
     add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
     add_defines("BIGOS_MODERN_STORAGE_BACKEND_SMOKE")

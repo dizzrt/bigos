@@ -16,25 +16,27 @@ def read_source(relative: str) -> str:
 
 def test_virtio_blk_is_modern_only_and_uses_pci_capabilities() -> None:
     source = read_source('kernel/drivers/block/virtio_blk.cc')
+    helper = read_source('kernel/drivers/virtio/pci.cc')
+    helper_h = read_source('include/drivers/virtio/pci.h')
 
-    assert 'VIRTIO_PCI_MODERN_BLK_DEVICE_ID = 0x1042' in source
-    assert 'VIRTIO_PCI_TRANSITIONAL_BLK_DEVICE_ID = 0x1001' in source
-    assert 'VIRTIO_PCI_CAPABILITY_ID = 0x09' in source
-    assert 'VIRTIO_PCI_CAP_COMMON_CFG' in source
-    assert 'VIRTIO_PCI_CAP_NOTIFY_CFG' in source
-    assert 'VIRTIO_PCI_CAP_ISR_CFG' in source
-    assert 'VIRTIO_PCI_CAP_DEVICE_CFG' in source
-    assert 'parse_virtio_caps' in source
-    assert 'driver::pci::read_capabilities' in source
-    assert 'driver::pci::read_bar' in source
-    assert 'map_device_mmio' in source
-    assert 'DeviceMmioCachePolicy::Uncached' in source
-    assert 'VIRTIO_F_VERSION_1_BIT = 32' in source
-    assert 'VIRTIO_STATUS_FEATURES_OK' in source
-    assert 'VIRTIO_STATUS_DRIVER_OK' in source
-    assert 'set_failed(__device)' in source
-    assert 'VIRTIO_PCI_TRANSITIONAL_BLK_DEVICE_ID' in source
-    assert 'parse_virtio_caps(__device->pci_address, &caps)' in source
+    assert 'PCI_MODERN_BLK_DEVICE_ID = 0x1042' in helper_h
+    assert 'PCI_TRANSITIONAL_BLK_DEVICE_ID = 0x1001' in helper_h
+    assert 'PCI_CAPABILITY_ID = 0x09' in helper_h
+    assert 'PCI_CAP_COMMON_CFG' in helper_h
+    assert 'PCI_CAP_NOTIFY_CFG' in helper_h
+    assert 'PCI_CAP_ISR_CFG' in helper_h
+    assert 'PCI_CAP_DEVICE_CFG' in helper_h
+    assert 'parse_modern_pci_caps' in source
+    assert 'driver::pci::read_capabilities' in helper
+    assert 'driver::pci::read_bar' in helper
+    assert 'map_device_mmio' in helper
+    assert 'DeviceMmioCachePolicy::Uncached' in helper
+    assert 'F_VERSION_1_BIT = 32' in helper_h
+    assert 'STATUS_FEATURES_OK' in helper_h
+    assert 'STATUS_DRIVER_OK' in helper_h
+    assert 'set_failed(&__device->transport)' in source
+    assert 'PCI_TRANSITIONAL_BLK_DEVICE_ID' in source
+    assert 'driver::virtio::parse_modern_pci_caps(__device->pci_address, &caps)' in source
 
 
 def test_virtqueue_uses_bounded_physical_dma_and_request_tokens() -> None:
@@ -43,20 +45,18 @@ def test_virtqueue_uses_bounded_physical_dma_and_request_tokens() -> None:
 
     assert 'VIRTIO_BLK_QUEUE_SIZE = 32' in header
     assert 'VIRTIO_BLK_REQUEST_SLOTS = bigos::block_io::QUEUE_CAPACITY_PER_DEVICE' in header
-    assert 'struct VirtqDesc' in header
+    assert 'driver::virtio::VirtqDesc *desc;' in header
     assert 'struct VirtqAvail' in header
     assert 'struct VirtqUsed' in header
     assert 'CompletionToken token;' in header
     assert 'alloc_physical_order(VIRTIO_QUEUE_PAGE_ORDER, 0)' in source
     assert 'alloc_physical_order(0, 0)' in source
     assert 'phys_to_direct' in source
-    assert 'queue_desc = __device->queue_phys' in source
-    assert 'queue_driver = __device->queue_phys +' in source
-    assert 'queue_device = __device->queue_phys +' in source
+    assert 'driver::virtio::configure_split_queue' in source
     assert 'entry.token = *__token' in source
     assert 'dev->desc[head]' in source
     assert 'dev->avail->ring[dev->avail_idx % dev->queue_size] = head' in source
-    assert '*dev->notify = 0' in source
+    assert 'driver::virtio::notify_queue(dev->queue_ref)' in source
     assert '__request->sector_count != 1' in source
 
 
@@ -68,7 +68,7 @@ def test_msix_completion_path_is_irq_safe_and_lapic_owned() -> None:
     assert 'driver::pci::msix::find_capability' in source
     assert 'driver::pci::msix::map_table_and_pba' in source
     assert 'driver::pci::msix::allocate_and_program_entry' in source
-    assert 'cfg->queue_msix_vector = __device->completion_vector.entry_index' in source
+    assert 'driver::virtio::set_queue_msix_vector' in source
     assert 'set_enable(__device->msix_info, true)' in source
     assert 'set_entry_mask(' in source
 
