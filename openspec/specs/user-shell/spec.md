@@ -82,28 +82,6 @@ BigOS shell SHALL let supported command execution, explicit path commands, input
 - **THEN** it MUST be described as bounded BigOS shell path handling with POSIX-style `.`/`..` component support
 - **AND** MUST NOT imply full POSIX shell language, globbing, quoting, job control, terminal process groups, symlink traversal, or complete `realpath`
 
-### Requirement: 小型 pwd 用户工具
-
-BigOS userland SHALL provide a small static `/bin/pwd` user program that reports the current process cwd through the libc `getcwd` wrapper. The tool MUST print a deterministic current-directory string to stdout on success, report deterministic errno-based errors on failure, and remain within the minimal freestanding userland model. It MUST NOT require shell builtin support, hosted stdio, dynamic linking, locale, symlink-aware realpath behavior, or complete POSIX utility semantics.
-
-#### Scenario: pwd 输出当前目录
-
-- **WHEN** 用户在 shell 中执行 `/bin/pwd` 或通过 PATH 执行 `pwd`
-- **THEN** the program MUST call libc `getcwd` and write the current cwd to stdout
-- **AND** the output MUST be deterministic enough for runtime validation and manual inspection
-
-#### Scenario: pwd 在 exec 后观察继承 cwd
-
-- **WHEN** shell changes cwd with `cd` and then executes `/bin/pwd`
-- **THEN** `/bin/pwd` MUST observe the cwd preserved across `fork`/`execve`
-- **AND** the shell MUST continue its bounded read-parse-execute loop after the tool exits
-
-#### Scenario: pwd 错误路径可报告
-
-- **WHEN** `getcwd` fails because of buffer sizing, user-memory validation, or another deterministic kernel error
-- **THEN** `/bin/pwd` MUST report an errno-based failure through stderr or stdout and exit nonzero
-- **AND** MUST NOT require hosted libc error formatting or complete POSIX utility behavior
-
 ### Requirement: 经 fork+execve+wait 运行外部命令
 
 BigOS shell SHALL 对非内建命令以 `fork` 创建子进程、在子进程中以解析出的 argv `execve` 目标程序、在父进程中 `wait` 子进程结束并取得其退出状态。目标程序路径按命令查找规则确定（见"命令查找与 PATH"需求）。当 `execve` 最终失败（如目标不存在）时，子进程 MUST 确定性报错并以非零码退出，父 shell MUST 不被破坏并继续循环。
@@ -400,4 +378,32 @@ BigOS shell SHALL run supported external commands and single-pipe commands throu
 - **WHEN** 用户输入 background job、`fg`/`bg` job-control syntax 或超出 bounded shell grammar 的 terminal-control form
 - **THEN** shell MUST report deterministic unsupported behavior or command-not-supported result
 - **AND** shell MUST NOT create hidden background jobs or claim complete POSIX job control
+
+### Requirement: Shell 日常内建命令
+BigOS shell SHALL provide bounded daily-use builtins for `pwd`, `help`, `env`, `clear`, `true`, and `false` in addition to existing builtins. These builtins MUST execute inside the shell process without `fork`/`execve`, MUST support existing stdout redirection where applicable, and MUST NOT introduce full POSIX shell expansion, variables, quoting, globbing, scripting control flow, aliases, or job control.
+
+#### Scenario: pwd 内建输出 shell cwd
+- **WHEN** 用户在 shell 中运行 `pwd`
+- **THEN** shell MUST call the libc/kernel `getcwd` path in the shell process and write the current cwd to stdout
+- **AND** failure MUST be reported deterministically without terminating the shell
+
+#### Scenario: help 内建描述能力边界
+- **WHEN** 用户在 shell 中运行 `help`
+- **THEN** shell MUST print a bounded summary of supported builtins, external command execution, pipe, redirection, and unsupported shell features
+- **AND** the summary MUST NOT claim complete POSIX shell behavior
+
+#### Scenario: env 内建打印环境
+- **WHEN** 用户在 shell 中运行 `env`
+- **THEN** shell MUST print the current environment entries visible to child `execve` calls
+- **AND** it MUST NOT require hosted libc environment mutation APIs
+
+#### Scenario: clear 内建使用 ANSI 清屏
+- **WHEN** 用户在 shell 中运行 `clear`
+- **THEN** shell MUST emit a supported ANSI/CSI clear-screen and cursor-home sequence to stdout
+- **AND** the command MUST remain bounded and deterministic if stdout is redirected
+
+#### Scenario: true false 传播状态
+- **WHEN** 用户在 shell 中运行 `true` or `false`
+- **THEN** shell MUST complete without external process creation
+- **AND** `true` MUST produce success status while `false` MUST produce nonzero status observable through the existing shell status builtin
 

@@ -2,7 +2,7 @@
  *
  * Read-parse-execute loop linked against crt0 and the user libc. Supports:
  *   - whitespace tokenization into a bounded argv,
- *   - builtins: exit, echo, cd, status, sync,
+ *   - builtins: exit, echo, cd, pwd, status, sync, help, env, clear, true, false,
  *   - external commands via PATH lookup + fork + execve + wait,
  *   - a single-stage pipe a | b,
  *   - basic > / < redirection.
@@ -352,6 +352,76 @@ static int run_builtin(int argc, char **argv, int out_fd, int last_status, int *
                 *status = 1;
         }
         write_all(fd, "\n");
+        return 1;
+    }
+    if (strcmp(argv[0], "pwd") == 0) {
+        if (argc != 1) {
+            sh_error("sh: pwd: usage: pwd", NULL);
+            *status = 1;
+            return 1;
+        }
+        char cwd[SH_PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd)) == NULL) {
+            sh_errno_error("sh: pwd failed", NULL, errno);
+            *status = 1;
+            return 1;
+        }
+        int fd = out_fd >= 0 ? out_fd : 1;
+        write_all(fd, cwd);
+        write_all(fd, "\n");
+        return 1;
+    }
+    if (strcmp(argv[0], "help") == 0) {
+        if (argc != 1) {
+            sh_error("sh: help: usage: help", NULL);
+            *status = 1;
+            return 1;
+        }
+        int fd = out_fd >= 0 ? out_fd : 1;
+        write_all(fd, "BigOS shell builtins:\n");
+        write_all(fd, "  exit [code]  echo [args...]  cd PATH  pwd  status  sync\n");
+        write_all(fd, "  help  env  clear  true  false\n");
+        write_all(fd, "External commands run via PATH (default /bin) using fork/execve/wait.\n");
+        write_all(fd, "Supported syntax: whitespace argv, one pipe with |, input <, output >.\n");
+        write_all(fd, "Unsupported: quoting, variables, globbing, scripts, jobs, background tasks.\n");
+        return 1;
+    }
+    if (strcmp(argv[0], "env") == 0) {
+        if (argc != 1) {
+            sh_error("sh: env: usage: env", NULL);
+            *status = 1;
+            return 1;
+        }
+        int fd = out_fd >= 0 ? out_fd : 1;
+        if (environ != NULL) {
+            for (char **e = environ; *e != NULL; e++) {
+                write_all(fd, *e);
+                write_all(fd, "\n");
+            }
+        }
+        return 1;
+    }
+    if (strcmp(argv[0], "clear") == 0) {
+        if (argc != 1) {
+            sh_error("sh: clear: usage: clear", NULL);
+            *status = 1;
+            return 1;
+        }
+        int fd = out_fd >= 0 ? out_fd : 1;
+        write_all(fd, "\033[2J\033[H");
+        return 1;
+    }
+    if (strcmp(argv[0], "true") == 0) {
+        if (argc != 1) {
+            sh_error("sh: true: usage: true", NULL);
+            *status = 1;
+        }
+        return 1;
+    }
+    if (strcmp(argv[0], "false") == 0) {
+        if (argc != 1)
+            sh_error("sh: false: usage: false", NULL);
+        *status = 1;
         return 1;
     }
     if (strcmp(argv[0], "cd") == 0) {

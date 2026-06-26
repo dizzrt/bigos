@@ -14,10 +14,37 @@ def test_smoke_probe_programs_are_packaged_only_for_userland_smoke() -> None:
     for name in ('args', 'env', 'out', 'errno', 'exit', 'libc_subset'):
         assert f'"{name}"' in xmake
         assert f"'{name}'" in boot_debug
-    for name in ('cat', 'ls', 'mkdir', 'rm', 'stat', 'pwd'):
+    for name in (
+        'cat',
+        'ls',
+        'mkdir',
+        'rm',
+        'stat',
+        'cp',
+        'mv',
+        'tee',
+        'write',
+        'append',
+        'head',
+        'tail',
+        'wc',
+        'grep',
+        'hexdump',
+        'date',
+        'kill',
+        'sleep',
+        'basename',
+        'dirname',
+        'more',
+        'find',
+        'du',
+    ):
         assert f'"{name}"' in xmake
         assert f'user", "bin", "{name}.c"' in xmake
         assert f"'{name}'" in boot_debug
+    assert '"pwd"' not in xmake
+    assert 'user", "bin", "pwd.c"' not in xmake
+    assert "'pwd'" not in boot_debug
 
     assert 'path.join(projectdir, "user", "smoke", "bin"' in xmake
     assert 'if has_config("userland_smoke") then' in xmake
@@ -231,7 +258,7 @@ def test_userland_smoke_runs_smoke_probes_directly_and_through_shell() -> None:
     assert 'fstat(fd, &st)' in smoke
     assert 'if (sync() != 0)' in smoke
     assert 'write_all_or_exit(input[1], "cd /rw\\n");' in smoke
-    assert 'write_all_or_exit(input[1], "/bin/pwd\\n");' in smoke
+    assert 'write_all_or_exit(input[1], "pwd\\n");' in smoke
     assert 'write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\\n");' in smoke
     assert 'write_all_or_exit(input[1], "mkdir smoke_shell_path_dir/nested\\n");' in smoke
     assert 'write_all_or_exit(input[1], "ls smoke_shell_path_dir > smoke_shell_ls_rw.txt\\n");' in smoke

@@ -19,8 +19,10 @@ environment.
 - `user/sh/sh.c`: bounded interactive shell with builtins, cwd-aware PATH lookup,
   `fork` + `execve` + `wait`, one-stage pipes, and basic `<` / `>` redirection.
 - `user/bin/*`: small packaged user binaries such as `/bin/echo`, `/bin/cat`,
-  `/bin/ls`, `/bin/mkdir`, `/bin/rm`, `/bin/rename`, `/bin/stat`, and
-  `/bin/pwd`.
+  `/bin/ls`, `/bin/mkdir`, `/bin/rm`, `/bin/rename`, `/bin/stat`, plus bounded
+  daily tools including `cp`, `mv`, `tee`, `write`, `append`, `head`, `tail`,
+  `wc`, `grep`, `hexdump`, `date`, `kill`, `sleep`, `basename`, `dirname`,
+  `more`, `find`, and `du`.
 - `user/smoke/bin/*`: validation-only C probes that are built and packaged under
   `/bin/smoke/*` only when the default-off `userland_smoke` path is selected.
 - `user/smoke/userland_smoke.c`: default-off deterministic validation program
@@ -88,8 +90,9 @@ The user libc mirror headers `user/libc/include/sys_nr.h` and
 
 The shell is intentionally small:
 
-- Builtins: `exit`, `echo`, and `cd`. `cd` runs in the shell process so the cwd
-  change survives the next command.
+- Builtins: `exit`, `echo`, `cd`, `pwd`, `status`, `sync`, `help`, `env`,
+  `clear`, `true`, and `false`. `cd` and `pwd` run in the shell process so cwd
+  state is observed directly by the interactive shell.
 - Prompt: deterministic `$ ` only when stdin and stdout are still connected to
   the default console fast paths.
 - Input feedback: printable characters, newline, and backspace are echoed from
@@ -104,8 +107,8 @@ The shell is intentionally small:
   the shell process group and canonical terminal input mode. This is only BigOS
   foreground-command behavior.
 - Redirection: one input `< file` and one output `> file` per command.
-- Cwd behavior: relative command paths containing `/`, redirection paths, and
-  small tools such as `/bin/pwd` use the kernel cwd contract.
+- Cwd behavior: relative command paths containing `/`, redirection paths,
+  shell builtins such as `pwd`, and external tools use the kernel cwd contract.
 - Output: builtins, child stdout, and deterministic recoverable errors use the
   existing fd/syscall path; default fd `1` and fd `2` reach the visible console
   when not redirected.
@@ -218,7 +221,11 @@ freestanding ELF64 `ET_EXEC` images using `user/crt0`, `user/libc`, and
 - `/boot/user/init.elf` for the default resident C init or the selected smoke.
 - `/bin/sh` for the interactive shell.
 - `/bin/echo`, `/bin/cat`, `/bin/ls`, `/bin/mkdir`, `/bin/rm`, `/bin/rename`,
-  `/bin/stat`, and `/bin/pwd` for normal packaged user commands.
+  `/bin/stat`, `/bin/truncate`, `/bin/mkfs_bigfs`, and the bounded daily tools
+  `cp`, `mv`, `tee`, `write`, `append`, `head`, `tail`, `wc`, `grep`,
+  `hexdump`, `date`, `kill`, `sleep`, `basename`, `dirname`, `more`, `find`,
+  and `du` for normal packaged user commands. `pwd` is a shell builtin rather
+  than a packaged external program.
 - `/bin/smoke/*` probes only for the explicit `userland_smoke` validation image.
 
 The image layout remains the existing Legacy BIOS / MBR / exFAT path; the
@@ -243,8 +250,8 @@ program baseline adds behavior assertions for the smoke-only C probes: the smoke
 observes their stdout/stderr, verifies argument and environment reporting,
 verifies `errno` translation through failing wrappers and success paths that do
 not rewrite `errno`, observes the requested exit-code probe, checks cwd-relative
-open/stat/`..`, fork inheritance, exec preservation through `/bin/pwd`, shell
-`cd`, and the bounded libc subset probe for public headers, ctype, time,
+open/stat/`..`, fork inheritance, exec preservation through cwd-relative
+external program execution, shell `cd`/`pwd`, and the bounded libc subset probe for public headers, ctype, time,
 assert, unsigned conversion, stateless search helpers, formatter behavior,
 error text, directory wrappers, and failure paths. It also runs probes through
 `/bin/sh` to confirm the shell continues after a non-zero external program.

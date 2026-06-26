@@ -785,8 +785,8 @@ static void test_current_directory(char **envp) {
         fail("cwd-deleted-dotdot");
     if (getcwd(cwd, sizeof(cwd)) == NULL || strcmp(cwd, "/rw/cwd_test") != 0)
         fail("cwd-deleted-dotdot-cwd");
-    char *pwd_argv[] = {(char *)"/bin/pwd", NULL};
-    run_program("/bin/pwd", pwd_argv, envp);
+    char *cat_argv[] = {(char *)"/bin/cat", (char *)"note.txt", NULL};
+    run_program("/bin/cat", cat_argv, envp);
     if (chdir("/") != 0)
         fail("cwd-final-restore");
 }
@@ -1094,7 +1094,7 @@ static void test_smoke_shell(char **envp) {
     close(input[0]);
     close(transcript);
     write_all_or_exit(input[1], "cd /rw\n");
-    write_all_or_exit(input[1], "/bin/pwd\n");
+    write_all_or_exit(input[1], "pwd\n");
     write_all_or_exit(input[1], "mkdir smoke_shell_path_dir\n");
     write_all_or_exit(input[1], "mkdir smoke_shell_path_dir/nested\n");
     write_all_or_exit(input[1], "echo nested-ok > smoke_shell_path_dir/nested/file.txt\n");
