@@ -132,6 +132,12 @@ option("virtio_net_smoke")
     set_description("enable validation-only modern virtio-net MSI-X tap-backed network driver smoke marker")
 option_end()
 
+option("network_protocol_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only bounded Ethernet/ARP/IPv4/ICMP/UDP protocol smoke marker")
+option_end()
+
 option("modern_storage_backend_smoke")
     set_default(false)
     set_showmenu(true)

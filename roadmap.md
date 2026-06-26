@@ -395,9 +395,9 @@ a minimal socket interface.
 - [x] Task M11.1: a network device driver such as virtio-net on the device and
   interrupt-driven I/O framework.
 - [x] 任务 M11.1：基于设备与中断驱动 I/O 框架的网络设备驱动，如 virtio-net。
-- [ ] Task M11.2: a bounded network protocol path sufficient for basic
+- [x] Task M11.2: a bounded network protocol path sufficient for basic
   communication, without claiming a complete network stack.
-- [ ] 任务 M11.2：足以支撑基础通信的有界网络协议路径，不声称完整网络栈。
+- [x] 任务 M11.2：足以支撑基础通信的有界网络协议路径，不声称完整网络栈。
 - [ ] Task M11.3: a minimal user-visible socket interface integrated with the
   existing fd/syscall path within bounded semantics.
 - [ ] 任务 M11.3：在有界语义内与既有 fd/syscall 路径集成的最小用户可见 socket 接口。

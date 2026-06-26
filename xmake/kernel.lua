@@ -49,6 +49,7 @@ add_files("$(projectdir)/kernel/core/timer/**.cc")
 add_files("$(projectdir)/kernel/core/time/**.cc")
 add_files("$(projectdir)/kernel/core/fs/**.cc")
 add_files("$(projectdir)/kernel/core/ipc/**.cc")
+add_files("$(projectdir)/kernel/core/net/**.cc")
 add_files("$(projectdir)/kernel/drivers/**.cc")
 add_files("$(projectdir)/kernel/mm/**.cc")
 add_files("$(projectdir)/cpp/**.cc")
@@ -149,6 +150,10 @@ end
 if has_config("virtio_net_smoke") then
     add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
     add_defines("BIGOS_VIRTIO_NET_SMOKE")
+end
+
+if has_config("network_protocol_smoke") then
+    add_defines("BIGOS_NETWORK_PROTOCOL_SMOKE")
 end
 
 if has_config("modern_storage_backend_smoke") then

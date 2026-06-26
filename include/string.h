@@ -4,6 +4,10 @@
 #include <bigos/types.h>
 #include <bigos/attributes.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void *memset(void *_s, int _c, size_t n) noexcept;
 void *memcpy(void *_dest, const void *_src, size_t _n) noexcept;
 // void *memmove(void *_dest, const void *_src, size_t _n) noexcept;
@@ -27,5 +31,9 @@ void *memcpy(void *_dest, const void *_src, size_t _n) noexcept;
 // size_t strspn(const char *_s, const char *_accept) noexcept _attr_pure_;
 // size_t strcspn(const char *_s, const char *_reject) noexcept _attr_pure_;
 size_t strlen(const char *_s) noexcept _attr_pure_;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif   // _BIG_STRING_H

@@ -12,6 +12,7 @@
 #include <bigos/device.h>
 #include <bigos/glyph_font.h>
 #include <bigos/memory.h>
+#include <bigos/net.h>
 #include <bigos/percpu.h>
 #include <bigos/proc.h>
 #include <bigos/sched.h>
@@ -1968,6 +1969,14 @@ void kernel(const BootInfoHeader *boot_info) {
     // filesystem, and userland remain independent of this internal network role.
     if (bigos::sched::create_kernel_thread(&virtio_net_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_VIRTIO_NET_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_NETWORK_PROTOCOL_SMOKE
+    // Validation-only bounded protocol smoke. It uses the kernel-internal
+    // frame-level boundary and does not expose socket, fd, syscall, or VFS ABI.
+    if (bigos::sched::create_kernel_thread(&bigos::net::protocol_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_NETWORK_PROTOCOL_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_WRITABLE_FS_SMOKE

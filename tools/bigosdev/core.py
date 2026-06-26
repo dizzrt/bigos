@@ -268,6 +268,7 @@ SMOKE_OPTIONS = (
     'block_io_request_smoke',
     'virtio_blk_smoke',
     'virtio_net_smoke',
+    'network_protocol_smoke',
     'modern_storage_backend_smoke',
     'demand_paging_smoke',
     'file_backed_mapping_smoke',
@@ -480,6 +481,26 @@ RUNTIME_SMOKE_MATRIX = (
             'default-off kernel-thread smoke over an internal VirtioNetValidation role; requires a QEMU '
             'modern virtio-net PCI device with MSI-X and a prepared TAP backend, and does not expose sockets, '
             'fd types, device nodes, network configuration commands, or protocol-stack semantics'
+        ),
+        qemu_extra=(
+            '-netdev',
+            'tap,id=bigosnet,ifname=bigos-tap0,script=no,downscript=no',
+            '-device',
+            'virtio-net-pci,netdev=bigosnet,disable-modern=off,mac=52:54:00:12:34:56',
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='bounded-network-protocol',
+        title='Bounded network protocol path',
+        switches=('network_protocol_smoke',),
+        expected_marker='BIGOS_NETWORK_PROTOCOL_PASSED',
+        timeout_seconds=20.0,
+        risk_area='bounded Ethernet II, ARP, IPv4, ICMP echo, and kernel-internal UDP datagram path',
+        validation_markers=('BIGOS_NETWORK_PROTOCOL_PASSED',),
+        proc_boundary=(
+            'default-off kernel-thread smoke over the bounded protocol implementation; validates protocol parsing, '
+            'ARP cache behavior, ICMP echo reply, UDP bind/send/receive, and unsupported-frame rejection without '
+            'exposing sockets, fd types, syscalls, device nodes, libc socket APIs, DHCP, DNS, TCP, IPv6, or routing'
         ),
         qemu_extra=(
             '-netdev',
