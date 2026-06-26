@@ -20,7 +20,10 @@ namespace bigos {
         uint32_t reserved0;
         uint64_t size;
         uint64_t object_id;
-        uint64_t reserved[4];
+        uint64_t atime;
+        uint64_t mtime;
+        uint64_t ctime;
+        uint64_t reserved;
     };
 }   // namespace bigos
 

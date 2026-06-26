@@ -381,7 +381,7 @@ static void test_runtime_filesystem(void) {
     if (stat("/rw/runtime_dir", &st) != 0 || st.type != BIGOS_METADATA_TYPE_DIRECTORY || !S_ISDIR(st.st_mode))
         fail("runtime-stat-dir");
     if (stat("/boot/user/init.elf", &st) != 0 || st.type != BIGOS_METADATA_TYPE_REGULAR || st.st_size == 0 ||
-        st.st_object_id == 0)
+        st.st_object_id != 0)
         fail("runtime-stat-exfat");
 
     int fd = open("/rw/runtime_file.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
@@ -391,8 +391,16 @@ static void test_runtime_filesystem(void) {
     if (write(fd, payload, strlen(payload)) != (ssize_t)strlen(payload))
         fail("runtime-write");
     if (fstat(fd, &st) != 0 || st.type != BIGOS_METADATA_TYPE_REGULAR || st.st_size != strlen(payload) ||
-        st.st_uid != 0 || st.st_gid != 0 || st.st_object_id == 0)
+        st.st_uid != 0 || st.st_gid != 0 || st.st_object_id != 0 || st.st_atime == 0 || st.st_mtime == 0 ||
+        st.st_ctime == 0)
         fail("runtime-fstat-file");
+    const time_t explicit_atime = 11;
+    const time_t explicit_mtime = 22;
+    if (bigos_utimens("/rw/runtime_file.txt", explicit_atime, explicit_mtime, 0) != 0)
+        fail("runtime-utimens");
+    if (stat("/rw/runtime_file.txt", &st) != 0 || st.st_atime != (unsigned long)explicit_atime ||
+        st.st_mtime != (unsigned long)explicit_mtime || st.st_ctime == 0)
+        fail("runtime-utimens-stat");
     if (lseek(fd, 0, SEEK_CUR) != (off_t)strlen(payload))
         fail("runtime-fstat-offset");
     if (fsync(fd) != 0)

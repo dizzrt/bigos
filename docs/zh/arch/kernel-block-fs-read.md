@@ -14,7 +14,9 @@ BIOS bootloader 的 exFAT 辅助逻辑分离：bootloader 仍使用固定低地�
 - 文件系统层自动发现第一个有效 MBR exFAT 分区，校验 exFAT boot region，并
   挂载单个只读 volume。
 - exFAT 支持 root path 查找、普通文件元数据、bounded read、`NoFatChain` 连续
-  文件，以及 bounded FAT-chain 跟随。
+  文件，以及 bounded FAT-chain 跟随。VFS metadata bridge 会完整初始化 atime、
+  mtime、ctime 字段；只读 exFAT 后端当前返回文档化的 0 时间戳默认值，而不承诺完整
+  exFAT 时间戳语义。
 - API 仅支持普通内核上下文；不承诺 IRQ-handler-safe、异步、DMA、sleep 或
   SMP 语义。
 

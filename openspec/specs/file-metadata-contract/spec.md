@@ -1,15 +1,16 @@
 ## Purpose
 
-定义 BigOS 最小文件与目录元数据契约，覆盖内核 fd/VFS 查询、freestanding libc 暴露、用户态消费和行为验证。该能力只承诺当前内核与文件系统后端支持的有界 `stat`/`fstat` 风格字段，不引入完整 POSIX metadata database、符号链接、设备节点、ACL、xattr、完整时间戳语义、稳定 inode 身份或跨重启持久化承诺。
+定义 BigOS 最小文件与目录元数据契约，覆盖内核 fd/VFS 查询、freestanding libc 暴露、用户态消费和行为验证。该能力只承诺当前内核与文件系统后端支持的有界 `stat`/`fstat` 风格字段，不引入完整 POSIX metadata database、符号链接、设备节点、ACL、xattr、纳秒级或完整 POSIX 时间戳语义、稳定 inode 身份或跨重启持久化承诺。
 ## Requirements
 ### Requirement: 最小元数据结构
 
-BigOS SHALL define a bounded file metadata structure for user-visible `stat`/`fstat` style queries. The structure MUST use fixed-width fields, MUST be fully initialized before copying to user memory, and MUST expose only the bounded subset supported by the current kernel and filesystem backends: object type, size, mode, uid, gid, bounded link count or default value, user-visible object identifier fixed to zero in the first version, and explicit reserved zero fields. The structure MUST NOT imply complete POSIX `struct stat` compatibility, device-node semantics, symbolic links, ACLs, extended attributes, complete timestamp semantics, stable inode numbers, or persistent inode identity.
+BigOS SHALL define a bounded file metadata structure for user-visible `stat`/`fstat` style queries. The structure MUST use fixed-width fields, MUST be fully initialized before copying to user memory, and MUST expose only the bounded subset supported by the current kernel and filesystem backends: object type, size, mode, uid, gid, bounded link count or default value, user-visible object identifier fixed to zero in the first version, bounded timestamp fields `atime`, `mtime`, and `ctime` expressed as Unix epoch seconds, and explicit reserved zero fields. The structure MUST NOT imply complete POSIX `struct stat` compatibility, device-node semantics, symbolic links, ACLs, extended attributes, nanosecond timestamp precision, timezone conversion, complete POSIX timestamp semantics, stable inode numbers, or persistent inode identity.
 
 #### Scenario: 常规文件元数据字段有界
 
 - **WHEN** a caller queries metadata for an existing regular file on a supported backend
 - **THEN** BigOS MUST return a fully initialized metadata structure with regular-file type, bounded file size, mode, uid and gid values derived from the backend contract or documented defaults
+- **AND** timestamp fields MUST be initialized to backend-provided values or documented bounded defaults
 - **AND** unsupported fields MUST be zero or documented bounded defaults rather than uninitialized data
 
 #### Scenario: 目录元数据字段有界
@@ -21,13 +22,23 @@ BigOS SHALL define a bounded file metadata structure for user-visible `stat`/`fs
 
 - **WHEN** documentation, headers, or user tools describe the metadata structure
 - **THEN** they MUST describe it as a BigOS bounded metadata subset
-- **AND** they MUST NOT claim full POSIX `stat` compatibility, full permission database semantics, persistent inode identity, or complete timestamp support
+- **AND** they MUST NOT claim full POSIX `stat` compatibility, full permission database semantics, persistent inode identity, nanosecond timestamp precision, timezone conversion, or complete POSIX timestamp support
 
 #### Scenario: 对象编号第一版保持零值
 
 - **WHEN** a caller queries metadata for any supported object on exFAT or `/rw`
 - **THEN** BigOS MUST return zero in the user-visible object identifier field
 - **AND** it MUST NOT expose `/rw` runtime inode numbers or exFAT backend identifiers as stable user ABI in this version
+
+### Requirement: metadata timestamp ABI 镜像一致
+
+BigOS SHALL keep kernel metadata and user-visible libc metadata timestamp fields ABI-compatible. The kernel metadata structure and `struct stat` mirror MUST expose `atime`, `mtime`, and `ctime` fields with matching field order, signedness/width assumptions, and copy-to-user initialization behavior. The ABI MUST NOT expose nanosecond subfields, timezone conversion state, locale formatting state, or unsupported POSIX metadata fields as implemented behavior.
+
+#### Scenario: 内核和用户结构字段一致
+
+- **WHEN** source contract validation checks the kernel metadata structure, syscall copy path, and user `struct stat`
+- **THEN** the timestamp fields MUST appear in a consistent ABI order with fixed-width storage
+- **AND** successful metadata queries MUST fully initialize those fields before publication to user memory
 
 ### Requirement: 路径元数据查询
 
@@ -307,4 +318,3 @@ BigOS SHALL keep file metadata bounded while file growth and truncate mature. Me
 - **WHEN** a file growth or truncate attempt fails before publishing the new file state
 - **THEN** subsequent metadata queries MUST report the last successfully committed size and supported attributes
 - **AND** they MUST NOT reveal partially prepared block allocation state
-

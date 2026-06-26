@@ -52,12 +52,35 @@ BigOS SHALL provide or retain a small file-content userland tool that reads one 
 - **AND** it MUST NOT panic the kernel, leak uninitialized memory, or require complete POSIX device semantics
 
 ### Requirement: 元数据观察工具
-BigOS SHALL provide or retain a small metadata-observation userland tool that displays the bounded file and directory metadata already exposed by the kernel and libc. The tool MUST make object type and size observable when available, MUST report unsupported fields as absent or bounded defaults, and MUST NOT claim complete POSIX `stat`, stable inode identity, ACLs, xattrs, complete timestamps, symlink behavior, or full permission database support.
+BigOS SHALL provide or retain a small metadata-observation userland tool that displays the bounded file and directory metadata already exposed by the kernel and libc. The tool MUST make object type, size, and bounded atime/mtime/ctime observable when available, MUST report unsupported fields as absent or bounded defaults, and MUST NOT claim complete POSIX `stat`, stable inode identity, ACLs, xattrs, nanosecond timestamps, timezone formatting, complete POSIX timestamp behavior, symlink behavior, or full permission database support.
 
 #### Scenario: 展示文件和目录元数据
 - **WHEN** a user runs the metadata-observation tool for an existing regular file or directory
 - **THEN** the tool MUST query metadata through the documented libc wrapper and print deterministic bounded fields
-- **AND** object type and size MUST be visible when supported by the backend contract
+- **AND** object type, size, and bounded timestamp fields MUST be visible when supported by the backend contract
+
+#### Scenario: stat 输出时间戳字段
+- **WHEN** a user runs `stat PATH` for a supported object
+- **THEN** the output MUST include atime, mtime, and ctime numeric values
+- **AND** unsupported backend timestamps MUST appear as documented bounded defaults
+
+### Requirement: touch 用户工具
+BigOS SHALL provide a bounded external `touch` userland tool that creates missing regular files on writable supported backends or updates an existing object's atime and mtime to the current bounded wall-clock time. The tool MUST report deterministic errno-based errors and MUST NOT imply complete POSIX `touch` options, date parsing, timezone conversion, symlink handling, recursive traversal, or nanosecond precision.
+
+#### Scenario: touch 创建缺失文件
+- **WHEN** a user runs `touch PATH` for a missing path under a writable supported parent directory
+- **THEN** BigOS MUST create an empty regular file
+- **AND** subsequent metadata observation MUST report initialized atime, mtime, and ctime for that file
+
+#### Scenario: touch 更新已有文件
+- **WHEN** a user runs `touch PATH` for an existing supported object with sufficient permission
+- **THEN** BigOS MUST update atime and mtime through the bounded timestamp update interface
+- **AND** ctime MUST reflect the timestamp metadata change
+
+#### Scenario: touch 失败可恢复
+- **WHEN** `touch` targets a read-only backend, missing parent, unsupported object, invalid path, or path without sufficient permission
+- **THEN** it MUST report a deterministic errno-based error and exit nonzero
+- **AND** the shell MUST remain usable
 
 #### Scenario: 元数据错误可观察
 - **WHEN** metadata query fails because the path is missing, unsupported, too long, not NUL-terminated at the kernel boundary, or rejected by user-buffer validation
@@ -276,4 +299,3 @@ BigOS SHALL provide bounded external `basename`, `dirname`, `more`, `find`, and 
 - **WHEN** 用户运行 `find PATH` or `du PATH`
 - **THEN** the tool MUST traverse supported directory entries within fixed recursion and path-length limits
 - **AND** failures for overlong paths, unsupported objects, or read errors MUST be deterministic and recoverable
-

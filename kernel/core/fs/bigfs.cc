@@ -6,6 +6,7 @@
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/vfs.h>
 #include <bigos/memory.h>
+#include <bigos/time.h>
 #include <string.h>
 
 // Internal allocator flag: alloc_kernel_pages() only returns mapped, accessible
@@ -44,16 +45,21 @@ namespace {
         uint32_t checksum;
     };
 
-    // 60 bytes packed into the 64-byte on-disk inode slot.
+    // Version 2 fits into the 128-byte on-disk inode slot. Version 1 used a
+    // 64-byte slot without timestamps and is rejected by the superblock check.
     struct DiskInode {
         uint32_t type;
         uint32_t mode;
         uint32_t uid;
         uint32_t gid;
         uint64_t size;
+        uint64_t atime;
+        uint64_t mtime;
+        uint64_t ctime;
         uint32_t link_count;
         uint32_t direct[DIRECT_BLOCKS];
     };
+    static_assert(sizeof(DiskInode) <= INODE_SIZE, "bigfs inode must fit the declared on-disk slot");
 
     struct DiskDirent {
         uint32_t inode_plus_one;   // 0 means empty slot
@@ -66,6 +72,7 @@ namespace {
     };
 
     bool load_inode(uint32_t __inode, DiskInode *__out) noexcept;
+    bool store_inode(uint32_t __inode, const DiskInode *__in) noexcept;
 
     uint8_t *g_ram = nullptr;
     driver::block::BlockDevice g_device = {};
@@ -89,6 +96,39 @@ namespace {
 
     uint32_t inode_table_block_no(uint32_t __inode) noexcept {
         return INODE_TABLE_START + __inode / INODES_PER_BLOCK;
+    }
+
+    uint64_t current_timestamp() noexcept {
+        const int64_t now = bigos::time::current_unix_time();
+        return now > 0 ? (uint64_t)now : 0;
+    }
+
+    void touch_all(DiskInode *__inode, uint64_t __now) noexcept {
+        if (__inode == nullptr)
+            return;
+        __inode->atime = __now;
+        __inode->mtime = __now;
+        __inode->ctime = __now;
+    }
+
+    void touch_data_change(DiskInode *__inode, uint64_t __now) noexcept {
+        if (__inode == nullptr)
+            return;
+        __inode->mtime = __now;
+        __inode->ctime = __now;
+    }
+
+    bool store_inode_with_time(uint32_t __inode, DiskInode *__node, uint64_t __now, bool __atime, bool __mtime,
+        bool __ctime) noexcept {
+        if (__node == nullptr)
+            return false;
+        if (__atime)
+            __node->atime = __now;
+        if (__mtime)
+            __node->mtime = __now;
+        if (__ctime)
+            __node->ctime = __now;
+        return store_inode(__inode, __node);
     }
 
     void metadata_commit_reset() noexcept {
@@ -900,6 +940,7 @@ namespace {
         root.gid = 0;
         root.size = 0;
         root.link_count = 2;
+        touch_all(&root, current_timestamp());
         if (!store_inode(ROOT_INODE, &root))
             return Status::IoError;
         metadata_commit_reset();
@@ -1122,6 +1163,8 @@ namespace bigfs {
             file.gid = __gid;
             file.size = 0;
             file.link_count = 1;
+            const uint64_t now = current_timestamp();
+            touch_all(&file, now);
             if (!store_inode(new_inode, &file)) {
                 bitmap_free(INODE_BITMAP_BLOCK, new_inode);
                 return Status::IoError;
@@ -1131,9 +1174,14 @@ namespace bigfs {
                 discard_new_inode(new_inode);
                 return add;
             }
+            if (!store_inode_with_time(parent, &dir, now, false, true, true)) {
+                (void)dir_remove_entry(&dir, leaf);
+                discard_new_inode(new_inode);
+                return Status::IoError;
+            }
             const Status commit = metadata_commit_file_create(parent, &dir, new_inode, &file);
             if (commit != Status::Success) {
-            (void)dir_remove_entry(&dir, leaf);
+                (void)dir_remove_entry(&dir, leaf);
                 discard_new_inode(new_inode);
                 return commit;
             }
@@ -1239,6 +1287,11 @@ namespace bigfs {
         }
         if (__out_read != nullptr)
             *__out_read = done;
+        if (done != 0) {
+            const uint64_t now = current_timestamp();
+            (void)store_inode_with_time(__inode, &file, now, true, false, false);
+            (void)metadata_commit_inode(__inode);
+        }
         return Status::Success;
     }
 
@@ -1286,6 +1339,7 @@ namespace bigfs {
         }
 
         DiskInode committed = file;
+        touch_data_change(&committed, current_timestamp());
         uint32_t allocated[DIRECT_BLOCKS] = {};
         uint32_t allocated_count = 0;
         for (uint32_t i = first_block; i <= last_block; i++) {
@@ -1388,6 +1442,7 @@ namespace bigfs {
             return Status::Success;
 
         DiskInode committed = file;
+        touch_data_change(&committed, current_timestamp());
         const uint32_t keep_blocks = __length == 0 ? 0 : (uint32_t)((__length - 1) / BLOCK_SIZE) + 1;
         for (uint32_t i = keep_blocks; i < DIRECT_BLOCKS; i++)
             committed.direct[i] = 0;
@@ -1464,6 +1519,8 @@ namespace bigfs {
         child.gid = __gid;
         child.size = 0;
         child.link_count = 2;
+        const uint64_t now = current_timestamp();
+        touch_all(&child, now);
         if (!store_inode(new_inode, &child)) {
             bitmap_free(INODE_BITMAP_BLOCK, new_inode);
             return Status::IoError;
@@ -1472,6 +1529,11 @@ namespace bigfs {
         if (add != Status::Success) {
             discard_new_inode(new_inode);
             return add;
+        }
+        if (!store_inode_with_time(parent, &dir, now, false, true, true)) {
+            (void)dir_remove_entry(&dir, leaf);
+            discard_new_inode(new_inode);
+            return Status::IoError;
         }
         const Status commit = metadata_commit_directory_create(parent, &dir, new_inode, &child);
         if (commit != Status::Success) {
@@ -1510,16 +1572,20 @@ namespace bigfs {
         if (tnode.type == INODE_DIRECTORY)
             return Status::IsDirectory;
 
+        const DiskInode old_tnode = tnode;
         const uint32_t old_link_count = tnode.link_count;
         tnode.link_count = 0;
+        tnode.ctime = current_timestamp();
         if (!store_inode(target, &tnode))
             return Status::IoError;
         if (!dir_remove_entry(&dir, leaf)) {
-            tnode.link_count = old_link_count;
-            (void)store_inode(target, &tnode);
+            DiskInode restored = old_tnode;
+            restored.link_count = old_link_count;
+            (void)store_inode(target, &restored);
             return Status::NotFound;
         }
-        const DiskInode old_tnode = tnode;
+        if (!store_inode_with_time(parent, &dir, tnode.ctime, false, true, true))
+            return Status::IoError;
         maybe_free_unlinked_inode(target, &tnode);
         return metadata_commit_unlink(parent, &dir, target, &tnode, &old_tnode, tnode.type == INODE_FREE);
     }
@@ -1556,16 +1622,20 @@ namespace bigfs {
         if (!dir_is_empty(&tnode))
             return Status::NotEmpty;
 
+        const DiskInode old_tnode = tnode;
         const uint32_t old_link_count = tnode.link_count;
         tnode.link_count = 0;
+        tnode.ctime = current_timestamp();
         if (!store_inode(target, &tnode))
             return Status::IoError;
         if (!dir_remove_entry(&dir, leaf)) {
-            tnode.link_count = old_link_count;
-            (void)store_inode(target, &tnode);
+            DiskInode restored = old_tnode;
+            restored.link_count = old_link_count;
+            (void)store_inode(target, &restored);
             return Status::NotFound;
         }
-        const DiskInode old_tnode = tnode;
+        if (!store_inode_with_time(parent, &dir, tnode.ctime, false, true, true))
+            return Status::IoError;
         maybe_free_unlinked_inode(target, &tnode);
         return metadata_commit_unlink(parent, &dir, target, &tnode, &old_tnode, tnode.type == INODE_FREE);
     }
@@ -1623,6 +1693,7 @@ namespace bigfs {
         if (target_node.type != INODE_REGULAR)
             return Status::Invalid;
 
+        const uint64_t now = current_timestamp();
         if (old_parent == new_parent) {
             DirSlot src = {};
             if (!dir_find_slot(&old_dir, old_leaf, &src))
@@ -1630,6 +1701,9 @@ namespace bigfs {
             dirent_set(src.entry, new_leaf, target);
             bigos::bcache::mark_dirty(src.block);
             bigos::bcache::put(src.block);
+            if (!store_inode_with_time(target, &target_node, now, false, false, true) ||
+                !store_inode_with_time(old_parent, &old_dir, now, false, true, true))
+                return Status::IoError;
             return metadata_commit_rename(old_parent, &old_dir, old_parent, &old_dir);
         }
 
@@ -1651,6 +1725,10 @@ namespace bigfs {
         bigos::bcache::mark_dirty(src.block);
         bigos::bcache::put(src.block);
         bigos::bcache::put(dst.block);
+        if (!store_inode_with_time(target, &target_node, now, false, false, true) ||
+            !store_inode_with_time(old_parent, &old_dir, now, false, true, true) ||
+            !store_inode_with_time(new_parent, &new_dir, now, false, true, true))
+            return Status::IoError;
         return metadata_commit_rename(old_parent, &old_dir, new_parent, &new_dir);
     }
 
@@ -1716,8 +1794,59 @@ namespace bigfs {
         return Status::Success;
     }
 
+    Status utimens(
+        const char *__abs_path, uint64_t __atime, uint64_t __mtime, uint32_t __flags, uint32_t __uid,
+        uint32_t __gid) noexcept {
+        if (!g_initialized || __abs_path == nullptr)
+            return Status::Invalid;
+        if ((__flags & ~bigos::vfs::UTIME_SUPPORTED_FLAGS) != 0)
+            return Status::Invalid;
+        if (((__flags & bigos::vfs::UTIME_ATIME_NOW) != 0 && (__flags & bigos::vfs::UTIME_ATIME_OMIT) != 0) ||
+            ((__flags & bigos::vfs::UTIME_MTIME_NOW) != 0 && (__flags & bigos::vfs::UTIME_MTIME_OMIT) != 0))
+            return Status::Invalid;
+
+        const char *rest = nullptr;
+        if (!strip_prefix(__abs_path, &rest))
+            return Status::Invalid;
+
+        uint32_t target = ROOT_INODE;
+        const char *root_cursor = rest;
+        while (*root_cursor == '/')
+            root_cursor++;
+        if (*root_cursor != 0) {
+            uint32_t parent = 0;
+            char leaf[DIRENT_NAME_MAX + 1];
+            const Status rp = resolve_parent(rest, &parent, leaf, sizeof(leaf));
+            if (rp != Status::Success)
+                return rp;
+            DiskInode dir;
+            if (!load_inode(parent, &dir) || dir.type != INODE_DIRECTORY)
+                return Status::NotDirectory;
+            if (!dir_lookup(&dir, leaf, &target))
+                return Status::NotFound;
+        }
+
+        DiskInode node;
+        if (!load_inode(target, &node) || node.type == INODE_FREE)
+            return Status::NotFound;
+        const Status acc = check_access(__uid, __gid, &node, bigos::cred::Access::Write);
+        if (acc != Status::Success)
+            return acc;
+
+        const uint64_t now = current_timestamp();
+        DiskInode committed = node;
+        if ((__flags & bigos::vfs::UTIME_ATIME_OMIT) == 0)
+            committed.atime = (__flags & bigos::vfs::UTIME_ATIME_NOW) != 0 ? now : __atime;
+        if ((__flags & bigos::vfs::UTIME_MTIME_OMIT) == 0)
+            committed.mtime = (__flags & bigos::vfs::UTIME_MTIME_NOW) != 0 ? now : __mtime;
+        committed.ctime = now;
+        if (!store_inode(target, &committed))
+            return Status::IoError;
+        return metadata_commit_inode(target) && metadata_commit_flush() ? Status::Success : Status::IoError;
+    }
+
     bool stat(uint32_t __inode, uint32_t *__mode, uint32_t *__uid, uint32_t *__gid, uint64_t *__size,
-        bool *__is_dir) noexcept {
+        bool *__is_dir, uint64_t *__atime, uint64_t *__mtime, uint64_t *__ctime) noexcept {
         DiskInode node;
         if (!g_initialized || !load_inode(__inode, &node) || node.type == INODE_FREE)
             return false;
@@ -1731,6 +1860,12 @@ namespace bigfs {
             *__size = node.size;
         if (__is_dir != nullptr)
             *__is_dir = node.type == INODE_DIRECTORY;
+        if (__atime != nullptr)
+            *__atime = node.atime;
+        if (__mtime != nullptr)
+            *__mtime = node.mtime;
+        if (__ctime != nullptr)
+            *__ctime = node.ctime;
         return true;
     }
 }   // namespace bigfs

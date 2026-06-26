@@ -93,9 +93,35 @@ USER_INIT_ELF_PATH = '/boot/user/init.elf'
 # USER_ELF_MAX_FILE_BYTES limit is enforced for both init and execve targets.
 USER_BIN_DIR = BUILD_DIR / 'bin' / 'user' / 'bin'
 USER_BASE_BIN_PROGRAMS = (
-    'sh', 'echo', 'cat', 'ls', 'mkdir', 'rm', 'rmdir', 'rename', 'stat', 'truncate',
-    'cp', 'mv', 'tee', 'write', 'append', 'head', 'tail', 'wc', 'grep', 'hexdump',
-    'date', 'kill', 'sleep', 'basename', 'dirname', 'more', 'find', 'du',
+    'sh',
+    'echo',
+    'cat',
+    'ls',
+    'mkdir',
+    'rm',
+    'rmdir',
+    'rename',
+    'stat',
+    'touch',
+    'truncate',
+    'cp',
+    'mv',
+    'tee',
+    'write',
+    'append',
+    'head',
+    'tail',
+    'wc',
+    'grep',
+    'hexdump',
+    'date',
+    'kill',
+    'sleep',
+    'basename',
+    'dirname',
+    'more',
+    'find',
+    'du',
 )
 USER_BIN_PROGRAMS = (*USER_BASE_BIN_PROGRAMS, 'mkfs_bigfs')
 USER_SMOKE_BIN_DIR = USER_BIN_DIR / 'smoke'

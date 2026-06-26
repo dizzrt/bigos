@@ -211,6 +211,24 @@ int truncate(const char *path, off_t length) {
     return (int)errno_translate(syscall2(SYS_TRUNCATE, (long)path, (long)length));
 }
 
+int bigos_utimens(const char *path, time_t atime, time_t mtime, unsigned int flags) {
+    const unsigned int supported =
+        BIGOS_UTIME_ATIME_NOW | BIGOS_UTIME_MTIME_NOW | BIGOS_UTIME_ATIME_OMIT | BIGOS_UTIME_MTIME_OMIT;
+    if ((flags & ~supported) != 0 ||
+        ((flags & BIGOS_UTIME_ATIME_NOW) != 0 && (flags & BIGOS_UTIME_ATIME_OMIT) != 0) ||
+        ((flags & BIGOS_UTIME_MTIME_NOW) != 0 && (flags & BIGOS_UTIME_MTIME_OMIT) != 0)) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (int)errno_translate(syscall4(SYS_UTIMENS, (long)path, (long)atime, (long)mtime, (long)flags));
+}
+
+int utime(const char *path, const struct utimbuf *times) {
+    if (times == NULL)
+        return bigos_utimens(path, 0, 0, BIGOS_UTIME_ATIME_NOW | BIGOS_UTIME_MTIME_NOW);
+    return bigos_utimens(path, times->actime, times->modtime, 0);
+}
+
 int mkdir(const char *path, mode_t mode) {
     return (int)errno_translate(syscall2(SYS_MKDIR, (long)path, (long)mode));
 }

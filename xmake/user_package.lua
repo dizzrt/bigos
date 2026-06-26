@@ -74,6 +74,7 @@ on_build(function()
         { "rmdir", path.join(projectdir, "user", "bin", "rmdir.c") },
         { "rename", path.join(projectdir, "user", "bin", "rename.c") },
         { "stat", path.join(projectdir, "user", "bin", "stat.c") },
+        { "touch", path.join(projectdir, "user", "bin", "touch.c") },
         { "truncate", path.join(projectdir, "user", "bin", "truncate.c") },
         { "mkfs_bigfs", path.join(projectdir, "user", "bin", "mkfs_bigfs.c") },
         { "cp", path.join(projectdir, "user", "bin", "cp.c") },

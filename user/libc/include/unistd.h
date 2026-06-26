@@ -38,6 +38,7 @@ int sync(void);
 int access(const char *path, int mode);
 int ftruncate(int fd, off_t length);
 int truncate(const char *path, off_t length);
+int bigos_utimens(const char *path, long atime, long mtime, unsigned int flags);
 int mkdir(const char *path, mode_t mode);
 int unlink(const char *path);
 int rmdir(const char *path);

@@ -94,8 +94,9 @@ control。
 - `SYS_FCNTL`（number=48）：有界 fd-control 入口，支持 `F_GETFD`、带 `FD_CLOEXEC` 的 `F_SETFD` 和 `F_DUPFD`。`F_DUPFD` 返回不小于调用方最小值的最低可用 fd，并清除新 descriptor 的 close-on-exec。它不实现 record locking、nonblocking I/O、async I/O、descriptor passing 或完整 POSIX `fcntl(2)`。
 - `SYS_ACCESS`（number=49）：通过共享 VFS path resolution 与 metadata 执行有界路径可见性/权限检查。仅支持 `F_OK`、`R_OK`、`W_OK`、`X_OK` bit，unsupported bit 确定性失败，且不打开或发布 descriptor。
 - `SYS_TRUNCATE`（number=50）：按路径执行有界 truncate，语义与 `SYS_FTRUNCATE` 的可写 `/rw` regular-file 子集一致。只读后端目标、目录、缺失路径、非法路径、过大长度和不可阻塞上下文都会失败，且不发布部分 size 更新。
+- `SYS_UTIMENS`（number=54）：按路径执行有界时间戳更新。ABI：`rdi` = 用户 path，`rsi` = atime 秒，`rdx` = mtime 秒，`r10` = BigOS atime/mtime NOW 或 OMIT flags。它只面向受支持的可写 `/rw` 对象，成功时把 ctime 更新为当前有界 wall-clock 秒；unsupported flags、只读后端等失败确定性返回且不修改时间戳。它不实现 POSIX `utimensat`、`futimens`、symlink 时间戳、纳秒精度、时区转换或 directory-fd 相对路径。
 
-这些 lifecycle syscall 是有界 BigOS 操作，不是完整 POSIX `munmap`、`mprotect` 或完整文件大小管理。它们不支持 VM 操作的任意字节粒度、`MAP_FIXED` 覆盖、shared writable mapping、file-backed writable upgrade、sparse-file API、journal、power-loss recovery、swap 或跨 CPU TLB shootdown。
+这些 lifecycle syscall 是有界 BigOS 操作，不是完整 POSIX `munmap`、`mprotect`、完整文件大小管理或完整 POSIX 文件时间戳管理。它们不支持 VM 操作的任意字节粒度、`MAP_FIXED` 覆盖、shared writable mapping、file-backed writable upgrade、sparse-file API、journal、power-loss recovery、swap 或跨 CPU TLB shootdown。
 
 syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
 

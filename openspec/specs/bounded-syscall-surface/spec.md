@@ -76,7 +76,13 @@ BigOS SHALL expose bounded fd-control primitives sufficient for small user progr
 
 ### Requirement: 有界文件与路径 primitive
 
-BigOS SHALL provide bounded file and path primitives for access checks, metadata queries, and truncation through the existing VFS and backend status model. Path-taking operations MUST share the existing bounded path copy and cwd-relative resolution rules. They MUST preserve read-only backend rejection, `/rw` backend permission/capacity failures, deterministic errno mapping, and blocking-context guards.
+BigOS SHALL provide bounded file and path primitives for access checks, metadata queries, truncation, and explicit timestamp updates through the existing VFS and backend status model. Path-taking operations MUST share the existing bounded path copy and cwd-relative resolution rules. They MUST preserve read-only backend rejection, `/rw` backend permission/capacity failures, deterministic errno mapping, and blocking-context guards.
+
+#### Scenario: 文件 primitive syscall 追加而不改号
+
+- **WHEN** BigOS adds bounded file or timestamp syscalls
+- **THEN** BigOS MUST append new syscall numbers after the existing syscall surface or use documented unused entries
+- **AND** all existing syscall numbers, argument register order, `int 0x80` return behavior, syscall gate privilege, exception/IRQ EOI rules, boot layout, page-table layout, CR3 switching, and disk image layout MUST remain unchanged
 
 #### Scenario: access 检查路径可见性
 
@@ -95,6 +101,18 @@ BigOS SHALL provide bounded file and path primitives for access checks, metadata
 - **WHEN** a user process truncates a writable `/rw` regular file by path or descriptor within supported size limits
 - **THEN** BigOS MUST update file size through the VFS writable backend and page/buffer-cache synchronization rules
 - **AND** read-only paths, directories, invalid lengths, insufficient capacity, and permission failures MUST return deterministic errno values without partial publication
+
+#### Scenario: utimens 更新时间戳
+
+- **WHEN** a user process invokes the supported timestamp syscall with a valid path, valid second-resolution timestamp arguments, supported flags, and sufficient permission
+- **THEN** BigOS MUST update the target object's atime and mtime according to the request
+- **AND** it MUST update ctime to the current bounded timestamp value
+
+#### Scenario: utimens 失败不修改状态
+
+- **WHEN** the timestamp syscall receives an invalid path pointer, invalid timestamp pointer, unsupported flags, missing target, read-only backend target, unsupported object, or insufficient permission
+- **THEN** BigOS MUST fail with deterministic negative errno
+- **AND** it MUST NOT mutate file timestamps, file data, directory entries, fd table state, or process identity
 
 ### Requirement: 有界进程信息 primitive
 
@@ -173,4 +191,3 @@ BigOS SHALL extend the bounded syscall surface with an append-only blocking slee
 - **WHEN** the scheduler sleep primitive reports timeout completion, forbidden blocking, or another internal wait result
 - **THEN** the syscall layer MUST translate the result into the documented user-visible success or negative errno value
 - **AND** it MUST NOT expose scheduler-private constants such as `WAIT_TIMEOUT` or `WAIT_BLOCK_FORBIDDEN` directly to user mode
-

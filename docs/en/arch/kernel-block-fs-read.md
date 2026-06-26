@@ -15,7 +15,10 @@ that later stages can reuse after memory management is initialized.
 - The filesystem layer discovers the first valid MBR exFAT partition, validates
   the exFAT boot region, and mounts a single read-only volume.
 - exFAT support covers root path lookup, regular file metadata, bounded
-  reads, `NoFatChain` contiguous files, and bounded FAT-chain traversal.
+  reads, `NoFatChain` contiguous files, and bounded FAT-chain traversal. The
+  VFS metadata bridge fully initializes atime, mtime, and ctime fields; the
+  read-only exFAT backend currently reports documented zero timestamp defaults
+  rather than complete exFAT timestamp semantics.
 - The API is ordinary-kernel-context only. It is not IRQ-handler-safe, not
   asynchronous, not DMA based, and does not provide sleep or SMP semantics.
 

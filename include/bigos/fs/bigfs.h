@@ -14,16 +14,16 @@ namespace bigfs {
     // write-back and fsync/eviction stay consistent.
     constexpr const char *MOUNT_PREFIX = "/rw";
     constexpr uint32_t MAGIC = 0x42494746;   // "BIGF"
-    constexpr uint32_t FORMAT_VERSION = 1;
+    constexpr uint32_t FORMAT_VERSION = 2;
     constexpr uint32_t BLOCK_SIZE = driver::block::DEFAULT_SECTOR_SIZE;   // 512
     constexpr uint32_t TOTAL_BLOCKS = 256;                                // 128 KiB RAM disk
     constexpr uint32_t INODE_COUNT = 32;
-    constexpr uint32_t INODE_SIZE = 64;
-    constexpr uint32_t INODES_PER_BLOCK = BLOCK_SIZE / INODE_SIZE;        // 8
+    constexpr uint32_t INODE_SIZE = 128;
+    constexpr uint32_t INODES_PER_BLOCK = BLOCK_SIZE / INODE_SIZE;        // 4
     constexpr uint32_t INODE_TABLE_START = 3;                             // blocks 0,1,2 reserved
-    constexpr uint32_t INODE_TABLE_BLOCKS = INODE_COUNT / INODES_PER_BLOCK;   // 4
-    constexpr uint32_t DATA_START = INODE_TABLE_START + INODE_TABLE_BLOCKS;   // 7
-    constexpr uint32_t DATA_BLOCK_COUNT = TOTAL_BLOCKS - DATA_START;          // 249
+    constexpr uint32_t INODE_TABLE_BLOCKS = INODE_COUNT / INODES_PER_BLOCK;   // 8
+    constexpr uint32_t DATA_START = INODE_TABLE_START + INODE_TABLE_BLOCKS;   // 11
+    constexpr uint32_t DATA_BLOCK_COUNT = TOTAL_BLOCKS - DATA_START;          // 245
     constexpr uint32_t DIRECT_BLOCKS = 8;
     constexpr uint64_t MAX_FILE_SIZE = (uint64_t)DIRECT_BLOCKS * BLOCK_SIZE;   // 4096
     constexpr uint32_t DIRENT_SIZE = 32;
@@ -84,6 +84,9 @@ namespace bigfs {
     Status write(uint32_t __inode, uint64_t __offset, const void *__src, size_t __len, uint32_t __uid, uint32_t __gid,
         size_t *__out_written) noexcept;
     Status truncate(uint32_t __inode, uint64_t __length, uint32_t __uid, uint32_t __gid) noexcept;
+    Status utimens(
+        const char *__abs_path, uint64_t __atime, uint64_t __mtime, uint32_t __flags, uint32_t __uid,
+        uint32_t __gid) noexcept;
 
     Status mkdir(const char *__abs_path, uint32_t __mode, uint32_t __uid, uint32_t __gid) noexcept;
     Status unlink(const char *__abs_path, uint32_t __uid, uint32_t __gid) noexcept;
@@ -98,7 +101,7 @@ namespace bigfs {
     Status fsync() noexcept;
 
     bool stat(uint32_t __inode, uint32_t *__mode, uint32_t *__uid, uint32_t *__gid, uint64_t *__size,
-        bool *__is_dir) noexcept;
+        bool *__is_dir, uint64_t *__atime, uint64_t *__mtime, uint64_t *__ctime) noexcept;
 }   // namespace bigfs
 NAMESPACE_BIGOS_END
 

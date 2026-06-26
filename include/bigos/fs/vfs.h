@@ -11,6 +11,12 @@ namespace vfs {
     constexpr uint64_t OPEN_RDWR = 1ull << 1;
     constexpr uint64_t OPEN_CREAT = 1ull << 6;
     constexpr uint64_t OPEN_TRUNC = 1ull << 9;
+    constexpr uint32_t UTIME_ATIME_NOW = 1u << 0;
+    constexpr uint32_t UTIME_MTIME_NOW = 1u << 1;
+    constexpr uint32_t UTIME_ATIME_OMIT = 1u << 2;
+    constexpr uint32_t UTIME_MTIME_OMIT = 1u << 3;
+    constexpr uint32_t UTIME_SUPPORTED_FLAGS =
+        UTIME_ATIME_NOW | UTIME_MTIME_NOW | UTIME_ATIME_OMIT | UTIME_MTIME_OMIT;
     constexpr size_t MAX_PATH_LEN = 256;
     constexpr size_t DIRENT_NAME_MAX = 27;
 
@@ -150,6 +156,11 @@ namespace vfs {
     Status rename(const char *__old_path, const char *__new_path, uint32_t __uid, uint32_t __gid) noexcept;
     Status rename(const char *__old_path, const char *__new_path, const char *__cwd, uint32_t __uid,
         uint32_t __gid) noexcept;
+    Status utimens(
+        const char *__path, uint64_t __atime, uint64_t __mtime, uint32_t __flags, uint32_t __uid,
+        uint32_t __gid) noexcept;
+    Status utimens(const char *__path, const char *__cwd, uint64_t __atime, uint64_t __mtime, uint32_t __flags,
+        uint32_t __uid, uint32_t __gid) noexcept;
     void retain(File *__file) noexcept;
     void release(File *__file) noexcept;
 }   // namespace vfs

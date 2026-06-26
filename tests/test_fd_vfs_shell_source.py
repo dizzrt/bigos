@@ -175,7 +175,9 @@ def test_bounded_metadata_contract_is_vfs_backed() -> None:
     assert 'BIGOS_METADATA_TYPE_REGULAR = 1' in header
     assert 'BIGOS_METADATA_TYPE_DIRECTORY = 2' in header
     assert 'uint64_t object_id;' in header
-    assert 'uint64_t reserved[4];' in header
+    assert 'uint64_t atime;' in header
+    assert 'uint64_t mtime;' in header
+    assert 'uint64_t ctime;' in header
     assert 'Status stat_absolute(const char *__path, bigos::Metadata *__out)' in vfs_h
     assert 'Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out)' in vfs_h
     assert 'Status stat(File *__file, bigos::Metadata *__out)' in vfs_h
@@ -183,8 +185,10 @@ def test_bounded_metadata_contract_is_vfs_backed() -> None:
     assert 'fill_metadata_defaults(__out)' in vfs
     assert 'exfat_identity(const bigos::fs::FileMetadata *__metadata)' in vfs
     assert 'bigfs_identity(uint32_t __inode)' in vfs
-    assert '__out->object_id = exfat_identity(__metadata).object_id;' in vfs
-    assert '__out->object_id = bigfs_identity(__inode).object_id;' in vfs
+    assert '__out->object_id = 0;' in vfs
+    assert '__out->atime = atime;' in vfs
+    assert '__out->mtime = mtime;' in vfs
+    assert '__out->ctime = ctime;' in vfs
     assert 'bigos::fs::lookup(&g_mount, __path, &metadata)' in vfs
     assert 'bigos::bigfs::stat(__inode' in vfs
     assert 'return Status::Unsupported;' in vfs
@@ -451,5 +455,8 @@ def test_runtime_filesystem_metadata_contract_review_is_documented() -> None:
     assert 'stat("/rw/runtime_rename_dst.txt", &st) != 0 || st.st_size != 11' in smoke
     assert 'stat("/rw/runtime_unlink.txt", &st) != -1 || errno != ENOENT' in smoke
     assert 'fstat(fd, &st) != 0 || st.st_size != 4' in smoke
-    assert 'st.st_object_id == 0' in smoke
+    assert 'st.st_object_id != 0' in smoke
+    assert 'st.st_atime == 0' in smoke
+    assert 'runtime-utimens-stat' in smoke
     assert 'object=' in stat_tool
+    assert 'atime=' in stat_tool

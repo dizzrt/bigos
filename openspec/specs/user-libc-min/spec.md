@@ -57,6 +57,23 @@ BigOS 用户态 libc SHALL expose bounded current-directory wrappers and path-ta
 - **THEN** libc MUST pass the bounded user path to the kernel without implementing its own namespace, symlink, `chroot`, or full `realpath` behavior
 - **AND** kernel negative errno MUST remain the single source for failure translation
 
+### Requirement: libc 暴露有界文件时间戳接口
+
+BigOS 用户态 libc SHALL expose bounded file timestamp fields and update wrappers for simple static C programs. Public headers MUST define `st_atime`, `st_mtime`, and `st_ctime` in `struct stat`, declare the supported `utime`/BigOS-specific timestamp wrapper, and define any BigOS-specific NOW/OMIT constants. The interfaces MUST remain freestanding-safe and MUST NOT imply complete POSIX `utimensat`, `futimens`, `lutimes`, symlink timestamp updates, timezone conversion, locale formatting, or nanosecond precision.
+
+#### Scenario: stat 结构包含时间戳字段
+
+- **WHEN** user programs include `sys/stat.h`
+- **THEN** `struct stat` MUST expose initialized atime, mtime, and ctime fields matching the kernel metadata ABI
+- **AND** unsupported precision or unsupported POSIX fields MUST not be declared as implemented behavior
+
+#### Scenario: timestamp wrapper 可编译
+
+- **WHEN** a small static user C program includes the documented timestamp header and calls the supported wrapper
+- **THEN** it MUST compile and link through the existing user crt0/libc build path
+- **AND** it MUST translate kernel negative errno returns through user `errno`
+- **AND** it MUST not require hosted libc symbols, dynamic linking, locale, timezone databases, threads, or unsupported POSIX timestamp APIs
+
 ### Requirement: cwd 头文件边界
 
 BigOS 用户态 libc SHALL expose cwd-related declarations only in freestanding-safe headers that already represent the bounded userland ABI. Headers MUST include only implemented constants, types, and prototypes needed for cwd and path wrappers, and MUST NOT imply hosted filesystem APIs, thread-safe cwd databases, dynamic loader behavior, or complete POSIX path support.
@@ -745,4 +762,3 @@ BigOS 用户态 libc SHALL expose minimal BigOS-specific terminal mode wrappers 
 - **WHEN** a simple static user program enters raw mode and later calls `bigos_tcsetmode` to restore canonical mode
 - **THEN** libc MUST provide the declarations and implementation needed for that restore path
 - **AND** the program MUST NOT need hosted libc, dynamic linking, or direct syscall assembly beyond the wrapper
-

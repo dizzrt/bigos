@@ -172,12 +172,20 @@ complete job control.
   regular-file semantics as `SYS_FTRUNCATE`. Read-only backend targets,
   directories, missing paths, invalid paths, oversized lengths, and nonblocking
   context fail without publishing a partial size update.
+- `SYS_UTIMENS` (number=54): bounded path timestamp update. ABI: `rdi` = user
+  path, `rsi` = atime seconds, `rdx` = mtime seconds, `r10` = BigOS flags for
+  atime/mtime NOW or OMIT. It only targets supported writable `/rw` objects,
+  updates ctime to the current bounded wall-clock second on success, rejects
+  unsupported flag combinations and read-only backends deterministically, and
+  does not implement POSIX `utimensat`, `futimens`, symlink timestamp mutation,
+  nanosecond precision, timezone conversion, or directory-fd relative paths.
 
 These lifecycle calls are bounded BigOS operations, not full POSIX `munmap` or
-`mprotect` or full POSIX file-size management. They do not support arbitrary
-byte granularity for VM operations, `MAP_FIXED` overwrite, shared writable
-mappings, file-backed writable upgrades, sparse-file APIs, journaling,
-power-loss recovery, swap, or cross-CPU TLB shootdown.
+`mprotect`, full POSIX file-size management, or complete POSIX file timestamp
+management. They do not support arbitrary byte granularity for VM operations,
+`MAP_FIXED` overwrite, shared writable mappings, file-backed writable upgrades,
+sparse-file APIs, journaling, power-loss recovery, swap, or cross-CPU TLB
+shootdown.
 
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 

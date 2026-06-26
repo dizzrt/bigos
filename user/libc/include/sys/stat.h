@@ -21,8 +21,11 @@ struct stat {
     unsigned int st_nlink;
     unsigned int reserved0;
     unsigned long st_size;
-    unsigned long st_object_id; /* stable within a mounted backend while object exists */
-    unsigned long reserved[4];
+    unsigned long st_object_id; /* reserved BigOS object id, currently zero */
+    unsigned long st_atime;
+    unsigned long st_mtime;
+    unsigned long st_ctime;
+    unsigned long reserved;
 };
 
 int mkdir(const char *path, mode_t mode);

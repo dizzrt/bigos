@@ -108,6 +108,7 @@ namespace bigos::sys {
                                 // Bounded BigOS sleep: not nanosleep, alarm,
                                 // timerfd, high-resolution timer, or
                                 // signal-interruptible POSIX sleep.
+        SYS_UTIMENS = 54,       // (path, atime, mtime, flags) -> bounded second-resolution timestamp update.
     };
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);

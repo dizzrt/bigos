@@ -2,7 +2,7 @@
 
 定义 BigOS 最小可写文件系统能力：与现有只读 exFAT 挂载并存的可写后端，支持
 `O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC` 打开、文件 `write` 与 `lseek`、文件创建/截断、
-目录项 `mkdir`/`unlink` 和受限常规文件 `rename` 的最小子集，inode 携带 owner/mode 元数据并以 `cred::may_access`
+目录项 `mkdir`/`unlink`、受限常规文件 `rename` 和有界时间戳更新的最小子集，inode 携带 owner/mode/atime/mtime/ctime 元数据并以 `cred::may_access`
 为实际访问强制点，所有写经块缓冲缓存，只读后端对写请求确定性 `-EROFS`。该能力本阶段默认
 承载介质为 RAM-backed 块设备、只保证运行期一致性而不承诺跨重启持久化，不引入完整 POSIX
 文件语义（无硬/软链接、无完整目录 rename 或 POSIX atomic replacement、无 mmap 文件映射、无 ACL/xattr），并以默认关闭的运行时
@@ -10,7 +10,7 @@ smoke 验证。
 ## Requirements
 ### Requirement: 可写文件系统后端与只读 exFAT 并存
 
-BigOS SHALL 提供一个最小可写文件系统后端，与现有只读 exFAT 挂载并存且不改变只读 exFAT 的发现、挂载与读语义。可写后端 MUST 经块缓冲缓存读写其超级块、inode、目录项与数据块，MUST 维护文件 inode 的 owner（uid/gid）与 mode 元数据，MUST 有界（块大小、inode 数、文件大小、目录项数均有上限），且 MUST NOT 引入硬/软链接、完整目录 rename、POSIX atomic replacement、journaling、ACL/xattr 或文件 mmap。本阶段可写后端的默认承载介质 MUST 为 RAM-backed 块设备（不改动现有磁盘镜像/MBR/分区/exFAT 只读发现契约），其正确性语义只覆盖运行期一致性，MUST NOT 承诺跨重启持久化；磁盘分区承载 MUST 不在本阶段范围。
+BigOS SHALL 提供一个最小可写文件系统后端，与现有只读 exFAT 挂载并存且不改变只读 exFAT 的发现、挂载与读语义。可写后端 MUST 经块缓冲缓存读写其超级块、inode、目录项与数据块，MUST 维护文件 inode 的 owner（uid/gid）、mode、atime、mtime、ctime 元数据，MUST 有界（块大小、inode 数、文件大小、目录项数均有上限），且 MUST NOT 引入硬/软链接、完整目录 rename、POSIX atomic replacement、journaling、ACL/xattr、纳秒时间戳或文件 mmap。本阶段可写后端的默认承载介质 MUST 为 RAM-backed 块设备（不改动现有磁盘镜像/MBR/分区/exFAT 只读发现契约），其正确性语义只覆盖运行期一致性，MUST NOT 承诺跨重启持久化；磁盘分区承载 MUST 不在本阶段范围。
 
 #### Scenario: 可写后端挂载且不影响只读 exFAT
 
@@ -27,6 +27,12 @@ BigOS SHALL 提供一个最小可写文件系统后端，与现有只读 exFAT �
 - **WHEN** 可写后端的 RAM-backed 承载介质分配失败
 - **THEN** BigOS MUST 确定性地不发布可写挂载，MUST 保持只读 exFAT 路径不受影响，MUST NOT panic
 
+#### Scenario: 旧格式持久化镜像不被误读
+
+- **WHEN** BigOS encounters a persistent bigfs image whose format version or inode layout lacks required timestamp fields
+- **THEN** it MUST reject the image or require explicit reformatting before publishing writable `/rw`
+- **AND** it MUST NOT reinterpret old inode bytes as valid atime, mtime, or ctime values
+
 ### Requirement: 可写打开与文件创建
 
 BigOS SHALL 支持以可写/创建 flags（`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`）按绝对路径打开可写后端的常规文件。`O_CREAT` 创建的新文件 MUST 记录调用进程身份为 owner 并采用调用方提供的 mode；打开/创建 MUST 在执行前经访问权限判定，并对非法路径、空间耗尽与权限拒绝确定性失败。
@@ -34,12 +40,12 @@ BigOS SHALL 支持以可写/创建 flags（`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUN
 #### Scenario: O_CREAT 创建新文件
 
 - **WHEN** 调用方以 `O_CREAT` 打开一个不存在的合法绝对路径且其目录可写、空间充足
-- **THEN** BigOS MUST 在可写后端创建该文件、记录 owner 为调用进程 uid/gid、采用调用方 mode，并返回一个可写打开文件对象，offset 为 0
+- **THEN** BigOS MUST 在可写后端创建该文件、记录 owner 为调用进程 uid/gid、采用调用方 mode、初始化 atime/mtime/ctime，并返回一个可写打开文件对象，offset 为 0
 
 #### Scenario: O_TRUNC 截断已有文件
 
 - **WHEN** 调用方以可写 flags 与 `O_TRUNC` 打开一个已存在且有写权限的文件
-- **THEN** BigOS MUST 把文件长度截断为 0 并释放其多余数据块，offset 为 0
+- **THEN** BigOS MUST 把文件长度截断为 0、更新 mtime/ctime 并释放其多余数据块，offset 为 0
 
 #### Scenario: 无空间创建失败
 
@@ -54,11 +60,19 @@ BigOS SHALL 提供从打开文件对象当前 offset 的有界写入与 `lseek` 
 
 - **WHEN** 调用方向一个可写打开文件写入合法用户缓冲
 - **THEN** BigOS MUST 经缓存写入数据、按实际写入字节推进 offset，且后续对同一文件的读 MUST 看到写入内容
+- **AND** successful writes MUST update the file mtime and ctime so later metadata queries observe the timestamp change
+
+#### Scenario: read atime 策略有界
+
+- **WHEN** `/rw` successfully reads file data
+- **THEN** BigOS MUST apply the documented bounded atime update policy
+- **AND** the update MUST remain safe with block-cache dirty tracking and fsync behavior
 
 #### Scenario: write 失败不推进 offset
 
 - **WHEN** 写入因无空间、IO 错误或用户缓冲校验失败而未成功交付字节
 - **THEN** BigOS MUST 返回确定性错误，MUST NOT 推进 offset，MUST NOT 破坏已有数据
+- **AND** it MUST NOT publish timestamp updates for the failed operation
 
 #### Scenario: lseek 定位与溢出校验
 
@@ -77,7 +91,7 @@ BigOS SHALL 在可写后端支持最小目录项创建（`mkdir`）、删除（`
 #### Scenario: mkdir 创建目录
 
 - **WHEN** 调用方对一个不存在的合法路径在可写、空间充足的父目录下 `mkdir`
-- **THEN** BigOS MUST 创建目录项与目录 inode、记录 owner 与 mode，并返回成功
+- **THEN** BigOS MUST 创建目录项与目录 inode、记录 owner/mode/atime/mtime/ctime，并返回成功
 
 #### Scenario: mkdir 已存在被拒绝
 
@@ -87,7 +101,7 @@ BigOS SHALL 在可写后端支持最小目录项创建（`mkdir`）、删除（`
 #### Scenario: unlink 删除常规文件
 
 - **WHEN** 调用方对一个存在且有权限的常规文件 `unlink`
-- **THEN** BigOS MUST 移除其目录项，并在无其它引用时释放其 inode 与数据块
+- **THEN** BigOS MUST 移除其目录项、更新父目录 mtime/ctime，并在无其它引用时释放其 inode 与数据块
 
 #### Scenario: unlink 非法目标被拒绝
 
@@ -448,4 +462,3 @@ BigOS SHALL keep read-only exFAT boot assets and unsupported backends isolated f
 - **WHEN** a `/rw` growth or truncate operation fails
 - **THEN** BigOS MUST preserve read-only exFAT discovery and future reads
 - **AND** it MUST NOT use exFAT state as rollback storage or persistence backing for `/rw`
-

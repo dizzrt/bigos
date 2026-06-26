@@ -73,10 +73,12 @@ then a data region. It is bounded throughout: fixed inode count, direct-block-
 only files (bounded `MAX_FILE_SIZE`), and fixed directory entry size. All
 metadata and data go through the block buffer cache.
 
-Each inode carries `owner` (uid/gid) and `mode`. Supported operations: writable
-`open` (`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`), file `write`, `lseek`,
-`O_TRUNC` truncation, `mkdir`, minimal directory enumeration, `unlink`, and
-restricted regular-file `rename` within the writable backend.
+Each inode carries `owner` (uid/gid), `mode`, and bounded Unix-second `atime`,
+`mtime`, and `ctime`. Supported operations: writable `open`
+(`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`), file `write`, `lseek`, `O_TRUNC`
+truncation, explicit `utimens` timestamp updates, `mkdir`, minimal directory
+enumeration, `unlink`, and restricted regular-file `rename` within the writable
+backend.
 `unlink` removes the directory entry first; open file descriptors keep the inode
 and data blocks alive until the last reference closes, and a pre-rename fd
 continues to reference the same runtime file after a successful rename. Failure semantics are
@@ -113,6 +115,9 @@ promises clean-sync plus clean reboot visibility for successful
 error and leaves dirty/pending cache state; it does not report durable success.
 There is no journaling, crash recovery, async I/O, broad storage driver support,
 stable inode identity, full POSIX `DIR*`, or power-loss consistency guarantee.
+BigFS format version 2 uses 128-byte inode slots for timestamp fields; older
+persistent format-version-1 volumes are rejected by validation and require an
+explicit `mkfs_bigfs` reformat instead of silent reinterpretation.
 
 ## Permission Enforcement
 
@@ -170,7 +175,8 @@ reclaiming the pipe when both ends are gone.
 New numbers are appended after `SYS_SIGRETURN = 19`: `SYS_LSEEK = 20`,
 `SYS_PIPE = 21`, `SYS_DUP = 22`, `SYS_DUP2 = 23`, `SYS_FSYNC = 24`,
 `SYS_MKDIR = 25`, `SYS_UNLINK = 26`, `SYS_EXECVE = 27`, `SYS_READDIR = 28`,
-`SYS_RMDIR = 38`, `SYS_FTRUNCATE = 39`, and `SYS_SYNC = 40`.
+`SYS_RMDIR = 38`, `SYS_FTRUNCATE = 39`, `SYS_SYNC = 40`, and
+`SYS_UTIMENS = 54`.
 `SYS_OPEN = 5` is extended to accept writable/create flags and an `O_CREAT`
 mode; `SYS_WRITE = 2` is extended to write file and pipe fds while preserving
 the console fast path. The register ABI, existing numbers, vector layout, and

@@ -202,7 +202,6 @@ namespace {
         __out->uid = bigos::cred::ROOT_UID;
         __out->gid = 0;
         __out->size = __metadata->data_length;
-        __out->object_id = exfat_identity(__metadata).object_id;
     }
 
     bigos::vfs::Status fill_bigfs_metadata(uint32_t __inode, bigos::Metadata *__out) noexcept {
@@ -213,15 +212,20 @@ namespace {
         uint32_t uid = 0;
         uint32_t gid = 0;
         uint64_t size = 0;
+        uint64_t atime = 0;
+        uint64_t mtime = 0;
+        uint64_t ctime = 0;
         bool is_dir = false;
-        if (!bigos::bigfs::stat(__inode, &mode, &uid, &gid, &size, &is_dir))
+        if (!bigos::bigfs::stat(__inode, &mode, &uid, &gid, &size, &is_dir, &atime, &mtime, &ctime))
             return bigos::vfs::Status::NotFound;
         __out->type = is_dir ? bigos::BIGOS_METADATA_TYPE_DIRECTORY : bigos::BIGOS_METADATA_TYPE_REGULAR;
         __out->mode = (mode & 07777) | (is_dir ? bigos::BIGOS_MODE_IFDIR : bigos::BIGOS_MODE_IFREG);
         __out->uid = uid;
         __out->gid = gid;
         __out->size = size;
-        __out->object_id = bigfs_identity(__inode).object_id;
+        __out->atime = atime;
+        __out->mtime = mtime;
+        __out->ctime = ctime;
         return bigos::vfs::Status::Success;
     }
 
@@ -830,7 +834,6 @@ namespace vfs {
         __out->uid = bigos::cred::ROOT_UID;
         __out->gid = 0;
         __out->size = __file->vnode->size;
-        __out->object_id = __file->identity.object_id;
         return Status::Success;
     }
 
@@ -917,6 +920,29 @@ namespace vfs {
         if (status != Status::Success)
             return status;
         return rename(old_resolved, new_resolved, __uid, __gid);
+    }
+
+    Status utimens(
+        const char *__path, uint64_t __atime, uint64_t __mtime, uint32_t __flags, uint32_t __uid,
+        uint32_t __gid) noexcept {
+        if (!g_initialized)
+            return Status::NotInitialized;
+        if (__path == nullptr || __path[0] != '/')
+            return Status::InvalidArgument;
+        if ((__flags & ~UTIME_SUPPORTED_FLAGS) != 0)
+            return Status::InvalidArgument;
+        if (!bigos::bigfs::owns_path(__path))
+            return Status::ReadOnlyFs;
+        return bigfs_to_vfs(bigos::bigfs::utimens(__path, __atime, __mtime, __flags, __uid, __gid));
+    }
+
+    Status utimens(const char *__path, const char *__cwd, uint64_t __atime, uint64_t __mtime, uint32_t __flags,
+        uint32_t __uid, uint32_t __gid) noexcept {
+        char resolved[MAX_PATH_LEN + 1];
+        const Status status = resolve_path(__path, __cwd, resolved, sizeof(resolved));
+        if (status != Status::Success)
+            return status;
+        return utimens(resolved, __atime, __mtime, __flags, __uid, __gid);
     }
 
     void retain(File *__file) noexcept {

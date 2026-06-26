@@ -1036,8 +1036,12 @@ namespace {
         uint32_t owner = 0;
         uint32_t group = 0;
         uint64_t stat_size = 0;
+        uint64_t atime = 0;
+        uint64_t mtime = 0;
+        uint64_t ctime = 0;
         bool stat_is_dir = false;
-        if (!bigos::bigfs::stat(inode, &mode, &owner, &group, &stat_size, &stat_is_dir) || stat_size != 2)
+        if (!bigos::bigfs::stat(inode, &mode, &owner, &group, &stat_size, &stat_is_dir, &atime, &mtime, &ctime) ||
+            stat_size != 2)
             return false;
         s = bigos::bigfs::read(inode, 2, gap, sizeof(gap), &read);
         if (s != bigos::bigfs::Status::Success || read != 0)
@@ -1488,8 +1492,12 @@ namespace {
         uint32_t owner = 0;
         uint32_t group = 0;
         uint64_t stat_size = 0;
+        uint64_t atime = 0;
+        uint64_t mtime = 0;
+        uint64_t ctime = 0;
         bool stat_is_dir = false;
-        const bool stat_ok = bigos::bigfs::stat(file_inode, &mode, &owner, &group, &stat_size, &stat_is_dir);
+        const bool stat_ok =
+            bigos::bigfs::stat(file_inode, &mode, &owner, &group, &stat_size, &stat_is_dir, &atime, &mtime, &ctime);
         bigos::bigfs::close_inode(file_inode);
         if (!stat_ok || stat_is_dir || stat_size != strlen(__payload) || owner != uid || group != gid)
             return false;

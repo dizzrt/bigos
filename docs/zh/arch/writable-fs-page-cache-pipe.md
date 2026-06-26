@@ -57,10 +57,10 @@ SMP I/O dispatch、新存储驱动、用户可见设备节点或新的 syscall A
 inode 数、仅直接块的文件（有界 `MAX_FILE_SIZE`）、定长目录项。所有元数据与数据均
 经块缓冲缓存读写。
 
-每个 inode 携带 `owner`（uid/gid）与 `mode`。支持：可写 `open`
-（`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`）、文件 `write`、`lseek`、`O_TRUNC`
-截断、`mkdir`、最小目录枚举、`unlink` 与可写 backend 内受限的 regular-file
-`rename`。`unlink` 会先移除目录项；仍打开的 fd 会让 inode 与数据块保留到最后一个
+每个 inode 携带 `owner`（uid/gid）、`mode` 以及有界 Unix 秒级 `atime`、`mtime`、
+`ctime`。支持：可写 `open`（`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`）、文件
+`write`、`lseek`、`O_TRUNC` 截断、显式 `utimens` 时间戳更新、`mkdir`、最小目录枚举、
+`unlink` 与可写 backend 内受限的 regular-file `rename`。`unlink` 会先移除目录项；仍打开的 fd 会让 inode 与数据块保留到最后一个
 引用关闭，rename 前已打开的 fd 在成功 rename 后仍指向同一个运行期文件。失败语义确定性
 （`-ENOSPC`/`-EEXIST`/`-ENOENT`/`-ENOTDIR`/`-EISDIR`/`-EINVAL`/`-ENOTEMPTY`/`-EIO`/
 `-EACCES`/`-EROFS`），失败路径绝不发布半成品元数据。
@@ -87,6 +87,9 @@ persistent test disk；它不是 POSIX `mkfs`、`mount` 或设备管理工具。
 误并保留 dirty/pending cache state，不报告 durable success。不提供 journaling、crash
 recovery、async I/O、广泛存储驱动、stable inode identity、完整 POSIX `DIR*` 或掉电一
 致性保证。
+BigFS format version 2 使用 128-byte inode slot 存放时间戳字段；旧的 format-version-1
+persistent 卷会被 validation 拒绝，必须显式执行 `mkfs_bigfs` 重新格式化，而不会被静默
+重解释。
 
 ## 权限强制
 
@@ -131,7 +134,7 @@ preservation API。复用块在用户可读前必须被清零或经完整 stagin
 新号紧随 `SYS_SIGRETURN = 19` 追加：`SYS_LSEEK = 20`、`SYS_PIPE = 21`、
 `SYS_DUP = 22`、`SYS_DUP2 = 23`、`SYS_FSYNC = 24`、`SYS_MKDIR = 25`、
 `SYS_UNLINK = 26`、`SYS_EXECVE = 27`、`SYS_READDIR = 28`、`SYS_RMDIR = 38`、
-`SYS_FTRUNCATE = 39`、`SYS_SYNC = 40`。`SYS_OPEN = 5`
+`SYS_FTRUNCATE = 39`、`SYS_SYNC = 40`、`SYS_UTIMENS = 54`。`SYS_OPEN = 5`
 扩展为接受可写/创建 flags 与 `O_CREAT` 的 mode；`SYS_WRITE = 2` 扩展为写文件/管道
 fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布局与「syscall 不发 EOI」规则
 不变。写/管道/FS syscall 在分配或进入同步块 IO/阻塞前检查调度阻塞守卫。

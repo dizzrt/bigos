@@ -20,6 +20,7 @@ def test_smoke_probe_programs_are_packaged_only_for_userland_smoke() -> None:
         'mkdir',
         'rm',
         'stat',
+        'touch',
         'cp',
         'mv',
         'tee',
@@ -132,8 +133,15 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'struct stat' in stat
     assert 'BIGOS_METADATA_TYPE_REGULAR' in stat
     assert 'unsigned long st_object_id;' in stat
+    assert 'unsigned long st_atime;' in stat
+    assert 'unsigned long st_mtime;' in stat
+    assert 'unsigned long st_ctime;' in stat
     assert 'int stat(const char *path, struct stat *st);' in stat
     assert 'int fstat(int fd, struct stat *st);' in stat
+    assert '#include "utime.h"' in libc
+    assert 'int bigos_utimens(const char *path, time_t atime, time_t mtime, unsigned int flags);' in read_source(
+        'user/libc/include/utime.h'
+    )
     assert '#define WAIT_ANY' in wait
     assert 'pid_t wait(int *status);' in wait
     assert 'pid_t waitpid(pid_t pid, int *status, int options);' in wait
@@ -156,6 +164,7 @@ def test_user_libc_sync_wrapper_uses_bounded_syscall_and_errno() -> None:
     assert '#define SYS_FCNTL       48' in sys_nr
     assert '#define SYS_ACCESS      49' in sys_nr
     assert '#define SYS_TRUNCATE    50' in sys_nr
+    assert '#define SYS_UTIMENS     54' in sys_nr
     assert 'int sync(void)' in libc
     assert 'errno_translate(syscall0(SYS_SYNC))' in libc
     assert 'int access(const char *path, int mode)' in libc
@@ -164,6 +173,7 @@ def test_user_libc_sync_wrapper_uses_bounded_syscall_and_errno() -> None:
     assert 'syscall3(SYS_FCNTL' in libc
     assert 'syscall2(SYS_ACCESS' in libc
     assert 'syscall2(SYS_TRUNCATE' in libc
+    assert 'syscall4(SYS_UTIMENS' in libc
 
 
 def test_bounded_path_tool_sources_use_libc_contracts() -> None:
@@ -172,6 +182,7 @@ def test_bounded_path_tool_sources_use_libc_contracts() -> None:
     mkdir_tool = read_source('user/bin/mkdir.c')
     rm = read_source('user/bin/rm.c')
     stat_tool = read_source('user/bin/stat.c')
+    touch_tool = read_source('user/bin/touch.c')
 
     assert 'Not a complete POSIX cat' in cat
     assert 'open(path, O_RDONLY, 0)' in cat
@@ -193,7 +204,13 @@ def test_bounded_path_tool_sources_use_libc_contracts() -> None:
     assert 'usage: rm PATH...' in rm
 
     assert 'bounded metadata observer' in stat_tool
+    assert 'st.st_atime' in stat_tool
+    assert 'st.st_mtime' in stat_tool
+    assert 'st.st_ctime' in stat_tool
     assert 'stable inode' not in stat_tool
+    assert 'BigOS bounded touch' in touch_tool
+    assert 'utime(path, NULL)' in touch_tool
+    assert 'O_WRONLY | O_CREAT' in touch_tool
 
 
 def test_smoke_probe_sources_cover_runtime_contract_categories() -> None:

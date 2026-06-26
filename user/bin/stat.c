@@ -75,6 +75,12 @@ static int show_path(const char *path) {
     write_uint(st.st_gid);
     write_all(1, " object=");
     write_uint(st.st_object_id);
+    write_all(1, " atime=");
+    write_uint(st.st_atime);
+    write_all(1, " mtime=");
+    write_uint(st.st_mtime);
+    write_all(1, " ctime=");
+    write_uint(st.st_ctime);
     write_all(1, "\n");
     return 0;
 }

@@ -30,5 +30,6 @@
 #include "sys/wait.h"     /* IWYU pragma: export */
 #include "time.h"         /* IWYU pragma: export */
 #include "unistd.h"       /* IWYU pragma: export */
+#include "utime.h"        /* IWYU pragma: export */
 
 #endif /* _BIGOS_LIBC_H */

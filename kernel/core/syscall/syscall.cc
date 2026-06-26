@@ -539,6 +539,29 @@ namespace sys {
             return bigfs_status_to_syscall(bigos::bigfs::format_persistent());
         }
 
+        static int64_t sys_utimens(uint64_t __path, uint64_t __atime, uint64_t __mtime, uint64_t __flags) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            if ((__flags & ~bigos::vfs::UTIME_SUPPORTED_FLAGS) != 0)
+                return -bigos::EINVAL;
+            char path[SYS_PATH_MAX_LEN + 1];
+            if (!copy_user_path(__path, path, sizeof(path)))
+                return -bigos::EFAULT;
+            if (relative_lookup_blocked_by_deleted_cwd(path))
+                return -bigos::ENOENT;
+            if (!bigos::vfs::initialized()) {
+                const bigos::vfs::Status init_status = bigos::vfs::init();
+                if (init_status != bigos::vfs::Status::Success)
+                    return vfs_status_to_syscall(init_status);
+            }
+            bigos::proc::Process *process = bigos::proc::current_process();
+            const uint32_t uid = process != nullptr ? process->uid : 0;
+            const uint32_t gid = process != nullptr ? process->gid : 0;
+            const bigos::vfs::Status status =
+                bigos::vfs::utimens(path, bigos::proc::current_cwd(), __atime, __mtime, (uint32_t)__flags, uid, gid);
+            return vfs_status_to_syscall(status);
+        }
+
         static int64_t sys_readdir(uint64_t __fd, uint64_t __entries, uint64_t __max_entries) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
@@ -990,6 +1013,9 @@ namespace sys {
                 break;
             case SYS_MKFS_BIGFS:
                 result = __detail::sys_mkfs_bigfs();
+                break;
+            case SYS_UTIMENS:
+                result = __detail::sys_utimens(__frame->rdi, __frame->rsi, __frame->rdx, __frame->r10);
                 break;
             case SYS_EXECVE:
                 // execve replaces the current process image and enters the new
