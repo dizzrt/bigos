@@ -12,6 +12,21 @@
 #include "../../libc/include/sys/wait.h"
 #include "../../libc/include/time.h"
 #include "../../libc/include/unistd.h"
+/* Standard freestanding headers come from the cross toolchain (-ffreestanding),
+ * NOT from this repository. Including them next to sys/types.h must not produce
+ * size_t/NULL duplicate-definition conflicts (sys/types.h re-references
+ * <stddef.h>). The static asserts pin the LP64 ABI as a regression guard. */
+#include <stddef.h>
+#include <stdint.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stdarg.h>
+
+_Static_assert(sizeof(size_t) == 8, "size_t must be 64-bit (LP64)");
+_Static_assert(sizeof(long) == 8, "long must be 64-bit (LP64)");
+_Static_assert(sizeof(int) == 4, "int must be 32-bit");
+_Static_assert(sizeof(void *) == 8, "pointer must be 64-bit");
+_Static_assert(INT_MAX == 2147483647, "INT_MAX must match 32-bit int");
 
 static void write_all(int fd, const char *s) {
     size_t len = strlen(s);
@@ -223,6 +238,51 @@ static int check_environment(char **envp) {
     return 1;
 }
 
+static int cmp_int_subset(const void *a, const void *b) {
+    int ia = *(const int *)a;
+    int ib = *(const int *)b;
+    return (ia > ib) - (ia < ib);
+}
+
+static int check_expanded_helpers(void) {
+    if (memcmp("abc", "abd", 3) >= 0 || memcmp("xy", "xy", 2) != 0)
+        return 0;
+    char cat[16] = "foo";
+    strcat(cat, "bar");
+    strncat(cat, "bazqux", 3);
+    if (strcmp(cat, "foobarbaz") != 0)
+        return 0;
+    if (strspn("aabbc", "ab") != 4 || strcspn("abc:d", ":") != 3)
+        return 0;
+    if (strpbrk("a,b", ",") == NULL)
+        return 0;
+    char toks[] = "x;;y";
+    char *save = NULL;
+    char *t1 = strtok_r(toks, ";", &save);
+    char *t2 = strtok_r(NULL, ";", &save);
+    if (t1 == NULL || strcmp(t1, "x") != 0 || t2 == NULL || strcmp(t2, "y") != 0)
+        return 0;
+    if (strtok_r(NULL, ";", &save) != NULL)
+        return 0;
+    if (abs(-3) != 3 || labs(-4l) != 4l)
+        return 0;
+    char *end = NULL;
+    if (strtoll("-9", &end, 10) != -9 || strtoull("0x10", &end, 0) != 16ull)
+        return 0;
+    int arr[] = {4, 1, 3, 2};
+    qsort(arr, 4, sizeof(int), cmp_int_subset);
+    if (arr[0] != 1 || arr[3] != 4)
+        return 0;
+    int key = 3;
+    if (bsearch(&key, arr, 4, sizeof(int), cmp_int_subset) == NULL)
+        return 0;
+    if (!isxdigit('f') || !ispunct('!') || !iscntrl('\n') || !isgraph('A') || !isblank('\t'))
+        return 0;
+    if (isxdigit('g') || ispunct('a') || iscntrl('A') || isgraph(' ') || isblank('\n'))
+        return 0;
+    return 1;
+}
+
 int main(int argc, char **argv, char **envp) {
     assert(argc >= 1);
     if (argc < 1 || argv == NULL || argv[0] == NULL)
@@ -249,6 +309,8 @@ int main(int argc, char **argv, char **envp) {
         return 9;
     if (!check_dir_wrapper())
         return 10;
+    if (!check_expanded_helpers())
+        return 12;
 
     printf("smoke_libc_subset stdout argc=%d argv0=%s fmt=%8x ptr=%p size=%zu %c %%\n", argc, argv[0], 0x2a, argv, (size_t)32, 'Z');
     if (fprintf(stderr, "smoke_libc_subset stderr errno=%d env=%s width=%5u long=%ld\n", errno, getenv("PATH"), 7u, -9l) < 0)

@@ -11,9 +11,8 @@ environment.
 - `user/libc`: bounded minimal C library subset, syscall wrappers, errno
   translation, cwd wrappers, ASCII/C-locale-style `ctype`, bounded
   `time.h`/`assert.h`, string/memory helpers, `brk`-backed `malloc`/`free`,
-  tiny fd-backed stdio with opaque standard streams, `printf`,
-  `fprintf(stderr, ...)`, deterministic error text, and read-only
-  `environ`/`getenv`.
+  a bounded buffered `FILE` stream subset with line/full/no buffering, `printf`,
+  `fprintf`, deterministic error text, and read-only `environ`/`getenv`.
 - `user/init/init.c`: resident PID-1. It starts `/bin/sh` with
   `fork` + `execve`, waits for children, and restarts the shell when it exits.
 - `user/sh/sh.c`: bounded interactive shell with builtins, cwd-aware PATH lookup,
@@ -129,7 +128,11 @@ The user libc exposes a documented bounded subset for simple static C programs:
   `errno.h`, `time.h`, `unistd.h`, `fcntl.h`, `sys/types.h`, `sys/wait.h`,
   `sys/stat.h`, `bigos_dirent.h`, `bigos_terminal.h`, plus the compatibility umbrella `libc.h`.
   Raw syscall primitives are opt-in through `bigos_syscall.h`, not exported by
-  the ordinary umbrella header.
+  the ordinary umbrella header. Standard freestanding headers (`stddef.h`,
+  `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`) are reused directly from the
+  cross toolchain under `-ffreestanding`; this repository does not ship copies.
+  `sys/types.h` re-references the toolchain `<stddef.h>` for `size_t`/`NULL` and
+  defines only BigOS-owned types (`ssize_t`/`off_t`/`mode_t`/`pid_t`).
 - Types and constants: `size_t`, `ssize_t`, `off_t`, `pid_t`, `NULL`, the
   implemented open flags, bounded fd-control constants (`F_GETFD`, `F_SETFD`,
   `F_DUPFD`, `FD_CLOEXEC`), access mode bits, seek constants, `WAIT_ANY`,
@@ -159,29 +162,47 @@ The user libc exposes a documented bounded subset for simple static C programs:
   libc internals or callers that explicitly include `bigos_syscall.h`; they do
   not translate `errno` and are not POSIX `syscall(2)` compatibility.
 - `ctype`, time, and assert: `ctype.h` provides deterministic ASCII/C-locale
-  classification and `toupper`/`tolower` only. `time.h` exposes second-resolution
+  classification (`isalnum`, `isalpha`, `isblank`, `iscntrl`, `isdigit`,
+  `isgraph`, `islower`, `isprint`, `ispunct`, `isspace`, `isupper`, `isxdigit`)
+  and `toupper`/`tolower` only. `time.h` exposes second-resolution
   `time()` backed by the BigOS bounded time primitive. `assert.h` supports
   `NDEBUG`; enabled failures print a deterministic stderr diagnostic and
   terminate through the user libc exit path.
 - Strings and memory: the subset includes the implemented bounded routines such
-  as `strlen`, `strcmp`, `strncmp`, `memcpy`, `memset`, and overlap-safe
-  `memmove`, plus the stateless search helpers `strchr`, `strrchr`, `strstr`,
-  and `memchr`. It does not expose `strtok`, `qsort`, or `bsearch`. Null pointer
-  inputs keep ordinary C preconditions and are not given extra BigOS-specific
-  safety promises.
-- Stdlib and heap: `strtol` and `strtoul` support bounded integer parsing with
-  base handling, `endptr`, no-digit behavior, and `ERANGE`; `atoi` is the decimal
-  convenience wrapper. `malloc`, `calloc`, and `realloc` are backed by the
-  bounded brk allocator: `calloc` checks multiplication overflow and zeroes
-  memory, `realloc` preserves the old allocation on failure, and `free(NULL)` is
-  a no-op. The allocator does not promise thread safety, complete coalescing, or
-  hosted allocator behavior.
-- Stdio: `stdin`, `stdout`, and `stderr` are opaque handles for fd `0`, `1`, and
-  `2` only. `putchar`, `puts`, `printf`, and `fprintf(stderr, ...)` are fd/write
-  based; `snprintf` uses the same bounded formatter. The formatter supports the
+  as `strlen`, `strcmp`, `strncmp`, `strcpy`, `strncpy`, `strcat`, `strncat`,
+  `memcpy`, `memcmp`, `memset`, and overlap-safe `memmove`, plus the stateless
+  search helpers `strchr`, `strrchr`, `strstr`, `strspn`, `strcspn`, `strpbrk`,
+  and `memchr`, and the explicit reentrant tokenizer `strtok_r` (caller-provided
+  `saveptr`). It does not expose the hidden-global `strtok`. Null pointer inputs
+  keep ordinary C preconditions and are not given extra BigOS-specific safety
+  promises.
+- Stdlib and heap: `strtol`, `strtoul`, `strtoll`, and `strtoull` support bounded
+  integer parsing with base handling, `endptr`, no-digit behavior, and `ERANGE`;
+  `atoi` is the decimal convenience wrapper. `abs` and `labs` give integer
+  magnitude, and `qsort`/`bsearch` use caller-provided comparators with no locale.
+  `malloc`, `calloc`, and `realloc` are backed by the bounded brk allocator:
+  `calloc` checks multiplication overflow and zeroes memory, `realloc` preserves
+  the old allocation on failure, and `free(NULL)` is a no-op. The allocator does
+  not promise thread safety, complete coalescing, or hosted allocator behavior.
+- Stdio: `stdin`, `stdout`, and `stderr` are static buffered `FILE` streams bound
+  to fd `0`, `1`, and `2` (`stderr` unbuffered, `stdout` line buffered, `stdin`
+  read buffered). The libc exposes a bounded buffered `FILE` stream subset:
+  `fopen`/`freopen`/`fclose`, buffered `fread`/`fwrite`, `fgetc`/`getc`/`fgets`/
+  `fputc`/`putc`/`fputs`/single-byte `ungetc`, buffering control
+  `setvbuf`/`setbuf` (`_IOFBF`/`_IOLBF`/`_IONBF`), stream state
+  `fflush`/`feof`/`ferror`/`clearerr`/`fileno`, and bounded byte positioning
+  `fseek`/`ftell`/`rewind`. `fopen` modes map to the implemented `open` flags
+  (`"r"`/`"w"`/`"a"` and their `+`/`b` variants); text and binary behave
+  identically (no newline translation) and append is emulated with `lseek`
+  because the kernel has no `O_APPEND`. `putchar`, `puts`, `printf`, and
+  `fprintf` route through the stream buffer and the shared formatter; `snprintf`
+  shares the same formatter against a caller buffer. The formatter supports the
   existing minimal forms plus simple width, `%u`, `%p`, `%ld`, `%lu`, and `%zu`.
-  There is no `fopen`, `fclose`, full buffering, precision, locale,
-  floating-point formatting, wide-character support, or hosted `FILE` semantics.
+  The libc exit path flushes all buffered writable streams so buffered output
+  lands even without explicit `fclose`. There is no `scanf` family, wide stream,
+  precision, locale, floating-point formatting, wide-character support,
+  `tmpfile`/`fmemopen`, complete `fpos_t` positioning, or other hosted `FILE`
+  semantics beyond this bounded subset.
 - Environment: `envp`, `environ`, and `getenv` are read-only. This stage does
   not implement `setenv`, `putenv`, or `unsetenv`.
 
@@ -191,7 +212,8 @@ The simple C program baseline treats simple static C programs as a user-visible 
 baseline, still within the existing freestanding runtime boundary:
 
 - Entry: `_start` calls `main(argc, argv, envp)` using the existing user stack
-  layout, and `main`'s return value is passed to `SYS_EXIT`.
+  layout, and `main`'s return value is passed to the libc `exit()`, which flushes
+  buffered stdio streams before issuing `SYS_EXIT`.
 - Wrappers: libc syscall wrappers translate negative kernel returns into
   positive `errno` values and return `-1` or the documented failure sentinel.
 - Output: programs use fd-based `write`, `putchar`, `puts`, bounded

@@ -122,6 +122,7 @@ int close(int fd) {
 }
 
 void exit(int code) {
+    __bigos_stdio_cleanup();
     syscall1(SYS_EXIT, (long)code);
     for (;;) {}
 }

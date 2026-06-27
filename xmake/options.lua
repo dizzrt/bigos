@@ -246,6 +246,12 @@ option("filesystem_maturity_smoke")
     set_description("enable validation-only runtime filesystem maturity smoke marker")
 option_end()
 
+option("libc_file_stream_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only bounded buffered libc FILE stream smoke marker")
+option_end()
+
 option("dynamic_link_smoke")
     set_default(false)
     set_showmenu(true)

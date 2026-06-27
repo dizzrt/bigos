@@ -97,16 +97,50 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'extern FILE *stderr;' in stdio
     assert 'int fprintf(FILE *stream, const char *fmt, ...);' in stdio
     assert 'void perror(const char *s);' in stdio
-    assert 'fopen(' not in stdio and 'fclose(' not in stdio
+    # Bounded buffered FILE stream subset is now exposed.
+    assert 'FILE *fopen(const char *path, const char *mode);' in stdio
+    assert 'FILE *freopen(const char *path, const char *mode, FILE *stream);' in stdio
+    assert 'int fclose(FILE *stream);' in stdio
+    assert 'size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);' in stdio
+    assert 'size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);' in stdio
+    assert 'char *fgets(char *s, int n, FILE *stream);' in stdio
+    assert 'int setvbuf(FILE *stream, char *buf, int mode, size_t size);' in stdio
+    assert 'int fseek(FILE *stream, long offset, int whence);' in stdio
+    assert 'long ftell(FILE *stream);' in stdio
+    assert '#define BUFSIZ' in stdio
+    assert '#define _IONBF' in stdio
+    # Buffered streams remain a bounded subset: no scanf family or wide streams.
+    assert 'int scanf(' not in stdio
+    assert 'int fscanf(' not in stdio
+    assert 'int sscanf(' not in stdio
     assert 'void *malloc(size_t n);' in stdlib
     assert 'unsigned long strtoul(const char *nptr, char **endptr, int base);' in stdlib
+    assert 'long long strtoll(const char *nptr, char **endptr, int base);' in stdlib
+    assert 'unsigned long long strtoull(const char *nptr, char **endptr, int base);' in stdlib
+    assert 'int abs(int v);' in stdlib
+    assert 'long labs(long v);' in stdlib
+    assert 'void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));' in stdlib
     assert 'char *getenv(const char *name);' in stdlib
     assert 'int strncmp(const char *a, const char *b, size_t n);' in string
     assert 'char *strrchr(const char *s, int c);' in string
     assert 'char *strstr(const char *haystack, const char *needle);' in string
     assert 'void *memchr(const void *s, int c, size_t n);' in string
+    assert 'int memcmp(const void *a, const void *b, size_t n);' in string
+    assert 'char *strcat(char *dst, const char *src);' in string
+    assert 'char *strncat(char *dst, const char *src, size_t n);' in string
+    assert 'size_t strspn(const char *s, const char *accept);' in string
+    assert 'size_t strcspn(const char *s, const char *reject);' in string
+    assert 'char *strpbrk(const char *s, const char *accept);' in string
+    assert 'char *strtok_r(char *str, const char *delim, char **saveptr);' in string
+    # The hidden-global strtok is intentionally not exposed.
+    assert 'char *strtok(char *' not in string
     assert 'const char *strerror(int errnum);' in string
     assert 'int isalpha(int c);' in ctype
+    assert 'int isxdigit(int c);' in ctype
+    assert 'int ispunct(int c);' in ctype
+    assert 'int iscntrl(int c);' in ctype
+    assert 'int isgraph(int c);' in ctype
+    assert 'int isblank(int c);' in ctype
     assert 'int toupper(int c);' in ctype
     assert '#define assert(expr)' in assert_h
     assert '#ifdef NDEBUG' in assert_h
@@ -129,6 +163,11 @@ def test_user_libc_exposes_bounded_fine_grained_headers() -> None:
     assert 'struct bigos_dirent' in dirent
     assert 'ssize_t bigos_readdir(int fd, struct bigos_dirent *entries, size_t max_entries);' in dirent
     assert 'typedef unsigned int mode_t;' in types
+    # size_t/NULL now come from the toolchain freestanding <stddef.h>, not a
+    # local copy, to avoid duplicate typedef/macro conflicts.
+    assert '#include <stddef.h>' in types
+    assert 'typedef unsigned long size_t;' not in types
+    assert '#define NULL' not in types
     assert 'int mkdir(const char *path, mode_t mode);' in stat
     assert 'struct stat' in stat
     assert 'BIGOS_METADATA_TYPE_REGULAR' in stat

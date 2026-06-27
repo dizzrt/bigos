@@ -412,9 +412,9 @@ programs and a richer userland.
 - [x] Task M12.1: dynamic linking and shared library support within bounded
   freestanding-safe semantics.
 - [x] 任务 M12.1：在有界 freestanding-safe 语义内支持动态链接与共享库。
-- [ ] Task M12.2: a more complete libc subset toward portable standard small
+- [x] Task M12.2: a more complete libc subset toward portable standard small
   programs.
-- [ ] 任务 M12.2：更完整的 libc 子集，支撑可移植的标准小程序。
+- [x] 任务 M12.2：更完整的 libc 子集，支撑可移植的标准小程序。
 - [ ] Task M12.3: a broader set of bounded core userland utilities.
 - [ ] 任务 M12.3：更广的一组有界核心用户态工具程序。
 

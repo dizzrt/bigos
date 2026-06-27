@@ -9,8 +9,8 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
   `copy_exec_args_to_stack` 生成的初始用户栈。
 - `user/libc`：有界最小 C 标准库子集，包括 syscall wrapper、errno 翻译、
   cwd wrapper、ASCII/C-locale-style `ctype`、有界 `time.h`/`assert.h`、
-  字符串/内存函数、基于 `brk` 的 `malloc`/`free`、带 opaque standard streams
-  的 fd-backed 极简 stdio、`printf`、`fprintf(stderr, ...)`、确定性错误文本，
+  字符串/内存函数、基于 `brk` 的 `malloc`/`free`、带行/全/无缓冲的有界缓冲
+  `FILE` 流子集、`printf`、`fprintf`、确定性错误文本，
   以及只读 `environ`/`getenv`。
 - `user/init/init.c`：常驻 PID-1，通过 `fork` + `execve` 启动 `/bin/sh`，
   等待子进程，并在 shell 退出后重新拉起。
@@ -41,8 +41,8 @@ rsp -> argc
 ```
 
 `_start` 将 `argc` 放入 `rdi`、`argv` 放入 `rsi`、`envp` 放入 `rdx`，按
-System V x86_64 调用边界对齐栈，调用 `main(argc, argv, envp)`，并用 `main`
-返回值经 `SYS_EXIT` 退出。它不会返回到未定义地址。
+System V x86_64 调用边界对齐栈，调用 `main(argc, argv, envp)`，并把 `main`
+返回值传给 libc `exit()`，由它在发出 `SYS_EXIT` 前刷新缓冲 stdio 流。它不会返回到未定义地址。
 
 ## 当前目录
 
@@ -105,7 +105,11 @@ Shell 有意保持很小：
 - 头文件：`assert.h`、`ctype.h`、`stdio.h`、`stdlib.h`、`string.h`、
   `errno.h`、`time.h`、`unistd.h`、`fcntl.h`、`sys/types.h`、`sys/wait.h`、
   `sys/stat.h`、`bigos_dirent.h`、`bigos_terminal.h`，以及兼容用 umbrella 头 `libc.h`。Raw syscall
-  primitive 需要显式包含 `bigos_syscall.h`，不会从普通 umbrella 头导出。
+  primitive 需要显式包含 `bigos_syscall.h`，不会从普通 umbrella 头导出。标准
+  freestanding 头（`stddef.h`、`stdint.h`、`limits.h`、`stdbool.h`、`stdarg.h`）
+  在 `-ffreestanding` 下直接复用交叉工具链版本；本仓库不提供副本。`sys/types.h`
+  的 `size_t`/`NULL` 转引工具链 `<stddef.h>`，仅定义 BigOS 自有类型
+  （`ssize_t`/`off_t`/`mode_t`/`pid_t`）。
 - 类型与常量：`size_t`、`ssize_t`、`off_t`、`pid_t`、`NULL`、已实现的
   open flags、有界 fd-control 常量（`F_GETFD`、`F_SETFD`、`F_DUPFD`、
   `FD_CLOEXEC`）、access mode bits、seek 常量、`WAIT_ANY`、`WNOHANG`，以及与
@@ -130,24 +134,38 @@ Shell 有意保持很小：
   shell、smoke、libc 或打包用户程序路径会使用它们。Raw `syscall0` 到 `syscall6`
   只作为 libc 内部或显式包含 `bigos_syscall.h` 的低层 BigOS ABI helper 保留；
   它们不翻译 `errno`，也不是 POSIX `syscall(2)` 兼容。
-- `ctype`、time 与 assert：`ctype.h` 只提供确定性的 ASCII/C-locale 分类和
+- `ctype`、time 与 assert：`ctype.h` 只提供确定性的 ASCII/C-locale 分类
+  （`isalnum`、`isalpha`、`isblank`、`iscntrl`、`isdigit`、`isgraph`、`islower`、
+  `isprint`、`ispunct`、`isspace`、`isupper`、`isxdigit`）和
   `toupper`/`tolower`。`time.h` 暴露由 BigOS 有界 time primitive 支撑的秒级
   `time()`。`assert.h` 支持 `NDEBUG`；启用的断言失败会向 stderr 输出确定性诊断，
   并通过用户态 libc exit 路径终止。
 - 字符串与内存：子集包含已实现的有界例程，例如 `strlen`、`strcmp`、
-  `strncmp`、`memcpy`、`memset` 和 overlap-safe `memmove`，以及无隐藏状态 search
-  helper：`strchr`、`strrchr`、`strstr` 和 `memchr`。它不暴露 `strtok`、`qsort`
-  或 `bsearch`。NULL 指针输入仍遵循普通 C 前置条件，BigOS 不额外承诺 hosted 安全检查。
-- Stdlib 与堆：`strtol` 和 `strtoul` 支持有界整数解析、base 处理、`endptr`、
-  no-digit 行为和 `ERANGE`；`atoi` 是十进制便利 wrapper。`malloc`、`calloc` 和
-  `realloc` 使用有界 brk allocator；`calloc` 检查乘法溢出并清零内存，`realloc`
-  失败时保留原块，`free(NULL)` 无副作用。分配器不承诺线程安全、完整 coalescing 或
-  hosted allocator 行为。
-- Stdio：`stdin`、`stdout`、`stderr` 只是 fd `0`、`1`、`2` 的 opaque handle。
-  `putchar`、`puts`、`printf` 和 `fprintf(stderr, ...)` 基于 fd/write，`snprintf`
-  复用同一有界 formatter。formatter 支持既有最小格式、简单宽度、`%u`、`%p`、
-  `%ld`、`%lu` 和 `%zu`；不提供 `fopen`、`fclose`、完整 buffering、precision、
-  locale、浮点格式化、宽字符或 hosted `FILE` 语义。
+  `strncmp`、`strcpy`、`strncpy`、`strcat`、`strncat`、`memcpy`、`memcmp`、
+  `memset` 和 overlap-safe `memmove`，以及无隐藏状态 search helper：`strchr`、
+  `strrchr`、`strstr`、`strspn`、`strcspn`、`strpbrk` 和 `memchr`，还有显式可重入
+  tokenizer `strtok_r`（调用方提供 `saveptr`）。它不暴露隐藏全局态的 `strtok`。
+  NULL 指针输入仍遵循普通 C 前置条件，BigOS 不额外承诺 hosted 安全检查。
+- Stdlib 与堆：`strtol`、`strtoul`、`strtoll` 和 `strtoull` 支持有界整数解析、
+  base 处理、`endptr`、no-digit 行为和 `ERANGE`；`atoi` 是十进制便利 wrapper。
+  `abs`/`labs` 给出整数绝对值，`qsort`/`bsearch` 使用调用方比较器且无 locale。
+  `malloc`、`calloc` 和 `realloc` 使用有界 brk allocator；`calloc` 检查乘法溢出并
+  清零内存，`realloc` 失败时保留原块，`free(NULL)` 无副作用。分配器不承诺线程
+  安全、完整 coalescing 或 hosted allocator 行为。
+- Stdio：`stdin`、`stdout`、`stderr` 是绑定 fd `0`、`1`、`2` 的静态缓冲 `FILE`
+  流（`stderr` 无缓冲、`stdout` 行缓冲、`stdin` 读缓冲）。libc 暴露有界缓冲
+  `FILE` 流子集：`fopen`/`freopen`/`fclose`、缓冲 `fread`/`fwrite`、`fgetc`/
+  `getc`/`fgets`/`fputc`/`putc`/`fputs`/单字节 `ungetc`、缓冲控制
+  `setvbuf`/`setbuf`（`_IOFBF`/`_IOLBF`/`_IONBF`）、流状态
+  `fflush`/`feof`/`ferror`/`clearerr`/`fileno`，以及有界字节定位
+  `fseek`/`ftell`/`rewind`。`fopen` 模式映射到已实现的 `open` flags（`"r"`/`"w"`/
+  `"a"` 及其 `+`/`b` 变体）；文本与二进制行为一致（不做换行转换），追加用 `lseek`
+  模拟（内核无 `O_APPEND`）。`putchar`、`puts`、`printf`、`fprintf` 经流缓冲与共享
+  formatter，`snprintf` 对调用方缓冲复用同一 formatter。formatter 支持既有最小
+  格式、简单宽度、`%u`、`%p`、`%ld`、`%lu` 和 `%zu`。libc exit 路径刷新所有可刷新
+  写流，使缓冲输出即使不显式 `fclose` 也能落盘。不提供 `scanf` 家族、宽流、
+  precision、locale、浮点格式化、宽字符、`tmpfile`/`fmemopen`、完整 `fpos_t` 定位，
+  或超出本有界子集的其他 hosted `FILE` 语义。
 - 环境：`envp`、`environ` 与 `getenv` 只读。本阶段不实现 `setenv`、`putenv`
   或 `unsetenv`。
 
@@ -157,7 +175,7 @@ Shell 有意保持很小：
 runtime 边界内：
 
 - 入口：`_start` 使用现有用户栈布局调用 `main(argc, argv, envp)`，并将
-  `main` 返回值传给 `SYS_EXIT`。
+  `main` 返回值传给 libc `exit()`，由它在发出 `SYS_EXIT` 前刷新缓冲 stdio 流。
 - Wrapper：libc syscall wrapper 将内核负返回值翻译为正的 `errno`，并返回
   `-1` 或接口文档化的失败哨兵。
 - 输出：程序使用 fd-based `write`、`putchar`、`puts`、有界 `printf`/`fprintf`

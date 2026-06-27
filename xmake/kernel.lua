@@ -224,6 +224,10 @@ if has_config("filesystem_maturity_smoke") then
     add_defines("BIGOS_FILESYSTEM_MATURITY_SMOKE")
 end
 
+if has_config("libc_file_stream_smoke") then
+    add_defines("BIGOS_LIBC_FILE_STREAM_SMOKE")
+end
+
 if has_config("dynamic_link_smoke") then
     add_defines("BIGOS_DYNAMIC_LINK")
     add_defines("BIGOS_DYNAMIC_LINK_SMOKE")

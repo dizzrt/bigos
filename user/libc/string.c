@@ -120,6 +120,84 @@ void *memmove(void *dst, const void *src, size_t n) {
     return dst;
 }
 
+int memcmp(const void *a, const void *b, size_t n) {
+    const unsigned char *pa = (const unsigned char *)a;
+    const unsigned char *pb = (const unsigned char *)b;
+    for (size_t i = 0; i < n; i++) {
+        if (pa[i] != pb[i])
+            return (int)pa[i] - (int)pb[i];
+    }
+    return 0;
+}
+
+char *strcat(char *dst, const char *src) {
+    char *out = dst;
+    while (*dst != 0)
+        dst++;
+    while ((*dst++ = *src++) != 0) {
+    }
+    return out;
+}
+
+char *strncat(char *dst, const char *src, size_t n) {
+    char *out = dst;
+    while (*dst != 0)
+        dst++;
+    size_t i = 0;
+    for (; i < n && src[i] != 0; i++)
+        dst[i] = src[i];
+    dst[i] = 0;
+    return out;
+}
+
+size_t strspn(const char *s, const char *accept) {
+    size_t count = 0;
+    for (; s[count] != 0; count++) {
+        if (strchr(accept, s[count]) == NULL)
+            break;
+    }
+    return count;
+}
+
+size_t strcspn(const char *s, const char *reject) {
+    size_t count = 0;
+    for (; s[count] != 0; count++) {
+        if (strchr(reject, s[count]) != NULL)
+            break;
+    }
+    return count;
+}
+
+char *strpbrk(const char *s, const char *accept) {
+    for (; *s != 0; s++) {
+        if (strchr(accept, *s) != NULL)
+            return (char *)s;
+    }
+    return NULL;
+}
+
+char *strtok_r(char *str, const char *delim, char **saveptr) {
+    if (saveptr == NULL || delim == NULL)
+        return NULL;
+    char *s = str != NULL ? str : *saveptr;
+    if (s == NULL)
+        return NULL;
+    s += strspn(s, delim); /* skip leading delimiters */
+    if (*s == 0) {
+        *saveptr = s;
+        return NULL;
+    }
+    char *token = s;
+    s = strpbrk(token, delim);
+    if (s == NULL) {
+        *saveptr = token + strlen(token);
+    } else {
+        *s = 0;
+        *saveptr = s + 1;
+    }
+    return token;
+}
+
 const char *strerror(int errnum) {
     switch (errnum) {
         case 0:

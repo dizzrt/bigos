@@ -55,6 +55,7 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
 | `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity 当前运行期文件系统语义，覆盖只读 exFAT、RAM-backed `/rw`、fd/VFS、metadata、cwd-relative path、libc errno 与 shell-visible tools；不声明重启持久化。 |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno/error text、ctype、有界 time/assert、`snprintf`/formatter、`strtol`/`strtoul`/`atoi`、无隐藏状态 search helper、`calloc`/`realloc`、有界 `DIR*` wrapper、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和有界 `/rw` 运行时文件操作。 |
+| `libc-file-stream` | `--libc_file_stream_smoke=y` | `BIGOS_LIBC_FILE_STREAM_PASSED` | 40s | 有界缓冲 `FILE` 流子集：`fopen`/`freopen`/`fclose`、缓冲 `fread`/`fwrite` 回环、`fgets`、`fseek`/`ftell`/`rewind`、`setvbuf` 模式与调用方缓冲、`fflush`/`feof`/`ferror`/`clearerr`、退出路径刷新、`freopen(stdout)` 重定向、确定性失败路径，以及扩充的 `string`/`stdlib`/`ctype` helper。 |
 | `default-init` | _(无)_ | `BIGOS_USER_EXEC` | 40s | 不加任何 smoke 开关的默认构建；normal boot 打包 PID-1 init、`/bin/sh` 和 bounded `/bin/*`。 |
 
 每个 case 只启用表中列出的 smoke 开关，并在构建前显式关闭其他 smoke 开关。runner 之外，所有 runtime smoke 选项仍保持默认关闭，除非开发者通过 `xmake f ...=y` 显式配置。

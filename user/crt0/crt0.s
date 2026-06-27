@@ -8,10 +8,9 @@
 #
 # crt0 reads argc/argv/envp from that layout, records environ for getenv,
 # aligns the stack to the System V 16-byte boundary, and calls
-# main(argc, argv, envp). When main returns its value is the SYS_EXIT code.
-# crt0 never returns to an undefined address.
-
-.equ SYS_EXIT, 3
+# main(argc, argv, envp). When main returns its value is passed to exit(), which
+# flushes buffered libc streams before issuing SYS_EXIT. crt0 never returns to an
+# undefined address.
 
 .section .text
 .global _start
@@ -28,9 +27,8 @@ _start:
 
     call main                      # main(argc, argv, envp); return value in eax
 
-    movl %eax, %edi                # SYS_EXIT exit code = main return value
-    movq $SYS_EXIT, %rax
-    int $0x80
+    movl %eax, %edi                # exit(main_return); exit() flushes stdio
+    call exit
 1:
     hlt                            # exit must not return; halt defensively
     jmp 1b

@@ -5,7 +5,7 @@ TBD - created by archiving change mature-portable-libc-subset. Update Purpose af
 ## Requirements
 ### Requirement: portable libc subset 边界
 
-BigOS SHALL define a portable libc subset for simple statically linked C programs on top of the existing bounded userland. This subset MUST cover freestanding-safe public headers, ASCII/C-locale-style `ctype` behavior, bounded `time.h` and `assert.h` public header behavior, bounded numeric conversion, bounded formatter behavior, deterministic error reporting, POSIX-like wrapper consumption, and representative program validation. The subset MUST NOT claim complete POSIX libc, hosted libc, dynamic linking, shared libraries, locale, threads, wide characters, complete `FILE` streams, complete calendar/timezone APIs, broad `mmap`, async I/O, SMP, or broad POSIX compatibility.
+BigOS SHALL define a portable libc subset for simple statically linked C programs on top of the existing bounded userland. This subset MUST cover freestanding-safe public headers, ASCII/C-locale-style `ctype` behavior, bounded `time.h` and `assert.h` public header behavior, bounded numeric conversion, bounded formatter behavior, a bounded buffered `FILE` stream subset as defined by the `bounded-file-streams` capability, deterministic error reporting, POSIX-like wrapper consumption, and representative program validation. The subset MUST NOT claim complete POSIX libc, hosted libc, dynamic linking, shared libraries, locale, threads, wide characters, complete hosted stdio (the `scanf` family, wide streams, `tmpfile`, `fmemopen`, complete `setvbuf` strategies, or complete `fpos_t` positioning), complete calendar/timezone APIs, broad `mmap`, async I/O, SMP, or broad POSIX compatibility.
 
 #### Scenario: 简单可移植程序只依赖 portable subset
 
@@ -18,6 +18,12 @@ BigOS SHALL define a portable libc subset for simple statically linked C program
 - **WHEN** 文档、OpenSpec、头文件注释或用户程序说明描述 portable libc subset
 - **THEN** 它们 MUST 将能力描述为 bounded C library subset 或 bounded POSIX-like wrapper subset
 - **AND** MUST NOT 暗示 BigOS 支持完整 POSIX libc、完整 hosted libc、动态链接、共享库或广泛 POSIX 兼容
+
+#### Scenario: 缓冲 FILE 流为有界子集
+
+- **WHEN** 文档、头文件或用户程序说明描述 portable subset 的 `FILE` 流能力
+- **THEN** 它们 MUST 将其描述为 `bounded-file-streams` 定义的有界缓冲流子集
+- **AND** MUST NOT 暗示完整 hosted stdio、`scanf` 家族、宽流、locale 或完整 `fpos_t` 定位
 
 ### Requirement: portable public headers 可分类且可构建
 
@@ -113,7 +119,7 @@ BigOS portable libc subset SHALL include a first batch of stateless search helpe
 
 ### Requirement: formatter 和错误报告成熟子集
 
-BigOS portable libc subset SHALL provide a shared bounded formatter for stdout, stderr, and bounded string formatting. The formatter MUST preserve existing supported formats and provide deterministic behavior for common integer, unsigned, pointer, size, long, width, truncation, and return-value cases documented by the subset. Error reporting MUST expose deterministic text for supported errno values through bounded helpers such as `strerror` or `perror`. The subset MUST NOT require floating-point formatting, locale, wide characters, complete flags, complete precision, complete `FILE` streams, or hosted stdio.
+BigOS portable libc subset SHALL provide a shared bounded formatter for stdout, stderr, and bounded string formatting, and MAY route stream output through the bounded buffered `FILE` stream subset defined by the `bounded-file-streams` capability. The formatter MUST preserve existing supported formats and provide deterministic behavior for common integer, unsigned, pointer, size, long, width, truncation, and return-value cases documented by the subset. Error reporting MUST expose deterministic text for supported errno values through bounded helpers such as `strerror` or `perror`. The subset MUST NOT require floating-point formatting, locale, wide characters, complete flags, complete precision, the `scanf` family, or complete hosted stdio.
 
 #### Scenario: formatter 组合行为一致
 
@@ -172,4 +178,20 @@ BigOS portable libc subset SHALL expose bounded blocking sleep wrappers backed b
 - **WHEN** representative static user programs include `unistd.h` or `time.h` and use only the documented bounded sleep declarations
 - **THEN** those declarations MUST resolve through BigOS user libc headers without host libc headers
 - **AND** the program MUST statically link through the existing user program build path
+
+### Requirement: 缓冲 FILE 流纳入可移植子集
+
+BigOS portable libc subset SHALL include a bounded buffered `FILE` stream subset so that common portable small programs can open named files, perform buffered reads and writes, query stream state, and perform bounded byte positioning without rewriting to raw fd calls. The semantics of this subset MUST be defined by the `bounded-file-streams` capability. This requirement MUST NOT imply complete hosted stdio, the `scanf` family, wide streams, locale, floating-point conversion, temporary files, memory streams, thread-safe stream locking, or complete `fpos_t` positioning.
+
+#### Scenario: 可移植程序经缓冲流读写命名文件
+
+- **WHEN** 一个简单静态 C 程序经 portable subset 的缓冲 `FILE` 流接口 `fopen` 一个命名文件并执行缓冲读写
+- **THEN** 该程序 MUST 能通过 BigOS freestanding 静态构建路径解析并链接这些接口
+- **AND** 其缓冲、定位与流状态行为 MUST 与 `bounded-file-streams` 能力一致
+
+#### Scenario: 缓冲流子集非目标不被暗示
+
+- **WHEN** 审查 portable subset 的缓冲流 public headers 或文档
+- **THEN** 它们 MUST NOT 将 `scanf` 家族、宽流、`tmpfile`/`fmemopen`、locale 或完整 `fpos_t` 定位声明为已支持
+- **AND** 这些能力的未来暴露 MUST 伴随显式规格与验证
 

@@ -133,6 +133,7 @@ on_build(function()
 
     -- Select the PID-1 init image:
     --   sleep_syscall_smoke                -> blocking sleep syscall validation program,
+    --   libc_file_stream_smoke    -> bounded buffered libc FILE stream validation program,
     --   userland_smoke/filesystem_maturity_smoke -> userland validation program,
     --   user_elf_smoke/user_program_smoke -> minimal print+exit smoke ELF
     --                               (preserves BIGOS_USER_ENTER/EXIT),
@@ -143,6 +144,8 @@ on_build(function()
         build_user_program(path.join(projectdir, "user", "smoke", "anonymous_lifecycle_smoke.c"), init_output)
     elseif has_config("sleep_syscall_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "sleep_syscall_smoke.c"), init_output)
+    elseif has_config("libc_file_stream_smoke") then
+        build_user_program(path.join(projectdir, "user", "smoke", "libc_file_stream_smoke.c"), init_output)
     elseif has_config("userland_smoke") or has_config("filesystem_maturity_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "userland_smoke.c"), init_output)
     elseif has_config("user_elf_smoke") or has_config("user_program_smoke") then

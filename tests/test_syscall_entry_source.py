@@ -109,10 +109,15 @@ def test_user_libc_syscall_and_errno_mirrors_match_kernel_headers() -> None:
 
 def test_user_crt0_exit_number_matches_shared_syscall_mirror() -> None:
     crt0 = read_source('user/crt0/crt0.s')
+    user_sys = read_source('user/libc/syscall.c')
     user_syscalls = parse_user_defines(read_source('user/libc/include/sys_nr.h'))
 
-    assert '.equ SYS_EXIT, 3' in crt0
-    assert 'movq $SYS_EXIT, %rax' in crt0
+    # crt0 delegates the main-return exit to libc exit(), which flushes buffered
+    # stdio streams before issuing SYS_EXIT. The SYS_EXIT number contract is now
+    # enforced in exit() (syscall.c) via the shared SYS_EXIT mirror.
+    assert 'call exit' in crt0
+    assert '__bigos_stdio_cleanup();' in user_sys
+    assert 'syscall1(SYS_EXIT, (long)code);' in user_sys
     assert user_syscalls['SYS_EXIT'] == 3
 
 

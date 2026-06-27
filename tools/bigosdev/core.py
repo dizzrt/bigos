@@ -653,6 +653,21 @@ RUNTIME_SMOKE_MATRIX = (
             'nanosleep, signal interruption, alarm, timerfd, or high-resolution timing'
         ),
     ),
+    RuntimeSmokeCase(
+        case_id='libc-file-stream',
+        title='Bounded buffered libc FILE streams',
+        switches=('libc_file_stream_smoke',),
+        expected_marker='BIGOS_LIBC_FILE_STREAM_PASSED',
+        timeout_seconds=40.0,
+        risk_area='user-space buffered FILE streams (fopen/freopen/fclose, buffered read/write, '
+        'setvbuf modes, fseek/ftell/rewind, exit-path flush) and expanded string/stdlib/ctype helpers',
+        validation_markers=('BIGOS_LIBC_FILE_STREAM_PASSED',),
+        proc_boundary=(
+            'default-off libc_file_stream_smoke build; packages a PID-1 user smoke that validates the '
+            'bounded buffered FILE stream subset and expanded helpers with deterministic assertions, '
+            'not complete hosted stdio, the scanf family, wide streams, locale, or floating point'
+        ),
+    ),
 )
 
 

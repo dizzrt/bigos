@@ -30,6 +30,10 @@
 #include "sys/wait.h"     /* IWYU pragma: export */
 #include "time.h"         /* IWYU pragma: export */
 #include "unistd.h"       /* IWYU pragma: export */
-#include "utime.h"        /* IWYU pragma: export */
+#include "utime.h"         /* IWYU pragma: export */
+
+/* Internal: flush all buffered writable streams on the libc exit path.
+ * Implemented in stdio.c, called by exit() and the crt0 main-return path. */
+void __bigos_stdio_cleanup(void);
 
 #endif /* _BIGOS_LIBC_H */
