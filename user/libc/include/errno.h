@@ -34,6 +34,13 @@
 #define ERANGE      34
 #define ENOSYS      38
 #define ENOTEMPTY   39
+#define ENOTSOCK    88
+#define EDESTADDRREQ 89
+#define EMSGSIZE    90
+#define EADDRINUSE  98
+#define ENETUNREACH 101
+#define ENOBUFS     105
+#define EHOSTUNREACH 113
 #define EOPNOTSUPP  95
 
 /* Global errno set by the syscall wrappers on a negative kernel return. */

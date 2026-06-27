@@ -13,6 +13,9 @@
 #include <bigos/glyph_font.h>
 #include <bigos/memory.h>
 #include <bigos/net.h>
+#ifdef BIGOS_SOCKET_SMOKE
+#include <bigos/net/socket.h>
+#endif
 #include <bigos/percpu.h>
 #include <bigos/proc.h>
 #include <bigos/sched.h>
@@ -1977,6 +1980,15 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&bigos::net::protocol_smoke_entry, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_NETWORK_PROTOCOL_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_SOCKET_SMOKE
+    // Validation-only minimal UDP socket interface smoke. Kernel-internal
+    // closed loop over the socket backend and the bind/send/receive path; runs
+    // without a real tap/network backend and does not change default boot.
+    if (bigos::sched::create_kernel_thread(&bigos::net::socket_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_SOCKET_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_WRITABLE_FS_SMOKE

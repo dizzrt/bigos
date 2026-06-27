@@ -14,6 +14,8 @@
 #include <bigos/arch_vm_user_boundary.h>
 #include <bigos/cred.h>
 #include <bigos/ipc/pipe.h>
+#include <bigos/net.h>
+#include <bigos/net/socket.h>
 #include <bigos/proc.h>
 #include <bigos/signal.h>
 #endif
@@ -923,6 +925,220 @@ namespace sys {
             bigos::proc::ExecArgs args = {argv, (uint32_t)argc, envp, (uint32_t)envc};
             return bigos::proc::execve_current(path, &args);
         }
+
+        // Maps a bigos::net::Status from the protocol/socket layer to a
+        // deterministic negative errno for the socket syscalls. Unmapped values
+        // collapse to -EIO so the user always sees a defined failure.
+        static int64_t net_status_to_errno(bigos::net::Status __status) noexcept {
+            switch (__status) {
+                case bigos::net::Status::Ok:
+                    return 0;
+                case bigos::net::Status::InvalidArgument:
+                    return -bigos::EINVAL;
+                case bigos::net::Status::Disabled:
+                case bigos::net::Status::NotReady:
+                case bigos::net::Status::InvalidConfig:
+                    return -bigos::ENODEV;
+                case bigos::net::Status::UnsupportedContext:
+                    return -bigos::EWOULDBLOCK;
+                case bigos::net::Status::Unsupported:
+                    return -bigos::EOPNOTSUPP;
+                case bigos::net::Status::TooLarge:
+                    return -bigos::EMSGSIZE;
+                case bigos::net::Status::NoRoute:
+                case bigos::net::Status::NotLocal:
+                    return -bigos::ENETUNREACH;
+                case bigos::net::Status::ArpUnresolved:
+                case bigos::net::Status::Timeout:
+                    return -bigos::EHOSTUNREACH;
+                case bigos::net::Status::CacheFull:
+                case bigos::net::Status::TableFull:
+                    return -bigos::ENOSPC;
+                case bigos::net::Status::AlreadyBound:
+                    return -bigos::EADDRINUSE;
+                case bigos::net::Status::NotBound:
+                    return -bigos::EDESTADDRREQ;
+                case bigos::net::Status::QueueFull:
+                    return -bigos::ENOBUFS;
+                case bigos::net::Status::NoData:
+                    return -bigos::EAGAIN;
+                case bigos::net::Status::DeviceTxFailure:
+                case bigos::net::Status::Malformed:
+                default:
+                    return -bigos::EIO;
+            }
+        }
+
+        // Resolves a current-process fd to its socket backend state, or nullptr
+        // when the fd is not a bound/created UDP socket.
+        static bigos::net::Socket *socket_for_fd(uint64_t __fd) noexcept {
+            bigos::vfs::File *file = bigos::proc::file_for_fd_current((uint32_t)__fd);
+            if (file == nullptr)
+                return nullptr;
+            return bigos::net::socket_state(file);
+        }
+
+        // SYS_SOCKET(domain, type, protocol): validate the bounded BigOS UDP
+        // subset, create an unbound socket File over the single default context,
+        // and install it into the fd table with deterministic failure rollback.
+        static int64_t sys_socket(uint64_t __domain, uint64_t __type, uint64_t __protocol) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            if (__domain != SOCKET_AF_INET || __type != SOCKET_SOCK_DGRAM ||
+                (__protocol != 0 && __protocol != SOCKET_IPPROTO_UDP))
+                return -bigos::EINVAL;
+
+            bigos::net::Context *context = bigos::net::default_context();
+            if (context == nullptr || bigos::net::state(context) != bigos::net::State::Ready)
+                return -bigos::ENODEV;
+
+            bigos::vfs::File *file = nullptr;
+            const bigos::vfs::Status status = bigos::net::socket_create(context, &file);
+            if (status != bigos::vfs::Status::Success)
+                return vfs_status_to_syscall(status);
+
+            const int64_t fd = bigos::proc::install_fd_current(file, false);
+            if (fd < 0) {
+                bigos::vfs::release(file);
+                return fd;
+            }
+            return fd;
+        }
+
+        // SYS_BIND(fd, const SockAddrIn*, addrlen): bind the socket's local port
+        // through the kernel-internal UDP API. addrlen MUST equal the fixed
+        // address struct size; family MUST be SOCKET_AF_INET.
+        static int64_t sys_bind(uint64_t __fd, uint64_t __addr, uint64_t __addrlen) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            bigos::net::Socket *socket = socket_for_fd(__fd);
+            if (socket == nullptr)
+                return -bigos::ENOTSOCK;
+            if (__addrlen != sizeof(SockAddrIn))
+                return -bigos::EINVAL;
+            if (!bigos::proc::validate_user_buffer(__addr, sizeof(SockAddrIn)))
+                return -bigos::EFAULT;
+            SockAddrIn addr = {};
+            if (!bigos::proc::copy_current_user_buffer(__addr, &addr, sizeof(addr)))
+                return -bigos::EFAULT;
+            if (addr.family != SOCKET_AF_INET || addr.port == 0)
+                return -bigos::EINVAL;
+            if (socket->bound)
+                return -bigos::EINVAL;
+
+            bigos::net::UdpEndpoint *endpoint = nullptr;
+            const bigos::net::Status status = bigos::net::udp_bind(socket->context, addr.port, &endpoint);
+            if (status != bigos::net::Status::Ok)
+                return net_status_to_errno(status);
+            socket->endpoint = endpoint;
+            socket->local_port = addr.port;
+            socket->bound = true;
+            return 0;
+        }
+
+        // SYS_SENDTO(fd, buf, len, dst, addrlen): copy a bounded payload and the
+        // destination address from user space, then transmit through the
+        // kernel-internal UDP API. An unbound socket has no source port, so the
+        // protocol layer rejects it deterministically.
+        static int64_t sys_sendto(
+            uint64_t __fd, uint64_t __buf, uint64_t __len, uint64_t __dst, uint64_t __addrlen) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            bigos::net::Socket *socket = socket_for_fd(__fd);
+            if (socket == nullptr)
+                return -bigos::ENOTSOCK;
+            if (!socket->bound || socket->endpoint == nullptr)
+                return -bigos::EDESTADDRREQ;
+            if (__addrlen != sizeof(SockAddrIn))
+                return -bigos::EINVAL;
+            if (__len > SYS_IO_MAX_LEN || __len > bigos::net::UDP_MAX_PAYLOAD)
+                return -bigos::EMSGSIZE;
+            if (!bigos::proc::validate_user_buffer(__dst, sizeof(SockAddrIn)))
+                return -bigos::EFAULT;
+            SockAddrIn dst = {};
+            if (!bigos::proc::copy_current_user_buffer(__dst, &dst, sizeof(dst)))
+                return -bigos::EFAULT;
+            if (dst.family != SOCKET_AF_INET || dst.port == 0)
+                return -bigos::EINVAL;
+
+            uint8_t payload[SYS_IO_MAX_LEN];
+            if (__len != 0) {
+                if (!bigos::proc::validate_user_buffer(__buf, __len))
+                    return -bigos::EFAULT;
+                if (!bigos::proc::copy_current_user_buffer(__buf, payload, __len))
+                    return -bigos::EFAULT;
+            }
+
+            bigos::net::Ipv4Address destination = {dst.addr};
+            const bigos::net::Status status = bigos::net::udp_send_to(
+                socket->context, socket->endpoint, destination, dst.port, payload, (uint16_t)__len, 0);
+            if (status != bigos::net::Status::Ok)
+                return net_status_to_errno(status);
+            return (int64_t)__len;
+        }
+
+        // SYS_RECVFROM(fd, buf, len, src_out, addrlen_io): bounded RX advance via
+        // net::pump plus net::udp_receive_from, with a bounded poll-and-yield
+        // wait. No data after the bounded wait returns -EAGAIN. This is bounded,
+        // NOT general POSIX blocking. The source IPv4/port is written back when
+        // src_out is non-null.
+        static int64_t sys_recvfrom(
+            uint64_t __fd, uint64_t __buf, uint64_t __len, uint64_t __src, uint64_t __addrlen_io) noexcept {
+            // Bounded RX advance budget per syscall: a small number of pump+yield
+            // rounds, each pulling a bounded number of frames. This caps the
+            // CPU/time cost so recvfrom never busy-waits unbounded.
+            constexpr uint32_t RECV_PUMP_FRAMES = bigos::net::UDP_RX_QUEUE_CAPACITY;
+            constexpr uint32_t RECV_MAX_ROUNDS = 16;
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            bigos::net::Socket *socket = socket_for_fd(__fd);
+            if (socket == nullptr)
+                return -bigos::ENOTSOCK;
+            if (!socket->bound || socket->endpoint == nullptr)
+                return -bigos::EDESTADDRREQ;
+            if (__len == 0)
+                return 0;
+            if (__len > SYS_IO_MAX_LEN || !bigos::proc::validate_user_io_buffer(__buf, __len))
+                return -bigos::EFAULT;
+            if (__src != 0) {
+                if (__addrlen_io == 0 || !bigos::proc::validate_user_io_buffer(__src, sizeof(SockAddrIn)))
+                    return -bigos::EFAULT;
+                uint32_t addrlen = 0;
+                if (!bigos::proc::validate_user_buffer(__addrlen_io, sizeof(uint32_t)) ||
+                    !bigos::proc::copy_current_user_buffer(__addrlen_io, &addrlen, sizeof(addrlen)))
+                    return -bigos::EFAULT;
+                if (addrlen != sizeof(SockAddrIn))
+                    return -bigos::EINVAL;
+            }
+
+            bigos::net::UdpDatagram datagram = {};
+            bigos::net::Status status = bigos::net::Status::NoData;
+            for (uint32_t round = 0; round < RECV_MAX_ROUNDS; round++) {
+                (void)bigos::net::pump(socket->context, RECV_PUMP_FRAMES);
+                status = bigos::net::udp_receive_from(socket->endpoint, &datagram);
+                if (status != bigos::net::Status::NoData)
+                    break;
+                bigos::sched::yield();
+            }
+            if (status != bigos::net::Status::Ok)
+                return net_status_to_errno(status);
+
+            uint64_t copy_len = datagram.payload_length;
+            if (copy_len > __len)
+                copy_len = __len;
+            if (copy_len != 0 &&
+                !bigos::proc::copy_to_current_user_buffer(__buf, datagram.payload, copy_len))
+                return -bigos::EFAULT;
+            if (__src != 0) {
+                SockAddrIn src = {};
+                src.family = SOCKET_AF_INET;
+                src.port = datagram.source_port;
+                src.addr = datagram.source_ipv4.value;
+                if (!bigos::proc::copy_to_current_user_buffer(__src, &src, sizeof(src)))
+                    return -bigos::EFAULT;
+            }
+            return (int64_t)copy_len;
+        }
 #endif
     }   // namespace __detail
 
@@ -1016,6 +1232,18 @@ namespace sys {
                 break;
             case SYS_UTIMENS:
                 result = __detail::sys_utimens(__frame->rdi, __frame->rsi, __frame->rdx, __frame->r10);
+                break;
+            case SYS_SOCKET:
+                result = __detail::sys_socket(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_BIND:
+                result = __detail::sys_bind(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_SENDTO:
+                result = __detail::sys_sendto(__frame->rdi, __frame->rsi, __frame->rdx, __frame->r10, __frame->r8);
+                break;
+            case SYS_RECVFROM:
+                result = __detail::sys_recvfrom(__frame->rdi, __frame->rsi, __frame->rdx, __frame->r10, __frame->r8);
                 break;
             case SYS_EXECVE:
                 // execve replaces the current process image and enters the new

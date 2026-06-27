@@ -109,7 +109,41 @@ namespace bigos::sys {
                                 // timerfd, high-resolution timer, or
                                 // signal-interruptible POSIX sleep.
         SYS_UTIMENS = 54,       // (path, atime, mtime, flags) -> bounded second-resolution timestamp update.
+        SYS_SOCKET = 55,        // (domain, type, protocol) -> bounded UDP socket fd, or negative errno.
+                                // Only the bounded BigOS UDP subset is accepted
+                                // (domain=SOCKET_AF_INET, type=SOCKET_SOCK_DGRAM,
+                                // protocol=0/SOCKET_IPPROTO_UDP); anything else is
+                                // rejected with a deterministic -EINVAL. Not a full
+                                // POSIX socket(2): no TCP/stream, AF_* family matrix,
+                                // connect/listen/accept, or option matrix.
+        SYS_BIND = 56,          // (fd, const struct SockAddrIn*, addrlen) -> 0 or negative errno.
+                                // Binds a UDP socket fd to a local port through the
+                                // kernel-internal bigos::net UDP API. addrlen MUST
+                                // equal sizeof(SockAddrIn).
+        SYS_SENDTO = 57,        // (fd, const void* buf, len, const struct SockAddrIn* dst, addrlen) ->
+                                // bytes sent or negative errno. payload bounded by
+                                // SYS_IO_MAX_LEN / UDP_MAX_PAYLOAD.
+        SYS_RECVFROM = 58,      // (fd, void* buf, len, struct SockAddrIn* src_out, uint32_t* addrlen_io) ->
+                                // bytes received or negative errno. Bounded RX
+                                // advance plus bounded wait; -EAGAIN on no data.
+                                // This is bounded, NOT general POSIX blocking.
     };
+
+    // Bounded user-visible UDP socket address (BigOS sockaddr-lite). Fixed-size,
+    // host byte order, IPv4 + port only. It deliberately avoids POSIX sockaddr
+    // variable length, sa_family_t, and network-byte-order complexity. The mirror
+    // user/libc header user/libc/include/sys/socket.h MUST match this layout and
+    // the constants below.
+    struct SockAddrIn {
+        uint16_t family;   // SOCKET_AF_INET
+        uint16_t port;     // local/remote UDP port, host order
+        uint32_t addr;     // IPv4 address, host order
+    };
+
+    // Bounded socket domain/type/protocol subset accepted by SYS_SOCKET.
+    constexpr uint16_t SOCKET_AF_INET = 2;
+    constexpr uint16_t SOCKET_SOCK_DGRAM = 2;
+    constexpr uint16_t SOCKET_IPPROTO_UDP = 17;
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);
     // the dispatcher writes their negated value into the return register, e.g.

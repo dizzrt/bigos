@@ -156,6 +156,10 @@ if has_config("network_protocol_smoke") then
     add_defines("BIGOS_NETWORK_PROTOCOL_SMOKE")
 end
 
+if has_config("socket_smoke") then
+    add_defines("BIGOS_SOCKET_SMOKE")
+end
+
 if has_config("modern_storage_backend_smoke") then
     add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
     add_defines("BIGOS_MODERN_STORAGE_BACKEND_SMOKE")

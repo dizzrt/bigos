@@ -7,6 +7,7 @@
 #include "libc.h"
 #include "bigos_syscall.h"
 #include "sys_nr.h"
+#include "sys/socket.h"
 
 int errno = 0;
 
@@ -588,4 +589,32 @@ int sigaction(int signo, const struct sigaction *act, struct sigaction *oldact) 
 int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
     sigset_t requested = set != NULL ? *set : 0;
     return (int)errno_translate(syscall3(SYS_SIGPROCMASK, (long)how, (long)requested, (long)oldset));
+}
+
+int socket(int domain, int type, int protocol) {
+    return (int)errno_translate(syscall3(SYS_SOCKET, (long)domain, (long)type, (long)protocol));
+}
+
+int bind(int fd, const struct sockaddr_in *addr, socklen_t addrlen) {
+    return (int)errno_translate(syscall3(SYS_BIND, (long)fd, (long)addr, (long)addrlen));
+}
+
+ssize_t sendto(int fd, const void *buf, size_t len, int flags,
+               const struct sockaddr_in *dst, socklen_t addrlen) {
+    if (flags != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (ssize_t)errno_translate(
+        syscall5(SYS_SENDTO, (long)fd, (long)buf, (long)len, (long)dst, (long)addrlen));
+}
+
+ssize_t recvfrom(int fd, void *buf, size_t len, int flags,
+                 struct sockaddr_in *src, socklen_t *addrlen) {
+    if (flags != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (ssize_t)errno_translate(
+        syscall5(SYS_RECVFROM, (long)fd, (long)buf, (long)len, (long)src, (long)addrlen));
 }

@@ -98,6 +98,15 @@ control。
 
 这些 lifecycle syscall 是有界 BigOS 操作，不是完整 POSIX `munmap`、`mprotect`、完整文件大小管理或完整 POSIX 文件时间戳管理。它们不支持 VM 操作的任意字节粒度、`MAP_FIXED` 覆盖、shared writable mapping、file-backed writable upgrade、sparse-file API、journal、power-loss recovery、swap 或跨 CPU TLB shootdown。
 
+最小用户可见 UDP socket 接口追加在 number 55..58：
+
+- `SYS_SOCKET`（number=55）：ABI `rdi` = domain，`rsi` = type，`rdx` = protocol。它只接受有界 BigOS UDP 子集（`SOCKET_AF_INET`、`SOCKET_SOCK_DGRAM`、protocol `0`/`SOCKET_IPPROTO_UDP`），在单一内核内部默认网络 context 上创建未绑定 socket `vfs::File` backend，安装到 fd 表并返回进程本地 fd 或确定性负 errno（`-EINVAL`/`-ENODEV`/`-ENOMEM`/`-EMFILE`）。socket fd 复用既有 `close`/`dup`/`dup2`/`fcntl`/`close-on-exec`/`fork` 路径。
+- `SYS_BIND`（number=56）：ABI `rdi` = socket fd，`rsi` = 用户 `struct SockAddrIn*`，`rdx` = addrlen。`addrlen` 必须等于 `sizeof(SockAddrIn)`，`family` 必须为 `SOCKET_AF_INET`。它通过内核内部 UDP API 绑定本地端口，并把协议结果（`AlreadyBound`/`TableFull`/`InvalidArgument`）映射为确定性 errno。
+- `SYS_SENDTO`（number=57）：ABI `rdi` = fd，`rsi` = 用户缓冲，`rdx` = 长度，`r10` = 用户 `struct SockAddrIn*` 目的地址，`r8` = addrlen。payload 受 `SYS_IO_MAX_LEN`/`UDP_MAX_PAYLOAD` 约束；它通过 VMA-backed 校验拷贝有界 payload 与目的地址，经内核内部 UDP API 发送，并返回字节数或确定性 errno。
+- `SYS_RECVFROM`（number=58）：ABI `rdi` = fd，`rsi` = 用户缓冲，`rdx` = 长度，`r10` = 可选用户 `struct SockAddrIn*` 来源输出，`r8` = 可选 `uint32_t*` addrlen in/out。它执行有界 `pump` 加轮询 RX 推进与有界让出等待，把一个 datagram 的 payload 与来源 IPv4/port 写回用户态，在有界等待内无 datagram 时返回 `-EAGAIN`。这是有界、非通用 POSIX 阻塞契约。socket `read`/`write` 刻意返回 `-EOPNOTSUPP`；数据仅经 `sendto`/`recvfrom` 流动。
+
+这些 socket syscall 是内核内部协议路径之上的有界 UDP 适配层，不是完整 POSIX socket 层：没有 TCP/stream socket、`connect`/`listen`/`accept`/`shutdown`、`getsockopt`/`setsockopt`、`poll`/`select`、scatter-gather、ancillary data、完整 `AF_*`/`SOCK_*` 矩阵、DHCP、DNS、IPv6 或多 context/多网卡选择。
+
 syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
 
 用户态 raw syscall primitive `syscall0` 到 `syscall6` 仍是 BigOS-specific 低层 helper。它们把 number 与返回值绑定到 `rax`，参数绑定到 `rdi`、`rsi`、`rdx`、`r10`、`r8`、`r9`，并列出 `rcx`、`r11` 与 `memory` clobber。源码级 contract 测试会检查这些约束，避免 wrapper 修改静默偏离 ABI；更高层 libc wrapper 仍负责把内核负返回值翻译为正 `errno` 与接口文档化的失败哨兵。

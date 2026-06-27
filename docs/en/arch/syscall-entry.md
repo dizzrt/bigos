@@ -187,6 +187,41 @@ management. They do not support arbitrary byte granularity for VM operations,
 sparse-file APIs, journaling, power-loss recovery, swap, or cross-CPU TLB
 shootdown.
 
+The minimal user-visible UDP socket interface is appended at numbers 55..58:
+
+- `SYS_SOCKET` (number=55): ABI `rdi` = domain, `rsi` = type, `rdx` = protocol.
+  It accepts only the bounded BigOS UDP subset (`SOCKET_AF_INET`,
+  `SOCKET_SOCK_DGRAM`, protocol `0`/`SOCKET_IPPROTO_UDP`), creates an unbound
+  socket `vfs::File` backend over the single kernel-internal default network
+  context, installs it into the fd table, and returns a process-local fd or a
+  deterministic negative errno (`-EINVAL`/`-ENODEV`/`-ENOMEM`/`-EMFILE`). The
+  socket fd reuses the existing `close`/`dup`/`dup2`/`fcntl`/`close-on-exec`/
+  `fork` paths.
+- `SYS_BIND` (number=56): ABI `rdi` = socket fd, `rsi` = user
+  `struct SockAddrIn*`, `rdx` = addrlen. `addrlen` MUST equal
+  `sizeof(SockAddrIn)` and `family` MUST be `SOCKET_AF_INET`. It binds the local
+  port through the kernel-internal UDP API and maps protocol results
+  (`AlreadyBound`/`TableFull`/`InvalidArgument`) to deterministic errno.
+- `SYS_SENDTO` (number=57): ABI `rdi` = fd, `rsi` = user buffer, `rdx` = length,
+  `r10` = user `struct SockAddrIn*` destination, `r8` = addrlen. The payload is
+  bounded by `SYS_IO_MAX_LEN`/`UDP_MAX_PAYLOAD`; it copies the bounded payload
+  and destination through VMA-backed validation, transmits through the
+  kernel-internal UDP API, and returns the byte count or a deterministic errno.
+- `SYS_RECVFROM` (number=58): ABI `rdi` = fd, `rsi` = user buffer, `rdx` =
+  length, `r10` = optional user `struct SockAddrIn*` source-out, `r8` = optional
+  `uint32_t*` addrlen in/out. It performs a bounded `pump`-plus-poll RX advance
+  with a bounded yield wait, copies one datagram's payload and source IPv4/port
+  back to user space, and returns the byte count or `-EAGAIN` when no datagram
+  arrives within the bounded wait. This is a bounded, non-general-POSIX blocking
+  contract. Socket `read`/`write` deliberately return `-EOPNOTSUPP`; data flows
+  only through `sendto`/`recvfrom`.
+
+These socket calls are a bounded UDP adapter over the kernel-internal protocol
+path, not a complete POSIX socket layer: there is no TCP/stream socket,
+`connect`/`listen`/`accept`/`shutdown`, `getsockopt`/`setsockopt`, `poll`/
+`select`, scatter-gather, ancillary data, full `AF_*`/`SOCK_*` matrix, DHCP, DNS,
+IPv6, or multi-context/multi-NIC selection.
+
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 
 Userland raw syscall primitives `syscall0` through `syscall6` remain

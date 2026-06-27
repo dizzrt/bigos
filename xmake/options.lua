@@ -138,6 +138,12 @@ option("network_protocol_smoke")
     set_description("enable validation-only bounded Ethernet/ARP/IPv4/ICMP/UDP protocol smoke marker")
 option_end()
 
+option("socket_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only minimal UDP socket interface closed-loop smoke marker")
+option_end()
+
 option("modern_storage_backend_smoke")
     set_default(false)
     set_showmenu(true)

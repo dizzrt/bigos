@@ -269,6 +269,7 @@ SMOKE_OPTIONS = (
     'virtio_blk_smoke',
     'virtio_net_smoke',
     'network_protocol_smoke',
+    'socket_smoke',
     'modern_storage_backend_smoke',
     'demand_paging_smoke',
     'file_backed_mapping_smoke',
@@ -507,6 +508,22 @@ RUNTIME_SMOKE_MATRIX = (
             'tap,id=bigosnet,ifname=bigos-tap0,script=no,downscript=no',
             '-device',
             'virtio-net-pci,netdev=bigosnet,disable-modern=off,mac=52:54:00:12:34:56',
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='minimal-socket-interface',
+        title='Minimal UDP socket interface',
+        switches=('socket_smoke',),
+        expected_marker='BIGOS_SOCKET_PASSED',
+        timeout_seconds=20.0,
+        risk_area='minimal user-visible UDP socket fd object, bind/sendto/recvfrom, and fd lifecycle',
+        validation_markers=('BIGOS_SOCKET_PASSED',),
+        proc_boundary=(
+            'default-off kernel-thread smoke over the socket backend and the kernel-internal UDP bind/send/'
+            'receive closed loop with injected frames; validates socket fd creation, ops-identity, '
+            'unsupported read/write, bind, sendto, recvfrom, no-data and oversize error paths, and exactly-once '
+            'endpoint reclamation on close, without exposing a complete POSIX socket API, TCP/stream, connect/'
+            'listen/accept, option matrix, DHCP, DNS, IPv6, or requiring a real tap/network backend'
         ),
     ),
     RuntimeSmokeCase(

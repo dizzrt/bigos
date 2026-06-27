@@ -43,6 +43,13 @@ constexpr int EPIPE = 32;         // broken pipe (all read ends closed)
 constexpr int ERANGE = 34;        // result too large for caller buffer
 constexpr int ENOSYS = 38;        // function not implemented
 constexpr int ENOTEMPTY = 39;    // directory not empty
+constexpr int ENOTSOCK = 88;      // socket operation on non-socket fd
+constexpr int EDESTADDRREQ = 89;  // destination address required (e.g. unbound/no-peer UDP)
+constexpr int EMSGSIZE = 90;      // message too long for the bounded datagram limit
+constexpr int EADDRINUSE = 98;    // address/port already in use
+constexpr int ENETUNREACH = 101;  // network unreachable / no route
+constexpr int ENOBUFS = 105;      // no buffer space available
+constexpr int EHOSTUNREACH = 113; // host unreachable (e.g. ARP unresolved / timeout)
 constexpr int EOPNOTSUPP = 95;    // operation not supported on this object/backend
 NAMESPACE_BIGOS_END
 

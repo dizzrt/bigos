@@ -13,8 +13,10 @@ filesystem, `/rw`, shell, and userland do not depend on network availability.
 
 The protocol module does not expose sockets, fd objects, syscalls, `/dev`
 nodes, libc socket calls, DHCP, DNS, TCP, IPv6, IP fragment reassembly, NAT,
-firewalling, dynamic routing, or multi-interface routing. Future user-visible
-socket work must wrap this kernel-internal API in a separate change.
+firewalling, dynamic routing, or multi-interface routing. The minimal
+user-visible UDP socket interface wraps this kernel-internal API in a separate
+change (see `docs/en/arch/syscall-entry.md`); it stays a bounded UDP adapter and
+does not change the protocol module's bounded capacities or non-goals.
 
 Protocol parsing runs only in ordinary kernel context. Virtio-net MSI-X handlers
 remain limited to frame-level RX/TX completion state; the protocol pump and UDP

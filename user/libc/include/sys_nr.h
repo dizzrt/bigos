@@ -63,5 +63,9 @@
 #define SYS_TCSETMODE   52
 #define SYS_SLEEP_MS    53
 #define SYS_UTIMENS     54
+#define SYS_SOCKET      55
+#define SYS_BIND        56
+#define SYS_SENDTO      57
+#define SYS_RECVFROM    58
 
 #endif /* _BIGOS_USER_SYS_H */

@@ -398,9 +398,9 @@ a minimal socket interface.
 - [x] Task M11.2: a bounded network protocol path sufficient for basic
   communication, without claiming a complete network stack.
 - [x] 任务 M11.2：足以支撑基础通信的有界网络协议路径，不声称完整网络栈。
-- [ ] Task M11.3: a minimal user-visible socket interface integrated with the
+- [x] Task M11.3: a minimal user-visible socket interface integrated with the
   existing fd/syscall path within bounded semantics.
-- [ ] 任务 M11.3：在有界语义内与既有 fd/syscall 路径集成的最小用户可见 socket 接口。
+- [x] 任务 M11.3：在有界语义内与既有 fd/syscall 路径集成的最小用户可见 socket 接口。
 
 ### Milestone M12 — Userland Maturity / 里程碑 M12 — 用户态成熟度
 
