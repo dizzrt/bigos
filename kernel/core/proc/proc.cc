@@ -28,11 +28,14 @@ namespace {
     constexpr uint64_t USER_INITIAL_STACK_ALIGN = 16;
     constexpr uint64_t ELF_MAGIC = 0x464c457full;
     constexpr uint16_t ELF_TYPE_EXEC = 2;
+    constexpr uint16_t ELF_TYPE_DYN = 3;
     constexpr uint16_t ELF_MACHINE_X86_64 = 62;
     constexpr uint32_t ELF_VERSION_CURRENT = 1;
     constexpr uint32_t PT_LOAD = 1;
     constexpr uint32_t PT_DYNAMIC = 2;
     constexpr uint32_t PT_INTERP = 3;
+    constexpr uint32_t PT_NOTE = 4;
+    constexpr uint32_t PT_PHDR = 6;
     constexpr uint32_t PT_TLS = 7;
     constexpr uint32_t PF_X = 1;
     constexpr uint32_t PF_W = 2;
@@ -372,11 +375,30 @@ namespace {
                     return false;
             }
         }
+        // Default-off bounded dynamic-link path: the live interpreter and
+        // shared-object regions sit inside the reserved future-runtime gap and
+        // MUST stay page-aligned, in-range, non-overlapping with each other and
+        // with every static range above.
+        if (__layout.dynamic) {
+            const bigos::proc::UserRange dyn_ranges[] = {__layout.dyn_interp, __layout.dyn_lib};
+            for (uint32_t i = 0; i < sizeof(dyn_ranges) / sizeof(dyn_ranges[0]); i++) {
+                if (dyn_ranges[i].len == 0 || !user_range_valid(dyn_ranges[i].base, dyn_ranges[i].len) ||
+                    !page_aligned(dyn_ranges[i].base) || !page_aligned(dyn_ranges[i].len))
+                    return false;
+                if (!range_inside(dyn_ranges[i].base, dyn_ranges[i].base + dyn_ranges[i].len, __layout.future_runtime))
+                    return false;
+                for (uint32_t j = i + 1; j < sizeof(dyn_ranges) / sizeof(dyn_ranges[0]); j++) {
+                    if (range_overlaps_user_range(
+                            dyn_ranges[i].base, dyn_ranges[i].base + dyn_ranges[i].len, dyn_ranges[j]))
+                        return false;
+                }
+            }
+        }
         return true;
     }
 
-    bool init_runtime_layout(
-        bigos::proc::Process *__process, uint64_t __elf_low, uint64_t __elf_high, uint64_t __heap_base) noexcept {
+    bool init_runtime_layout(bigos::proc::Process *__process, uint64_t __elf_low, uint64_t __elf_high,
+        uint64_t __heap_base, bool __dynamic = false) noexcept {
         if (__process == nullptr || !page_aligned(__elf_low) || !page_aligned(__elf_high) || __elf_low >= __elf_high)
             return false;
         uint64_t heap_end = 0;
@@ -402,6 +424,12 @@ namespace {
         };
         layout.anonymous = {bigos::proc::USER_ANON_BASE, bigos::proc::USER_ANON_MAX_PAGES * PAGE_SIZE};
         layout.file_mapped = {bigos::proc::USER_FILEMAP_BASE, bigos::proc::USER_FILEMAP_MAX_PAGES * PAGE_SIZE};
+        if (__dynamic) {
+            layout.dynamic = true;
+            layout.dyn_interp = {
+                bigos::proc::USER_INTERP_BASE, bigos::proc::USER_INTERP_MAX_PAGES * PAGE_SIZE};
+            layout.dyn_lib = {bigos::proc::USER_DYN_LIB_BASE, bigos::proc::USER_DYN_LIB_MAX_PAGES * PAGE_SIZE};
+        }
         layout.committed = true;
         if (!runtime_layout_valid(layout))
             return false;
@@ -469,6 +497,19 @@ namespace {
                        __entry.file_backing != nullptr && page_aligned(__entry.file_offset) &&
                        permissions_include(__entry.permissions, bigos::proc::VmaPermission::Read) &&
                        !permissions_include(__entry.permissions, bigos::proc::VmaPermission::Write);
+            case bigos::proc::VmaPurpose::DynInterp:
+                // Kernel-mapped interpreter (ld.so) ELF segments. Only valid on
+                // the dynamic layout, inside the interpreter region, ElfSegment
+                // backed, W^X enforced by internal_add_vma.
+                return layout.dynamic && range_inside(__entry.start, __entry.end, layout.dyn_interp) &&
+                       __entry.backing == bigos::proc::VmaBacking::ElfSegment &&
+                       __entry.growth == bigos::proc::VmaGrowth::None;
+            case bigos::proc::VmaPurpose::DynLib:
+                // ld.so-mapped shared objects: anonymous demand-zero pages inside
+                // the shared-object region whose bytes the interpreter copies in.
+                return layout.dynamic && range_inside(__entry.start, __entry.end, layout.dyn_lib) &&
+                       __entry.backing == bigos::proc::VmaBacking::Anonymous &&
+                       __entry.growth == bigos::proc::VmaGrowth::None;
         }
         return false;
     }
@@ -893,6 +934,38 @@ namespace {
         return true;
     }
 
+#ifdef BIGOS_DYNAMIC_LINK
+    // Stages a permission change over DynLib anonymous VMAs (the shared-object
+    // mapping region). Same clip-and-replace shape as stage_anonymous_protect but
+    // keyed on VmaPurpose::DynLib so the static lifecycle path is untouched.
+    bool stage_dyn_lib_protect(bigos::proc::Process *__process, uint64_t __addr, uint64_t __end,
+        bigos::proc::VmaPermission __permissions, bigos::proc::VmaCollection *__staged) noexcept {
+        if (__process == nullptr || __staged == nullptr || !permissions_supported(__permissions))
+            return false;
+        *__staged = __process->vmas;
+        uint64_t cursor = __addr;
+        while (cursor < __end) {
+            const bigos::proc::VmaEntry *entry = internal_find_vma(&__process->vmas, cursor);
+            if (entry == nullptr || entry->purpose != bigos::proc::VmaPurpose::DynLib ||
+                entry->backing != bigos::proc::VmaBacking::Anonymous)
+                return false;
+            const uint64_t cut_end = entry->end < __end ? entry->end : __end;
+            if (!internal_remove_vma(__staged, entry->start, entry->end))
+                return false;
+            if (entry->start < cursor && !internal_add_vma(__staged, clipped_vma(*entry, entry->start, cursor)))
+                return false;
+            bigos::proc::VmaEntry changed = clipped_vma(*entry, cursor, cut_end);
+            changed.permissions = __permissions;
+            if (!internal_add_vma(__staged, changed))
+                return false;
+            if (cut_end < entry->end && !internal_add_vma(__staged, clipped_vma(*entry, cut_end, entry->end)))
+                return false;
+            cursor = cut_end;
+        }
+        return true;
+    }
+#endif   // BIGOS_DYNAMIC_LINK
+
     bool unmap_present_pages_in_range(bigos::proc::Process *__process, uint64_t __addr, uint64_t __end) noexcept {
         if (__process == nullptr)
             return false;
@@ -1263,6 +1336,182 @@ namespace {
         return bigos::proc::UserElfLoadError::Success;
     }
 
+#ifdef BIGOS_DYNAMIC_LINK
+    // GNU/OS program header types that appear in normal PIE/shared images. They
+    // carry no loadable content for our bounded path and are skipped (never
+    // mapped, never granting permissions). PT_TLS stays a hard reject.
+    constexpr uint32_t PT_GNU_EH_FRAME = 0x6474e550;
+    constexpr uint32_t PT_GNU_STACK = 0x6474e551;
+    constexpr uint32_t PT_GNU_RELRO = 0x6474e552;
+    constexpr uint32_t PT_GNU_PROPERTY = 0x6474e553;
+    constexpr uint64_t DYN_INTERP_PATH_MAX = 64;
+
+    // auxv a_type values for the initial-stack handshake (mirror bigos/elf.h).
+    constexpr uint64_t AT_NULL = 0;
+    constexpr uint64_t AT_PHDR = 3;
+    constexpr uint64_t AT_PHENT = 4;
+    constexpr uint64_t AT_PHNUM = 5;
+    constexpr uint64_t AT_PAGESZ = 6;
+    constexpr uint64_t AT_BASE = 7;
+    constexpr uint64_t AT_ENTRY = 9;
+
+    struct DynLoadInfo {
+        uint64_t load_base;   // deterministic position-independent load base
+        uint64_t entry;       // absolute entry = load_base + e_entry
+        uint64_t phdr_addr;   // absolute program-header address (for AT_PHDR)
+        uint16_t phnum;       // number of program headers
+        uint16_t phentsize;   // size of one program header
+    };
+
+    // Validates a bounded position-independent ET_DYN image and produces load
+    // segments with absolute (load_base + p_vaddr) addresses, so the existing
+    // map_segment maps it unchanged. Mirrors validate_elf's bounds/overlap/W^X/
+    // alignment/entry checks adjusted for the base offset. When __allow_interp is
+    // true (main image) exactly-one PT_INTERP is accepted and its path is copied
+    // out; the interpreter image itself MUST NOT contain a PT_INTERP. The static
+    // ET_EXEC path is untouched.
+    bigos::proc::UserElfLoadError validate_dyn_image(const uint8_t *__image, uint64_t __image_len, uint64_t __load_base,
+        bool __allow_interp, LoadSegment *__segments, uint32_t *__segment_count, DynLoadInfo *__info,
+        char *__interp_out, bool *__has_interp_out) noexcept {
+        if (__image == nullptr || __segments == nullptr || __segment_count == nullptr || __info == nullptr ||
+            __image_len < sizeof(Elf64Header) || __image_len > bigos::proc::USER_ELF_MAX_FILE_BYTES)
+            return bigos::proc::UserElfLoadError::InvalidArgument;
+        if (!page_aligned(__load_base))
+            return bigos::proc::UserElfLoadError::InvalidArgument;
+
+        const auto *ehdr = (const Elf64Header *)__image;
+        if (*(const uint32_t *)ehdr->ident != ELF_MAGIC || ehdr->ident[4] != 2 || ehdr->ident[5] != 1 ||
+            ehdr->ident[6] != ELF_VERSION_CURRENT)
+            return bigos::proc::UserElfLoadError::UnsupportedElf;
+        if (ehdr->type != ELF_TYPE_DYN || ehdr->machine != ELF_MACHINE_X86_64 ||
+            ehdr->version != ELF_VERSION_CURRENT || ehdr->ehsize != sizeof(Elf64Header) ||
+            ehdr->phentsize != sizeof(Elf64ProgramHeader) || ehdr->phnum == 0 || ehdr->phnum > ELF_MAX_LOAD_SEGMENTS)
+            return bigos::proc::UserElfLoadError::BadHeader;
+
+        uint64_t ph_table_bytes = 0;
+        uint64_t ph_table_end = 0;
+        if (__builtin_mul_overflow((uint64_t)ehdr->phentsize, (uint64_t)ehdr->phnum, &ph_table_bytes) ||
+            add_overflow(ehdr->phoff, ph_table_bytes, &ph_table_end) || ph_table_end > __image_len)
+            return bigos::proc::UserElfLoadError::BadHeader;
+
+        *__segment_count = 0;
+        bool has_load = false;
+        bool entry_executable = false;
+        bool has_interp = false;
+        bool phdr_found = false;
+        uint64_t phdr_vaddr = 0;
+        const uint64_t stack_base = bigos::proc::USER_STACK_TOP - bigos::proc::USER_STACK_PAGES * PAGE_SIZE;
+        TrackedPage tracked_pages[ELF_MAX_TRACKED_PAGES] = {};
+        uint32_t tracked_page_count = 0;
+        const uint64_t abs_entry = __load_base + ehdr->entry;
+
+        for (uint16_t i = 0; i < ehdr->phnum; i++) {
+            const uint64_t ph_offset = ehdr->phoff + (uint64_t)i * ehdr->phentsize;
+            const auto *phdr = (const Elf64ProgramHeader *)(__image + ph_offset);
+            if (phdr->type == PT_TLS)
+                return bigos::proc::UserElfLoadError::UnsupportedElf;
+            if (phdr->type == PT_INTERP) {
+                if (!__allow_interp || has_interp)
+                    return bigos::proc::UserElfLoadError::UnsupportedElf;
+                uint64_t interp_end = 0;
+                if (add_overflow(phdr->offset, phdr->filesz, &interp_end) || interp_end > __image_len ||
+                    phdr->filesz == 0 || phdr->filesz > DYN_INTERP_PATH_MAX)
+                    return bigos::proc::UserElfLoadError::BadProgramHeader;
+                const char *src = (const char *)(__image + phdr->offset);
+                if (src[phdr->filesz - 1] != 0)
+                    return bigos::proc::UserElfLoadError::BadProgramHeader;
+                if (__interp_out != nullptr)
+                    memcpy(__interp_out, src, phdr->filesz);
+                has_interp = true;
+                continue;
+            }
+            if (phdr->type == PT_DYNAMIC || phdr->type == PT_PHDR || phdr->type == PT_NOTE ||
+                phdr->type == PT_GNU_EH_FRAME || phdr->type == PT_GNU_STACK || phdr->type == PT_GNU_RELRO ||
+                phdr->type == PT_GNU_PROPERTY)
+                continue;
+            if (phdr->type != PT_LOAD)
+                continue;
+            if (phdr->memsz == 0 || phdr->filesz > phdr->memsz || is_writable_executable(phdr->flags))
+                return bigos::proc::UserElfLoadError::UnsafePermissions;
+            if (phdr->align != 0 && phdr->align != 1 && (!is_power_of_two(phdr->align) || phdr->align > PAGE_SIZE))
+                return bigos::proc::UserElfLoadError::BadProgramHeader;
+
+            uint64_t abs_vaddr = 0;
+            uint64_t file_end = 0;
+            uint64_t mem_end = 0;
+            if (add_overflow(__load_base, phdr->vaddr, &abs_vaddr) ||
+                add_overflow(phdr->offset, phdr->filesz, &file_end) || file_end > __image_len ||
+                add_overflow(abs_vaddr, phdr->memsz, &mem_end) || !user_range_valid(abs_vaddr, phdr->memsz) ||
+                ranges_overlap(abs_vaddr, phdr->memsz, stack_base, bigos::proc::USER_STACK_PAGES * PAGE_SIZE))
+                return bigos::proc::UserElfLoadError::AddressOutOfRange;
+
+            uint64_t map_end = 0;
+            const uint64_t map_base = page_down(abs_vaddr);
+            if (!page_up(mem_end, &map_end) || map_end <= map_base)
+                return bigos::proc::UserElfLoadError::AddressOutOfRange;
+
+            for (uint32_t j = 0; j < *__segment_count; j++) {
+                if (ranges_overlap(map_base, map_end - map_base, __segments[j].map_base, __segments[j].map_len))
+                    return bigos::proc::UserElfLoadError::SegmentOverlap;
+            }
+
+            const bigos::mm::PageAttr attr = segment_attr(phdr->flags);
+            for (uint64_t page = map_base; page < map_end; page += PAGE_SIZE) {
+                if (!track_page(tracked_pages, &tracked_page_count, page, attr))
+                    return bigos::proc::UserElfLoadError::UnsafePermissions;
+            }
+
+            // Locate the PT_LOAD covering the program-header file range (modern
+            // Linux fs/binfmt_elf.c algorithm) so AT_PHDR points at mapped memory.
+            if ((phdr->flags & PF_W) == 0 && phdr->offset <= ehdr->phoff &&
+                ehdr->phoff + ph_table_bytes <= phdr->offset + phdr->filesz) {
+                phdr_vaddr = phdr->vaddr + (ehdr->phoff - phdr->offset);
+                phdr_found = true;
+            }
+
+            LoadSegment &segment = __segments[*__segment_count];
+            segment = {
+                abs_vaddr, phdr->memsz, phdr->filesz, phdr->offset, map_base, map_end - map_base, phdr->flags, attr};
+            (*__segment_count)++;
+            has_load = true;
+            if ((phdr->flags & PF_X) != 0 && abs_entry >= abs_vaddr && abs_entry < mem_end)
+                entry_executable = true;
+        }
+
+        if (!has_load)
+            return bigos::proc::UserElfLoadError::BadProgramHeader;
+        if (__allow_interp && !has_interp)
+            return bigos::proc::UserElfLoadError::UnsupportedElf;
+        // AT_PHDR coverage is only required for the main image (its interpreter
+        // reads the phdrs from memory). The interpreter itself self-locates via
+        // its _DYNAMIC (PC-relative) and never needs a mapped phdr table.
+        if (__allow_interp && !phdr_found)
+            return bigos::proc::UserElfLoadError::BadProgramHeader;
+        if (!user_range_valid(abs_entry, 1))
+            return bigos::proc::UserElfLoadError::AddressOutOfRange;
+        if (!entry_executable)
+            return bigos::proc::UserElfLoadError::EntryNotExecutable;
+
+        __info->load_base = __load_base;
+        __info->entry = abs_entry;
+        __info->phdr_addr = __load_base + phdr_vaddr;
+        __info->phnum = ehdr->phnum;
+        __info->phentsize = ehdr->phentsize;
+        if (__has_interp_out != nullptr)
+            *__has_interp_out = has_interp;
+        return bigos::proc::UserElfLoadError::Success;
+    }
+
+    // True when the image is a bounded ET_DYN main executable (dynamic-link path
+    // candidate). Cheap header peek that leaves the static ET_EXEC path untouched.
+    bool image_is_dyn_exec(const uint8_t *__image, uint64_t __image_len) noexcept {
+        if (__image == nullptr || __image_len < sizeof(Elf64Header))
+            return false;
+        const auto *ehdr = (const Elf64Header *)__image;
+        return *(const uint32_t *)ehdr->ident == ELF_MAGIC && ehdr->type == ELF_TYPE_DYN;
+    }
+#endif   // BIGOS_DYNAMIC_LINK
+
     bigos::proc::UserElfLoadError map_segment(bigos::proc::Process *__process, const uint8_t *__image,
         const LoadSegment &__segment, bool __shared_file_backed) noexcept {
         if (__shared_file_backed) {
@@ -1550,6 +1799,96 @@ namespace {
         return true;
     }
 
+#ifdef BIGOS_DYNAMIC_LINK
+    struct AuxvEntry {
+        uint64_t type;
+        uint64_t val;
+    };
+
+    // Builds the initial user stack for the dynamic load path: the existing
+    // [argc][argv][NULL][envp][NULL] layout plus a bounded auxv array appended
+    // after the envp NULL terminator and terminated by AT_NULL. Append-only:
+    // a static crt0 reading only up to the envp NULL is unaffected. The argc
+    // landing address is kept 16-aligned for the System V ABI entry contract.
+    bool copy_exec_args_and_auxv_to_stack(uint64_t __stack_phys, uint64_t __stack_base,
+        const bigos::proc::ExecArgs *__args, const AuxvEntry *__auxv, uint32_t __auxv_count,
+        uint64_t *__initial_sp) noexcept {
+        if (__initial_sp == nullptr || __auxv == nullptr || __auxv_count == 0 ||
+            __auxv_count > bigos::proc::USER_DYN_MAX_AUXV)
+            return false;
+        uint8_t *direct = (uint8_t *)bigos::mm::phys_to_direct(__stack_phys);
+        if (direct == nullptr)
+            return false;
+
+        const char *empty_argv[] = {nullptr};
+        bigos::proc::ExecArgs empty_args = {empty_argv, 0, nullptr, 0};
+        const bigos::proc::ExecArgs *args = __args == nullptr ? &empty_args : __args;
+        if (args->argc > bigos::proc::EXEC_MAX_ARGC || args->envc > bigos::proc::EXEC_MAX_ENVC)
+            return false;
+        if ((args->argc != 0 && args->argv == nullptr) || (args->envc != 0 && args->envp == nullptr))
+            return false;
+
+        uint64_t sp = PAGE_SIZE;
+        uint64_t argv_user[bigos::proc::EXEC_MAX_ARGC] = {};
+        uint64_t envp_user[bigos::proc::EXEC_MAX_ENVC] = {};
+
+        for (uint32_t i = 0; i < args->envc; i++) {
+            const uint64_t len = bounded_strlen(args->envp[i], bigos::proc::EXEC_MAX_STRING_BYTES);
+            if (len == UINT64_MAX || len + 1 > sp)
+                return false;
+            sp -= len + 1;
+            memcpy(direct + sp, args->envp[i], len + 1);
+            envp_user[i] = __stack_base + sp;
+        }
+        for (uint32_t i = 0; i < args->argc; i++) {
+            const uint64_t len = bounded_strlen(args->argv[i], bigos::proc::EXEC_MAX_STRING_BYTES);
+            if (len == UINT64_MAX || len + 1 > sp)
+                return false;
+            sp -= len + 1;
+            memcpy(direct + sp, args->argv[i], len + 1);
+            argv_user[i] = __stack_base + sp;
+        }
+
+        sp &= ~(USER_INITIAL_STACK_ALIGN - 1);
+        const uint64_t auxv_bytes = (uint64_t)__auxv_count * 2 * sizeof(uint64_t);
+        const uint64_t envp_bytes = (uint64_t)(args->envc + 1) * sizeof(uint64_t);
+        const uint64_t argv_bytes = (uint64_t)(args->argc + 1) * sizeof(uint64_t);
+        const uint64_t frame_bytes = sizeof(uint64_t) + argv_bytes + envp_bytes + auxv_bytes;
+        if (frame_bytes > sp)
+            return false;
+        // Pad so the final argc address lands on a 16-byte boundary.
+        if (((sp - frame_bytes) & (USER_INITIAL_STACK_ALIGN - 1)) != 0) {
+            if (sp < sizeof(uint64_t))
+                return false;
+            sp -= sizeof(uint64_t);
+        }
+
+        sp -= auxv_bytes;
+        uint64_t *auxv_table = (uint64_t *)(direct + sp);
+        for (uint32_t i = 0; i < __auxv_count; i++) {
+            auxv_table[i * 2] = __auxv[i].type;
+            auxv_table[i * 2 + 1] = __auxv[i].val;
+        }
+
+        sp -= envp_bytes;
+        uint64_t *envp_table = (uint64_t *)(direct + sp);
+        for (uint32_t i = 0; i < args->envc; i++)
+            envp_table[i] = envp_user[i];
+        envp_table[args->envc] = 0;
+
+        sp -= argv_bytes;
+        uint64_t *argv_table = (uint64_t *)(direct + sp);
+        for (uint32_t i = 0; i < args->argc; i++)
+            argv_table[i] = argv_user[i];
+        argv_table[args->argc] = 0;
+
+        sp -= sizeof(uint64_t);
+        *(uint64_t *)(direct + sp) = args->argc;
+        *__initial_sp = __stack_base + sp;
+        return true;
+    }
+#endif   // BIGOS_DYNAMIC_LINK
+
     // Derives the read-only copy-on-write leaf attribute from a writable
     // anonymous page's current attribute: clear WRITABLE, set PTE_COW, keep
     // present/user/NX. The next write to either sharer faults into the COW split
@@ -1743,6 +2082,11 @@ namespace bigos::proc {
     void release_file_backed_vmas(Process *__process) noexcept;
     UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len,
         const ExecArgs *__args, bigos::vfs::File *__elf_file) noexcept;
+
+#ifdef BIGOS_DYNAMIC_LINK
+    UserElfLoadError create_dyn_user_process(
+        Process *__process, const void *__image, uint64_t __image_len, const ExecArgs *__args) noexcept;
+#endif
 
     void init() noexcept {
         if (g_proc_initialized)
@@ -1990,6 +2334,14 @@ namespace bigos::proc {
             return UserElfLoadError::InvalidArgument;
         if (!g_proc_initialized)
             init();
+#ifdef BIGOS_DYNAMIC_LINK
+        // Default-off dynamic path: ET_DYN main images route to the bounded
+        // dynamic loader; the static ET_EXEC path below is reached unchanged for
+        // every non-ET_DYN image.
+        if (image_is_dyn_exec((const uint8_t *)__image, __image_len))
+            return create_dyn_user_process(__process, __image, __image_len, __args);
+        (void)__elf_file;
+#endif
         LoadSegment segments[ELF_MAX_LOAD_SEGMENTS] = {};
         uint32_t segment_count = 0;
         uint64_t entry = 0;
@@ -2173,6 +2525,259 @@ namespace bigos::proc {
     UserElfLoadError create_elf_user_process(Process *__process, const void *__image, uint64_t __image_len) noexcept {
         return create_elf_user_process(__process, __image, __image_len, nullptr, nullptr);
     }
+
+#ifdef BIGOS_DYNAMIC_LINK
+    // Bounded dynamic load path (default-off). Loads an ET_DYN main image at
+    // USER_DYN_EXEC_BASE plus its PT_INTERP-named interpreter at USER_INTERP_BASE,
+    // builds an auxv-bearing initial stack, and sets the interpreter entry as the
+    // ring3 entry point. Relocation/symbol binding happen entirely in ld.so; the
+    // kernel only loads + hands off. Runs in ordinary (non-IRQ) context only.
+    UserElfLoadError create_dyn_user_process(Process *__process, const void *__image, uint64_t __image_len,
+        const ExecArgs *__args) noexcept {
+        if (__process == nullptr || __image == nullptr)
+            return UserElfLoadError::InvalidArgument;
+        if (!g_proc_initialized)
+            init();
+
+        // Validate the ET_DYN main image at its deterministic base and extract the
+        // interpreter path.
+        LoadSegment main_segments[ELF_MAX_LOAD_SEGMENTS] = {};
+        uint32_t main_segment_count = 0;
+        DynLoadInfo main_info = {};
+        char interp_path[DYN_INTERP_PATH_MAX] = {};
+        bool has_interp = false;
+        UserElfLoadError error = validate_dyn_image((const uint8_t *)__image, __image_len, USER_DYN_EXEC_BASE, true,
+            main_segments, &main_segment_count, &main_info, interp_path, &has_interp);
+        if (error != UserElfLoadError::Success)
+            return error;
+        if (!has_interp || interp_path[0] != '/')
+            return UserElfLoadError::UnsupportedElf;
+
+        // Read the interpreter ELF through the read-only VFS into a transient
+        // kernel buffer (freed before return). Runs in kernel CR3 context.
+        bigos::vfs::File *interp_file = nullptr;
+        bigos::vfs::Status status = bigos::vfs::open_absolute(interp_path, bigos::vfs::OPEN_RDONLY, &interp_file);
+        if (status != bigos::vfs::Status::Success)
+            return UserElfLoadError::UnsupportedElf;
+        const uint64_t interp_size = interp_file->vnode != nullptr ? interp_file->vnode->size : 0;
+        if (interp_size == 0 || interp_size > USER_ELF_MAX_FILE_BYTES) {
+            bigos::vfs::release(interp_file);
+            return UserElfLoadError::UnsupportedElf;
+        }
+        void *interp_image = bigos::kmalloc((size_t)interp_size);
+        if (interp_image == nullptr) {
+            bigos::vfs::release(interp_file);
+            return UserElfLoadError::OutOfMemory;
+        }
+        size_t interp_read = 0;
+        status = bigos::vfs::read(interp_file, interp_image, (size_t)interp_size, &interp_read);
+        bigos::vfs::release(interp_file);
+        if (status != bigos::vfs::Status::Success || interp_read != interp_size) {
+            bigos::free(interp_image);
+            return UserElfLoadError::UnsupportedElf;
+        }
+
+        LoadSegment interp_segments[ELF_MAX_LOAD_SEGMENTS] = {};
+        uint32_t interp_segment_count = 0;
+        DynLoadInfo interp_info = {};
+        error = validate_dyn_image((const uint8_t *)interp_image, interp_size, USER_INTERP_BASE, false, interp_segments,
+            &interp_segment_count, &interp_info, nullptr, nullptr);
+        if (error != UserElfLoadError::Success) {
+            bigos::free(interp_image);
+            return error;
+        }
+
+        uint64_t image_low = UINT64_MAX;
+        uint64_t image_high = 0;
+        uint64_t heap_base = 0;
+
+        scrub_process(__process);
+        __process->kernel_stack_base = bigos::alloc_kernel_pages(PROCESS_KERNEL_STACK_PAGES, _GFM_PRE_PAGING);
+        if (__process->kernel_stack_base == nullptr) {
+            bigos::free(interp_image);
+            return UserElfLoadError::OutOfMemory;
+        }
+        {
+            const uint64_t root = bigos::mm::derive_user_address_space_root();
+            if (root == bigos::mm::INVALID_PHYS_ADDR) {
+                error = UserElfLoadError::OutOfMemory;
+                goto fail;
+            }
+            if (!attach_mm_context(__process, root)) {
+                (void)bigos::mm::teardown_user_address_space(root);
+                error = UserElfLoadError::OutOfMemory;
+                goto fail;
+            }
+        }
+        __process->kernel_address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+        if (!clone_process_kernel_stack_mapping(__process)) {
+            error = UserElfLoadError::MapFailed;
+            goto fail;
+        }
+        internal_init_vmas(&__process->vmas);
+        for (uint32_t i = 0; i < main_segment_count; i++) {
+            if (main_segments[i].map_base < image_low)
+                image_low = main_segments[i].map_base;
+            if (main_segments[i].map_base + main_segments[i].map_len > image_high)
+                image_high = main_segments[i].map_base + main_segments[i].map_len;
+        }
+        if (!page_up(image_high, &heap_base) ||
+            !init_runtime_layout(__process, image_low, image_high, heap_base, true)) {
+            error = UserElfLoadError::AddressOutOfRange;
+            goto fail;
+        }
+        // Main image segment VMAs (anonymous-copy ElfSegment backing).
+        for (uint32_t i = 0; i < main_segment_count; i++) {
+            const VmaPurpose purpose = (main_segments[i].flags & PF_X) != 0 ? VmaPurpose::Code : VmaPurpose::Data;
+            if (!internal_add_process_vma(__process,
+                    {main_segments[i].map_base, main_segments[i].map_base + main_segments[i].map_len,
+                        main_segments[i].map_base, main_segments[i].map_base + main_segments[i].map_len,
+                        segment_permissions(main_segments[i].flags), purpose, VmaBacking::ElfSegment, VmaGrowth::None,
+                        true, nullptr, 0})) {
+                error = UserElfLoadError::MapFailed;
+                goto fail;
+            }
+        }
+        // Interpreter segment VMAs (DynInterp purpose, inside the interp region).
+        for (uint32_t i = 0; i < interp_segment_count; i++) {
+            if (!internal_add_process_vma(__process,
+                    {interp_segments[i].map_base, interp_segments[i].map_base + interp_segments[i].map_len,
+                        interp_segments[i].map_base, interp_segments[i].map_base + interp_segments[i].map_len,
+                        segment_permissions(interp_segments[i].flags), VmaPurpose::DynInterp, VmaBacking::ElfSegment,
+                        VmaGrowth::None, true, nullptr, 0})) {
+                error = UserElfLoadError::MapFailed;
+                goto fail;
+            }
+        }
+        __process->vmas.heap_base = heap_base;
+        __process->vmas.heap_break = heap_base;
+        __process->vmas.heap_limit = __process->runtime_layout.heap.base + __process->runtime_layout.heap.len;
+        if (!internal_add_process_vma(__process,
+                {heap_base, __process->vmas.heap_limit, heap_base, heap_base,
+                    (VmaPermission)(permissions_value(VmaPermission::Read) | permissions_value(VmaPermission::Write)),
+                    VmaPurpose::Heap, VmaBacking::Anonymous, VmaGrowth::Up, true})) {
+            error = UserElfLoadError::MapFailed;
+            goto fail;
+        }
+
+        for (uint32_t i = 0; i < main_segment_count; i++) {
+            error = map_segment(__process, (const uint8_t *)__image, main_segments[i], false);
+            if (error != UserElfLoadError::Success)
+                goto fail;
+        }
+        for (uint32_t i = 0; i < interp_segment_count; i++) {
+            error = map_segment(__process, (const uint8_t *)interp_image, interp_segments[i], false);
+            if (error != UserElfLoadError::Success)
+                goto fail;
+        }
+
+        {
+            const uint64_t stack_base = USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE;
+            const uint64_t stack_phys = alloc_user_frame();
+            uint64_t initial_sp = 0;
+            AuxvEntry auxv[] = {
+                {AT_PHDR, main_info.phdr_addr},
+                {AT_PHENT, main_info.phentsize},
+                {AT_PHNUM, main_info.phnum},
+                {AT_ENTRY, main_info.entry},
+                {AT_BASE, interp_info.load_base},
+                {AT_PAGESZ, PAGE_SIZE},
+                {AT_NULL, 0},
+            };
+            if (!internal_add_process_vma(__process,
+                    {stack_base - (USER_STACK_GROWTH_PAGES + USER_STACK_GUARD_PAGES) * PAGE_SIZE,
+                        stack_base - USER_STACK_GROWTH_PAGES * PAGE_SIZE, stack_base, stack_base, VmaPermission::None,
+                        VmaPurpose::StackGuard, VmaBacking::Guard, VmaGrowth::None, true}) ||
+                !internal_add_process_vma(__process,
+                    {stack_base - USER_STACK_GROWTH_PAGES * PAGE_SIZE, USER_STACK_TOP, stack_base, USER_STACK_TOP,
+                        (VmaPermission)(permissions_value(VmaPermission::Read) |
+                                        permissions_value(VmaPermission::Write)),
+                        VmaPurpose::Stack, VmaBacking::Anonymous, VmaGrowth::Down, true})) {
+                error = UserElfLoadError::MapFailed;
+                goto fail;
+            }
+            if (stack_phys == 0) {
+                error = UserElfLoadError::OutOfMemory;
+                goto fail;
+            }
+            if (!zero_frame(stack_phys)) {
+                free_user_frame(stack_phys);
+                error = UserElfLoadError::CopyFailed;
+                goto fail;
+            }
+            if (!copy_exec_args_and_auxv_to_stack(
+                    stack_phys, stack_base, __args, auxv, sizeof(auxv) / sizeof(auxv[0]), &initial_sp)) {
+                free_user_frame(stack_phys);
+                error = UserElfLoadError::CopyFailed;
+                goto fail;
+            }
+            if (!map_user_page_for_process(__process, stack_base, stack_phys, bigos::mm::page_attr::USER_DATA, false)) {
+                free_user_frame(stack_phys);
+                error = UserElfLoadError::MapFailed;
+                goto fail;
+            }
+            __process->stack_phys = stack_phys;
+            __process->stack = {stack_base, USER_STACK_PAGES * PAGE_SIZE};
+            __process->initial_stack = initial_sp;
+        }
+
+        bigos::free(interp_image);
+        interp_image = nullptr;
+
+        __process->kernel_stack_len = (uint64_t)PROCESS_KERNEL_STACK_PAGES * PAGE_SIZE;
+        __process->kernel_stack_top = (uint64_t)__process->kernel_stack_base + __process->kernel_stack_len;
+        // Ring3 entry is the interpreter entry (decision 1), not the main image.
+        __process->entry = interp_info.entry;
+        __process->code = {main_segments[0].map_base, main_segments[0].map_len};
+        __process->data = {0, 0};
+        for (uint32_t i = 0; i < main_segment_count; i++) {
+            if ((main_segments[i].flags & PF_X) != 0)
+                __process->code = {main_segments[i].map_base, main_segments[i].map_len};
+            if ((main_segments[i].flags & PF_W) != 0 && __process->data.len == 0)
+                __process->data = {main_segments[i].map_base, main_segments[i].map_len};
+        }
+        __process->state = ProcessState::Created;
+        __process->reap_pending = false;
+        __process->resources_reclaimed = false;
+        __process->exit_code = 0;
+        __process->fault_reason = 0;
+        __process->uid = bigos::cred::ROOT_UID;
+        __process->gid = bigos::cred::ROOT_UID;
+        __process->euid = bigos::cred::ROOT_UID;
+        __process->egid = bigos::cred::ROOT_UID;
+        __process->pgid = 0;
+        __process->sid = 0;
+        __process->start_unix_time = bigos::time::current_unix_time();
+        init_cwd(__process);
+        bigos::signal::init_state(__process);
+        init_fd_table(__process);
+        if (!publish_process(
+                __process, current_process_slot() != nullptr ? current_process_slot()->pid : ROOT_PARENT_PID)) {
+            error = UserElfLoadError::OutOfMemory;
+            goto fail;
+        }
+        return UserElfLoadError::Success;
+
+    fail:
+        if (interp_image != nullptr)
+            bigos::free(interp_image);
+        if (__process->kernel_stack_base != nullptr)
+            bigos::free_pages(__process->kernel_stack_base);
+        if (__process->address_space_root != bigos::mm::INVALID_PHYS_ADDR) {
+            if (__process->mm_context != nullptr)
+                bigos::mm::mark_mm_context_dying(__process->mm_context);
+            (void)unmap_shared_file_backed_pages(__process->address_space_root, &__process->vmas);
+            (void)bigos::mm::teardown_user_address_space(__process->address_space_root);
+        }
+        release_file_backed_vmas(__process);
+        if (__process->table_published)
+            unpublish_process(__process);
+        free_fd_table(__process);
+        forget_mm_context(__process);
+        scrub_process(__process);
+        return error;
+    }
+#endif   // BIGOS_DYNAMIC_LINK
 
     UserElfLoadError exec_current_from_elf_image(const void *__image, uint64_t __image_len, const ExecArgs *__args,
         bigos::vfs::File *__elf_file) noexcept {
@@ -2763,6 +3368,75 @@ namespace bigos::proc {
         process->vmas.filemap_next = end;
         return (int64_t)base;
     }
+
+#ifdef BIGOS_DYNAMIC_LINK
+    int64_t dyn_map_current(uint64_t __base, uint64_t __len, uint64_t __permissions) noexcept {
+        Process *process = current_process_slot();
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+            return -bigos::EWOULDBLOCK;
+        // Dynamic-layout-only: the static path can never reach a dyn_lib region.
+        if (!process->runtime_layout.dynamic)
+            return -bigos::EINVAL;
+        uint64_t len = 0;
+        if (__len == 0 || !page_aligned(__base) || !page_up(__len, &len))
+            return -bigos::EINVAL;
+        const auto permissions = (VmaPermission)(uint8_t)__permissions;
+        if (!permissions_supported(permissions) || !permissions_include(permissions, VmaPermission::Read))
+            return -bigos::EINVAL;
+
+        uint64_t end = 0;
+        const uint64_t lib_base = process->runtime_layout.dyn_lib.base;
+        const uint64_t lib_limit = lib_base + process->runtime_layout.dyn_lib.len;
+        if (add_overflow(__base, len, &end) || __base < lib_base || end > lib_limit)
+            return -bigos::EINVAL;
+        for (uint32_t i = 0; i < MAX_VMAS; i++) {
+            const VmaEntry &entry = process->vmas.entries[i];
+            if (entry.used && __base < entry.end && entry.start < end)
+                return -bigos::EINVAL;
+        }
+        if (!internal_add_process_vma(process, {__base, end, __base, __base, permissions, VmaPurpose::DynLib,
+                                                   VmaBacking::Anonymous, VmaGrowth::None, true}))
+            return -bigos::EFAULT;
+        // Lazy demand-zero: pages materialize on first access with the requested
+        // permissions through try_handle_user_page_fault.
+        return (int64_t)__base;
+    }
+
+    int64_t dyn_protect_current(uint64_t __base, uint64_t __len, uint64_t __permissions) noexcept {
+        Process *process = current_process_slot();
+        if (process == nullptr || process->state != ProcessState::Running || !bigos::sched::can_block())
+            return -bigos::EWOULDBLOCK;
+        if (!process->runtime_layout.dynamic)
+            return -bigos::EINVAL;
+        uint64_t end = 0;
+        if (!lifecycle_range_bounds(__base, __len, &end))
+            return -bigos::EINVAL;
+        const auto permissions = (VmaPermission)(uint8_t)__permissions;
+        if (!permissions_supported(permissions) || !permissions_include(permissions, VmaPermission::Read))
+            return -bigos::EINVAL;
+        // The whole range must be covered by DynLib anonymous VMAs.
+        const uint64_t lib_base = process->runtime_layout.dyn_lib.base;
+        const uint64_t lib_limit = lib_base + process->runtime_layout.dyn_lib.len;
+        if (__base < lib_base || end > lib_limit)
+            return -bigos::EINVAL;
+        uint64_t cursor = __base;
+        while (cursor < end) {
+            const VmaEntry *entry = internal_find_vma(&process->vmas, cursor);
+            if (entry == nullptr || entry->purpose != VmaPurpose::DynLib ||
+                entry->backing != VmaBacking::Anonymous)
+                return -bigos::EINVAL;
+            cursor = entry->end < end ? entry->end : end;
+        }
+
+        VmaCollection staged = {};
+        if (!stage_dyn_lib_protect(process, __base, end, permissions, &staged))
+            return -bigos::EINVAL;
+        if (!protect_present_pages_in_range(process, __base, end, permissions))
+            return -bigos::EFAULT;
+        process->vmas = staged;
+        return 0;
+    }
+#endif   // BIGOS_DYNAMIC_LINK
 
     // Resolves a copy-on-write write fault for the current process on a present,
     // read-only, PTE_COW page covered by a writable anonymous VMA. Defined after

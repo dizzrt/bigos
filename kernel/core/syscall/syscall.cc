@@ -674,6 +674,16 @@ namespace sys {
             return bigos::proc::map_file_current(__fd, __offset, __len, __permissions, __flags);
         }
 
+#ifdef BIGOS_DYNAMIC_LINK
+        static int64_t sys_dyn_map(uint64_t __base, uint64_t __len, uint64_t __permissions) noexcept {
+            return bigos::proc::dyn_map_current(__base, __len, __permissions);
+        }
+
+        static int64_t sys_dyn_protect(uint64_t __base, uint64_t __len, uint64_t __permissions) noexcept {
+            return bigos::proc::dyn_protect_current(__base, __len, __permissions);
+        }
+#endif
+
         // Read-only identity queries. Each returns a current-process field via
         // rax. They never allocate, block, or send an EOI. With no current
         // process they return a deterministic -bigos::ESRCH-style error; the
@@ -1283,6 +1293,14 @@ namespace sys {
             case SYS_PROTECT_ANON:
                 result = __detail::sys_protect_anon(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
+#ifdef BIGOS_DYNAMIC_LINK
+            case SYS_DYN_MAP:
+                result = __detail::sys_dyn_map(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_DYN_PROTECT:
+                result = __detail::sys_dyn_protect(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+#endif
             case SYS_FORK:
                 // fork duplicates the current process. The dispatcher passes the
                 // parent's saved frame so the child can resume from the same int

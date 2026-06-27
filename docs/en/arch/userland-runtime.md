@@ -263,3 +263,57 @@ echo, backspace feedback, and command output on the text console. When local
 display, ROM, keyboard input, or injection support is unavailable, record the
 interactive portion as skipped or blocked with the substitute
 source/build/headless checks and remaining console-usability risk.
+
+## Bounded Dynamic Linking (default-off)
+
+A default-off bounded dynamic-link path adds a minimal "dynamic linking + shared
+library" mechanism on top of the static baseline. It is gated by a build switch
+and changes nothing about the default static boot: with the switch off no
+interpreter, shared library, or dynamic executable is built or packaged, and the
+loader keeps rejecting `PT_INTERP`/`ET_DYN` images deterministically.
+
+When enabled, the kernel ELF loader accepts a bounded `ET_DYN` main executable
+that carries exactly one `PT_INTERP`. The kernel loads the main image and the
+`PT_INTERP`-named user-space interpreter to deterministic, non-overlapping bases
+inside the previously reserved runtime gap, appends a bounded auxiliary vector
+(`AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_ENTRY`/`AT_BASE`/`AT_PAGESZ`/`AT_NULL`) after
+the existing `argc`/`argv`/`envp` initial stack, and enters ring3 at the
+interpreter entry instead of the main image entry. The static `ET_EXEC` path,
+its bounded limits, the `int 0x80` register ABI, syscall numbers, and boot/disk
+layout are unchanged; the auxv is append-only, so the existing static crt0 (which
+reads only up to the `envp` NULL terminator) is unaffected.
+
+Relocation and symbol binding run entirely in the user-space interpreter
+(`ld-bigos.so`), not in the kernel. The interpreter is a freestanding,
+position-independent `ET_DYN` that self-relocates first (only
+`R_X86_64_RELATIVE`, using `AT_BASE`), then locates the main image program
+headers through the auxv, loads a bounded number of `DT_NEEDED` shared objects
+from `/lib` into a bounded shared-object mapping region, applies an eager
+(`BIND_NOW`-equivalent) relocation subset
+(`R_X86_64_RELATIVE`/`GLOB_DAT`/`JMP_SLOT`/`64`) with global-scope symbol binding
+(main image first, then load order), and finally jumps to the main image real
+entry. Two bounded helper syscalls let the interpreter reserve and re-protect
+pages inside the shared-object region; both reject any process that is not on the
+bounded dynamic layout.
+
+This path is intentionally bounded and is **not** a complete POSIX dynamic
+linker. It does not implement `dlopen`/`dlsym`/`dlclose`, `LD_PRELOAD`/
+`LD_LIBRARY_PATH` search, symbol versioning, GNU hash, multiple interpreters,
+TLS (`PT_TLS`/`*TPOFF*`/`DTPMOD`), `IFUNC`/`IRELATIVE`, lazy PLT resolution, or
+splitting the default libc into a shared object. Unsupported relocation types,
+unresolved non-weak symbols, missing interpreter or `DT_NEEDED` libraries, and
+over-limit counts all fail deterministically (kernel loader/exec error or a
+bounded `BIGOS_DYNLINK_FAILED` interpreter marker plus `SYS_EXIT`); the path
+never jumps to an unrelocated or undefined address. The default-off validation
+delivers one example shared library and one dynamic executable that exercise the
+full path end to end:
+
+```bash
+xmake f --dynamic_link_smoke=y
+uv run python -m tools.bigosdev run --emulator qemu --display none --expect-serial-marker BIGOS_DYNLINK_PASSED
+```
+
+`BIGOS_DYNLINK_PASSED` confirms the kernel loaded the dynamic executable and its
+interpreter, the interpreter self-relocated, loaded the example shared library,
+bound the cross-module function and data symbols, and the program called them
+with the expected results.

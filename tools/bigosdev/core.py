@@ -128,6 +128,12 @@ USER_BIN_PROGRAMS = (*USER_BASE_BIN_PROGRAMS, 'mkfs_bigfs')
 USER_SMOKE_BIN_DIR = USER_BIN_DIR / 'smoke'
 USER_SMOKE_BIN_PROGRAMS = ('args', 'env', 'out', 'errno', 'exit', 'libc_subset')
 USER_BIN_MAX_BYTES = USER_INIT_ELF_MAX_BYTES
+# Default-off bounded dynamic-link artifacts. Built only under dynamic_link_smoke
+# and packaged into /lib so the kernel ET_DYN load path can read the interpreter
+# and the example shared library through the VFS. The legacy exFAT generator does
+# not pack /lib; dynamic-link validation uses the UEFI boot path.
+USER_LIB_DIR = BUILD_DIR / 'bin' / 'user' / 'lib'
+USER_LIB_PROGRAMS = ('ld-bigos.so', 'libdemo.so')
 
 BUILD_TOOLS = (
     'xmake',
@@ -175,6 +181,9 @@ class ImageLayout:
     smoke_bin_dir_cluster: int = 0
     # Tuple of (name, first_cluster, data_length, clusters) for /bin/smoke programs.
     smoke_bin_files: tuple[tuple[str, int, int, int], ...] = ()
+    lib_dir_cluster: int = 0
+    # Tuple of (name, first_cluster, data_length, clusters) for /lib dynamic-link artifacts.
+    lib_files: tuple[tuple[str, int, int, int], ...] = ()
 
     @property
     def cluster_heap_lba(self) -> int:
@@ -207,6 +216,8 @@ class PreparedArtifacts:
     bin_programs: tuple[tuple[str, Path], ...] = ()
     # List of (name, Path) for optional user /bin/smoke programs.
     smoke_bin_programs: tuple[tuple[str, Path], ...] = ()
+    # List of (name, Path) for optional /lib dynamic-link artifacts (ld.so + libs).
+    lib_programs: tuple[tuple[str, Path], ...] = ()
     font_asset: Path | None = None
 
 
@@ -960,6 +971,13 @@ def get_artifacts(kernel: Path = DEFAULT_KERNEL, boot_mode: str = 'legacy') -> P
             program = smoke_bin_dir / name
             require_file(program, 'image build', f'/bin/smoke/{name}', USER_BIN_MAX_BYTES)
             smoke_bin_programs.append((name, program))
+    # Optional /lib dynamic-link artifacts (only when dynamic_link_smoke built them).
+    lib_programs: list[tuple[str, Path]] = []
+    if USER_LIB_DIR.exists():
+        for name in USER_LIB_PROGRAMS:
+            program = USER_LIB_DIR / name
+            require_file(program, 'image build', f'/lib/{name}', USER_BIN_MAX_BYTES)
+            lib_programs.append((name, program))
     return PreparedArtifacts(
         kernel=kernel,
         mbr=BOOT_ARTIFACTS['mbr'][0],
@@ -970,6 +988,7 @@ def get_artifacts(kernel: Path = DEFAULT_KERNEL, boot_mode: str = 'legacy') -> P
         user_init_elf=USER_INIT_ELF,
         bin_programs=tuple(bin_programs),
         smoke_bin_programs=tuple(smoke_bin_programs),
+        lib_programs=tuple(lib_programs),
         font_asset=FONT_ASSET if boot_mode == 'uefi' else None,
     )
 
@@ -981,6 +1000,7 @@ def make_layout(
     user_init_size: int = 0,
     bin_sizes: Sequence[tuple[str, int]] = (),
     smoke_bin_sizes: Sequence[tuple[str, int]] = (),
+    lib_sizes: Sequence[tuple[str, int]] = (),
 ) -> ImageLayout:
     image_size = align_up(image_size, SECTOR_SIZE)
     total_sectors = image_size // SECTOR_SIZE
@@ -1021,6 +1041,18 @@ def make_layout(
                 smoke_bin_files.append((name, next_cluster, size, clusters))
                 next_cluster += clusters
 
+    # /lib directory (single cluster) plus one contiguous run per artifact, only
+    # when dynamic-link artifacts were built.
+    lib_dir_cluster = 0
+    lib_files: list[tuple[str, int, int, int]] = []
+    if lib_sizes:
+        lib_dir_cluster = next_cluster
+        next_cluster += 1
+        for name, size in lib_sizes:
+            clusters = clusters_for_size(size)
+            lib_files.append((name, next_cluster, size, clusters))
+            next_cluster += clusters
+
     last_cluster = next_cluster - 1
     cluster_count = (partition_sectors - CLUSTER_HEAP_OFFSET) // SECTORS_PER_CLUSTER
     if cluster_count < last_cluster - 1:
@@ -1046,6 +1078,8 @@ def make_layout(
         bin_files=tuple(bin_files),
         smoke_bin_dir_cluster=smoke_bin_dir_cluster,
         smoke_bin_files=tuple(smoke_bin_files),
+        lib_dir_cluster=lib_dir_cluster,
+        lib_files=tuple(lib_files),
     )
 
 
@@ -1188,6 +1222,10 @@ def make_allocation_bitmap(layout: ImageLayout) -> bytes:
         used_clusters.append(layout.smoke_bin_dir_cluster)
         for _name, first_cluster, _size, clusters in layout.smoke_bin_files:
             used_clusters.extend(range(first_cluster, first_cluster + clusters))
+    if layout.lib_dir_cluster != 0:
+        used_clusters.append(layout.lib_dir_cluster)
+        for _name, first_cluster, _size, clusters in layout.lib_files:
+            used_clusters.extend(range(first_cluster, first_cluster + clusters))
     for cluster in used_clusters:
         index = cluster - 2
         bitmap[index // 8] |= 1 << (index % 8)
@@ -1222,8 +1260,10 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
     bin_sizes = [(name, len(data)) for name, data in bin_data]
     smoke_bin_data = [(name, read_file(program)) for name, program in artifacts.smoke_bin_programs]
     smoke_bin_sizes = [(name, len(data)) for name, data in smoke_bin_data]
+    lib_data = [(name, read_file(program)) for name, program in artifacts.lib_programs]
+    lib_sizes = [(name, len(data)) for name, data in lib_data]
 
-    layout = make_layout(image_size, len(boot), len(kernel), len(user_init), bin_sizes, smoke_bin_sizes)
+    layout = make_layout(image_size, len(boot), len(kernel), len(user_init), bin_sizes, smoke_bin_sizes, lib_sizes)
     image_path.parent.mkdir(parents=True, exist_ok=True)
 
     with image_path.open('wb') as image:
@@ -1242,6 +1282,8 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
         ]
         if layout.bin_dir_cluster != 0:
             root_entries.append(ExfatFile('bin', layout.bin_dir_cluster, CLUSTER_SIZE, is_directory=True))
+        if layout.lib_dir_cluster != 0:
+            root_entries.append(ExfatFile('lib', layout.lib_dir_cluster, CLUSTER_SIZE, is_directory=True))
         root = make_directory(root_entries)
         boot_entries = [
             ExfatFile('boot.bin', BOOT_FILE_CLUSTER, len(boot), is_directory=False),
@@ -1288,6 +1330,15 @@ def create_image(image_path: Path, image_size: int, artifacts: PreparedArtifacts
             for name, first_cluster, _size, _clusters in layout.smoke_bin_files:
                 assert smoke_size_by_name[name] == len(smoke_data_by_name[name])
                 write_at(image, layout.cluster_lba(first_cluster) * SECTOR_SIZE, smoke_data_by_name[name])
+        if layout.lib_dir_cluster != 0:
+            lib_entries = [
+                ExfatFile(name, first_cluster, size, is_directory=False)
+                for (name, first_cluster, size, _clusters) in layout.lib_files
+            ]
+            write_cluster(image, layout, layout.lib_dir_cluster, make_directory(lib_entries))
+            lib_data_by_name = dict(lib_data)
+            for name, first_cluster, _size, _clusters in layout.lib_files:
+                write_at(image, layout.cluster_lba(first_cluster) * SECTOR_SIZE, lib_data_by_name[name])
 
     return layout
 
@@ -1329,6 +1380,8 @@ def create_uefi_image(image_path: Path, image_size: int, artifacts: PreparedArti
         run_command('uefi esp mkdir', ['mmd', '-i', str(image_path), mtools_path(directory)], PROJECT_ROOT)
     if artifacts.smoke_bin_programs:
         run_command('uefi esp mkdir', ['mmd', '-i', str(image_path), mtools_path('/bin/smoke')], PROJECT_ROOT)
+    if artifacts.lib_programs:
+        run_command('uefi esp mkdir', ['mmd', '-i', str(image_path), mtools_path('/lib')], PROJECT_ROOT)
 
     mtools_copy_in(image_path, artifacts.uefi_loader, '/EFI/BOOT/BOOTX64.EFI')
     mtools_copy_in(image_path, artifacts.kernel, '/boot/kernel')
@@ -1343,6 +1396,8 @@ def create_uefi_image(image_path: Path, image_size: int, artifacts: PreparedArti
         mtools_copy_in(image_path, program, f'/bin/{name}')
     for name, program in artifacts.smoke_bin_programs:
         mtools_copy_in(image_path, program, f'/bin/smoke/{name}')
+    for name, program in artifacts.lib_programs:
+        mtools_copy_in(image_path, program, f'/lib/{name}')
 
 
 def validate_uefi_image(image_path: Path) -> None:

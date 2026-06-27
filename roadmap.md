@@ -409,9 +409,9 @@ programs and a richer userland.
 
 用户可见目标：BigOS 更像一个可用系统，支持更多标准程序与更丰富的用户态。
 
-- [ ] Task M12.1: dynamic linking and shared library support within bounded
+- [x] Task M12.1: dynamic linking and shared library support within bounded
   freestanding-safe semantics.
-- [ ] 任务 M12.1：在有界 freestanding-safe 语义内支持动态链接与共享库。
+- [x] 任务 M12.1：在有界 freestanding-safe 语义内支持动态链接与共享库。
 - [ ] Task M12.2: a more complete libc subset toward portable standard small
   programs.
 - [ ] 任务 M12.2：更完整的 libc 子集，支撑可移植的标准小程序。

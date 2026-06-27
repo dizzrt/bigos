@@ -227,4 +227,45 @@ struct Elf64_Dyn {
     };
 };
 
+// auxiliary vector entry types (a_type). Bounded subset used by the default-off
+// dynamic-link path's initial-stack handshake; the user-space interpreter reads
+// AT_PHDR/AT_PHENT/AT_PHNUM/AT_ENTRY/AT_BASE/AT_PAGESZ to locate the main image
+// program header, real entry, its own load base, and the page size.
+#define AT_NULL   0    // end of vector
+#define AT_IGNORE 1    // entry should be ignored
+#define AT_EXECFD 2    // file descriptor of program
+#define AT_PHDR   3    // program headers for program
+#define AT_PHENT  4    // size of program header entry
+#define AT_PHNUM  5    // number of program headers
+#define AT_PAGESZ 6    // system page size
+#define AT_BASE   7    // base address of interpreter
+#define AT_FLAGS  8    // flags
+#define AT_ENTRY  9    // entry point of program
+
+// auxiliary vector entry. The initial user stack appends an array of these,
+// terminated by an a_type == AT_NULL entry, after the envp NULL terminator.
+struct Elf64_auxv_t {
+    Elf64_Xword a_type;
+    union {
+        Elf64_Xword a_val;
+    } a_un;
+};
+
+// x86_64 relocation types. Bounded subset supported by the user-space
+// interpreter's eager (BIND_NOW-equivalent) binding; everything outside this
+// set (TLS, IFUNC/IRELATIVE, etc.) is rejected deterministically.
+#define R_X86_64_NONE     0    // no relocation
+#define R_X86_64_64       1    // S + A (direct 64-bit)
+#define R_X86_64_GLOB_DAT 6    // S (set GOT entry to symbol value)
+#define R_X86_64_JMP_SLOT 7    // S (set PLT entry to symbol value)
+#define R_X86_64_RELATIVE 8    // B + A (adjust by load base)
+
+// r_info field accessors (ELF64): high 32 bits symbol index, low 32 bits type.
+#define ELF64_R_SYM(info)  ((info) >> 32)
+#define ELF64_R_TYPE(info) ((info) & 0xffffffffUL)
+
+// st_info field accessors: high nibble binding, low nibble type.
+#define ELF64_ST_BIND(info) ((info) >> 4)
+#define ELF64_ST_TYPE(info) ((info) & 0xf)
+
 #endif   // _BIG_ELF_H

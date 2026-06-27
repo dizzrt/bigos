@@ -195,8 +195,10 @@ def test_sigreturn_dispatch_does_not_overwrite_restored_rax() -> None:
 def test_lifecycle_initializes_inherits_and_resets_signal_state() -> None:
     proc = read_source('kernel/core/proc/proc.cc')
 
-    # Both non-fork creation paths initialize signal state.
-    assert proc.count('bigos::signal::init_state(__process);') == 2
+    # All non-fork creation paths initialize signal state:
+    # create_first_user_process, create_elf_user_process, and the default-off
+    # dynamic create_dyn_user_process path.
+    assert proc.count('bigos::signal::init_state(__process);') == 3
 
     # fork inherits the disposition table and mask, clears pending.
     fork_body = proc[proc.index('int64_t fork_current(') : proc.index('int64_t install_fd_current(')]

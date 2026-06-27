@@ -214,3 +214,41 @@ helper、formatter 行为、错误文本、目录 wrapper 和失败路径。它�
 backspace feedback 和命令输出。若本地 display、ROM、keyboard input 或 injection 能力不可用，
 需要将交互部分记录为 skipped 或 blocked，并写明替代 source/build/headless 检查和剩余
 console-usability 风险。
+
+## 有界动态链接（默认关闭）
+
+默认关闭的有界动态链接路径在静态基线之上新增了最小的"动态链接 + 共享库"机制。
+它由一个构建开关守卫，不改变默认静态启动：开关关闭时不构建或打包任何解释器、
+共享库或动态可执行程序，装载器继续对 `PT_INTERP`/`ET_DYN` 镜像确定性拒绝。
+
+开关启用时，内核 ELF 装载器接受含恰好一个 `PT_INTERP` 的有界 `ET_DYN` 主可执行
+镜像。内核把主镜像和 `PT_INTERP` 指定的用户态解释器加载到先前预留运行时 gap 内
+确定性、不重叠的基址，在既有 `argc`/`argv`/`envp` 初始栈之后追加有界 auxiliary
+vector（`AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_ENTRY`/`AT_BASE`/`AT_PAGESZ`/`AT_NULL`），
+并以解释器入口（而非主镜像入口）进入 ring3。静态 `ET_EXEC` 路径、其有界限制、
+`int 0x80` 寄存器 ABI、syscall number 与 boot/磁盘布局均不变；auxv 是追加式的，
+因此既有静态 crt0（只读到 `envp` 的 NULL 终止符）不受影响。
+
+重定位与符号绑定完全在用户态解释器（`ld-bigos.so`）中进行，内核不做重定位。
+解释器是 freestanding、位置无关的 `ET_DYN`：先自重定位（仅 `R_X86_64_RELATIVE`，
+用 `AT_BASE`），再经 auxv 定位主镜像 program header，把有界数量的 `DT_NEEDED`
+共享对象从 `/lib` 加载到有界共享对象映射区，执行 eager（`BIND_NOW` 等价）重定位
+子集（`R_X86_64_RELATIVE`/`GLOB_DAT`/`JMP_SLOT`/`64`）并按全局作用域（主镜像优先、
+其后加载顺序）绑定符号，最后跳转到主镜像真实入口。两个有界辅助 syscall 让解释器
+在共享对象映射区内预留并改写页权限；二者都拒绝任何不在有界动态布局上的进程。
+
+该路径是刻意有界的，**不是**完整 POSIX 动态链接器。它不实现 `dlopen`/`dlsym`/
+`dlclose`、`LD_PRELOAD`/`LD_LIBRARY_PATH` 搜索、符号版本、GNU hash、多解释器、
+TLS（`PT_TLS`/`*TPOFF*`/`DTPMOD`）、`IFUNC`/`IRELATIVE`、lazy PLT 解析，也不把默认
+libc 拆为共享对象。未支持的重定位类型、未解析的非弱符号、缺失的解释器或
+`DT_NEEDED` 库以及超界数量都走确定性失败（内核 loader/exec 错误，或有界
+`BIGOS_DYNLINK_FAILED` 解释器 marker 加 `SYS_EXIT`）；该路径绝不跳转到未重定位或
+未定义地址。默认关闭的验证交付一个示例共享库和一个动态可执行程序，端到端走通整条路径：
+
+```bash
+xmake f --dynamic_link_smoke=y
+uv run python -m tools.bigosdev run --emulator qemu --display none --expect-serial-marker BIGOS_DYNLINK_PASSED
+```
+
+`BIGOS_DYNLINK_PASSED` 确认内核加载了动态可执行程序及其解释器，解释器完成自重定位、
+加载了示例共享库、绑定了跨模块的函数与数据符号，且程序以预期结果调用了它们。

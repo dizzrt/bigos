@@ -67,5 +67,7 @@
 #define SYS_BIND        56
 #define SYS_SENDTO      57
 #define SYS_RECVFROM    58
+#define SYS_DYN_MAP     59
+#define SYS_DYN_PROTECT 60
 
 #endif /* _BIGOS_USER_SYS_H */

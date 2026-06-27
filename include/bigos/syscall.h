@@ -127,6 +127,12 @@ namespace bigos::sys {
                                 // bytes received or negative errno. Bounded RX
                                 // advance plus bounded wait; -EAGAIN on no data.
                                 // This is bounded, NOT general POSIX blocking.
+        SYS_DYN_MAP = 59,       // (base, len, permissions) -> base or negative errno. Default-off bounded
+                                // dynamic-link path only: reserves demand-zero pages at a fixed page-aligned
+                                // base inside the bounded shared-object region for the user-space interpreter.
+        SYS_DYN_PROTECT = 60,   // (base, len, permissions) -> 0 or negative errno. Default-off bounded
+                                // dynamic-link path only: changes permissions of an already-mapped
+                                // shared-object sub-range (e.g. dropping write after copying text bytes).
     };
 
     // Bounded user-visible UDP socket address (BigOS sockaddr-lite). Fixed-size,

@@ -110,9 +110,11 @@ def test_process_carries_identity_quad_and_start_timestamp() -> None:
 def test_identity_initialized_on_creation_and_inherited_on_fork() -> None:
     proc = read_source('kernel/core/proc/proc.cc')
 
-    # Both non-fork creation paths default to root and record the wall clock.
-    assert proc.count('__process->uid = bigos::cred::ROOT_UID;') == 2
-    assert proc.count('__process->start_unix_time = bigos::time::current_unix_time();') == 2
+    # All non-fork creation paths default to root and record the wall clock:
+    # create_first_user_process, create_elf_user_process, and the default-off
+    # dynamic create_dyn_user_process path.
+    assert proc.count('__process->uid = bigos::cred::ROOT_UID;') == 3
+    assert proc.count('__process->start_unix_time = bigos::time::current_unix_time();') == 3
 
     # fork inherits the identity quad field-by-field and stamps a fresh time.
     fork_body = proc[proc.index('int64_t fork_current(') : proc.index('int64_t install_fd_current(')]

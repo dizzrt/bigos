@@ -26,6 +26,26 @@ namespace bigos::proc {
     constexpr uint64_t USER_FILEMAP_MAX_PAGES = 32;
     constexpr uint64_t USER_RUNTIME_RESERVED_BASE = USER_STACK_TOP;
     constexpr uint64_t USER_RUNTIME_RESERVED_END = USER_ANON_BASE;
+    // Default-off bounded dynamic-link layout (BIGOS_DYNAMIC_LINK). The position
+    // independent ET_DYN main image loads at USER_DYN_EXEC_BASE, which reuses the
+    // static code region (the static ET_EXEC path and the dynamic path are never
+    // live in one address space). The user-space interpreter (ld.so) and the
+    // DT_NEEDED shared objects live inside the previously reserved future-runtime
+    // gap [USER_RUNTIME_RESERVED_BASE, USER_RUNTIME_RESERVED_END); both regions
+    // are page-aligned, non-overlapping, and stay inside the supported user low
+    // half clear of stack/heap/anonymous/file-backed windows.
+    constexpr uint64_t USER_DYN_EXEC_BASE = USER_CODE_BASE;
+    constexpr uint64_t USER_INTERP_BASE = 0x0000000000900000ull;
+    constexpr uint64_t USER_INTERP_MAX_PAGES = 64;
+    constexpr uint64_t USER_DYN_LIB_BASE = 0x0000000000a00000ull;
+    constexpr uint64_t USER_DYN_LIB_MAX_PAGES = 256;
+    // Deterministic upper bounds for the bounded dynamic-link path. Anything past
+    // these is a fail-closed deterministic error (no partial dynamic execution).
+    constexpr uint32_t USER_DYN_MAX_NEEDED = 4;
+    constexpr uint32_t USER_DYN_MAX_OBJECTS = 8;
+    constexpr uint32_t USER_DYN_MAX_RELOCS = 512;
+    constexpr uint32_t USER_DYN_MAX_AUXV = 16;
+    constexpr const char *USER_INTERP_PATH = "/lib/ld-bigos.so";
     constexpr const char *USER_ELF_SMOKE_PATH = "/boot/user/init.elf";
     // Default-on init image path. Semantically neutral name for the normal-boot
     // launch_init path; intentionally the same value as USER_ELF_SMOKE_PATH so
@@ -94,6 +114,11 @@ namespace bigos::proc {
         Stack,
         StackGuard,
         FileMapped,
+        // Default-off bounded dynamic-link path only. DynInterp covers the
+        // kernel-mapped interpreter (ld.so) image; DynLib covers shared objects
+        // that ld.so maps at deterministic bases in the shared-object region.
+        DynInterp,
+        DynLib,
     };
 
     enum class VmaBacking : uint8_t {
@@ -148,6 +173,13 @@ namespace bigos::proc {
         UserRange arguments;
         UserRange future_runtime;
         UserRange file_mapped;
+        // Default-off bounded dynamic-link path only. When dynamic is true the
+        // future_runtime gap is split into a live interpreter mapping region and
+        // a live shared-object mapping region; otherwise both stay zero and the
+        // gap remains a non-runtime reserved area.
+        UserRange dyn_interp;
+        UserRange dyn_lib;
+        bool dynamic;
         bool committed;
     };
 
@@ -320,6 +352,18 @@ namespace bigos::proc {
     // syscall) context only.
     int64_t map_file_current(uint64_t __fd, uint64_t __offset, uint64_t __len, uint64_t __permissions,
         uint64_t __flags) noexcept;
+    // Default-off bounded dynamic-link path only (BIGOS_DYNAMIC_LINK). The
+    // user-space interpreter (ld.so) uses these to place DT_NEEDED shared objects
+    // at deterministic bases inside the bounded shared-object region. dyn_map
+    // reserves anonymous demand-zero pages at a fixed page-aligned base inside the
+    // committed dyn_lib region with W^X permissions; dyn_protect changes the
+    // permissions of an already-mapped dyn_lib sub-range (e.g. dropping write from
+    // a text segment after the interpreter copies its file bytes in). Both return
+    // 0/base or a deterministic negative errno and are blockable-context only.
+    // They reject any process whose runtime layout is not the bounded dynamic
+    // layout, so the static path can never reach a dynamic mapping region.
+    int64_t dyn_map_current(uint64_t __base, uint64_t __len, uint64_t __permissions) noexcept;
+    int64_t dyn_protect_current(uint64_t __base, uint64_t __len, uint64_t __permissions) noexcept;
     bool try_handle_user_page_fault(uint64_t __fault_address, uint64_t __error_code) noexcept;
     // Duplicates the current user process into a new child (POSIX-style fork).
     // __parent_frame is the parent's saved int 0x80 InterruptFrame from the
@@ -400,6 +444,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_FILE_BACKED_MAPPING_SMOKE
     void file_backed_mapping_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_DYNAMIC_LINK_SMOKE
+    void dynamic_link_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 

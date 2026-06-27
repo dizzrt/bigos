@@ -136,6 +136,7 @@ on_build(function()
     --   userland_smoke/filesystem_maturity_smoke -> userland validation program,
     --   user_elf_smoke/user_program_smoke -> minimal print+exit smoke ELF
     --                               (preserves BIGOS_USER_ENTER/EXIT),
+    --   dynamic_link_smoke        -> dynamic demo executable (ld.so + libdemo.so),
     --   otherwise                -> resident C init that launches /bin/sh.
     local init_output = path.join(user_bindir, "init.elf")
     if has_config("anonymous_lifecycle_smoke") then
@@ -146,6 +147,68 @@ on_build(function()
         build_user_program(path.join(projectdir, "user", "smoke", "userland_smoke.c"), init_output)
     elseif has_config("user_elf_smoke") or has_config("user_program_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "elf_smoke.c"), init_output)
+    elseif has_config("dynamic_link_smoke") then
+        -- Default-off bounded dynamic-link validation. Build the user-space
+        -- interpreter ld-bigos.so (ET_DYN) and the example shared library
+        -- libdemo.so into a packaged /lib directory, then build the dynamic
+        -- executable dyn_demo (PIE, PT_INTERP=/lib/ld-bigos.so, DT_NEEDED
+        -- libdemo.so) as the PID-1 init image. The kernel ET_DYN load path then
+        -- enters ld.so, which loads libdemo.so and binds the cross-module
+        -- symbols dyn_demo calls before jumping to its entry.
+        local user_lib_subdir = path.join(user_bindir, "lib")
+        os.mkdir(user_lib_subdir)
+        local rtld_dir = path.join(projectdir, "user", "rtld")
+        -- Position-independent freestanding flags for the dynamic artifacts.
+        local pic_cflags = "-c -ffreestanding -nostdlib -fPIC -fno-plt -fno-stack-protector " ..
+            "-mno-sse -mno-sse2 -mno-mmx -mno-red-zone -Os -std=c17 -Wall -Wextra"
+
+        -- ld-bigos.so: ET_DYN interpreter, entry _dl_start, -Bsymbolic so its own
+        -- references collapse to R_X86_64_RELATIVE (or none).
+        local ld_start_obj = path.join(user_tempdir, "ld_start.o")
+        local ld_main_obj = path.join(user_tempdir, "ld_main.o")
+        os.exec("x86_64-elf-as -c %s -o %s", path.join(rtld_dir, "ld_start.s"), ld_start_obj)
+        os.exec("x86_64-elf-gcc %s -fvisibility=hidden %s -o %s", pic_cflags,
+            path.join(rtld_dir, "ld_main.c"), ld_main_obj)
+        os.exec("x86_64-elf-ld -shared -Bsymbolic -z max-page-size=0x1000 -e _dl_start -T %s %s %s -o %s",
+            path.join(rtld_dir, "ld.lds"), ld_start_obj, ld_main_obj,
+            path.join(user_lib_subdir, "ld-bigos.so"))
+
+        -- libdemo.so: example shared object exporting demo_add/demo_msg/demo_value.
+        local libdemo_obj = path.join(user_tempdir, "libdemo.o")
+        os.exec("x86_64-elf-gcc %s -fvisibility=default %s -o %s", pic_cflags,
+            path.join(rtld_dir, "demo", "libdemo.c"), libdemo_obj)
+        os.exec("x86_64-elf-ld -shared -z max-page-size=0x1000 -soname libdemo.so %s -o %s",
+            libdemo_obj, path.join(user_lib_subdir, "libdemo.so"))
+
+        -- dyn_demo: PIE that DT_NEEDED libdemo.so and PT_INTERP /lib/ld-bigos.so.
+        local dyn_crt0_obj = path.join(user_tempdir, "dyn_crt0.o")
+        local dyn_demo_obj = path.join(user_tempdir, "dyn_demo.o")
+        os.exec("x86_64-elf-as -c %s -o %s", path.join(rtld_dir, "demo", "dyn_crt0.s"), dyn_crt0_obj)
+        os.exec("x86_64-elf-gcc %s -fvisibility=default %s -o %s", pic_cflags,
+            path.join(rtld_dir, "demo", "dyn_demo.c"), dyn_demo_obj)
+        os.exec("x86_64-elf-ld -pie -z max-page-size=0x1000 --dynamic-linker /lib/ld-bigos.so -e _start " ..
+            "-L%s -rpath-link %s %s %s %s -o %s",
+            user_lib_subdir, user_lib_subdir, dyn_crt0_obj, dyn_demo_obj,
+            path.join(user_lib_subdir, "libdemo.so"), init_output)
+
+        -- Build-time guard: reject any relocation type outside the supported
+        -- subset (RELATIVE/GLOB_DAT/JMP_SLOT/64) in the example artifacts.
+        for _, art in ipairs({ "ld-bigos.so", "libdemo.so" }) do
+            local relocs = try { function()
+                return os.iorun("x86_64-elf-readelf -r %s", path.join(user_lib_subdir, art))
+            end }
+            if relocs and (relocs:find("TPOFF") or relocs:find("DTPMOD") or relocs:find("DTPOFF") or
+                relocs:find("IRELATIVE")) then
+                raise("%s contains an unsupported relocation type (TLS/IFUNC)", art)
+            end
+        end
+        local demo_relocs = try { function()
+            return os.iorun("x86_64-elf-readelf -r %s", init_output)
+        end }
+        if demo_relocs and (demo_relocs:find("TPOFF") or demo_relocs:find("DTPMOD") or
+            demo_relocs:find("DTPOFF") or demo_relocs:find("IRELATIVE")) then
+            raise("dyn_demo contains an unsupported relocation type (TLS/IFUNC)")
+        end
     else
         build_user_program(path.join(projectdir, "user", "init", "init.c"), init_output)
     end

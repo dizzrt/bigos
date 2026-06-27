@@ -224,6 +224,11 @@ if has_config("filesystem_maturity_smoke") then
     add_defines("BIGOS_FILESYSTEM_MATURITY_SMOKE")
 end
 
+if has_config("dynamic_link_smoke") then
+    add_defines("BIGOS_DYNAMIC_LINK")
+    add_defines("BIGOS_DYNAMIC_LINK_SMOKE")
+end
+
 if is_mode("debug") then
     set_symbols("debug")
 elseif is_mode("release") then
