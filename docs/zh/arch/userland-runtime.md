@@ -24,6 +24,24 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
 - `user/smoke/userland_smoke.c`：默认关闭的确定性验证程序，覆盖 crt0、libc
   wrapper、errno、stdout/stderr、smoke C 程序执行、fork/exec/wait、pipe、重定向和 malloc。
 
+## 有界核心工具
+
+默认 `/bin` 命名空间暴露一组 BigOS 有界核心工具。它们是小型 freestanding 静态
+用户 ELF，不是 GNU coreutils 或完整 POSIX utilities：
+
+- 文件字节流和文本过滤：`cat`、`tee`、`head`、`tail`、`wc`、`grep`、
+  `hexdump` 和 `more`。`grep` 只做普通字节子串匹配；regex flag 等未支持 option
+  或 pattern form 会确定性失败。
+- 路径、目录和元数据观察：`ls`、`find`、`du`、`stat`、`basename` 和 `dirname`。
+- 运行期文件修改：`mkdir`、`rmdir`、`rm`、`touch`、`truncate`、`cp`、`mv`、
+  `rename`、`write` 和 `append`。这些工具复用现有 cwd、只读 `/boot` 和可写 `/rw`
+  契约，不新增 symlink、hard link、权限、atomic replacement、journaling 或跨重启持久性承诺。
+- 时间/进程辅助和 BigOS 维护：`date`、`sleep`、`kill` 和 `mkfs_bigfs`。
+- Shell 组合消费者：这些工具继承 fd `0`/`1`/`2`，并通过 `/bin/sh` 支持的 PATH 查找、
+  `<`/`>` 重定向和单级 pipe 进行验证。
+
+网络诊断命令刻意不属于本批默认核心工具集合；用户可见 socket/network 体验留给单独的有界网络变更。
+
 ## crt0 栈契约
 
 内核进入用户 ELF 镜像时，`rsp` 指向如下布局：
@@ -199,11 +217,11 @@ runtime 边界内：
 
 - `/boot/user/init.elf`：默认常驻 C init 或选中的 smoke 程序。
 - `/bin/sh`：交互 shell。
-- `/bin/echo`、`/bin/cat`、`/bin/ls`、`/bin/mkdir`、`/bin/rm`、`/bin/rename`、
-  `/bin/stat`、`/bin/truncate`、`/bin/mkfs_bigfs`，以及有界日常工具 `cp`、`mv`、
-  `tee`、`write`、`append`、`head`、`tail`、`wc`、`grep`、`hexdump`、`date`、
-  `kill`、`sleep`、`basename`、`dirname`、`more`、`find` 和 `du`：正常打包用户命令。
-  `pwd` 是 shell 内建，不再作为默认外部程序打包。
+- `/bin/echo`、`/bin/cat`、`/bin/ls`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、
+  `/bin/rename`、`/bin/stat`、`/bin/touch`、`/bin/truncate`、`/bin/mkfs_bigfs`，
+  以及有界日常工具 `cp`、`mv`、`tee`、`write`、`append`、`head`、`tail`、`wc`、
+  `grep`、`hexdump`、`date`、`kill`、`sleep`、`basename`、`dirname`、`more`、`find`
+  和 `du`：正常打包用户命令。`pwd` 是 shell 内建，不再作为默认外部程序打包。
 - `/bin/smoke/*` 探针：仅用于显式 `userland_smoke` 验证镜像。
 
 镜像布局仍沿用现有 Legacy BIOS / MBR / exFAT 路径；当前有界用户态基线只在
@@ -227,6 +245,9 @@ open/stat/`..`、fork 继承、通过 cwd-relative 外部程序执行观察 exec
 libc subset 探针覆盖 public headers、ctype、time、assert、无符号转换、无隐藏状态 search
 helper、formatter 行为、错误文本、目录 wrapper 和失败路径。它也会通过 `/bin/sh`
 运行探针以确认 shell 在外部程序非零退出后继续运行。
+Shell 验证还会用代表性有界核心工具覆盖 `/boot` 只读输入、`/rw` 修改、cwd-relative
+路径、输出重定向、输入/输出 fd 继承、单级 pipe、固定缓冲文本过滤、unsupported tool
+option、多输入部分失败和只读目标失败。
 交互控制台可用性还保留 default-init headless marker 断言（`BIGOS_USER_EXEC`），并增加
 可选的手工或 emulator-input 检查，用于观察文本 console 上的 prompt、输入回显、
 backspace feedback 和命令输出。若本地 display、ROM、keyboard input 或 injection 能力不可用，

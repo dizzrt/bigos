@@ -1,5 +1,5 @@
 /* BigOS bounded directory-listing utility. Not a complete POSIX ls. */
-#include "libc.h"
+#include "tool_common.h"
 
 static void report_error(const char *path, const char *op) {
     fprintf(stderr, "ls: %s: %s errno=%d %s\n", path, op, errno, strerror(errno));
@@ -68,6 +68,10 @@ int main(int argc, char **argv, char **envp) {
     int rc = 0;
     const int show_header = argc > 2;
     for (int i = 1; i < argc; i++) {
+        if (tool_reject_unsupported_option("ls", argv[i]) != 0) {
+            rc = 1;
+            continue;
+        }
         if (i > 1 && show_header)
             putchar('\n');
         if (list_path(argv[i], show_header) != 0)

@@ -8,6 +8,11 @@ int main(int argc, char **argv, char **envp) {
     int fds[TEE_MAX_FILES];
     int files = 0;
     for (int i = 1; i < argc; i++) {
+        if (tool_reject_unsupported_option("tee", argv[i]) != 0) {
+            for (int j = 0; j < files; j++)
+                close(fds[j]);
+            return 1;
+        }
         if (files >= TEE_MAX_FILES) {
             tool_error("tee", "too many output files");
             return 1;

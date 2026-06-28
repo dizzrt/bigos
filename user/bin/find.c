@@ -53,5 +53,7 @@ int main(int argc, char **argv, char **envp) {
         tool_error("find", "usage: find [PATH]");
         return 1;
     }
+    if (argc == 2 && tool_reject_unsupported_option("find", argv[1]) != 0)
+        return 1;
     return find_path(argc == 2 ? argv[1] : ".", 0);
 }

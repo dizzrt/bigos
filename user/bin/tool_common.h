@@ -42,6 +42,20 @@ static TOOL_UNUSED void tool_errno_error(const char *tool, const char *path, con
     tool_write_all(2, "\n");
 }
 
+static TOOL_UNUSED int tool_is_option(const char *s) {
+    return s != NULL && s[0] == '-' && s[1] != 0;
+}
+
+static TOOL_UNUSED int tool_reject_unsupported_option(const char *tool, const char *arg) {
+    if (!tool_is_option(arg))
+        return 0;
+    tool_write_all(2, tool);
+    tool_write_all(2, ": unsupported option: ");
+    tool_write_all(2, arg);
+    tool_write_all(2, "\n");
+    return 1;
+}
+
 static TOOL_UNUSED int tool_parse_ulong(const char *s, unsigned long *out) {
     if (s == NULL || *s == 0 || out == NULL)
         return -1;

@@ -56,6 +56,10 @@ int main(int argc, char **argv, char **envp) {
         return dump_fd(0, NULL);
     int rc = 0;
     for (int i = 1; i < argc; i++) {
+        if (tool_reject_unsupported_option("hexdump", argv[i]) != 0) {
+            rc = 1;
+            continue;
+        }
         int fd = open(argv[i], O_RDONLY, 0);
         if (fd < 0) {
             tool_errno_error("hexdump", argv[i], "open");

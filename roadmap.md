@@ -415,8 +415,8 @@ programs and a richer userland.
 - [x] Task M12.2: a more complete libc subset toward portable standard small
   programs.
 - [x] 任务 M12.2：更完整的 libc 子集，支撑可移植的标准小程序。
-- [ ] Task M12.3: a broader set of bounded core userland utilities.
-- [ ] 任务 M12.3：更广的一组有界核心用户态工具程序。
+- [x] Task M12.3: a broader set of bounded core userland utilities.
+- [x] 任务 M12.3：更广的一组有界核心用户态工具程序。
 
 ### Parallel Foundations / 并行基础方向
 

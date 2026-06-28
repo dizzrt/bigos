@@ -35,17 +35,28 @@ int main(int argc, char **argv, char **envp) {
     (void)envp;
     unsigned long lines = 10;
     int arg = 1;
+    if (argc >= 2 && tool_is_option(argv[1]) && strcmp(argv[1], "-n") != 0) {
+        tool_reject_unsupported_option("head", argv[1]);
+        return 1;
+    }
     if (argc >= 3 && strcmp(argv[1], "-n") == 0) {
         if (tool_parse_ulong(argv[2], &lines) != 0) {
             tool_error("head", "invalid line count");
             return 1;
         }
         arg = 3;
+    } else if (argc == 2 && strcmp(argv[1], "-n") == 0) {
+        tool_error("head", "usage: head [-n LINES] [PATH...]");
+        return 1;
     }
     if (arg == argc)
         return head_fd(0, NULL, lines);
     int rc = 0;
     for (int i = arg; i < argc; i++) {
+        if (tool_reject_unsupported_option("head", argv[i]) != 0) {
+            rc = 1;
+            continue;
+        }
         int fd = open(argv[i], O_RDONLY, 0);
         if (fd < 0) {
             tool_errno_error("head", argv[i], "open");

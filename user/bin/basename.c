@@ -7,6 +7,8 @@ int main(int argc, char **argv, char **envp) {
         tool_error("basename", "usage: basename PATH");
         return 1;
     }
+    if (tool_reject_unsupported_option("basename", argv[1]) != 0)
+        return 1;
     const char *s = argv[1];
     size_t len = strlen(s);
     while (len > 1 && s[len - 1] == '/')

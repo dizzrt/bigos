@@ -28,6 +28,33 @@ environment.
   for crt0, libc wrappers, errno, stdout/stderr, smoke C-program execution,
   fork/exec/wait, pipe, redirection, and malloc.
 
+## Bounded Core Utilities
+
+The default `/bin` namespace exposes a bounded BigOS core utility set. These are
+small freestanding static user ELFs, not GNU coreutils or complete POSIX
+utilities:
+
+- File byte-stream and text filters: `cat`, `tee`, `head`, `tail`, `wc`,
+  `grep`, `hexdump`, and `more`. `grep` is plain byte substring matching only;
+  unsupported options or pattern forms such as regex flags fail
+  deterministically.
+- Path, directory, and metadata observers: `ls`, `find`, `du`, `stat`,
+  `basename`, and `dirname`.
+- Runtime file mutation tools: `mkdir`, `rmdir`, `rm`, `touch`, `truncate`,
+  `cp`, `mv`, `rename`, `write`, and `append`. They consume the existing cwd,
+  read-only `/boot`, and writable `/rw` contracts and do not add symlinks,
+  hard links, permissions, atomic replacement, journaling, or cross-reboot
+  persistence promises.
+- Time/process helpers and BigOS maintenance: `date`, `sleep`, `kill`, and
+  `mkfs_bigfs`.
+- Shell composition consumers: these tools inherit fd `0`/`1`/`2` and are
+  validated through supported `/bin/sh` PATH lookup, `<`/`>` redirection, and a
+  single-stage pipe.
+
+Network diagnostic commands are intentionally not part of this default core
+utility set. User-visible socket/network experience belongs to a separate
+bounded networking change.
+
 ## crt0 Stack Contract
 
 The kernel enters a user ELF image with `rsp` pointing at this layout:
@@ -242,12 +269,12 @@ freestanding ELF64 `ET_EXEC` images using `user/crt0`, `user/libc`, and
 
 - `/boot/user/init.elf` for the default resident C init or the selected smoke.
 - `/bin/sh` for the interactive shell.
-- `/bin/echo`, `/bin/cat`, `/bin/ls`, `/bin/mkdir`, `/bin/rm`, `/bin/rename`,
-  `/bin/stat`, `/bin/truncate`, `/bin/mkfs_bigfs`, and the bounded daily tools
-  `cp`, `mv`, `tee`, `write`, `append`, `head`, `tail`, `wc`, `grep`,
-  `hexdump`, `date`, `kill`, `sleep`, `basename`, `dirname`, `more`, `find`,
-  and `du` for normal packaged user commands. `pwd` is a shell builtin rather
-  than a packaged external program.
+- `/bin/echo`, `/bin/cat`, `/bin/ls`, `/bin/mkdir`, `/bin/rm`, `/bin/rmdir`,
+  `/bin/rename`, `/bin/stat`, `/bin/touch`, `/bin/truncate`,
+  `/bin/mkfs_bigfs`, and the bounded daily tools `cp`, `mv`, `tee`, `write`,
+  `append`, `head`, `tail`, `wc`, `grep`, `hexdump`, `date`, `kill`, `sleep`,
+  `basename`, `dirname`, `more`, `find`, and `du` for normal packaged user
+  commands. `pwd` is a shell builtin rather than a packaged external program.
 - `/bin/smoke/*` probes only for the explicit `userland_smoke` validation image.
 
 The image layout remains the existing Legacy BIOS / MBR / exFAT path; the
@@ -277,6 +304,11 @@ external program execution, shell `cd`/`pwd`, and the bounded libc subset probe 
 assert, unsigned conversion, stateless search helpers, formatter behavior,
 error text, directory wrappers, and failure paths. It also runs probes through
 `/bin/sh` to confirm the shell continues after a non-zero external program.
+The shell validation also exercises representative bounded core utilities over
+`/boot` read-only inputs, `/rw` mutations, cwd-relative paths, output
+redirection, input/output fd inheritance, a single-stage pipe, fixed-buffer text
+filters, unsupported tool options, multi-input partial failure, and read-only
+target failure.
 Interactive
 console usability also
 keeps the default-init headless marker assertion (`BIGOS_USER_EXEC`) while

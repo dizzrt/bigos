@@ -55,6 +55,10 @@ int main(int argc, char **argv, char **envp) {
     }
     int rc = 0;
     for (int i = 1; i < argc; i++) {
+        if (tool_reject_unsupported_option("du", argv[i]) != 0) {
+            rc = 1;
+            continue;
+        }
         unsigned long total = 0;
         if (du_sum(argv[i], 0, &total) != 0)
             rc = 1;

@@ -1,7 +1,4 @@
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
+#include "tool_common.h"
 
 static int parse_size(const char *s, off_t *out) {
     if (s == NULL || *s == 0 || out == NULL)
@@ -19,18 +16,22 @@ static int parse_size(const char *s, off_t *out) {
     return 0;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv, char **envp) {
+    (void)envp;
     if (argc != 3) {
-        printf("usage: truncate SIZE PATH\n");
+        tool_error("truncate", "usage: truncate SIZE PATH");
         return 1;
     }
+    if (tool_reject_unsupported_option("truncate", argv[1]) != 0 ||
+        tool_reject_unsupported_option("truncate", argv[2]) != 0)
+        return 1;
     off_t size = 0;
     if (parse_size(argv[1], &size) != 0) {
-        printf("truncate: invalid size\n");
+        tool_error("truncate", "invalid size");
         return 1;
     }
     if (truncate(argv[2], size) != 0) {
-        printf("truncate: failed errno=%d\n", errno);
+        tool_errno_error("truncate", argv[2], "truncate");
         return 1;
     }
     return 0;

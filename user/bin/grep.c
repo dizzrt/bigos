@@ -50,11 +50,17 @@ int main(int argc, char **argv, char **envp) {
         tool_error("grep", "usage: grep NEEDLE [PATH...]");
         return 2;
     }
+    if (tool_reject_unsupported_option("grep", argv[1]) != 0)
+        return 2;
     if (argc == 2)
         return grep_fd(0, NULL, argv[1]);
     int any = 0;
     int hard_error = 0;
     for (int i = 2; i < argc; i++) {
+        if (tool_reject_unsupported_option("grep", argv[i]) != 0) {
+            hard_error = 1;
+            continue;
+        }
         int fd = open(argv[i], O_RDONLY, 0);
         if (fd < 0) {
             tool_errno_error("grep", argv[i], "open");

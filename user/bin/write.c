@@ -7,6 +7,8 @@ int main(int argc, char **argv, char **envp) {
         tool_error("write", "usage: write PATH TEXT...");
         return 1;
     }
+    if (tool_reject_unsupported_option("write", argv[1]) != 0)
+        return 1;
     int fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
         tool_errno_error("write", argv[1], "open");

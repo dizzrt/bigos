@@ -7,6 +7,9 @@ int main(int argc, char **argv, char **envp) {
         tool_error("cp", "usage: cp SRC DST");
         return 1;
     }
+    if (tool_reject_unsupported_option("cp", argv[1]) != 0 ||
+        tool_reject_unsupported_option("cp", argv[2]) != 0)
+        return 1;
 
     int in_fd = open(argv[1], O_RDONLY, 0);
     if (in_fd < 0) {
