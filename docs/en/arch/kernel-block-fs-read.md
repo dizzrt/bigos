@@ -19,13 +19,15 @@ that later stages can reuse after memory management is initialized.
   VFS metadata bridge fully initializes atime, mtime, and ctime fields; the
   read-only exFAT backend currently reports documented zero timestamp defaults
   rather than complete exFAT timestamp semantics.
-- The API is ordinary-kernel-context only. It is not IRQ-handler-safe, not
-  asynchronous, not DMA based, and does not provide sleep or SMP semantics.
+- This archived foundation API is ordinary-kernel-context only. It is not
+  IRQ-handler-safe, not DMA based, and does not itself provide scheduler sleep,
+  async request lifecycle, or cross-CPU semantics; newer block-layer documents
+  describe the bounded interrupt-driven request path built above it.
 
 ## Non-Goals
 
 - No write, delete, directory mutation, permissions, page cache, or full VFS.
-- No AHCI, NVMe, USB storage, DMA, hotplug, or interrupt-driven disk I/O.
+- No AHCI, NVMe, USB storage, DMA, hotplug, or broad storage-device management.
 - No full exFAT implementation beyond the controlled read-only subset.
 - No changes to MBR/DBR/extended DBR layout, BootInfo handoff, linker addresses,
   or the existing first user-program smoke.

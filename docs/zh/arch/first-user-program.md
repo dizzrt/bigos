@@ -48,7 +48,8 @@ init marker 与 smoke `BIGOS_USER_*` marker 区分开：
 
 ## 进程生命周期
 
-`bigos::proc::Process` 是单核 bounded lifecycle 记录。即使
+`bigos::proc::Process` 是与当前 scheduler 和 address-space 边界集成的 bounded
+lifecycle 记录。即使
 `user_program_smoke` 和 `user_elf_smoke` 都关闭，核心也会在 normal build 中编译；
 这些开关只控制 smoke entry 线程和 user ELF artifact。每个进程记录：
 

@@ -4,7 +4,7 @@
 保护的 IRQ-return 重调度钩子之上，新增一个最小但正确的 POSIX 信号模型。它刻意
 保持小：固定的非实时信号编号、每进程内联信号状态、单一 IRQ-return 投递点，以及
 面向默认终端 interrupt-like input 的有界 process-group 投递。不引入实时信号、完整
-作业控制、`termios`、SMP 或完整 POSIX libc。
+作业控制、`termios`、跨核 signal broadcast 语义或完整 POSIX libc。
 
 ## 信号编号集合与默认动作
 
@@ -74,8 +74,8 @@ process-group 遍历、权限检查与 pending bit 更新均在普通用户进�
 - 用户 `Handler` 处置在用户栈构造信号帧并改写被中断上下文（见下）。
 
 由于这是唯一投递点，自投信号（如 `kill(getpid(), ...)`）在下一次返回用户态边界投
-递，而非在 `SYS_KILL` 同步返回时投递。单核 PIT IRQ0 下，任何用户进程都会在一个
-tick 内经过该边界，因此延迟有上界且确定。
+递，而非在 `SYS_KILL` 同步返回时投递。在有界 timer interrupt 模型下，运行中的用户
+进程会在可观测 tick 内经过该边界，因此延迟有上界且确定。
 
 ## 信号帧与 sigreturn
 
@@ -135,8 +135,8 @@ trampoline；smoke 用户程序（及任何 handler）须显式调用 `SYS_SIGRE
 本阶段非目标：实时信号（`SIGRTMIN`+ 排队）与完整 `siginfo`/`sigqueue`；
 `SIGSTOP`/`SIGCONT` 作业控制、进程组与 `killpg`；`sigsuspend`/`sigpending`/
 `sigaltstack` 与完整 `sigaction` 标志；`SA_RESTART` / EINTR syscall 重启（同步
-syscall 不睡眠）；core dump 文件；用户态 libc 信号包装与自动 trampoline；以及 SMP
-跨核投递。
+syscall 不睡眠）；core dump 文件；用户态 libc 信号包装与自动 trampoline；以及超出
+当前有界进程模型的广泛跨核 signal broadcast/delivery policy。
 
 已知限制：单一 IRQ-return 投递点下，自投信号在下一次返回用户态边界投递，而非在
 `SYS_KILL` 同步返回时投递。

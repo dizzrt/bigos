@@ -22,7 +22,7 @@ monotonic tick. It does not poll the RTC periodically.
 - `bigos::time::current_unix_time()` returns
   `boot_unix_time + (timer::ticks() - boot_tick) / TIMER_HZ`. The query path does
   no hardware access, no allocation, and no blocking, and is monotonic
-  non-decreasing under the single-core tick model. `boot_unix_time()` returns the
+  non-decreasing under the bounded kernel tick model. `boot_unix_time()` returns the
   baseline.
 
 ### RTC read correctness

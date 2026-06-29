@@ -29,7 +29,7 @@ The public `alloc_kernel_pages(nr_pages, flags)` / `free_pages(ptr)` API remains
 
 `teardown_user_address_space(root)` releases a derived user root only when it is not the active CR3 root. It traverses PML4 indices `0..255` only, so copied high-half kernel mappings remain borrowed and untouched.
 
-For each user-owned low-half mapping, teardown clears the leaf PTE, returns the process-owned leaf physical page, releases empty PT/PD/PDPT frames, and releases the user PML4 root last. The root is inactive during teardown, so immediate `invlpg` is not required under the current single-core assumption; the root must not be reactivated after teardown begins.
+For each user-owned low-half mapping, teardown clears the leaf PTE, returns the process-owned leaf physical page, releases empty PT/PD/PDPT frames, and releases the user PML4 root last. The root is inactive during teardown, so it is not reactivated after teardown begins; active-root and remote-use cases must be rejected or handled through the SMP TLB-shootdown boundary before reclamation.
 
 ## Process Reaper
 

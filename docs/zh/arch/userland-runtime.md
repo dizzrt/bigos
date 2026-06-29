@@ -114,7 +114,8 @@ Shell 有意保持很小：
 
 本阶段不实现完整作业控制、后台进程、`fg`/`bg`、job table、glob、变量展开、shell
 脚本、子 shell、`termios`、多终端、完整目录 API、symlink、持久完整可写文件系统、
-广泛 file-backed `mmap`、完整 FILE API、动态链接、SMP 或完整 POSIX libc。
+广泛 writable file-backed `mmap`、完整作业控制、完整 POSIX dynamic loader、CPU
+hotplug、NUMA 或完整 POSIX libc。
 
 ## 最小 libc 子集
 
@@ -208,7 +209,7 @@ runtime 边界内：
   `strtol`/`atoi`、`calloc`/`realloc`、`DIR*` wrapper 和有界堆行为。
 
 该基线不新增 kernel syscall、不修改 `int 0x80` 寄存器 ABI、不改变 boot 或磁盘布局、
-不引入动态链接，也不声称提供 hosted libc 或完整 POSIX shell 行为。
+不改变有界 dynamic-link 契约，也不声称提供 hosted libc 或完整 POSIX shell 行为。
 
 ## 构建与打包
 
@@ -224,9 +225,12 @@ runtime 边界内：
   和 `du`：正常打包用户命令。`pwd` 是 shell 内建，不再作为默认外部程序打包。
 - `/bin/smoke/*` 探针：仅用于显式 `userland_smoke` 验证镜像。
 
-镜像布局仍沿用现有 Legacy BIOS / MBR / exFAT 路径；当前有界用户态基线只在
-`/boot/user` 与 `/bin` 下新增文件，不引入 UEFI、AHCI、NVMe、virtio 或新的文件系统后端。
-每个用户程序都保持为静态 freestanding ELF64 `ET_EXEC`，并受共享 64 KiB user-ELF 上限约束。
+默认镜像布局是 UEFI ESP/FAT image 加 exFAT 兼容 root image；Legacy BIOS / MBR /
+exFAT image 作为显式兼容 backend 保留。当前有界用户态基线在 `/boot/user`、`/bin`
+以及 dynamic-link smoke 的 validation-only `/lib` payload 下打包文件，但不引入 AHCI、
+NVMe、通用 virtio boot device model 或新的文件系统后端。静态用户程序保持为
+freestanding ELF64 `ET_EXEC`，并受共享 64 KiB user-ELF 上限约束；dynamic-link smoke
+使用下文描述的独立有界 `ET_DYN` 路径。
 
 ## 验证
 

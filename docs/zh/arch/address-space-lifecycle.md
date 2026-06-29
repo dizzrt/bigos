@@ -29,7 +29,7 @@ metadata 会在 present descriptor 发布前完成登记。如果 metadata 登�
 
 `teardown_user_address_space(root)` 仅在目标 root 不是 active CR3 root 时释放派生用户 root。它只遍历 PML4 index `0..255`，因此复制的高半区 kernel 映射保持 borrowed 且不会被触碰。
 
-对每个 user-owned 低半区映射，teardown 会清除 leaf PTE、归还 process-owned leaf 物理页、释放空 PT/PD/PDPT 帧，并最后释放用户 PML4 root。teardown 时 root 已非活动，因此在当前单核假设下不需要立即 `invlpg`；teardown 开始后不得再次激活该 root。
+对每个 user-owned 低半区映射，teardown 会清除 leaf PTE、归还 process-owned leaf 物理页、释放空 PT/PD/PDPT 帧，并最后释放用户 PML4 root。teardown 时 root 已非活动，teardown 开始后不得再次激活该 root；active-root 或 remote-use 情况必须在回收前被拒绝，或通过 SMP TLB-shootdown 边界处理。
 
 ## 进程 reaper
 

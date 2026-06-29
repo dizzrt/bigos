@@ -297,7 +297,7 @@ exFAT、固定低地址和页表准备的实现。BIOS 与 UEFI loader 需要共
 | --- | --- | --- | --- | --- | --- |
 | 1 | `BootInfoHeader + tagged sections`、寄存器传递 `BootInfo*`、统一 handoff header 设计与文档化 | 是，Legacy BIOS producer/consumer 已落地 | 当前 BIOS `BootInfo` layout 校验稳定 | ABI 破坏、legacy fallback 不一致 | `define-unified-boot-handoff-abi` |
 | 2 | 内存模块迁移到统一 `BootMemoryRegion` consumer，并保留 BIOS fallback | 是，BIOS E820 已规范化 | unified boot handoff capability header 和 memory map section 草案 | allocator 初始化顺序、可用内存误判 | `define-unified-boot-handoff-abi` |
-| 3 | 最小 UEFI loader，单独实现 UEFI ELF reader，目标仅为加载 kernel、填充 handoff、进入 `kernel()` | 是，已晋升为默认 UEFI backend 的组成部分 | unified boot handoff capability ABI、ELF64 加载规则、工具链 spike | PE/COFF 构建、ExitBootServices 顺序、页表差异 | `spike-minimal-uefi-loader` |
+| 3 | 最小 UEFI loader，单独实现 UEFI ELF reader，目标仅为加载 kernel、填充 handoff、进入 `kernel()` | 是，已晋升为默认 UEFI backend 的组成部分 | unified boot handoff capability ABI、ELF64 加载规则、工具链验证 | PE/COFF 构建、ExitBootServices 顺序、页表差异 | `spike-minimal-uefi-loader` |
 | 4 | ESP/FAT 镜像生成、OVMF/QEMU 调试入口和文档化命令 | 是，已晋升为默认 UEFI backend 的组成部分 | kernel memory API capability loader 可启动 | 宿主机 OVMF 路径、CI 可移植性、产物隔离 | `add-uefi-boot-debug-entry` |
 | 5 | GOP framebuffer metadata handoff、ACPI RSDP/SMBIOS handoff 和更完整的 UEFI 验证策略 | 部分：仅完成 GOP framebuffer/font metadata handoff | unified boot handoff capability sections、kernel memory API capability/UEFI smoke test | framebuffer 映射、ACPI 表生命周期、runtime metadata 误用 | `handoff-gop-acpi-firmware-tables` |
 | 6 | BIOS 与 UEFI 共享 ELF64 加载规则规范，但不要求近期共享 loader 代码 | 否 | 当前 BIOS ELF 加载行为文档化 | 规则与实现漂移、错误处理不一致 | `document-common-elf64-loader-rules` |

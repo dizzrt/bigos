@@ -10,7 +10,7 @@
 
 - `bigos::time::init()` 在 PIT tick 可用之后（`enableIRQ()` 之后）、`proc::init()` 之前运行，使进程启动时间戳能观察到就绪的墙钟。
 - 它经端口 `0x70`（index）/ `0x71`（data）通过 `driver::rtc` 驱动读一次 CMOS RTC，把 UTC 民用日期/时间换算为 Unix epoch 秒（`days_from_civil` 加时/分/秒），记为 `boot_unix_time`，并记录 `boot_tick = timer::ticks()`。
-- `bigos::time::current_unix_time()` 返回 `boot_unix_time + (timer::ticks() - boot_tick) / TIMER_HZ`。查询路径不触硬件、不分配、不阻塞，在单核 tick 模型下单调不减。`boot_unix_time()` 返回基准。
+- `bigos::time::current_unix_time()` 返回 `boot_unix_time + (timer::ticks() - boot_tick) / TIMER_HZ`。查询路径不触硬件、不分配、不阻塞，在有界 kernel tick 模型下单调不减。`boot_unix_time()` 返回基准。
 
 ### RTC 读取正确性
 

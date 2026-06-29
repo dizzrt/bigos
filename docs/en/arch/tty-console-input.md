@@ -1,6 +1,6 @@
 # TTY, Console, And Keyboard Input
 
-BigOS input covers only single-core x86_64, i8259 PIC, PS/2 set-1 keyboard, and the default runtime text console. Its goal is a minimal, verifiable keyboard-to-TTY handoff and an ordinary runtime text output entry. It is not a full terminal, shell, or user-mode input subsystem.
+BigOS input covers x86_64 PS/2 set-1 keyboard input through the current PIC/APIC routing paths and the selected default runtime console backend. Its goal is a minimal, verifiable keyboard-to-TTY handoff and an ordinary runtime text output entry. It is not a full terminal, shell, or user-mode input subsystem.
 
 ## Input Data Flow
 
@@ -166,7 +166,7 @@ This path does not implement multiple TTYs, complete xterm/VT100/VT220 behavior,
 command history, complete POSIX `termios`, pseudo-terminals, complete job control, background
 read/write control, USB HID, full graphical terminal behavior, locale,
 Unicode normalization, grapheme clusters, shaping, input methods, persistent or
-unbounded history, APIC/IOAPIC, SMP, or internationalized keyboard layouts. The minimal fd
+unbounded history, USB HID, or internationalized keyboard layouts. The minimal fd
 integration covers only the default console fast paths for bounded userland and
 does not introduce `/dev/tty`, a general character-device filesystem, async I/O,
 or full POSIX terminal reads.

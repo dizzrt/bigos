@@ -1,7 +1,8 @@
 # Timer IRQ Foundation
 
-BigOS uses the legacy PIT 8253/8254 channel 0 as the first early periodic timer
-source on the current BIOS + i8259 path.
+BigOS 使用 legacy PIT 8253/8254 channel 0 作为最早期 periodic timer source，也作为
+Legacy BIOS/i8259 fallback。APIC-backed timer ownership 由 scheduler 与 multicore
+validation 路径记录。
 
 ## Scope
 
@@ -10,8 +11,7 @@ source on the current BIOS + i8259 path.
   early-kernel target tick rate.
 - Registers an IRQ0 handler for vector `0x20` before unmasking IRQ0 during
   ordinary boot.
-- Maintains a single-core early-kernel tick counter exposed through
-  `bigos::timer::ticks()`.
+- 维护通过 `bigos::timer::ticks()` 暴露的 early-kernel monotonic tick counter。
 - Provides `bigos::timer::mdelay()` as a coarse busy-wait helper.
 - Provides `bigos::timer::sleep_for()` as a cooperative scheduler sleep helper
   for ordinary non-interrupt kernel threads.
@@ -31,9 +31,8 @@ The early timer APIs have explicit execution-context contracts:
   `kprintf`, send i8259 EOI, call `kmalloc`/`free`/`alloc_kernel_pages`/
   `free_pages`/global `new/delete`, or depend on scheduler/TTY/filesystem
   services.
-- `ticks()` is a context-agnostic read. It returns a monotonic tick snapshot
-  valid under the current single-core early-kernel model and makes no guarantee
-  about SMP coherence or high-resolution timing.
+- `ticks()` 是 context-agnostic read。它返回有界 kernel time model 的 monotonic
+  tick snapshot，不承诺 high-resolution timing 或完整 POSIX clock 语义。
 - `mdelay()` is non-interrupt context only. It must run with maskable interrupts
   enabled so that IRQ0 keeps advancing ticks. Calling it with interrupts disabled
   or inside an IRQ handler busy-waits forever.
@@ -81,10 +80,10 @@ invariants without changing the `InterruptFrame` layout or register-save order:
 
 ## Non-Goals
 
-This foundation does not introduce SMP tick accounting, APIC/IOAPIC, HPET, TSC
-calibration, user-visible time APIs, or POSIX sleep policy. Timer-driven
-preemption is limited to the current single-core scheduler boundary and does not
-claim SMP, real-time, or POSIX scheduling semantics.
+This foundation does not introduce HPET, TSC calibration, complete POSIX clock
+APIs, or POSIX sleep policy. Timer-driven preemption is limited to the current
+bounded scheduler boundary and does not claim real-time or POSIX scheduling
+semantics.
 
 `mdelay()` is not scheduler sleep. It does not yield, does not block on a wait
 queue, and only has coarse timing semantics after PIT IRQ0 delivery is enabled.

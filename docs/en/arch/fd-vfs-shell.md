@@ -114,9 +114,9 @@ and the minimal userland runtime.
 ## Non-Goals
 
 - This baseline still does not introduce `select`, complete POSIX `stat`, full
-  pathname canonicalization, symlink traversal, mount namespaces, `chroot`, SMP,
-  or a UEFI backend; those are either later bounded capabilities or still
-  non-goals.
-- Current project non-goals remain async I/O, broad or file-backed `mmap`, full
-  POSIX filesystem/process semantics, dynamic linking, SMP, and a runnable UEFI
-  backend.
+  pathname canonicalization, symlink traversal, mount namespaces, or `chroot`;
+  some of those are later bounded capabilities, while others remain non-goals.
+- Current project non-goals remain broad user-visible async I/O, broad writable
+  file-backed `mmap`, full POSIX filesystem/process semantics, complete POSIX
+  dynamic-loader semantics, CPU hotplug, NUMA, and broad storage/device
+  management.

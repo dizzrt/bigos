@@ -6,7 +6,8 @@ syscall entry, and the guarded IRQ-return reschedule hook. It is intentionally
 small: fixed non-realtime signal numbers, per-process inline signal state, a
 single IRQ-return delivery point, and bounded process-group delivery for default
 terminal interrupt-like input. It does not introduce realtime signals, complete
-job control, `termios`, SMP, or a complete POSIX libc.
+job control, `termios`, cross-core signal broadcast semantics, or a complete
+POSIX libc.
 
 ## Signal Numbers And Default Actions
 
@@ -98,9 +99,9 @@ clears its pending bit, and acts on the disposition:
 
 Because this is the only delivery point, a self-targeted signal (e.g.
 `kill(getpid(), ...)`) is delivered at the next return-to-user boundary rather
-than synchronously on the `SYS_KILL` return. Under the single-core PIT IRQ0, any
-user process passes that boundary within a tick, so the delay is bounded and
-deterministic.
+than synchronously on the `SYS_KILL` return. Under the bounded timer interrupt
+model, a running user process passes that boundary within an observable tick, so
+the delay is bounded and deterministic.
 
 ## Signal Frame And sigreturn
 
@@ -175,7 +176,8 @@ Out of scope this stage: realtime signals (`SIGRTMIN`+ queuing) and full
 `killpg`; `sigsuspend`/`sigpending`/`sigaltstack` and full `sigaction` flags;
 `SA_RESTART` / EINTR syscall restart (the synchronous syscalls do not sleep);
 core dump files; a user-space libc signal wrapper and automatic trampoline; and
-SMP cross-core delivery.
+broad cross-core signal broadcast/delivery policy beyond the current bounded
+process model.
 
 Known limitation: with a single IRQ-return delivery point, a self-targeted signal
 is delivered at the next return-to-user boundary, not synchronously on the

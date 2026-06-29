@@ -7,8 +7,8 @@ compatibility backend for low-level BIOS, ATA, port-IO, and Bochs validation.
 Architecture boundary work keeps both paths clear and makes the split between
 kernel core concepts and x86_64 mechanisms explicit. It does not add Secure
 Boot, a broad graphics stack beyond the bounded framebuffer text console, ACPI
-handoff, UEFI Runtime Services, a non-x86 backend, a broad device model,
-dynamic linking, or complete POSIX coverage.
+handoff, UEFI Runtime Services, a non-x86 backend, a broad device model, or
+complete POSIX coverage.
 
 ## Boundary Rule
 
@@ -49,7 +49,7 @@ runtime seams:
   tables, ATA/exFAT loading, and the concrete producer side of boot-info data.
 - `kernel/core/irq` owns the current IDT setup, ISR stubs, x86 exception state,
   IRQ dispatch, syscall vector dispatch, and i8259 EOI split.
-- `kernel/core/sched` owns the single-core scheduler policy while the assembly
+- `kernel/core/sched` owns the per-CPU scheduler policy while the assembly
   context-switch frame remains an AMD64 ABI detail. Scheduler policy consumes
   IRQ-return context eligibility and kernel context switching through the
   `include/bigos/arch_context.h` boundary rather than open-coding raw frame
@@ -82,8 +82,8 @@ separate change declares and validates the behavior change:
 - Interrupt frame and scheduler context-switch frame layouts consumed by fork,
   signal, syscall, IRQ-return preemption, and context switching.
 - The `include/bigos/arch_context.h` boundary is a current x86_64 backend
-  core-facing contract only. It does not promise a complete HAL, SMP, UEFI
-  runtime parity, non-x86 runtime parity, APIC/IOAPIC support, or HPET support.
+  core-facing contract only. It does not promise a complete HAL,
+  multi-architecture runtime parity, broad backend parity, or HPET support.
 - x86_64 page-table layout, recursive self-mapping window, direct map window,
   CR3 root semantics, and TLB invalidation behavior.
 - Existing higher-half kernel mappings shared into user roots, user low-half
@@ -114,12 +114,12 @@ has been initialized as schedulable.
   keyboard/input IRQ is routed through IOAPIC to the initialized online BSP.
 - TLB invalidation is expressed through a boundary that carries address-space
   root, virtual page or range, target CPU mask, and completion requirement. The
-  single-core implementation accepts only the bootstrap CPU target and completes
-  with local `invlpg` or CR3 reload.
+  current implementation supports local invalidation and typed remote
+  shootdown for initialized online CPUs within the bounded SMP contract.
 - Shared scheduler state, IRQ-visible state, and page-table updates publish under
   interrupt-disabled sections or the selected local boundary before becoming
   visible to handlers, fault paths, or future remote CPUs.
-- CPU hotplug, NUMA, RCU, MSI/MSI-X, broad IRQ affinity/load balancing, and
+- CPU hotplug, NUMA, RCU, broad IRQ affinity/load balancing, and
   non-x86_64 interrupt backend parity remain future dependencies.
 
 ## Review Checklist

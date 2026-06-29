@@ -17,13 +17,14 @@ BIOS bootloader 的 exFAT 辅助逻辑分离：bootloader 仍使用固定低地�
   文件，以及 bounded FAT-chain 跟随。VFS metadata bridge 会完整初始化 atime、
   mtime、ctime 字段；只读 exFAT 后端当前返回文档化的 0 时间戳默认值，而不承诺完整
   exFAT 时间戳语义。
-- API 仅支持普通内核上下文；不承诺 IRQ-handler-safe、异步、DMA、sleep 或
-  SMP 语义。
+- 这个已归档 foundation API 仅支持普通内核上下文；不承诺 IRQ-handler-safe、DMA，
+  也不由自身提供 scheduler sleep、async request lifecycle 或跨 CPU 语义；较新的
+  block-layer 文档描述构建在其上的有界 interrupt-driven request 路径。
 
 ## 非目标
 
 - 不支持写入、删除、目录修改、权限、page cache 或完整 VFS。
-- 不支持 AHCI、NVMe、USB storage、DMA、热插拔或中断驱动磁盘 I/O。
+- 不支持 AHCI、NVMe、USB storage、DMA、热插拔或广泛 storage-device management。
 - 不实现受控只读子集之外的完整 exFAT 规范。
 - 不修改 MBR/DBR/extended DBR 布局、BootInfo handoff、linker 地址或现有
   first user-program smoke。

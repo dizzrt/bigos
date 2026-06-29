@@ -51,7 +51,8 @@ Init markers are distinct from the smoke `BIGOS_USER_*` markers:
 
 ## Process Lifecycle
 
-`bigos::proc::Process` is a bounded single-core lifecycle record. The core is
+`bigos::proc::Process` is a bounded lifecycle record integrated with the
+current scheduler and address-space boundaries. The core is
 compiled in normal builds even when `user_program_smoke` and `user_elf_smoke`
 are disabled; those switches only control smoke entry threads and the user ELF
 artifact. Each process records:

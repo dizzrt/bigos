@@ -1,6 +1,6 @@
 # TTY、Console 与键盘输入
 
-BigOS TTY console input capability 的输入路径只覆盖单核 x86_64、i8259 PIC、PS/2 set-1 keyboard 和默认 runtime text console。目标是提供最小、可验证的 keyboard 到 TTY handoff，以及普通运行期文本输出入口；它不是完整终端、shell 或用户态输入子系统。
+BigOS TTY console input capability 的输入路径覆盖 x86_64 PS/2 set-1 keyboard、当前 PIC/APIC routing 路径和选中的默认 runtime console backend。目标是提供最小、可验证的 keyboard 到 TTY handoff，以及普通运行期文本输出入口；它不是完整终端、shell 或用户态输入子系统。
 
 ## 输入数据流
 
@@ -146,4 +146,4 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 ## 非目标
 
-该路径不实现多 TTY、完整 xterm/VT100/VT220 行为、命令历史、完整 POSIX `termios`、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史、APIC/IOAPIC、SMP 或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。
+该路径不实现多 TTY、完整 xterm/VT100/VT220 行为、命令历史、完整 POSIX `termios`、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史，或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。

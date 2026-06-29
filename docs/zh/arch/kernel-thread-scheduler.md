@@ -16,15 +16,15 @@ BigOS 仍保持最小内核线程模型的 bounded 边界，但调度器现在�
 
 ## 非目标与边界
 
-- **仅限 scheduler SMP**：支持 per-CPU run queue、scheduler nudge、LAPIC timer ownership，以及已支持 timer/keyboard IRQ source 的 bounded APIC default delivery；不支持 CPU hotplug、NUMA、完整 IRQ affinity API、work stealing、CFS、实时调度、POSIX scheduling policy、generic device IRQ balancing 或 MSI/MSI-X。
-- **无完整优先级调度器**：调度器只记录 bounded priority/policy metadata，默认选择策略仍是确定性的单核 round-robin。
-- **Bounded process 与 syscall integration**：timer preemption 不创建用户可见的 POSIX scheduling policy。后续 process/fd/VFS syscall 可以在普通进程 syscall 上下文中使用 `sched::can_block()`，但只限同一个单核 blocking contract。
+- **仅限 scheduler SMP**：支持 per-CPU run queue、scheduler nudge、LAPIC timer ownership，以及已支持 timer/keyboard IRQ source 的 bounded APIC default delivery；不支持 CPU hotplug、NUMA、完整 IRQ affinity API、work stealing、CFS、实时调度、POSIX scheduling policy、generic device IRQ balancing 或广泛 MSI/MSI-X device balancing policy。
+- **无完整优先级调度器**：调度器只记录 bounded priority/policy metadata，默认选择策略仍是确定性的 per-CPU round-robin。
+- **Bounded process 与 syscall integration**：timer preemption 不创建用户可见的 POSIX scheduling policy。process/fd/VFS syscall 可以在普通进程 syscall 上下文中使用 `sched::can_block()`，但只限同一个有界 kernel-thread blocking contract。
 - **bounded timer-driven scheduler semantics 阻塞边界**：wait queue 与 tick-based sleep 仍是内核线程原语。它们可以通过 waiter-owned CPU scheduler domain 唤醒，但仍不提供 POSIX blocking IO policy、用户可见 cancellation 或 signal 语义。
 - 不改变 boot 固定地址、higher-half base、kernel load base、BootInfo ABI、direct map、`KVMEM_BASE`、IDT vector 分配或 `InterruptFrame` ABI。
 
 ## 线程模型与状态
 
-每个内核线程由一个 TCB 表示，记录稳定 thread ID、`ThreadState`、saved stack pointer（cooperative context 指针）、内核栈 base/size、入口函数与参数、bounded time-slice state，以及预留的 priority/policy metadata。`ThreadState` 包含 `Runnable`、`Running`、`Idle`、`Blocked`、`Sleeping` 和 `Terminated`。`Blocked` 与 `Sleeping` 只是 bounded non-runnable 内核等待状态，不暗示 POSIX blocking IO、用户 wait queue、进程归属、取消策略或 SMP 迁移。
+每个内核线程由一个 TCB 表示，记录稳定 thread ID、`ThreadState`、saved stack pointer（cooperative context 指针）、内核栈 base/size、入口函数与参数、bounded time-slice state，以及预留的 priority/policy metadata。`ThreadState` 包含 `Runnable`、`Running`、`Idle`、`Blocked`、`Sleeping` 和 `Terminated`。`Blocked` 与 `Sleeping` 只是 bounded non-runnable 内核等待状态，不暗示 POSIX blocking IO、用户 wait queue、进程归属、取消策略或无限制跨 CPU 迁移。
 
 run queue、wait queue、sleep list 与 terminated list 都是 intrusive 链表，节点（`rq_next`、`wait_next`、`sleep_next`、`term_next`）由 TCB 自身持有，生命周期与 TCB 绑定。因此调度路径不依赖普通 heap 容器，也不会在 IRQ handler 中分配队列节点。同一线程最多同时属于一个 CPU run queue、一个显式 wait queue 和一个 timeout tracking list。
 
@@ -96,4 +96,4 @@ recovery 路径。
 
 `scheduler_semantics_smoke` 默认关闭。启用 `BIGOS_SCHEDULER_SEMANTICS_SMOKE` 时，`kernel()` 创建两个普通内核线程。第一个线程在 preemption disabled 且 timer ticks 继续推进时观察 `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED`；第二个线程只有在 timer-driven IRQ-return preemption 真正运行它时才能输出 `BIGOS_SCHED_SEMANTICS_PREEMPTED` 与 `BIGOS_SCHED_SEMANTICS_PASSED`。这些 marker 与 cooperative `scheduler_smoke` marker 区分开。
 
-`scheduler_smp_smoke` 默认关闭，并隐式启用 AP startup/per-CPU timer baseline 与 bounded APIC default delivery gate。启用 `BIGOS_SCHEDULER_SMP_SMOKE` 时，`kernel()` 创建一个 BSP worker 和一个显式投递到 AP 的 worker。只有 APIC-backed timer/keyboard routing active 且普通 scheduler work 在超过一个 online CPU 上运行时，smoke 才输出 `BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE`、`BIGOS_SCHED_SMP_BSP_THREAD`、`BIGOS_SCHED_SMP_AP_THREAD` 与 `BIGOS_SCHED_SMP_PASSED`。该 smoke 不验证 CPU hotplug、NUMA、generic device IRQ balancing、MSI/MSI-X 或完整 IRQ affinity。
+`scheduler_smp_smoke` 默认关闭，并隐式启用 AP startup/per-CPU timer baseline 与 bounded APIC default delivery gate。启用 `BIGOS_SCHEDULER_SMP_SMOKE` 时，`kernel()` 创建一个 BSP worker 和一个显式投递到 AP 的 worker。只有 APIC-backed timer/keyboard routing active 且普通 scheduler work 在超过一个 online CPU 上运行时，smoke 才输出 `BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE`、`BIGOS_SCHED_SMP_BSP_THREAD`、`BIGOS_SCHED_SMP_AP_THREAD` 与 `BIGOS_SCHED_SMP_PASSED`。该 smoke 不验证 CPU hotplug、NUMA、generic device IRQ balancing、广泛 MSI/MSI-X policy 或完整 IRQ affinity。

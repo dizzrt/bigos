@@ -5,24 +5,29 @@ context: |
 
   Domain:
   - The repository is a toy/research OS kernel, not an application service.
-  - The current default runnable backend is x86_64 Legacy BIOS/MBR/exFAT. A
-    runnable x86_64 UEFI boot backend spike exists, but UEFI runtime parity,
-    storage/device backend parity, multi-architecture backends, and SMP remain
-    future or parallel tracks.
-  - The kernel boots from an x86 disk image, enters long mode, loads an ELF64
-    kernel named "kernel", and jumps to the higher-half kernel address
-    0xffffffff80000000.
+  - The current default runnable backend is x86_64 UEFI with an ESP/FAT image
+    and an exFAT compatibility root image for the bounded userland payloads. The
+    Legacy BIOS/MBR/exFAT path remains runnable as an explicit compatibility and
+    cross-validation backend. Additional architectures are not runtime-parity
+    backends.
+  - The kernel still jumps to the higher-half kernel address
+    0xffffffff80000000. The UEFI backend loads the same ELF64 kernel through the
+    unified handoff ABI; the Legacy backend continues to load a kernel named
+    "kernel" from the exFAT disk image.
   - The current bounded userland baseline covers bootstrapping, VGA text and
     COM1 serial output, a kernel-owned IDT with exception/IRQ/syscall dispatch,
     i8259 PIC, PIT IRQ0 tick, keyboard TTY/console input, buddy/slab/kmalloc/
-    virtual memory, direct map, owned empty page-table reclamation, a single-core
-    scheduler, `int 0x80` syscall dispatch, process lifecycle, demand paging,
-    bounded `fork`/COW, signals, time/identity, fd/VFS, pipe/dup, RAM-backed
-    writable `/rw`, persistent clean-sync `/rw`, cwd/relative path handling,
-    constrained rename, bounded metadata, page/buffer cache, `execve`, default
-    PID-1 init, minimal user crt0/libc, `/bin/sh`, packaged `/bin/*`, bounded
-    POSIX-like process/I/O behavior, and behavior-oriented default-off runtime
-    smokes.
+    virtual memory, direct map, owned empty page-table reclamation, a multi-core
+    capable scheduler, AP startup/per-CPU state, typed IPI/TLB shootdown paths,
+    `int 0x80` syscall dispatch, process lifecycle, demand paging, bounded
+    `fork`/COW, signals, time/identity, fd/VFS, pipe/dup, RAM-backed writable
+    `/rw`, persistent writable storage, cwd/relative path handling, constrained
+    rename, bounded metadata, page/buffer cache, async request lifecycle,
+    interrupt-driven block completion, modern virtio-blk and virtio-net
+    validation paths, bounded UDP socket syscalls, `execve`, default PID-1 init,
+    minimal user crt0/libc, bounded FILE streams, bounded dynamic linking,
+    `/bin/sh`, packaged `/bin/*`, bounded POSIX-like process/I/O behavior, and
+    behavior-oriented default-off runtime smokes.
 
   Tech stack:
   - C++17 and C17 in freestanding mode.
@@ -30,31 +35,36 @@ context: |
     startup objects.
   - xmake is the primary build system.
   - x86_64-elf-gcc is the expected cross toolchain.
-  - QEMU and Bochs are supported for the current Legacy BIOS path.
+  - QEMU is supported for the default UEFI path and the explicit Legacy BIOS
+    path. Bochs remains supported for the Legacy BIOS/debug path.
   - Python scripts are auxiliary build/install helpers, not the core runtime.
   - Python-related commands should run through uv, for example `uv run pytest`,
     `uv run python <script>`, `uv run ruff check`, and `uv run pyright`.
 
   Major directories:
-  - kernel/arch/x86/boot: MBR, exFAT DBR, extended DBR, long-mode boot code, and
-    ELF loader.
+  - kernel/arch/x86/boot: Legacy MBR, exFAT DBR, extended DBR, long-mode boot
+    code, and ELF loader.
+  - kernel/arch/x86/uefi: x86_64 UEFI loader, PE/COFF handoff assembly, and
+    UEFI support headers.
   - kernel/core: kernel entry plus subsystem subdirectories: irq, timer, terminal,
     sched, syscall, proc, fs, ipc, signal, time, bigos, and string functions.
   - kernel/core/proc: process model, growable fd table, VMA/heap metadata,
     demand-zero/COW handling, `fork`, signals integration, ring3 entry, `execve`,
-    PID-1 init launch, safe teardown/reaping, and bounded ELF64 loader.
+    PID-1 init launch, safe teardown/reaping, bounded ELF64 loader, and bounded
+    dynamic-link layout helpers.
   - kernel/core/fs: exFAT read path, RAM-backed and persistent clean-sync `bigfs`
     mounted at `/rw`, cwd/relative path handling, constrained rename, bounded
     metadata, VFS open/read/write/close/lseek/fsync, page/buffer cache, and
-    bounded file IO.
+    bounded file IO over the block request layer.
   - kernel/mm: buddy physical page allocator with an early metadata arena,
     slab/kmalloc allocator, kernel virtual memory, kernel direct map, public
     memory API, and switchable memory runtime self-test.
-  - kernel/drivers: VGA text-mode driver, i8259 PIC driver, PIT timer driver, and
-    ATA PIO block driver.
+  - kernel/drivers: VGA text-mode driver, i8259 PIC, LAPIC/IOAPIC, PIT timer,
+    RTC, PCI/MSI-X, ATA PIO, RAM block, virtio-blk, and virtio-net drivers.
   - kernel/runtime: startup objects such as crt0, crti, and crtn.
   - user: freestanding user crt0/libc, PID-1 init, `/bin/sh`, small `/bin/*`
-    programs, and the default-off userland smoke.
+    programs, bounded dynamic-link demo/runtime artifacts, and default-off
+    userland smokes.
   - tools: developer helper scripts such as boot_debug.py.
   - cpp: small kernel C++ support library, KTL containers, new/delete, and minimal
     libsupc++/ABI support.
@@ -64,29 +74,33 @@ context: |
   - tests: validation tests and local test assets.
 
   Current maturity:
-  - The project has iterated from an early boot/kernel skeleton to a single-core
-    bounded userland baseline.
+  - The project has iterated from an early boot/kernel skeleton to a multi-core
+    capable bounded userland baseline.
   - Boot, VGA/serial output, kernel-owned IDT and exception/IRQ/syscall dispatch,
     PIC, PIT timer IRQ0, keyboard decode plus TTY/console input, buddy allocation,
     slab allocation, kernel virtual memory, owned empty page-table reclamation,
-    and the kernel direct map are implemented and covered by switchable smokes or
-    source-level checks.
-  - A single-core round-robin scheduler with cooperative switching, wait queues,
-    timeout sleep, preemption-disable depth, and guarded IRQ-return timer
-    preemption is implemented.
+    the kernel direct map, framebuffer handoff, glyph/font lookup, and
+    framebuffer console rendering are implemented and covered by switchable
+    smokes or source-level checks.
+  - A multi-core capable scheduler with cooperative switching, per-CPU state,
+    wait queues, timeout sleep, preemption-disable depth, guarded IRQ-return
+    timer preemption, scheduler nudge IPI, remote wakeups, and TLB shootdown
+    validation is implemented within bounded semantics.
   - The `int 0x80` syscall entry supports the bounded diagnostic/user ABI plus
     process wait/exit, fd/VFS open/read/write/close/lseek/fsync, pipe/dup, brk,
     restricted anonymous mapping, `fork`, time/identity, signals, mkdir/unlink,
-    and `execve`.
+    bounded socket calls, dynamic-link helper calls, and `execve`.
   - Normal boot packages `/boot/user/init.elf`, `/bin/sh`, and bounded `/bin/*`,
     enters resident PID-1 init, and starts `/bin/sh`. Default-off smokes cover
     flat user program, filesystem-backed user ELF, demand paging, fork/COW,
-    time/identity, signals, writable FS, pipe, and userland runtime markers.
-  - Not yet implemented: SMP, a complete POSIX process/job-control model, broad
-    file-backed `mmap`, dynamic linking/shared libraries, a complete POSIX libc,
-    persistent full writable filesystems beyond the bounded clean-sync `/rw`
-    backend, async I/O, broad storage/device drivers, UEFI runtime parity/backend
-    parity, and release-grade CI automation.
+    time/identity, signals, writable FS, pipe, modern storage/network paths,
+    socket behavior, dynamic linking, libc file streams, userland runtime, and
+    core user utilities markers.
+  - Still bounded or not implemented: a complete POSIX process/job-control model,
+    broad writable file-backed `mmap`, a complete POSIX libc, full filesystem
+    crash recovery, broad async I/O exposed as a user ABI, broad storage/device
+    management, CPU hotplug, NUMA, multi-architecture runtime parity, and
+    release-grade CI automation.
   - Some paths are scaffolding or TODOs. Inspect call sites before assuming a
     subsystem is wired into normal boot; optional smoke entry threads and runtime
     validation markers remain gated even when shared subsystems compile normally.
@@ -113,11 +127,20 @@ context: |
   - Validation/diagnostic features are gated by xmake switches (all default-off)
     and emit fixed COM1/VGA markers:
     mm_self_test, slab_debug, page_fault_smoke, timer_smoke, keyboard_smoke,
-    scheduler_smoke, scheduler_semantics_smoke, blocking_smoke, user_vmem_smoke,
-    syscall_smoke, user_program_smoke, fs_smoke, user_elf_smoke,
-    demand_paging_smoke, fork_cow_smoke, time_identity_smoke, signal_smoke,
-    writable_fs_smoke, pipe_smoke, and userland_smoke. The unified panic path
-    emits BIGOS_PANIC code=<code> source=<source>.
+    ap_startup_percpu_timers, keyboard_smoke, scheduler_smoke,
+    scheduler_semantics_smoke, scheduler_smp_smoke, tlb_shootdown_smoke,
+    multicore_hardening_smoke, blocking_smoke, user_vmem_smoke, syscall_smoke,
+    user_program_smoke, fs_smoke, user_elf_smoke, block_io_request_smoke,
+    pci_config_vector_smoke, pci_msix_smoke, virtio_blk_smoke,
+    virtio_net_smoke, network_protocol_smoke, socket_smoke,
+    modern_storage_backend_smoke, demand_paging_smoke,
+    file_backed_mapping_smoke, shared_readonly_mappings_smoke,
+    anonymous_lifecycle_smoke, growable_tables_smoke, fork_cow_smoke,
+    time_identity_smoke, signal_smoke, writable_fs_smoke,
+    persistent_writable_fs_smoke, pipe_smoke, userland_smoke,
+    sleep_syscall_smoke, filesystem_maturity_smoke, libc_file_stream_smoke, and
+    dynamic_link_smoke. The unified panic path emits BIGOS_PANIC code=<code>
+    source=<source>.
   - Treat hardware constants, linker addresses, boot protocol addresses, and page
     table self-mapping addresses as design-critical. Explain changes to them.
   - Keep public headers minimal and include only what is needed.

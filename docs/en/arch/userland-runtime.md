@@ -144,8 +144,8 @@ The shell is intentionally small:
 This does not implement complete job control, background processes, `fg`/`bg`,
 job tables, globbing, variable expansion, shell scripts, sub-shells, `termios`,
 multiple terminals, a full directory API, symlinks, a persistent full writable
-filesystem, broad file-backed `mmap`, a full FILE API, dynamic linking, SMP, or
-a complete POSIX libc.
+filesystem, broad writable file-backed `mmap`, complete job control, a complete
+POSIX dynamic loader, CPU hotplug, NUMA, or a complete POSIX libc.
 
 ## Minimal libc Subset
 
@@ -227,7 +227,6 @@ The user libc exposes a documented bounded subset for simple static C programs:
   existing minimal forms plus simple width, `%u`, `%p`, `%ld`, `%lu`, and `%zu`.
   The libc exit path flushes all buffered writable streams so buffered output
   lands even without explicit `fclose`. There is no `scanf` family, wide stream,
-  precision, locale, floating-point formatting, wide-character support,
   `tmpfile`/`fmemopen`, complete `fpos_t` positioning, or other hosted `FILE`
   semantics beyond this bounded subset.
 - Environment: `envp`, `environ`, and `getenv` are read-only. This stage does
@@ -258,8 +257,8 @@ baseline, still within the existing freestanding runtime boundary:
   `DIR*` wrappers, and bounded heap behavior when `userland_smoke` is enabled.
 
 This baseline does not add kernel syscalls, change the `int 0x80` register ABI,
-change boot or disk layout, introduce dynamic linking, or claim hosted libc or
-full POSIX shell behavior.
+change boot or disk layout, alter the bounded dynamic-link contract, or claim
+hosted libc or full POSIX shell behavior.
 
 ## Build and Packaging
 
@@ -277,11 +276,14 @@ freestanding ELF64 `ET_EXEC` images using `user/crt0`, `user/libc`, and
   commands. `pwd` is a shell builtin rather than a packaged external program.
 - `/bin/smoke/*` probes only for the explicit `userland_smoke` validation image.
 
-The image layout remains the existing Legacy BIOS / MBR / exFAT path; the
-current bounded userland baseline adds files under `/boot/user` and `/bin` but
-does not introduce UEFI, AHCI, NVMe, virtio, or a new filesystem backend. Every
-user program remains a static freestanding ELF64 `ET_EXEC` image bounded by the
-shared 64 KiB user-ELF limit.
+The default image layout is the UEFI ESP/FAT image plus an exFAT compatibility
+root image; the Legacy BIOS / MBR / exFAT image remains an explicit
+compatibility backend. The current bounded userland baseline adds files under
+`/boot/user`, `/bin`, and validation-only `/lib` payloads for dynamic-link
+smoke, but it does not introduce AHCI, NVMe, a general virtio boot device model,
+or a new filesystem backend. Static user programs remain freestanding ELF64
+`ET_EXEC` images bounded by the shared 64 KiB user-ELF limit; the dynamic-link
+smoke uses the separate bounded `ET_DYN` path described below.
 
 ## Validation
 

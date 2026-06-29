@@ -25,7 +25,7 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 ## Interrupt Guard
 
-`bigos::irq::InterruptGuard` is the minimal critical-section primitive for the early single-core kernel. Construction reads `RFLAGS.IF` and executes `cli`; destruction restores `sti` only when IF was enabled on entry, leaving already-disabled paths disabled. The guard prevents same-CPU maskable IRQ interleaving only. It is not an SMP lock, does not protect NMI, has no blocking semantics, and is not a scheduler lock.
+`bigos::irq::InterruptGuard` is the minimal same-CPU maskable-IRQ critical-section primitive. Construction reads `RFLAGS.IF` and executes `cli`; destruction restores `sti` only when IF was enabled on entry, leaving already-disabled paths disabled. The guard prevents same-CPU maskable IRQ interleaving only. It is not a cross-CPU lock, does not protect NMI, has no blocking semantics, and is not a scheduler lock.
 
 Allocator internals use this guard around short metadata update boundaries in buddy, slab, and KVMEM. That does not make ordinary allocators IRQ-handler-safe APIs. Future IRQ producers that need handoff storage should still use static or boot-time-prepared bounded storage and document their overflow/drop policy.
 

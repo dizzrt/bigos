@@ -5,7 +5,7 @@ BigOS 当前只有一个默认具备 bounded userland baseline 内 runtime parit
 路径仍作为显式可运行兼容 backend 保留，用于低层 BIOS、ATA、port-IO 和 Bochs 验证。
 架构边界整理需要清晰保留两条路径，并明确区分 kernel core 概念与 x86_64 机制。本工作
 不新增 Secure Boot、超出有界 framebuffer text console 的宽泛图形栈、ACPI handoff、
-UEFI Runtime Services、non-x86 backend、宽泛设备模型、动态链接或完整 POSIX 覆盖。
+UEFI Runtime Services、non-x86 backend、宽泛设备模型或完整 POSIX 覆盖。
 
 ## 边界规则
 
@@ -40,7 +40,7 @@ UEFI Runtime Services、non-x86 backend、宽泛设备模型、动态链接或�
   ATA/exFAT 加载，以及 boot-info 数据的具体生产者侧。
 - `kernel/core/irq` 拥有当前 IDT setup、ISR stub、x86 exception state、IRQ dispatch、
   syscall vector dispatch 和 i8259 EOI 分流。
-- `kernel/core/sched` 拥有单核 scheduler 策略，而 assembly context-switch frame
+- `kernel/core/sched` 拥有 per-CPU scheduler 策略，而 assembly context-switch frame
   仍是 AMD64 ABI 细节。scheduler policy 通过 `include/bigos/arch_context.h`
   边界消费 IRQ-return context eligibility 和 kernel context switch，而不是
   open-code raw frame offset 或 assembly symbol。
@@ -68,8 +68,8 @@ UEFI Runtime Services、non-x86 backend、宽泛设备模型、动态链接或�
 - fork、signal、syscall、IRQ-return preemption 和 context switching 消费的
   interrupt frame 与 scheduler context-switch frame layout。
 - `include/bigos/arch_context.h` 边界只是当前 x86_64 backend 的 core-facing
-  contract；它不承诺完整 HAL、SMP、UEFI runtime parity、non-x86 runtime
-  parity、APIC/IOAPIC 支持或 HPET 支持。
+  contract；它不承诺完整 HAL、多架构 runtime parity、广泛 backend parity 或 HPET
+  支持。
 - x86_64 page-table layout、recursive self-mapping window、direct map window、
   CR3 root 语义和 TLB invalidation 行为。
 - 共享到 user root 的现有 higher-half kernel mapping、user low-half 隔离、
@@ -95,12 +95,12 @@ preemption-disable depth 和 pending reschedule state。
   IOAPIC external IRQ 发送 LAPIC EOI。APIC default delivery active 时，scheduler
   tick 归 LAPIC timer，keyboard/input IRQ 通过 IOAPIC 路由到已初始化且 online 的 BSP。
 - TLB invalidation 通过携带 address-space root、virtual page 或 range、target CPU
-  mask 和 completion requirement 的边界表达。单核实现只接受 bootstrap CPU target，
-  并通过本地 `invlpg` 或 CR3 reload 完成。
+  mask 和 completion requirement 的边界表达。当前实现支持 local invalidation，并在
+  有界 SMP contract 内对已初始化 online CPU 执行 typed remote shootdown。
 - Shared scheduler state、IRQ-visible state 和 page-table update 在对 handler、fault
   path 或未来 remote CPU 可见前，必须通过 interrupt-disabled section 或所选本地边界
   完成发布。
-- CPU hotplug、NUMA、RCU、MSI/MSI-X、广义 IRQ affinity/load balancing，以及
+- CPU hotplug、NUMA、RCU、广义 IRQ affinity/load balancing，以及
   非 x86_64 interrupt backend parity 仍是后续依赖。
 
 ## Review Checklist

@@ -25,7 +25,7 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 ## Interrupt Guard
 
-`bigos::irq::InterruptGuard` 是单核早期内核的最小 critical-section primitive。构造时读取 RFLAGS.IF 并执行 `cli`；析构时只在进入前 IF 为 enabled 时恢复 `sti`，进入前已 disabled 的路径保持 disabled。该 guard 只防止 same-CPU maskable IRQ interleaving，不是 SMP lock，不保护 NMI，不提供阻塞语义，也不是 scheduler lock。
+`bigos::irq::InterruptGuard` 是最小 same-CPU maskable-IRQ critical-section primitive。构造时读取 RFLAGS.IF 并执行 `cli`；析构时只在进入前 IF 为 enabled 时恢复 `sti`，进入前已 disabled 的路径保持 disabled。该 guard 只防止 same-CPU maskable IRQ interleaving，不是跨 CPU lock，不保护 NMI，不提供阻塞语义，也不是 scheduler lock。
 
 allocator 内部使用该 guard 保护 buddy、slab 和 KVMEM 的短元数据更新边界。它不会让普通 allocator 变成 IRQ-handler-safe API；后续 IRQ producer 若需要 handoff，仍应使用静态或 boot-time-prepared bounded storage，并明确 overflow/drop 策略。
 

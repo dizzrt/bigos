@@ -4,18 +4,18 @@ Language: English | [简体中文](README-zh.md)
 
 BigOS is an early-stage x86_64 operating system kernel written mainly in
 freestanding C++17, C17, and assembly. It has grown from a boot/kernel skeleton
-into a smoke-tested, single-core, mostly synchronous research kernel. The
-current default runnable baseline remains the x86_64 Legacy BIOS/MBR/exFAT
-path, with a runnable x86_64 UEFI boot backend spike available as a non-parity
-backend. Its bounded userland loop includes bootstrapping, text/serial output,
-interrupt/exception/syscall handling, a PIT timer tick, keyboard-driven TTY
-input, a bounded timer-aware kernel-thread scheduler, wait queues and timeout
-sleep, an `int 0x80` syscall entry, process lifecycle core, fd/VFS services,
-bounded writable `/rw` storage, persistent clean-sync `/rw`, cwd/relative path
-handling, constrained rename, metadata queries, pipes/dup, default-on PID-1
-init, a minimal user crt0/libc, `/bin/sh`, bounded ELF64 user-program loading,
-VMA-backed user-memory validation, and a fairly complete early kernel
-memory-management stack.
+into a smoke-tested, multi-core capable research kernel with bounded userland.
+The current default runnable baseline is the x86_64 UEFI boot backend; the
+Legacy BIOS/MBR/exFAT path remains an explicit compatibility and debug backend.
+Its bounded userland loop includes bootstrapping, text/serial/framebuffer
+output, interrupt/exception/syscall handling, timers, keyboard-driven TTY input,
+multi-core scheduling, wait queues and timeout sleep, an `int 0x80` syscall
+entry, process lifecycle core, fd/VFS services, bounded writable `/rw` storage,
+persistent writable storage, cwd/relative path handling, constrained rename,
+metadata queries, pipes/dup, bounded network/socket paths, default-on PID-1
+init, a minimal user crt0/libc, bounded FILE streams, bounded dynamic linking,
+`/bin/sh`, bounded ELF64 user-program loading, VMA-backed user-memory
+validation, and a fairly complete early kernel memory-management stack.
 
 This repository is a research/toy OS kernel project, not a hosted application or
 service.
@@ -23,18 +23,20 @@ service.
 ## Status
 
 The completed capability baseline is compressed into the current bounded
-minimal usable system baseline: a single-core, mostly synchronous kernel with
-timer, input, scheduling, syscall, a bounded POSIX-like process/I/O subset,
-read/write VFS primitives, bounded user ELF loading, a resident PID-1 init,
-minimal static user programs, bounded `/rw` runtime and persistent clean-sync
-storage, cwd/relative path handling, constrained rename, metadata, pipe/dup,
-and a minimal userland runtime on top of the boot path, interrupt foundation,
-and early memory management.
+minimal usable system baseline: a multi-core capable kernel with timer, input,
+scheduling, syscall, a bounded POSIX-like process/I/O subset, read/write VFS
+primitives, bounded user ELF loading, a resident PID-1 init, static user
+programs, bounded `/rw` runtime and persistent storage, cwd/relative path
+handling, constrained rename, metadata, pipe/dup, bounded socket/dynamic-link
+paths, and a minimal userland runtime on top of the UEFI default backend,
+Legacy compatibility backend, interrupt foundation, and early memory management.
 
 Implemented or partially implemented:
 
-- x86 boot path with MBR, exFAT DBR, extended DBR, and long-mode transition.
-- ELF64 kernel loading from an exFAT disk image.
+- x86_64 UEFI default boot path with unified handoff, framebuffer/font metadata,
+  and OVMF/QEMU runtime packaging.
+- Legacy x86 boot path with MBR, exFAT DBR, extended DBR, long-mode transition,
+  and ELF64 kernel loading from an exFAT disk image.
 - Higher-half kernel linking at `0xffffffff80000000`.
 - VGA text-mode output, `kprintf`, and COM1 serial output for deterministic markers.
 - Kernel-owned static IDT, generated assembly ISR stubs, and a stable
@@ -45,14 +47,15 @@ Implemented or partially implemented:
 - Unified early fatal diagnostics (`bigos::kpanic`/`khalt`) that emit a stable
   `BIGOS_PANIC code=<code> source=<source>` marker on COM1 and VGA, then disable
   interrupts and halt.
-- i8259 PIC driver and a PIT timer driver on IRQ0 providing a monotonic tick and
-  a minimal `mdelay` busy-wait primitive.
+- i8259 PIC, LAPIC/IOAPIC, and PIT timer drivers providing interrupt delivery,
+  monotonic ticks, and a minimal `mdelay` busy-wait primitive.
 - Keyboard IRQ1 scancode decode (US Set 1) feeding a fixed-capacity TTY/console
   input path; console output routes through VGA.
-- Single-core kernel-thread scheduler with 1-page kernel stacks, an x86_64
-  context switch, round-robin `yield()`, scheduler-owned idle thread, wait
-  queues, timeout sleep, preemption-disable guards, and bounded IRQ-return timer
-  preemption.
+- Multi-core capable kernel-thread scheduler with 1-page kernel stacks, x86_64
+  context switch, per-CPU run queues, round-robin `yield()`, scheduler-owned
+  idle threads, wait queues, timeout sleep, preemption-disable guards,
+  scheduler nudge IPI, remote wakeups, TLB shootdown validation, and bounded
+  IRQ-return timer preemption.
 - `int 0x80` syscall entry with a minimal register ABI and a bounded dispatcher
   including process, fd/VFS, pipe/dup, identity/time, signal, and `SYS_EXECVE`
   calls used by the user libc and shell.
@@ -68,12 +71,16 @@ Implemented or partially implemented:
 - Process lifecycle core with PID/parent-child state, wait/exit/reap semantics,
   process-local fd table, bounded exec image replacement, and safe teardown on
   exit or user fault.
-- Kernel block/filesystem path and VFS shell: synchronous ATA PIO sector reads,
-  MBR exFAT partition discovery, read-only exFAT boot assets, bounded writable
-  `/rw` files, persistent clean-sync storage, cwd/relative path lookup,
-  constrained rename, metadata queries, fd-backed
+- Kernel block/filesystem path and VFS shell: block request lifecycle,
+  interrupt-driven completion, ATA/legacy and bounded virtio-blk validation
+  backends, MBR exFAT partition discovery for the compatibility path, read-only
+  boot assets, bounded writable `/rw` files, persistent writable storage,
+  cwd/relative path lookup, constrained rename, metadata queries, fd-backed
   `open`/`read`/`write`/`close`/`lseek`/`fsync`, and bounded file reads/writes
-  for controlled raw images.
+  for controlled images.
+- Device/network path with bounded device registration, PCI/MSI-X validation,
+  modern-only virtio-net smoke coverage, a bounded Ethernet/ARP/IPv4/ICMP/UDP
+  protocol path, and a minimal UDP socket fd/syscall subset.
 - Buddy physical page allocator with an early metadata arena for bootstrap.
 - Slab/kmalloc allocator with size classes, dynamic slab reclaim, page-backed
   large allocations, optional debug guards, and validation statistics.
@@ -83,31 +90,30 @@ Implemented or partially implemented:
 - User address-space teardown and empty PT/PD/PDPT reclamation for owned
   runtime-created mappings, with high-half kernel mappings kept borrowed.
 - Bounded VMA/user-memory API for stack/heap/image metadata, VMA-backed syscall
-  buffer validation, `brk`, restricted anonymous mapping, demand-zero user
-  materialization, and COW write splitting; this is not broad file-backed
-  demand paging.
+  buffer validation, `brk`, restricted anonymous mapping, read-only file-backed
+  mapping, demand-zero user materialization, and COW write splitting; this is
+  not broad writable file-backed demand paging.
+- Bounded dynamic-link path with fixed user layout reservations, a minimal loader
+  handshake, and validation-only shared object packaging.
 - Explicit allocation API: `alloc_kernel_pages(nr_pages, flags)` for kernel
   virtual pages and an internal `alloc_physical_order(order, flags)` for buddy.
 - Switchable early memory runtime self-test (`bigos::mm::self_test`).
 - Small KTL support library for kernel containers and helpers.
 
-Not implemented or still skeletal:
+Still bounded or not implemented:
 
-- UEFI runtime parity, storage/device backend parity, backend cleanup, and broad
-  UEFI validation beyond the current runnable x86_64 boot backend spike.
-- SMP, per-CPU run queues, cross-CPU migration, full priority/realtime
-  scheduling, and POSIX scheduling policy.
-- A full POSIX multi-process model: broad process policy, `fork` semantics such
-  as COW beyond the current bounded subset, `exec*` families, job control, and
-  terminal process groups.
-- File-backed `mmap`, broad mapping policy, dynamic linking, shared libraries,
-  and a complete POSIX libc.
-- Complete POSIX filesystems, journaling, crash recovery, async I/O, broad
-  directory mutation semantics beyond the constrained current subset, and broad
-  storage-device support beyond the current controlled ATA PIO plus exFAT/VFS
-  subset.
-- Broad device-driver support.
-- Complete build/install automation and CI.
+- Multi-architecture runtime parity, firmware parity beyond the tested x86_64
+  UEFI/Legacy paths, and broad backend cleanup.
+- CPU hotplug, NUMA, full priority/realtime scheduling, and POSIX scheduling
+  policy.
+- A full POSIX multi-process model: broad process policy, full `exec*` family,
+  complete job control, and complete terminal process groups.
+- Broad writable file-backed `mmap`, broad mapping policy, a complete POSIX
+  dynamic loader, and a complete POSIX libc.
+- Complete POSIX filesystems, full journaling/crash recovery, broad user-visible
+  async I/O, unrestricted directory mutation semantics, and broad
+  storage-device management.
+- Broad device-driver support and release-grade CI automation.
 
 ## Repository Layout
 
@@ -117,10 +123,12 @@ Not implemented or still skeletal:
 |-- include           public kernel headers and small libc-style header subset
 |-- user              freestanding user crt0/libc, init, shell, bins, and smoke
 |-- kernel            kernel implementation sources
-|   |-- arch/x86/boot x86 boot code, MBR/DBR, and ELF loader
+|   |-- arch/x86/boot Legacy x86 boot code, MBR/DBR, and ELF loader
+|   |-- arch/x86/uefi x86_64 UEFI loader and handoff support
 |   |-- core          kernel entry and subsystems: irq, timer, terminal (console/
-|   |                 keyboard/tty), sched, syscall, proc, fs, low-level IO
-|   |-- drivers       hardware drivers such as VGA, i8259 PIC, PIT, and ATA PIO
+|   |                 keyboard/tty), sched, syscall, proc, fs, net, low-level IO
+|   |-- drivers       hardware drivers such as VGA, irqchips, PIT, PCI/MSI-X,
+|   |                 ATA PIO, RAM block, virtio-blk, and virtio-net
 |   |-- mm            buddy, slab, kmalloc, virtual memory, and direct map code
 |   `-- runtime       runtime startup assembly source objects
 |-- tools             developer helpers such as the boot disk install tool
@@ -135,7 +143,18 @@ Not implemented or still skeletal:
 ## Boot Flow
 
 ```text
-BIOS
+UEFI firmware (default QEMU path)
+  |
+  v
+BOOTX64.EFI
+  - loads the kernel ELF64 image
+  - prepares the unified boot handoff
+  - passes framebuffer, memory-map, font, and root-image metadata
+  |
+  v
+kernel()
+
+Legacy BIOS compatibility path
   |
   v
 MBR / exFAT DBR
@@ -166,21 +185,23 @@ kernel()
     PIT timer on IRQ0, and the keyboard IRQ1 path
   - enables interrupts after early handlers are registered
   - emits the "BigOS kernel reached" marker on serial and VGA
-  - optionally runs the syscall, scheduler, blocking, scheduler-semantics,
+  - optionally runs syscall, scheduler, blocking, scheduler-semantics,
+    multicore, storage, network/socket, dynamic-link, libc/userland,
     block/exFAT, first-user-program, and user-ELF smokes
-  - enters the single-core scheduler via sched::start(); halt behavior is owned
-    by the scheduler idle thread instead of a naked hlt loop
+  - enters the scheduler via sched::start(); per-CPU idle threads own halt
+    behavior instead of a naked hlt loop
 ```
 
 Key files:
 
+- `kernel/arch/x86/uefi/loader.cc`: default UEFI loader.
+- `kernel/arch/x86/uefi/handoff.s`: UEFI-to-kernel handoff.
 - `kernel/arch/x86/boot/boot.s`: early CPU mode switch and jump to the kernel.
 - `kernel/arch/x86/boot/boot.cc`: disk read, exFAT lookup, ELF loading.
 - `kernel/core/kernel.cc`: main kernel entry.
 - `link.lds`: higher-half kernel layout.
-- `docs/en/arch/x86-boot-layout.md`: current Legacy BIOS address and handoff layout.
-- `docs/en/arch/uefi-boot-blueprint.md`: x86_64 UEFI boot backend spike notes
-  and future runtime-parity/backend-cleanup boundaries.
+- `docs/en/arch/uefi-boot-blueprint.md`: current x86_64 UEFI boot backend.
+- `docs/en/arch/x86-boot-layout.md`: Legacy BIOS address and handoff layout.
 
 ## Build And Run
 
@@ -225,24 +246,27 @@ enters PID-1 init, and starts `/bin/sh`; default headless validation observes
 `--userland_smoke` select default-off user-program validation paths in place of
 the normal user init payload. All markers are written to COM1 serial and VGA.
 
-Local emulator runs for the current Legacy BIOS/MBR/exFAT path:
+Local emulator runs:
 
 ```bash
 xmake run qemu
 xmake run qemu -- --display none
+xmake run qemu-uefi
+xmake run qemu-legacy
 xmake run qemu-gdb
 xmake run bochs
 xmake run bochs -- --display sdl2
 xmake run bochs -- --display none
 ```
 
-`xmake run qemu` launches graphical QEMU against the generated raw image and
-writes COM1 output to `build/test/qemu.serial.log`. `xmake run qemu -- --display
-none` launches QEMU without an interactive display. `xmake run qemu-gdb` starts
-QEMU paused with the default GDB stub (`target remote localhost:1234`) and writes
-COM1 output to `build/test/qemu-gdb.serial.log`. `xmake run bochs` defaults to
-the SDL2 Bochs flow, `xmake run bochs -- --display sdl2` selects it explicitly,
-and `xmake run bochs -- --display none` selects Bochs no-GUI mode. These targets
+`xmake run qemu` launches the default UEFI QEMU path and writes COM1 output to
+`logs/qemu-uefi.serial.log`. `xmake run qemu -- --display none` launches the
+same UEFI path without an interactive display. `xmake run qemu-legacy` selects
+the Legacy BIOS/MBR/exFAT compatibility path. `xmake run qemu-gdb` starts Legacy
+QEMU paused with the default GDB stub (`target remote localhost:1234`).
+`xmake run bochs` defaults to the Legacy SDL2 Bochs flow,
+`xmake run bochs -- --display sdl2` selects it explicitly, and
+`xmake run bochs -- --display none` selects Bochs no-GUI mode. These targets
 build the kernel and boot artifacts through xmake, then call the Python image
 helper with `--skip-build` and forward target arguments after `--`.
 
@@ -255,20 +279,22 @@ uv run python -m tools.bigosdev run
 ```
 
 The helper runs preflight checks, can build the kernel and boot artifacts when
-not called from an xmake run target, creates a raw disk image entirely in user
-space, writes the MBR, exFAT boot regions, `/boot/boot.bin`, root `kernel`,
-`/boot/fs_smoke.txt`, `/boot/user/init.elf`, and packaged `/bin/*` user
-programs, then launches the selected emulator unless `--no-launch` is supplied.
-It does not build a UEFI loader, ESP image, OVMF configuration, or new
-storage-driver path.
+not called from an xmake run target, creates the default UEFI ESP/FAT image and
+an exFAT compatibility root image, or creates the explicit Legacy raw disk image
+when `--boot-mode legacy` is selected. It packages `/boot/user/init.elf`,
+`/bin/sh`, `/bin/*`, and validation payloads, then launches the selected
+emulator unless `--no-launch` is supplied.
 
 Generated boot-debug artifacts are isolated under `build/` by default:
 
-- Raw disk image: `build/test/os.raw`.
+- UEFI ESP/FAT image: `build/test/uefi-esp.img`.
+- UEFI exFAT root image: `build/test/uefi-root.raw`.
+- Legacy raw disk image: `build/test/os.raw`.
 - Generated Bochs config: `build/test/bochsrc.bxrc`.
-- QEMU serial logs: `build/test/qemu.serial.log` and
-  `build/test/qemu-gdb.serial.log`.
+- QEMU serial logs: `logs/qemu-uefi.serial.log`, `logs/qemu.serial.log`, and
+  `logs/qemu-gdb.serial.log`.
 - Boot artifacts: `build/bin/x86/boot/`.
+- UEFI loader: `build/bin/x86/uefi/BOOTX64.EFI`.
 - Kernel ELF: `build/kernel`.
 
 Useful options:
@@ -293,9 +319,11 @@ a hand-prepared exFAT image.
 
 Current scope:
 
-- QEMU and Bochs are supported emulators in this workflow.
-- QEMU uses Legacy BIOS defaults and exposes the raw image as an IDE disk with
-  `-drive file=<image>,format=raw,if=ide`, preserving the current ATA PIO path.
+- QEMU is supported for the default UEFI path and explicit Legacy path; Bochs is
+  supported for the Legacy BIOS/debug path.
+- The default QEMU path uses UEFI/OVMF with an ESP/FAT image and an exFAT root
+  image. The Legacy path exposes the raw image as an IDE disk with
+  `-drive file=<image>,format=raw,if=ide`, preserving the ATA PIO path.
 - QEMU headless automation uses the helper display selector, for example
   `--emulator qemu --display none`; no separate `qemu-headless` xmake target is
   provided.
@@ -303,8 +331,8 @@ Current scope:
   `xmake run bochs -- --display sdl2` for explicit SDL2 or `xmake run bochs --
   --display none` for Bochs no-GUI mode. Bochs remains useful for early boot,
   BIOS, ATA PIO, interrupt, and hardware-behavior investigations.
-- UEFI remains a separate, non-parity backend spike path; storage/device parity
-  and broader runtime validation remain future backend work.
+- Virtio block/net paths are bounded validation backends. They do not create
+  broad storage/device parity or user-visible device management.
 - The workflow does not change `boot.s`, `boot.cc`, `BootInfo`, `link.lds`, the
   higher-half kernel address, or kernel runtime initialization.
 
@@ -321,11 +349,12 @@ Common failures:
   generated `build/test/bochsrc.bxrc` avoids Windows paths, `win32` display
   settings, and fixed ROM paths by default.
 
-Run the generated Bochs flows:
+Run the generated emulator flows:
 
 ```bash
 xmake run qemu
 xmake run qemu -- --display none
+xmake run qemu-legacy
 xmake run qemu-gdb
 xmake run bochs
 xmake run bochs -- --display sdl2
@@ -378,12 +407,14 @@ Notes:
 
 ### Boot
 
-The bootloader is specific to x86/x86_64 and assumes a disk image layout that can
-provide an exFAT partition containing a file named `kernel`.
-The default runnable backend is Legacy BIOS. A runnable x86_64 UEFI boot backend
-spike exists, but it is not a runtime-parity replacement for the Legacy
-BIOS/MBR/exFAT path.
+The boot path is specific to x86/x86_64. The default runnable backend is the
+x86_64 UEFI loader, which uses an ESP/FAT image and an exFAT compatibility root
+image for the bounded userland payloads. The Legacy BIOS/MBR/exFAT path remains
+an explicit compatibility backend and still assumes an exFAT partition
+containing a file named `kernel`.
 
+- `kernel/arch/x86/uefi/loader.cc`: UEFI ELF loading and boot handoff.
+- `kernel/arch/x86/uefi/handoff.s`: handoff from UEFI code into the kernel ABI.
 - `kernel/arch/x86/boot/mbr.s`: first-stage boot code.
 - `kernel/arch/x86/boot/dbr_exfat.s`: exFAT boot-sector code.
 - `kernel/arch/x86/boot/exdbr_exfat.s`: extended exFAT boot code.
@@ -405,9 +436,10 @@ BIOS/MBR/exFAT path.
 - Optionally triggers a page-fault smoke (when built with `BIGOS_PAGE_FAULT_SMOKE`).
 - Enables interrupts and emits the "BigOS kernel reached" marker.
 - Optionally runs the syscall, scheduler, blocking, scheduler-semantics,
+  multicore, storage, network/socket, dynamic-link, libc/userland,
   block/exFAT, first-user-program, and user-ELF smokes.
-- Enters the single-core scheduler via `bigos::sched::start()`; the idle thread
-  owns the halt behavior.
+- Enters the scheduler via `bigos::sched::start()`; per-CPU idle threads own
+  halt behavior.
 
 ### Memory Management
 
@@ -478,19 +510,24 @@ fixed-capacity TTY input buffer; console output routes through VGA.
 
 ### Scheduler
 
-A single-core round-robin kernel-thread scheduler with cooperative switch paths,
-wait queues, timeout sleep, and guarded IRQ-return timer preemption.
+A multi-core capable round-robin kernel-thread scheduler with cooperative switch
+paths, per-CPU run queues, wait queues, timeout sleep, scheduler nudge IPI,
+remote wakeups, TLB shootdown validation, and guarded IRQ-return timer
+preemption.
 
 - `kernel/core/sched/sched.cc` / `include/bigos/sched.h`: TCBs, a round-robin run
-  queue, intrusive wait/sleep lists, `create_kernel_thread()`, `yield()`,
+  queues, intrusive wait/sleep lists, `create_kernel_thread()`, `yield()`,
   `thread_exit()`, `sleep_for()`, wakeup APIs, preemption guards, and `start()`
   (which adopts the boot context as the idle thread).
 - `kernel/core/sched/switch.s`: the x86_64 callee-saved context switch.
 - The timer IRQ accounts ordinary-thread time slices, wakes expired sleepers,
   and records bounded reschedule intent. External IRQ return may switch only
   after handler completion, a single EOI, and scheduler guard approval.
-- `scheduler_smoke`, `blocking_smoke`, and `scheduler_semantics_smoke` validate
-  cooperative switching, wait/timeout behavior, and IRQ-return preemption markers.
+- `scheduler_smoke`, `blocking_smoke`, `scheduler_semantics_smoke`,
+  `scheduler_smp_smoke`, `tlb_shootdown_smoke`, and
+  `multicore_hardening_smoke` validate cooperative switching, wait/timeout
+  behavior, IRQ-return preemption, AP placement, remote wakeups, and TLB
+  shootdown markers.
 
 ### System Calls
 
@@ -499,8 +536,9 @@ wait queues, timeout sleep, and guarded IRQ-return timer preemption.
   `rdi/rsi/rdx/r10/r8/r9`, return in `rax`). Implements `SYS_DEBUG_WRITE`,
   `SYS_GET_TICK`, `SYS_WRITE`, `SYS_EXIT`, `SYS_WAIT`, fd/VFS
   `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`, `SYS_BRK`, restricted `SYS_MAP_ANON`,
-  `SYS_FORK`, time/identity, signal, `lseek`, pipe/dup, fsync/mkdir/unlink, and
-  `SYS_EXECVE`; unknown numbers return `SYS_ENOSYS`. The `syscall_smoke` switch
+  `SYS_FORK`, time/identity, signal, `lseek`, pipe/dup, fsync/mkdir/unlink,
+  bounded UDP socket calls, bounded dynamic-link helper calls, and `SYS_EXECVE`;
+  unknown numbers return `SYS_ENOSYS`. The `syscall_smoke` switch
   exercises diagnostic dispatch from ring0.
 
 ### Process And User Mode
@@ -519,15 +557,19 @@ resident PID-1 init and `/bin/sh`; `user_program_smoke`, `user_elf_smoke`, and
   and default-off user smokes.
 - `kernel/core/proc/user_mode.cc` / `kernel/core/proc/user_mode.s` /
   `include/bigos/user_mode.h`: GDT/TSS/RSP0 setup and the `iretq` ring3 entry.
-- Demand paging and COW are implemented only for the current bounded anonymous
-  user mappings; broad file-backed `mmap`, dynamic linking, job control, and a
-  complete POSIX libc remain out of scope.
+- Demand paging and COW are implemented for the current bounded anonymous
+  user mappings, with bounded read-only file-backed mapping support. Dynamic
+  linking exists as a bounded default-off path. Broad writable file-backed
+  `mmap`, complete job control, and a complete POSIX libc remain out of scope.
 
 ### Display And IO
 
-VGA text mode and COM1 serial are the current output backends.
+UEFI framebuffer console, Legacy VGA text mode, and COM1 serial are the current
+output backends.
 
 - `kernel/drivers/video/vga.cc`: text buffer writes, cursor movement, screen clearing.
+- `kernel/core/terminal/console_render.cc`: framebuffer text rendering.
+- `kernel/core/terminal/glyph_font.cc`: glyph lookup for framebuffer output.
 - `kernel/core/bigos/io.cc`: port IO wrappers, `kprintf`, and serial output.
 - `kernel/core/bigos/utils.cc`: small helpers such as integer-to-string conversion.
 
@@ -548,10 +590,11 @@ The project provides a small amount of freestanding C++ infrastructure.
 - Treat boot addresses, linker addresses, page-table layout, interrupt vectors,
   and disk offsets as design-critical.
 - Keep fd/VFS, process lifecycle, and VMA/user-memory descriptions bounded:
-  synchronous I/O, RAM-backed and persistent clean-sync `/rw`, constrained
+  bounded I/O, RAM-backed and persistent `/rw`, constrained
   rename/metadata/cwd-relative paths, restricted anonymous/file mapping, bounded
-  demand paging/COW, no broad POSIX process model, no dynamic linking, no job
-  control, no journaling/crash recovery, and no broad file-backed `mmap`.
+  demand paging/COW, bounded dynamic linking, no broad POSIX process model, no
+  complete job control, no full journaling/crash recovery, and no broad writable
+  file-backed `mmap`.
 - Prefer small, explicit hardware-facing code.
 - Validate initialization order carefully; many subsystems depend on memory,
   paging, or descriptor tables being available first.

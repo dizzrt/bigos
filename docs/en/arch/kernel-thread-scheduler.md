@@ -17,18 +17,18 @@ BigOS keeps the minimal kernel-thread model bounded, but the scheduler now owns 
 
 ## Non-Goals And Boundaries
 
-- **Limited scheduler SMP only**: per-CPU run queues, scheduler nudge, LAPIC timer ownership, and bounded APIC default delivery for supported timer/keyboard IRQ sources are supported, but there is no CPU hotplug, NUMA, complete IRQ affinity API, work stealing, CFS, real-time scheduling, POSIX scheduling policy, generic device IRQ balancing, or MSI/MSI-X.
-- **No full priority scheduler**: the scheduler records bounded priority/policy metadata only. Default selection remains deterministic single-core round-robin.
+- **Limited scheduler SMP only**: per-CPU run queues, scheduler nudge, LAPIC timer ownership, and bounded APIC default delivery for supported timer/keyboard IRQ sources are supported, but there is no CPU hotplug, NUMA, complete IRQ affinity API, work stealing, CFS, real-time scheduling, POSIX scheduling policy, generic device IRQ balancing, or broad MSI/MSI-X device balancing policy.
+- **No full priority scheduler**: the scheduler records bounded priority/policy metadata only. Default selection remains deterministic per-CPU round-robin.
 - **Bounded process and syscall integration**: timer preemption does not create
-  user-visible POSIX scheduling policy. Later process/fd/VFS syscalls may use
+  user-visible POSIX scheduling policy. Process/fd/VFS syscalls may use
   `sched::can_block()` from ordinary process syscall contexts, but only inside
-  the same single-core blocking contract.
+  the same bounded kernel-thread blocking contract.
 - **bounded timer-driven scheduler semantics blocking boundary**: wait queues and tick-based sleep remain kernel-thread primitives. They can wake through the waiter-owned CPU scheduler domain, but they still do not provide POSIX blocking IO policy, user-visible cancellation, or signal semantics.
 - Does not change fixed boot addresses, higher-half base, kernel load base, BootInfo ABI, direct map, `KVMEM_BASE`, IDT vector allocation, or `InterruptFrame` ABI.
 
 ## Thread Model And State
 
-Each kernel thread is represented by a TCB that records a stable thread ID, `ThreadState`, saved stack pointer (cooperative context pointer), kernel stack base/size, entry function, argument, bounded time-slice state, and reserved priority/policy metadata. `ThreadState` includes `Runnable`, `Running`, `Idle`, `Blocked`, `Sleeping`, and `Terminated`. `Blocked` and `Sleeping` are bounded non-runnable kernel wait states only; they do not imply POSIX blocking IO, user wait queues, process ownership, cancellation policy, or SMP migration.
+Each kernel thread is represented by a TCB that records a stable thread ID, `ThreadState`, saved stack pointer (cooperative context pointer), kernel stack base/size, entry function, argument, bounded time-slice state, and reserved priority/policy metadata. `ThreadState` includes `Runnable`, `Running`, `Idle`, `Blocked`, `Sleeping`, and `Terminated`. `Blocked` and `Sleeping` are bounded non-runnable kernel wait states only; they do not imply POSIX blocking IO, user wait queues, process ownership, cancellation policy, or unrestricted cross-CPU migration.
 
 The run queue, wait queues, sleep list, and terminated list are intrusive lists. Their nodes (`rq_next`, `wait_next`, `sleep_next`, `term_next`) are owned by the TCB itself and share its lifetime. The scheduler path therefore does not depend on ordinary heap containers and does not allocate queue nodes in IRQ handlers. A thread may belong to at most one CPU run queue, one explicit wait queue, and one timeout tracking list at a time.
 
@@ -104,4 +104,4 @@ paths.
 
 `scheduler_semantics_smoke` is default off. When `BIGOS_SCHEDULER_SEMANTICS_SMOKE` is enabled, `kernel()` creates two ordinary kernel threads. The first observes `BIGOS_SCHED_SEMANTICS_PREEMPT_DELAYED` while preemption is disabled and timer ticks continue; the second can emit `BIGOS_SCHED_SEMANTICS_PREEMPTED` and `BIGOS_SCHED_SEMANTICS_PASSED` only if timer-driven IRQ-return preemption runs it. These markers are distinct from the cooperative `scheduler_smoke` markers.
 
-`scheduler_smp_smoke` is default off and implicitly enables the AP startup/per-CPU timer baseline plus the bounded APIC default delivery gate. When `BIGOS_SCHEDULER_SMP_SMOKE` is enabled, `kernel()` creates one BSP worker and one explicitly AP-placed worker. The smoke emits `BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE`, `BIGOS_SCHED_SMP_BSP_THREAD`, `BIGOS_SCHED_SMP_AP_THREAD`, and `BIGOS_SCHED_SMP_PASSED` only when APIC-backed timer/keyboard routing is active and ordinary scheduler work runs on more than one online CPU. This does not validate CPU hotplug, NUMA, generic device IRQ balancing, MSI/MSI-X, or complete IRQ affinity.
+`scheduler_smp_smoke` is default off and implicitly enables the AP startup/per-CPU timer baseline plus the bounded APIC default delivery gate. When `BIGOS_SCHEDULER_SMP_SMOKE` is enabled, `kernel()` creates one BSP worker and one explicitly AP-placed worker. The smoke emits `BIGOS_APIC_DEFAULT_DELIVERY_ACTIVE`, `BIGOS_SCHED_SMP_BSP_THREAD`, `BIGOS_SCHED_SMP_AP_THREAD`, and `BIGOS_SCHED_SMP_PASSED` only when APIC-backed timer/keyboard routing is active and ordinary scheduler work runs on more than one online CPU. This does not validate CPU hotplug, NUMA, generic device IRQ balancing, broad MSI/MSI-X policy, or complete IRQ affinity.

@@ -4,21 +4,22 @@
 
 Current project-level status lives in `README.md`, `README-zh.md`, `AGENTS.md`,
 `openspec/config.yaml`, and `roadmap.md`. Architecture docs should describe the
-current bounded minimal usable system baseline as a single-core, mostly synchronous,
-x86_64 research kernel with a bounded POSIX-like subset. Legacy
-BIOS/MBR/exFAT remains the default runnable baseline; the x86_64 UEFI boot
-backend is a runnable non-parity spike. Do not describe BigOS as complete POSIX
-coverage or a complete general-purpose OS.
+current bounded minimal usable system baseline as a multi-core capable x86_64
+research kernel with a bounded POSIX-like subset. The x86_64 UEFI backend is the
+default runnable baseline; the Legacy BIOS/MBR/exFAT path remains an explicit
+compatibility and debug backend. Do not describe BigOS as complete POSIX
+coverage, a complete network/storage stack, or a complete general-purpose OS.
 
 `roadmap.md` is for project-level implemented capabilities, missing capabilities,
 medium/long-term planning, and staged development priorities. Keep concrete
 entry points, file paths, commands, validation markers, implementation details,
 and archive/version indexes in dedicated documentation or change records.
 Filesystem and userland documentation must keep bounded `/rw`, persistent
-clean-sync storage, constrained rename, metadata, cwd/relative paths, pipe/dup,
-minimal libc, and static user programs separate from full POSIX filesystem,
-journaling/crash recovery, async I/O, dynamic linking, job control, complete
-POSIX libc, and broad storage/device support.
+storage, constrained rename, metadata, cwd/relative paths, pipe/dup, bounded
+socket support, bounded dynamic linking, minimal libc, and static user programs
+separate from full POSIX filesystem, complete journaling/crash recovery, broad
+user-visible async I/O, complete job control, complete POSIX libc, and broad
+storage/device support.
 
 ## Language Entry Points
 

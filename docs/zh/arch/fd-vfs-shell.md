@@ -66,5 +66,5 @@ BigOS 引入最小的只读 fd/VFS 边界。后续能力保持这条 exFAT 读�
 
 ## 非目标
 
-- 当前基线仍不引入 `select`、完整 POSIX `stat`、完整 pathname canonicalization、symlink traversal、mount namespace、`chroot`、SMP 或 UEFI backend；其中一部分是后续 bounded 能力，另一部分仍是非目标。
-- 当前项目非目标仍包括 async I/O、广泛或 file-backed `mmap`、完整 POSIX 文件系统/进程语义、动态链接、SMP 和可运行 UEFI backend。
+- 当前基线仍不引入 `select`、完整 POSIX `stat`、完整 pathname canonicalization、symlink traversal、mount namespace 或 `chroot`；其中一部分是后续 bounded 能力，另一部分仍是非目标。
+- 当前项目非目标仍包括广泛 user-visible async I/O、广泛 writable file-backed `mmap`、完整 POSIX 文件系统/进程语义、完整 POSIX dynamic-loader 语义、CPU hotplug、NUMA 和广泛 storage/device management。

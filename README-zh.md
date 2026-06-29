@@ -3,30 +3,32 @@
 语言：[English](README.md) | 简体中文
 
 BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
-C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为经过 smoke 验证、单核且以同步为主的
-研究内核：当前默认可运行基线仍是 x86_64 Legacy BIOS/MBR/exFAT 路径，同时已有一个
-不具备运行时等价能力的 x86_64 UEFI boot backend spike。它的有界用户态闭环包括引导流程、
-文本/串口输出、中断/异常/syscall 处理、PIT timer tick、键盘驱动的 TTY 输入路径、
-具备 bounded timer semantics 的内核线程调度器、`int 0x80` syscall 入口、进程生命周期、
-fd/VFS 服务、有界可写 `/rw` 存储、persistent clean-sync `/rw`、cwd/relative path、
-受限 rename、metadata 查询、pipe/dup、默认开启的 PID-1 init、最小用户态 crt0/libc、
-`/bin/sh`、bounded ELF64 用户程序加载器、VMA-backed 用户内存校验，以及一套相对完整的
-早期内核内存管理。
+C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为经过 smoke 验证、具备多核能力的
+研究内核：当前默认可运行基线是 x86_64 UEFI boot backend，Legacy BIOS/MBR/exFAT
+路径作为显式兼容与调试 backend 保留。它的有界用户态闭环包括引导流程、文本/串口/
+framebuffer 输出、中断/异常/syscall 处理、timer、键盘驱动的 TTY 输入路径、多核调度、
+wait queue 与 timeout sleep、`int 0x80` syscall 入口、进程生命周期、fd/VFS 服务、
+有界可写 `/rw` 存储、persistent writable storage、cwd/relative path、受限 rename、
+metadata 查询、pipe/dup、有界 network/socket 路径、默认开启的 PID-1 init、最小用户态
+crt0/libc、有界 FILE stream、有界动态链接、`/bin/sh`、bounded ELF64 用户程序加载器、
+VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管理。
 
 本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
 
 ## 状态
 
-已完成能力压缩为当前有界最小可用系统基线：在 boot 路径、
+已完成能力压缩为当前有界最小可用系统基线：在默认 UEFI backend、Legacy 兼容 backend、
 中断基础设施和早期内存管理之上，具备 timer、输入、调度、syscall、有界 POSIX-like
-进程/I/O 子集、读写 VFS 原语、bounded 用户 ELF 加载、常驻 PID-1 init、最小静态用户程序、
-有界 `/rw` 运行期与 persistent clean-sync 存储、cwd/relative path、受限 rename、
-metadata、pipe/dup 和最小用户态运行时的单核、以同步为主的内核。
+进程/I/O 子集、读写 VFS 原语、bounded 用户 ELF 加载、常驻 PID-1 init、静态用户程序、
+有界 `/rw` 运行期与 persistent storage、cwd/relative path、受限 rename、metadata、
+pipe/dup、有界 socket/dynamic-link 路径和最小用户态运行时的多核能力内核。
 
 已经实现或部分实现：
 
-- x86 引导路径，包括 MBR、exFAT DBR、扩展 DBR 和长模式切换。
-- 从 exFAT 磁盘镜像加载 ELF64 内核。
+- x86_64 UEFI 默认引导路径，包含 unified handoff、framebuffer/font metadata
+  和 OVMF/QEMU runtime packaging。
+- Legacy x86 引导路径，包括 MBR、exFAT DBR、扩展 DBR、长模式切换，以及从
+  exFAT 磁盘镜像加载 ELF64 内核。
 - 高半区内核链接地址 `0xffffffff80000000`。
 - VGA 文本模式输出、`kprintf`，以及用于确定性标记的 COM1 串口输出。
 - kernel-owned 静态 IDT、生成的汇编 ISR 桩，以及把 CPU exception、i8259 IRQ
@@ -35,13 +37,14 @@ metadata、pipe/dup 和最小用户态运行时的单核、以同步为主的内
   的内核 fault 输出 `BIGOS_PAGE_FAULT` 标记。
 - 统一的早期致命诊断（`bigos::kpanic`/`khalt`）：在 COM1 与 VGA 输出稳定的
   `BIGOS_PANIC code=<code> source=<source>` 标记，然后关中断并停机。
-- i8259 PIC 驱动，以及 IRQ0 上的 PIT timer 驱动，提供单调 tick 和最小 `mdelay`
-  忙等原语。
+- i8259 PIC、LAPIC/IOAPIC 和 PIT timer 驱动，提供中断投递、单调 tick 和最小
+  `mdelay` 忙等原语。
 - 键盘 IRQ1 scancode 解码（US Set 1）接入定容 TTY/console 输入路径；console
   输出走 VGA。
-- 单核内核线程调度器：1 页内核栈、x86_64 context switch、round-robin
-  `yield()`、scheduler-owned idle 线程、wait queue、timeout sleep、
-  preemption-disable guard，以及 bounded IRQ-return timer preemption。
+- 具备多核能力的内核线程调度器：1 页内核栈、x86_64 context switch、per-CPU
+  run queue、round-robin `yield()`、scheduler-owned idle 线程、wait queue、
+  timeout sleep、preemption-disable guard、scheduler nudge IPI、remote wakeup、
+  TLB shootdown validation，以及 bounded IRQ-return timer preemption。
 - `int 0x80` syscall 入口、最小寄存器 ABI 和 bounded dispatcher，包含用户 libc
   与 shell 使用的进程、fd/VFS、pipe/dup、身份/时间、信号和 `SYS_EXECVE` 调用。
 - 默认关闭的首个 ring3 用户程序 smoke：flat embedded image 通过 TSS/RSP0 与
@@ -53,11 +56,15 @@ metadata、pipe/dup 和最小用户态运行时的单核、以同步为主的内
   `BIGOS_USERLAND_PASSED` 验证 crt0、libc、fork/exec/wait、pipe、重定向和 malloc。
 - 进程生命周期核心：PID/parent-child 状态、wait/exit/reap 语义、process-local
   fd table、bounded exec image replacement，以及 exit 或 user fault 后的 safe teardown。
-- 内核 block/filesystem 路径和 VFS 壳层：同步 ATA PIO sector 读取、MBR exFAT
-  分区发现、只读 exFAT boot assets、有界可写 `/rw` 文件、persistent clean-sync
-  存储、cwd/relative path lookup、受限 rename、metadata 查询、fd-backed
-  `open`/`read`/`write`/`close`/`lseek`/`fsync`，以及面向受控 raw image 的 bounded
+- 内核 block/filesystem 路径和 VFS 壳层：block request lifecycle、中断驱动
+  completion、ATA/Legacy 和有界 virtio-blk 验证 backend、兼容路径的 MBR exFAT
+  分区发现、只读 boot assets、有界可写 `/rw` 文件、persistent writable storage、
+  cwd/relative path lookup、受限 rename、metadata 查询、fd-backed
+  `open`/`read`/`write`/`close`/`lseek`/`fsync`，以及面向受控镜像的 bounded
   file read/write。
+- 设备/网络路径：有界 device registration、PCI/MSI-X 验证、modern-only
+  virtio-net smoke、有界 Ethernet/ARP/IPv4/ICMP/UDP protocol path，以及最小 UDP
+  socket fd/syscall 子集。
 - 基于 buddy 的物理页分配器，并使用 early metadata arena 完成 bootstrap。
 - Slab/kmalloc 分配器：size class、动态 slab 回收、page-backed 大对象分配、
   可选 debug guard 和验证统计。
@@ -66,26 +73,27 @@ metadata、pipe/dup 和最小用户态运行时的单核、以同步为主的内
 - 用户地址空间 teardown 和 owned 运行时映射的空 PT/PD/PDPT 回收；高半区内核映射
   保持 borrowed。
 - Bounded VMA/user-memory API：stack/heap/image 元数据、VMA-backed syscall buffer
-  validation、`brk`、restricted anonymous mapping、demand-zero 用户页物化和 COW
-  写时分裂；这不是广泛 file-backed demand paging。
+  validation、`brk`、restricted anonymous mapping、read-only file-backed
+  mapping、demand-zero 用户页物化和 COW 写时分裂；这不是广泛 writable
+  file-backed demand paging。
+- 有界 dynamic-link 路径：固定用户态布局保留、最小 loader handshake，以及
+  validation-only shared object packaging。
 - 显式分配 API：内核虚拟页使用 `alloc_kernel_pages(nr_pages, flags)`，
   物理 buddy 使用内部 `alloc_physical_order(order, flags)`。
 - 可切换的早期内存运行时自检（`bigos::mm::self_test`）。
 - 小型 KTL 支持库，用于内核容器和辅助工具。
 
-尚未实现或仍处于骨架状态：
+仍然有界或尚未实现：
 
-- UEFI runtime parity、storage/device backend parity、backend cleanup，以及超出当前
-  可运行 x86_64 boot backend spike 的广泛 UEFI 验证。
-- SMP、per-CPU run queue、跨 CPU migration、完整 priority/realtime scheduling
-  和 POSIX scheduling policy。
-- 完整 POSIX 多进程模型：广泛进程策略、超出当前 bounded 子集的 `fork` 语义、
-  `exec*` 全族、作业控制和终端进程组。
-- file-backed `mmap`、广泛 mapping policy、动态链接、共享库和完整 POSIX libc。
-- 完整 POSIX filesystem、journaling、crash recovery、async I/O、超出当前受限子集的
-  广泛目录变更语义，以及超出当前受控 ATA PIO + exFAT/VFS 子集的广泛存储设备支持。
-- 更广泛的设备驱动支持。
-- 完整的构建/安装自动化与 CI。
+- 多架构 runtime parity、超出已验证 x86_64 UEFI/Legacy 路径的 firmware parity，
+  以及更广泛 backend cleanup。
+- CPU hotplug、NUMA、完整 priority/realtime scheduling 和 POSIX scheduling policy。
+- 完整 POSIX 多进程模型：广泛进程策略、完整 `exec*` 全族、完整作业控制和完整终端进程组。
+- 广泛 writable file-backed `mmap`、广泛 mapping policy、完整 POSIX dynamic loader
+  和完整 POSIX libc。
+- 完整 POSIX filesystem、完整 journaling/crash recovery、广泛 user-visible async I/O、
+  无限制目录变更语义和广泛 storage-device management。
+- 更广泛的设备驱动支持，以及 release-grade CI 自动化。
 
 ## 仓库结构
 
@@ -95,10 +103,12 @@ metadata、pipe/dup 和最小用户态运行时的单核、以同步为主的内
 |-- include           公共内核头文件和小型 libc 风格头文件子集
 |-- user              freestanding 用户 crt0/libc、init、shell、bin 与 smoke
 |-- kernel            内核实现源码
-|   |-- arch/x86/boot x86 引导代码、MBR/DBR 和 ELF 加载器
+|   |-- arch/x86/boot Legacy x86 引导代码、MBR/DBR 和 ELF 加载器
+|   |-- arch/x86/uefi x86_64 UEFI loader 和 handoff 支持
 |   |-- core          内核入口及子系统：irq、timer、terminal（console/
-|   |                 keyboard/tty）、sched、syscall、proc、fs、底层 IO
-|   |-- drivers       VGA、i8259 PIC、PIT timer、ATA PIO 等硬件驱动
+|   |                 keyboard/tty）、sched、syscall、proc、fs、net、底层 IO
+|   |-- drivers       VGA、irqchip、PIT、PCI/MSI-X、ATA PIO、RAM block、
+|   |                 virtio-blk 和 virtio-net 等硬件驱动
 |   |-- mm            buddy、slab、kmalloc、虚拟内存和 direct map 代码
 |   `-- runtime       运行时启动汇编源码对象
 |-- tools             boot 磁盘安装工具等开发辅助脚本
@@ -113,7 +123,18 @@ metadata、pipe/dup 和最小用户态运行时的单核、以同步为主的内
 ## 引导流程
 
 ```text
-BIOS
+UEFI firmware（默认 QEMU 路径）
+  |
+  v
+BOOTX64.EFI
+  - 加载 kernel ELF64 image
+  - 准备 unified boot handoff
+  - 传递 framebuffer、memory-map、font 和 root-image metadata
+  |
+  v
+kernel()
+
+Legacy BIOS 兼容路径
   |
   v
 MBR / exFAT DBR
@@ -143,20 +164,22 @@ kernel()
     timer 和 keyboard IRQ1 路径
   - 在 early handler 注册完成后开启中断
   - 在串口与 VGA 输出 "BigOS kernel reached" 标记
-  - 可选运行 syscall、scheduler、blocking、scheduler-semantics、block/exFAT、首个用户程序和用户 ELF smoke
-  - 通过 sched::start() 进入单核调度器；停机行为由调度器 idle 线程拥有，
-    取代裸 hlt 尾循环
+  - 可选运行 syscall、scheduler、blocking、scheduler-semantics、multicore、
+    storage、network/socket、dynamic-link、libc/userland、block/exFAT、首个用户程序
+    和用户 ELF smoke
+  - 通过 sched::start() 进入调度器；per-CPU idle 线程拥有停机行为，取代裸 hlt 尾循环
 ```
 
 关键文件：
 
+- `kernel/arch/x86/uefi/loader.cc`：默认 UEFI loader。
+- `kernel/arch/x86/uefi/handoff.s`：UEFI 到 kernel ABI 的 handoff。
 - `kernel/arch/x86/boot/boot.s`：早期 CPU 模式切换并跳转到内核。
 - `kernel/arch/x86/boot/boot.cc`：磁盘读取、exFAT 查找、ELF 加载。
 - `kernel/core/kernel.cc`：主内核入口。
 - `link.lds`：高半区内核布局。
-- `docs/zh/arch/x86-boot-layout.md`：当前 Legacy BIOS 地址和 handoff 布局。
-- `docs/zh/arch/uefi-boot-blueprint.md`：x86_64 UEFI boot backend spike 说明，
-  以及未来 runtime parity/backend cleanup 边界。
+- `docs/zh/arch/uefi-boot-blueprint.md`：当前 x86_64 UEFI boot backend。
+- `docs/zh/arch/x86-boot-layout.md`：Legacy BIOS 地址和 handoff 布局。
 
 ## 构建与运行
 
@@ -199,25 +222,28 @@ PID-1 init，并启动 `/bin/sh`；默认 headless 验证观察 `BIGOS_USER_EXEC
 `--user_program_smoke`、`--user_elf_smoke` 和 `--userland_smoke` 会选择默认关闭的
 用户程序验证路径，替代普通用户 init payload。所有标记都写到 COM1 串口和 VGA。
 
-当前 Legacy BIOS/MBR/exFAT 路径的本地 emulator 运行入口：
+本地 emulator 运行入口：
 
 ```bash
 xmake run qemu
 xmake run qemu -- --display none
+xmake run qemu-uefi
+xmake run qemu-legacy
 xmake run qemu-gdb
 xmake run bochs
 xmake run bochs -- --display sdl2
 xmake run bochs -- --display none
 ```
 
-`xmake run qemu` 使用图形 QEMU 启动生成的 raw image，并把 COM1 输出写入
-`build/test/qemu.serial.log`。`xmake run qemu -- --display none` 以无交互显示模式
-启动 QEMU。`xmake run qemu-gdb` 会让 QEMU 在启动前暂停并开启默认 GDB stub
-（`target remote localhost:1234`），COM1 输出写入 `build/test/qemu-gdb.serial.log`。
-`xmake run bochs` 默认启动 SDL2 Bochs 流程；`xmake run bochs -- --display sdl2`
-显式选择 SDL2，`xmake run bochs -- --display none` 选择 Bochs no-GUI 模式。这些
-target 都通过 xmake 构建 kernel 和 boot artifacts，然后以 `--skip-build` 调用
-Python 镜像辅助脚本，并转发 `--` 后的 target arguments。
+`xmake run qemu` 启动默认 UEFI QEMU 路径，并把 COM1 输出写入
+`logs/qemu-uefi.serial.log`。`xmake run qemu -- --display none` 以无交互显示模式
+启动同一 UEFI 路径。`xmake run qemu-legacy` 选择 Legacy BIOS/MBR/exFAT 兼容路径。
+`xmake run qemu-gdb` 会让 Legacy QEMU 在启动前暂停并开启默认 GDB stub
+（`target remote localhost:1234`）。`xmake run bochs` 默认启动 Legacy SDL2 Bochs
+流程；`xmake run bochs -- --display sdl2` 显式选择 SDL2，`xmake run bochs --
+--display none` 选择 Bochs no-GUI 模式。这些 target 都通过 xmake 构建 kernel 和 boot
+artifacts，然后以 `--skip-build` 调用 Python 镜像辅助脚本，并转发 `--` 后的 target
+arguments。
 
 Python helper 仍用于 raw image 生成、Bochs 配置生成、QEMU 启动命令查看、
 serial marker 检查和 no-launch/offline validation：
@@ -227,18 +253,21 @@ uv run python -m tools.bigosdev run
 ```
 
 helper 会执行 preflight 检查；如果不是从 xmake run target 调用，也可以构建 kernel
-和 boot artifacts。随后它在用户态生成 raw 磁盘镜像，写入 MBR、exFAT boot
-region、`/boot/boot.bin`、根目录 `kernel`、`/boot/fs_smoke.txt`、
-`/boot/user/init.elf` 和打包的 `/bin/*` 用户程序，并在未指定 `--no-launch`
-时启动选定 emulator。它不会构建 UEFI loader、ESP 镜像、OVMF 配置或新存储驱动路径。
+和 boot artifacts。随后它生成默认 UEFI ESP/FAT image 与 exFAT 兼容 root image；
+显式选择 `--boot-mode legacy` 时则生成 Legacy raw disk image。它会打包
+`/boot/user/init.elf`、`/bin/sh`、`/bin/*` 和验证 payload，并在未指定 `--no-launch`
+时启动选定 emulator。
 
 默认生成物均位于 `build/` 下：
 
-- raw 磁盘镜像：`build/test/os.raw`。
+- UEFI ESP/FAT image：`build/test/uefi-esp.img`。
+- UEFI exFAT root image：`build/test/uefi-root.raw`。
+- Legacy raw 磁盘镜像：`build/test/os.raw`。
 - 生成的 Bochs 配置：`build/test/bochsrc.bxrc`。
-- QEMU 串口日志：`build/test/qemu.serial.log` 和
-  `build/test/qemu-gdb.serial.log`。
+- QEMU 串口日志：`logs/qemu-uefi.serial.log`、`logs/qemu.serial.log` 和
+  `logs/qemu-gdb.serial.log`。
 - boot 产物：`build/bin/x86/boot/`。
+- UEFI loader：`build/bin/x86/uefi/BOOTX64.EFI`。
 - 内核 ELF：`build/kernel`。
 
 常用参数示例：
@@ -261,16 +290,17 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
 
 当前范围：
 
-- 该流程支持 QEMU 与 Bochs。
-- QEMU 使用 Legacy BIOS 默认路径，并用 `-drive file=<image>,format=raw,if=ide`
-  把 raw image 暴露为 IDE disk，保持当前 ATA PIO 路径。
+- QEMU 支持默认 UEFI 路径和显式 Legacy 路径；Bochs 支持 Legacy BIOS/debug 路径。
+- 默认 QEMU 路径使用 UEFI/OVMF、ESP/FAT image 与 exFAT root image。Legacy 路径
+  用 `-drive file=<image>,format=raw,if=ide` 把 raw image 暴露为 IDE disk，
+  保持 ATA PIO 路径。
 - QEMU headless automation 通过 helper 的 display 参数实现，例如
   `--emulator qemu --display none`；不新增独立 `qemu-headless` xmake target。
 - `xmake run bochs` 是默认 SDL2 的 Legacy BIOS 调试入口；使用 `xmake run
   bochs -- --display sdl2` 可显式选择 SDL2，使用 `xmake run bochs -- --display
   none` 可选择 Bochs no-GUI 模式。Bochs 仍适合早期 boot、BIOS、ATA PIO、中断和硬件行为差异排查。
-- UEFI 仍是独立的非等价 backend spike 路径；storage/device parity 和更广泛的
-  runtime validation 仍是未来 backend 工作。
+- Virtio block/net 路径是有界验证 backend，不提供广泛 storage/device parity 或
+  用户可见 device management。
 - 该流程不修改 `boot.s`、`boot.cc`、`BootInfo`、`link.lds`、高半区内核地址或
   内核运行时初始化顺序。
 
@@ -285,11 +315,12 @@ device、挂载权限、`mkfs.exfat` 或手工准备的 exFAT 镜像。
   `build/test/bochsrc.bxrc` 默认不会硬编码 Windows 路径、`win32` display
   设置或固定 ROM 路径。
 
-运行生成的 Bochs 流程：
+运行生成的 emulator 流程：
 
 ```bash
 xmake run qemu
 xmake run qemu -- --display none
+xmake run qemu-legacy
 xmake run qemu-gdb
 xmake run bochs
 xmake run bochs -- --display sdl2
@@ -341,11 +372,13 @@ xmake run bochs -- --display none
 
 ### 引导
 
-引导加载器专用于 x86/x86_64，并假设磁盘镜像布局中存在一个 exFAT 分区，
-该分区包含名为 `kernel` 的文件。
-默认可运行 backend 是 Legacy BIOS。当前已有可运行的 x86_64 UEFI boot backend
-spike，但它不是 Legacy BIOS/MBR/exFAT 路径的 runtime-parity 替代。
+引导路径专用于 x86/x86_64。默认可运行 backend 是 x86_64 UEFI loader，它使用
+ESP/FAT image，并通过 exFAT 兼容 root image 提供有界用户态 payload。Legacy
+BIOS/MBR/exFAT 路径作为显式兼容 backend 保留，并仍假设磁盘镜像中存在一个包含
+名为 `kernel` 文件的 exFAT 分区。
 
+- `kernel/arch/x86/uefi/loader.cc`：UEFI ELF 加载与 boot handoff。
+- `kernel/arch/x86/uefi/handoff.s`：从 UEFI 代码进入 kernel ABI 的 handoff。
 - `kernel/arch/x86/boot/mbr.s`：第一阶段引导代码。
 - `kernel/arch/x86/boot/dbr_exfat.s`：exFAT 引导扇区代码。
 - `kernel/arch/x86/boot/exdbr_exfat.s`：扩展 exFAT 引导代码。
@@ -366,8 +399,10 @@ spike，但它不是 Legacy BIOS/MBR/exFAT 路径的 runtime-parity 替代。
   timer、keyboard IRQ1）。
 - 可选触发 page-fault smoke（以 `BIGOS_PAGE_FAULT_SMOKE` 构建时）。
 - 开启中断并输出 "BigOS kernel reached" 标记。
-- 可选运行 syscall、scheduler、blocking、scheduler-semantics、block/exFAT、首个用户程序和用户 ELF smoke。
-- 通过 `bigos::sched::start()` 进入单核调度器；停机行为由 idle 线程拥有。
+- 可选运行 syscall、scheduler、blocking、scheduler-semantics、multicore、
+  storage、network/socket、dynamic-link、libc/userland、block/exFAT、首个用户程序
+  和用户 ELF smoke。
+- 通过 `bigos::sched::start()` 进入调度器；per-CPU idle 线程拥有停机行为。
 
 ### 内存管理
 
@@ -431,8 +466,9 @@ PIT 在 IRQ0 上驱动周期性 tick。
 
 ### 调度器
 
-单核 round-robin 内核线程调度器，包含 cooperative switch 路径、wait queue、
-timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
+具备多核能力的 round-robin 内核线程调度器，包含 cooperative switch 路径、per-CPU
+run queue、wait queue、timeout sleep、scheduler nudge IPI、remote wakeup、TLB
+shootdown validation 和受 guard 保护的 IRQ-return timer preemption。
 
 - `kernel/core/sched/sched.cc` / `include/bigos/sched.h`：TCB、round-robin run
   queue、intrusive wait/sleep list、`create_kernel_thread()`、`yield()`、
@@ -442,8 +478,10 @@ timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
 - timer IRQ 统计普通线程 time slice、唤醒到期 sleeper，并记录 bounded reschedule
   intent。外部 IRQ return 只有在 handler 完成、单次 EOI 已发送且 scheduler guard
   允许后才可能切换。
-- `scheduler_smoke`、`blocking_smoke` 和 `scheduler_semantics_smoke` 分别验证
-  cooperative switching、wait/timeout 行为和 IRQ-return preemption marker。
+- `scheduler_smoke`、`blocking_smoke`、`scheduler_semantics_smoke`、
+  `scheduler_smp_smoke`、`tlb_shootdown_smoke` 和 `multicore_hardening_smoke`
+  分别验证 cooperative switching、wait/timeout 行为、IRQ-return preemption、
+  AP placement、remote wakeup 和 TLB shootdown marker。
 
 ### 系统调用
 
@@ -452,7 +490,8 @@ timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
   返回值在 `rax`）。实现 `SYS_DEBUG_WRITE`、`SYS_GET_TICK`、`SYS_WRITE`、
   `SYS_EXIT`、`SYS_WAIT`、fd/VFS `SYS_OPEN`/`SYS_READ`/`SYS_CLOSE`、`SYS_BRK`、
   restricted `SYS_MAP_ANON`、`SYS_FORK`、时间/身份、signal、`lseek`、pipe/dup、
-  fsync/mkdir/unlink 和 `SYS_EXECVE`；未知 number 返回 `SYS_ENOSYS`。
+  fsync/mkdir/unlink、有界 UDP socket 调用、有界 dynamic-link helper 调用和
+  `SYS_EXECVE`；未知 number 返回 `SYS_ENOSYS`。
   `syscall_smoke` 开关从 ring0 验证诊断 dispatch。
 
 ### 进程与用户态
@@ -469,14 +508,17 @@ timeout sleep 和受 guard 保护的 IRQ-return timer preemption。
   bounded ELF64 `ET_EXEC` prepare/exec 路径。
 - `kernel/core/proc/user_mode.cc` / `kernel/core/proc/user_mode.s` /
   `include/bigos/user_mode.h`：GDT/TSS/RSP0 设置和 `iretq` ring3 entry。
-- Demand paging 与 COW 仅针对当前 bounded anonymous 用户映射实现；广泛
-  file-backed `mmap`、动态链接、作业控制和完整 POSIX libc 仍不在范围内。
+- Demand paging 与 COW 针对当前 bounded anonymous 用户映射实现，并提供有界
+  read-only file-backed mapping 支持。动态链接存在于有界默认关闭路径中。广泛
+  writable file-backed `mmap`、完整作业控制和完整 POSIX libc 仍不在范围内。
 
 ### 显示与 IO
 
-VGA 文本模式和 COM1 串口是当前输出后端。
+UEFI framebuffer console、Legacy VGA 文本模式和 COM1 串口是当前输出后端。
 
 - `kernel/drivers/video/vga.cc`：文本缓冲区写入、光标移动、清屏。
+- `kernel/core/terminal/console_render.cc`：framebuffer 文本渲染。
+- `kernel/core/terminal/glyph_font.cc`：framebuffer 输出的 glyph lookup。
 - `kernel/core/bigos/io.cc`：端口 IO 封装、`kprintf` 和串口输出。
 - `kernel/core/bigos/utils.cc`：整数转字符串等小型辅助函数。
 
@@ -495,10 +537,11 @@ VGA 文本模式和 COM1 串口是当前输出后端。
 - 保持代码 freestanding-safe。不要依赖托管 libc、异常、RTTI、OS 服务，
   或尚未初始化的动态分配路径。
 - 将引导地址、链接地址、页表布局、中断向量和磁盘偏移视为关键设计约束。
-- 描述 fd/VFS、process lifecycle 和 VMA/user-memory 时保持 bounded 边界：同步 I/O、
-  RAM-backed 与 persistent clean-sync `/rw`、受限 rename/metadata/cwd-relative path、
-  restricted anonymous/file mapping、bounded demand paging/COW、无广泛 POSIX 进程模型、
-  无动态链接、无作业控制、无 journaling/crash recovery、无广泛 file-backed `mmap`。
+- 描述 fd/VFS、process lifecycle 和 VMA/user-memory 时保持 bounded 边界：有界 I/O、
+  RAM-backed 与 persistent `/rw`、受限 rename/metadata/cwd-relative path、
+  restricted anonymous/file mapping、bounded demand paging/COW、有界动态链接、
+  无广泛 POSIX 进程模型、无完整作业控制、无完整 journaling/crash recovery、无广泛
+  writable file-backed `mmap`。
 - 优先使用小而显式的硬件相关代码。
 - 仔细验证初始化顺序；许多子系统依赖内存、分页或描述符表先就绪。
 - 修改 Bochs 或磁盘镜像设置时，请记录本地路径假设。
