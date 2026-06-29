@@ -174,23 +174,51 @@ The next phase keeps x86_64 as the delivery target and grows user-visible
 maturity in dependency order: first modernize the boot backend and display
 subsystem, then consolidate the freshly landed multi-core base, then move I/O
 toward asynchronous and interrupt-driven paths so modern storage and networking
-can build on a correct foundation, and finally mature the userland. New code
-added along the way should respect the existing boot, memory, interrupt, and
-multi-core boundaries so each milestone stays a controlled extension rather than
-a broad retrofit.
+can build on a correct foundation, then mature the userland, and then deepen the
+architecture-neutral capabilities that make the system feel usable — user-visible
+asynchronous I/O and multiplexing, a connection-oriented network stack, and a
+recoverable writable filesystem — before any hardening or multi-architecture
+work. New code added along the way should respect the existing boot, memory,
+interrupt, and multi-core boundaries so each milestone stays a controlled
+extension rather than a broad retrofit. After the depth phase the continuation
+phase stays on x86_64 and raises general-purpose maturity in dependency order:
+first let user programs use the multi-core kernel through bounded user-space
+parallelism, then harden isolation and resource limits whose threat model that
+parallelism makes concrete, then mature the ecosystem so more standard programs
+run, and broaden device support as a parallel track. Multi-architecture work is
+deferred to a later long-term goal.
 
 下一阶段保持 x86_64 为交付目标，并按依赖顺序推进用户可见成熟度：先现代化启动 backend
 与显示子系统，再巩固刚落地的多核基线，随后将 I/O 推向异步与中断驱动路径，使现代存储与
-网络能够构建在正确的基础之上，最后完善用户态。沿途新增代码应尊重既有启动、内存、中断
-与多核边界，使每个里程碑成为受控扩展，而非大范围 retrofit。
+网络能够构建在正确的基础之上，再完善用户态，然后在任何加固或多架构工作之前夯实让系统
+真正可用的 architecture-neutral 能力——用户可见的异步 I/O 与多路复用、面向连接的网络栈，
+以及可恢复的可写文件系统。沿途新增代码应尊重既有启动、内存、中断与多核边界，使每个
+里程碑成为受控扩展，而非大范围 retrofit。深度阶段之后，延续阶段继续保持 x86_64，并按
+依赖顺序提升通用成熟度：先通过有界用户态并行让用户程序用满多核内核，再加固隔离与资源
+限制（其威胁模型正由该并行能力变得具体），随后完善生态以运行更多标准程序，并把设备支持
+作为并行轨道拓宽。多架构工作延后为长期目标。
 
-The mainline extends with seven sequenced milestones (M6–M12) on top of the
+The mainline extends with fourteen sequenced milestones (M6–M19) on top of the
 completed capability baseline. Each milestone has a clear user-visible goal and
-lists its tasks; they are pursued in M6–M12 order, where later milestones depend
-on earlier ones.
+lists its tasks; they are pursued in M6–M19 order, where later milestones depend
+on earlier ones. M6–M12 are complete. M13–M15 form the next depth phase: they
+deepen architecture-neutral capabilities (user-visible asynchronous I/O and
+multiplexing, a real networking stack, and a real writable filesystem) and are
+validated once on x86_64 to reduce later multi-architecture rework. M16–M19 form
+the x86_64 continuation phase: they raise general-purpose maturity on a single
+architecture by letting user programs use the multi-core kernel, hardening
+isolation, maturing the ecosystem, and broadening device support. Multi-architecture
+work is deliberately deferred to a later long-term goal so it builds on
+already-mature generic capabilities rather than forcing them to be revalidated
+per ISA.
 
-主线在已完成能力基线之上扩展为七个有序里程碑（M6–M12）。每个里程碑都有清晰的用户可见
-目标并列出其任务；它们按 M6–M12 的顺序推进，后续里程碑依赖在先的里程碑。
+主线在已完成能力基线之上扩展为十四个有序里程碑（M6–M19）。每个里程碑都有清晰的用户可见
+目标并列出其任务；它们按 M6–M19 的顺序推进，后续里程碑依赖在先的里程碑。M6–M12 已完成。
+M13–M15 构成下一阶段的深度推进：先夯实 architecture-neutral 能力（用户可见的异步 I/O
+与多路复用、真实网络栈、真实可写文件系统），并只在 x86_64 上验证一次，以降低后续多架构
+的返工成本。M16–M19 构成 x86_64 延续阶段：在单一架构上提升通用成熟度——让用户程序用满
+多核内核、加固隔离、完善生态、拓宽设备支持。多架构工作被有意延后为长期目标，使其构建在
+已成熟的通用能力之上，而不必为每个 ISA 重复验证。
 
 ### Milestone M1 — Address Space And mmap Maturity / 里程碑 M1 — 地址空间与 mmap 完善
 
@@ -418,6 +446,224 @@ programs and a richer userland.
 - [x] Task M12.3: a broader set of bounded core userland utilities.
 - [x] 任务 M12.3：更广的一组有界核心用户态工具程序。
 
+### Depth Phase / 深度阶段
+
+M13–M15 deepen architecture-neutral capabilities before any hardening or
+multi-architecture work. They build directly on the completed baseline: M13
+adds a user-visible readiness and multiplexing model that later networking and
+interactive programs depend on, M14 grows the bounded UDP-only network path into
+a usable connection-oriented stack, and M15 turns the bounded clean-sync `/rw`
+storage into a recoverable writable filesystem. All three are validated once on
+the x86_64 delivery target and must avoid leaking architecture-specific
+assumptions into generic process, I/O, network, and filesystem policy.
+
+M13–M15 在任何加固或多架构工作之前，先夯实 architecture-neutral 能力。它们直接构建在
+已完成基线之上：M13 增加后续网络与交互式程序所依赖的用户可见 readiness 与多路复用模型，
+M14 将有界 UDP-only 网络路径成长为可用的面向连接网络栈，M15 将有界 clean-sync `/rw`
+存储升级为可恢复的可写文件系统。三者都只在 x86_64 交付目标上验证一次，并且必须避免把
+architecture-specific 假设扩散到通用进程、I/O、网络与文件系统策略中。
+
+### Milestone M13 — Asynchronous I/O And Multiplexing / 里程碑 M13 — 异步 I/O 与多路复用
+
+User-visible goal: a single-threaded user program can wait on multiple
+descriptors at once and write an event loop, instead of busy-waiting one
+descriptor at a time.
+
+用户可见目标：单线程用户程序可以一次等待多个描述符并编写事件循环，而不再逐个描述符忙等。
+
+- [ ] Task M13.1: a kernel fd readiness model expressing readable, writable, and
+  error readiness for socket, pipe, and terminal descriptors over the existing
+  blocking primitives, without implying broad POSIX poll semantics.
+- [ ] 任务 M13.1：内核 fd readiness 模型，在既有阻塞原语之上为 socket、pipe 与终端描述符
+  表达可读、可写与错误就绪状态，不暗示完整 POSIX poll 语义。
+- [ ] Task M13.2: bounded non-blocking descriptor behavior so reads and writes
+  return a deterministic would-block status instead of blocking, integrated with
+  the existing fd-control path.
+- [ ] 任务 M13.2：有界非阻塞描述符行为，使读写返回确定性 would-block 状态而非阻塞，
+  并与既有 fd-control 路径集成。
+- [ ] Task M13.3: a bounded multiplexing syscall that waits on a fixed-capacity
+  set of descriptors with a timeout and reports per-descriptor readiness, reusing
+  the scheduler wait queues.
+- [ ] 任务 M13.3：有界多路复用 syscall，对定容描述符集合带超时等待并报告各描述符就绪状态，
+  复用调度等待队列。
+
+### Milestone M14 — Connection-Oriented Networking / 里程碑 M14 — 面向连接的网络栈
+
+User-visible goal: user programs can run real TCP client/server exchanges,
+connect to a loopback address, and resolve names, on top of the existing bounded
+network path.
+
+用户可见目标：用户程序可以在既有有界网络路径之上运行真实 TCP client/server 交互、连接
+loopback 地址并解析名字。
+
+- [ ] Task M14.1: a loopback network path so connection-oriented and datagram
+  traffic to the local address works without a physical or emulated network
+  card, enabling reproducible default-off validation.
+- [ ] 任务 M14.1：loopback 网络路径，使面向连接与 datagram 的本机地址流量无需物理或仿真
+  网卡即可工作，支撑可复现的默认关闭验证。
+- [ ] Task M14.2: a bounded TCP path with connection setup, bounded retransmission
+  and windowing, ordered delivery, and connection teardown, without claiming a
+  complete TCP feature matrix.
+- [ ] 任务 M14.2：有界 TCP 路径，包含连接建立、有界重传与窗口、有序交付与连接拆除，
+  不声称完整 TCP 特性矩阵。
+- [ ] Task M14.3: a stream socket interface integrated with the fd, multiplexing,
+  and syscall paths, exposing connect, listen, and accept within bounded
+  semantics.
+- [ ] 任务 M14.3：与 fd、多路复用与 syscall 路径集成的 stream socket 接口，在有界语义内
+  暴露 connect、listen 与 accept。
+- [ ] Task M14.4: a minimal DNS client over the existing UDP path sufficient for
+  basic name resolution, without a general resolver or caching daemon.
+- [ ] 任务 M14.4：基于既有 UDP 路径的最小 DNS client，足以支持基础名字解析，
+  不提供通用 resolver 或缓存守护进程。
+
+### Milestone M15 — Recoverable Writable Filesystem / 里程碑 M15 — 可恢复可写文件系统
+
+User-visible goal: the filesystem stays consistent across a crash or power loss
+and can mount more than one writable backend, moving beyond the current
+clean-sync boundary.
+
+用户可见目标：文件系统在崩溃或断电后仍保持一致，并可挂载多于一个可写后端，突破当前
+clean-sync 边界。
+
+- [ ] Task M15.1: a write-ahead journaling path for the writable `/rw` backend
+  with bounded log records covering metadata and data ordering, without claiming
+  general POSIX durability guarantees.
+- [ ] 任务 M15.1：可写 `/rw` 后端的 write-ahead journaling 路径，使用覆盖元数据与数据
+  顺序的有界日志记录，不声称通用 POSIX 持久性保证。
+- [ ] Task M15.2: a mount-time recovery path that replays or discards the journal
+  to restore a consistent filesystem state after an unclean shutdown.
+- [ ] 任务 M15.2：挂载时恢复路径，通过 replay 或丢弃 journal，在非干净关机后恢复一致的
+  文件系统状态。
+- [ ] Task M15.3: a bounded VFS mount framework that lets more than one writable
+  filesystem backend attach at distinct mount points, preserving the read-only
+  boot asset and existing `/rw` boundaries.
+- [ ] 任务 M15.3：有界 VFS mount 框架，使多于一个可写文件系统后端可挂载在不同挂载点，
+  同时保留只读启动资产与既有 `/rw` 边界。
+
+### Continuation Phase / 延续阶段
+
+M16–M19 keep x86_64 as the only delivery target and raise general-purpose
+maturity on a single architecture. They build directly on the depth phase: M16
+lets a user program use the multi-core kernel through bounded user-space
+parallelism, M17 hardens isolation and resource limits whose threat model that
+parallelism makes concrete, M18 matures the ecosystem so more standard programs
+run, and M19 broadens device support as a parallel track. Multi-architecture
+work stays deferred; these milestones must avoid spreading architecture-specific
+assumptions into generic process, isolation, ecosystem, and device policy so a
+later multi-architecture goal can build on them.
+
+M16–M19 继续以 x86_64 为唯一交付目标，在单一架构上提升通用成熟度。它们直接构建在深度
+阶段之上：M16 通过有界用户态并行让用户程序用满多核内核，M17 加固隔离与资源限制（其威胁
+模型正由该并行能力变得具体），M18 完善生态以运行更多标准程序，M19 把设备支持作为并行
+轨道拓宽。多架构工作仍延后；这些里程碑必须避免把 architecture-specific 假设扩散到通用
+进程、隔离、生态与设备策略中，使后续多架构目标可在其上构建。
+
+### Milestone M16 — User-Space Parallelism / 里程碑 M16 — 用户态并行
+
+User-visible goal: a single user program can run multiple threads that the
+kernel schedules across cores, so throughput within one program scales with core
+count instead of being pinned to a single core.
+
+用户可见目标：单个用户程序可以运行由内核跨核调度的多个线程，使单程序内吞吐随核数提升，
+而不再被钉在单一核心上。
+
+- [ ] Task M16.1: separate the bounded process model into a shared thread-group
+  container and per-thread execution units, so per-thread state lives on the
+  scheduler thread while address space, descriptors, working directory,
+  identity, and signal dispositions stay shared, without changing single-threaded
+  behavior.
+- [ ] 任务 M16.1：将有界进程模型拆分为共享的线程组容器与每线程执行单元，使每线程状态归属
+  调度线程，而地址空间、描述符、工作目录、身份与信号处置保持共享，且不改变单线程行为。
+- [ ] Task M16.2: a bounded thread-creation syscall that adds a thread to the
+  current address space with a caller-provided stack and thread-local storage,
+  sharing the thread group's descriptors, working directory, and identity.
+- [ ] 任务 M16.2：有界线程创建 syscall，在当前地址空间内新增线程，使用调用者提供的栈与
+  thread-local 存储，并共享线程组的描述符、工作目录与身份。
+- [ ] Task M16.3: a bounded fast user-space mutex primitive for wait and wake,
+  reusing the existing scheduler wait queues and staying IRQ-safe.
+- [ ] 任务 M16.3：有界的快速用户态互斥原语，支持等待与唤醒，复用既有调度等待队列并保持
+  IRQ-safe。
+- [ ] Task M16.4: thread-aware exit, wait, and signal semantics, including
+  per-thread masks with shared dispositions, thread-directed versus
+  group-directed pending signals, group termination on a fatal signal, and
+  thread-group-scoped reaping, without claiming a complete threading model.
+- [ ] 任务 M16.4：线程感知的 exit、wait 与 signal 语义，包括每线程屏蔽位配合共享处置、
+  线程定向与线程组定向的 pending 信号、致命信号时的整组终止，以及以线程组为范围的回收，
+  不声称完整线程模型。
+- [ ] Task M16.5: a minimal user libc thread API providing thread create/join and
+  a mutex built on the user-space mutex primitive, staying freestanding-safe.
+- [ ] 任务 M16.5：最小用户 libc 线程 API，提供线程 create/join 与基于用户态互斥原语的
+  mutex，保持 freestanding-safe。
+
+### Milestone M17 — Isolation And Resource Limits / 里程碑 M17 — 隔离与资源限制
+
+User-visible goal: the multi-threaded multi-process system stays trustworthy
+under stress, so a single program cannot exhaust shared resources or breach the
+kernel/user boundary.
+
+用户可见目标：多线程多进程系统在压力下保持可信，使单个程序无法耗尽共享资源或突破
+内核/用户边界。
+
+- [ ] Task M17.1: enable architecture-supported kernel/user access protection so
+  the kernel faults on stray user-pointer access except through audited copy
+  paths, hardening the boundary that user-space parallelism widens.
+- [ ] 任务 M17.1：启用架构支持的内核/用户访问保护，使内核在越过受审计拷贝路径的杂散
+  用户指针访问时 fault，加固由用户态并行扩大的边界。
+- [ ] Task M17.2: bounded per-process resource limits covering descriptors,
+  memory, threads, and child processes, with deterministic enforcement and
+  diagnostics.
+- [ ] 任务 M17.2：有界的每进程资源限制，覆盖描述符、内存、线程与子进程，具备确定性
+  强制与诊断。
+- [ ] Task M17.3: a bounded read-only self-inspection surface exposing process,
+  thread, memory, and descriptor state for diagnostics, without a broad procfs
+  contract.
+- [ ] 任务 M17.3：有界只读自省面，暴露进程、线程、内存与描述符状态用于诊断，
+  不提供广义 procfs 契约。
+- [ ] Task M17.4: a controlled shutdown and reset path behind an architecture glue
+  interface, so the system can power off or restart deterministically.
+- [ ] 任务 M17.4：受控关机与重启路径，置于架构 glue 接口之后，使系统可确定性关机或重启。
+- [ ] Task M17.5: release-grade validation automation that runs the default-off
+  smoke matrix reproducibly.
+- [ ] 任务 M17.5：release 级验证自动化，可复现地运行默认关闭的 smoke 矩阵。
+
+### Milestone M18 — Ecosystem Maturity / 里程碑 M18 — 生态成熟
+
+User-visible goal: BigOS runs more standard small programs with fewer porting
+obstacles, and can build a small program on itself.
+
+用户可见目标：BigOS 以更少移植障碍运行更多标准小程序，并可在自身上构建一个小程序。
+
+- [ ] Task M18.1: align signal, terminal, and libc behavior with the
+  expectations of common small programs within bounded semantics.
+- [ ] 任务 M18.1：在有界语义内，使 signal、终端与 libc 行为对齐常见小程序的预期。
+- [ ] Task M18.2: port a set of real third-party small programs as conformance
+  evidence, recording bounded gaps rather than claiming full compatibility.
+- [ ] 任务 M18.2：移植一组真实第三方小程序作为符合性证据，记录有界差距而非声称完全兼容。
+- [ ] Task M18.3: a bounded self-hosting path that compiles and runs a small
+  program on BigOS, without claiming a full self-hosting toolchain.
+- [ ] 任务 M18.3：有界自举路径，在 BigOS 上编译并运行一个小程序，不声称完整自举工具链。
+
+### Milestone M19 — Broader Device Support / 里程碑 M19 — 更广设备支持
+
+User-visible goal: BigOS drives more real hardware-style devices through the
+existing device and async I/O framework, pursued as a parallel track that can
+interleave with M16–M18.
+
+用户可见目标：BigOS 通过既有设备与异步 I/O 框架驱动更多真实硬件风格设备，作为可与
+M16–M18 穿插的并行轨道推进。
+
+- [ ] Task M19.1: an additional modern storage driver such as AHCI or NVMe on the
+  device and async I/O framework, validated through the emulator path.
+- [ ] 任务 M19.1：基于设备与异步 I/O 框架的额外现代存储驱动，如 AHCI 或 NVMe，
+  通过仿真器路径验证。
+- [ ] Task M19.2: a bounded USB host and human-interface input path so keyboard
+  and pointer input work beyond the legacy controller.
+- [ ] 任务 M19.2：有界 USB host 与人机输入路径，使键盘与指针输入不再局限于 legacy
+  控制器。
+- [ ] Task M19.3: broaden the bounded network device path toward an additional
+  real network backend within the existing interrupt-driven I/O boundaries.
+- [ ] 任务 M19.3：在既有中断驱动 I/O 边界内，将有界网络设备路径拓宽到额外的真实网络后端。
+
 ### Parallel Foundations / 并行基础方向
 
 - Backend and cleanup work may continue alongside the mainline, but the
@@ -427,3 +673,22 @@ programs and a richer userland.
   process, filesystem, userland ABI, and generic kernel policy.
 - 所有 x86_64 工作都应避免把 architecture-specific 假设扩散到进程、文件系统、用户态 ABI 和通用
   内核策略中。
+
+### Long-Term Goal / 长期目标
+
+After the M16–M19 continuation phase, the deferred multi-architecture goal
+carries BigOS toward the multi-architecture project goal. It is intentionally
+kept at planning level and sequenced last so it builds on already-mature generic
+capabilities rather than forcing them to be revalidated per ISA.
+
+在 M16–M19 延续阶段之后，延后的多架构目标将 BigOS 推向多架构项目目标。它被有意保持在
+规划层面，并排在最后，使其构建在已成熟的通用能力之上，而不必为每个 ISA 重复验证。
+
+- Multi-architecture goal: formalize the architecture/core boundary by auditing
+  the architecture-specific assumptions surfaced during the depth and
+  continuation phases, then stand up a second ISA as a runnable backend to
+  fulfill the multi-architecture project goal. This goal, not the short-term
+  plan, is where a new ISA is introduced.
+- 多架构目标：通过审查深度与延续阶段暴露出的 architecture-specific 假设来正式化
+  architecture/core 边界，再把第二个 ISA 立为可运行 backend，以兑现多架构项目目标。
+  新 ISA 在该目标中引入，而不在短期计划内。
