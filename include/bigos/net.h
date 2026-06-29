@@ -2,6 +2,7 @@
 #define _BIGOS_NET_H
 
 #include <bigos/device.h>
+#include <bigos/sched.h>
 #include <bigos/timer.h>
 #include <bigos/types.h>
 
@@ -121,6 +122,10 @@ namespace net {
         UdpDatagram rx_queue[UDP_RX_QUEUE_CAPACITY];
         uint32_t rx_head;
         uint32_t rx_count;
+        // Receive wait queue. The protocol RX delivery path wakes it after a
+        // datagram is enqueued so the unified readiness model and future
+        // multiplexing have a wakeup source. Reset on bind via clear_endpoint().
+        sched::WaitQueue rx_wait;
     };
 
     struct ArpEntry {

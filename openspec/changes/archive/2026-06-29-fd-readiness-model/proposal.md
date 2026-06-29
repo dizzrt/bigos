@@ -7,7 +7,7 @@
 - 在 VFS 层引入统一的内核 fd 就绪查询能力：为 `vfs::File` 增加一个可选的就绪（readiness）操作（在 `FileOperations` 末尾追加，不重排既有槽位），用一组位标志表达可读、可写、错误三类就绪状态。
 - 为 pipe 后端接入就绪查询：复用既有 `read_ready`/`write_ready` 判断，把写端关闭后的可读 EOF、读端关闭后的写端错误（broken pipe）映射为对应就绪位。
 - 为 socket（有界 UDP）后端补齐等待队列：在 UDP endpoint/socket 上新增接收等待队列，由协议 RX 投递路径在数据到达时唤醒；并提供就绪查询，把“收队列非空”表达为可读、“可发送”表达为可写、端点失活表达为错误。
-- 为 terminal/tty 描述符接入就绪查询：把全局 tty 输入环与其等待队列桥接到 fd 就绪查询路径，复用既有 `input_available`/`input_record_available` 判断，使终端描述符的可读就绪可被统一查询。
+- 为 terminal/tty 描述符接入就绪查询：tty 已表达为 `vfs::File`（`TTY_OPS` 并已预留 poll 槽位），本变更为 `TTY_OPS` 实现就绪 op，复用既有 `input_available`/`input_record_available` 判断；因所有终端 fd（含 fd 1/2 与 `dup` 副本）共享同一 `TTY_OPS` 句柄，标准输入以外的终端 fd 自动获得一致就绪语义，无需裸 fd 特例。
 - 新增一个默认关闭的运行期 smoke 开关与 COM1 标记，验证三类描述符（pipe、socket、tty）在有数据/可写/关闭等条件下报告的就绪位与既有阻塞行为一致。
 - 非目标：不实现非阻塞读写返回 would-block 的描述符标志（属于后续 M13.2），不实现面向用户态的多路复用 syscall（属于后续 M13.3），不暗示完整 POSIX `poll`/`select`/`epoll` 语义。
 
@@ -21,7 +21,7 @@
 
 ## Impact
 
-- 受影响内核子系统：VFS（`kernel/core/fs`、`include/bigos/fs/vfs.h`）、IPC pipe（`kernel/core/ipc`、`include/bigos/ipc/pipe.h`）、网络 socket/UDP（`kernel/core/net`、`include/bigos/net/socket.h`、`include/bigos/net.h`）、terminal/tty（`kernel/core/terminal`、`include/bigos/tty.h`）、进程 fd 表（`kernel/core/proc`、`include/bigos/proc.h`）。
+- 受影响内核子系统：VFS（`kernel/core/fs`、`include/bigos/fs/vfs.h`）、IPC pipe（`kernel/core/ipc`、`include/bigos/ipc/pipe.h`）、网络 socket/UDP（`kernel/core/net`、`include/bigos/net/socket.h`、`include/bigos/net.h`）、terminal/tty（`kernel/core/terminal`、`include/bigos/tty.h`，为既有 `TTY_OPS` 增补 poll op）、进程 fd 表（`kernel/core/proc`、`include/bigos/proc.h`）。
 - 复用而非改动调度阻塞原语：`bigos::sched::WaitQueue`、`wait_queue_wait_until`、`wake_one`/`wake_all`、`can_block()`（`include/bigos/sched.h`、`kernel/core/sched/sched.cc`）；新增的 socket 等待队列遵循既有 IRQ-safe 唤醒约定。
 - ABI/接口影响：`FileOperations` 仅在末尾追加一个可选函数指针，不重排既有槽位；本变更不新增 syscall 编号、不改动 syscall ABI（用户可见的多路复用 syscall 延后到 M13.3）。
 - 构建/验证：新增一个默认关闭的 xmake smoke 开关（映射到 `BIGOS_*` 宏）与对应 COM1 标记，遵循既有 smoke 模式，通过 QEMU headless 路径验证；不改动默认启动行为。

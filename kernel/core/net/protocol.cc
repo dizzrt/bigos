@@ -317,6 +317,10 @@ namespace {
         memcpy(datagram.payload, __payload + 8, payload_len);
         endpoint->rx_count++;
         __ctx->diagnostics.udp_received++;
+        // Datagram is fully enqueued before the wakeup, so a waiter that re-checks
+        // rx_count after being woken always observes the new data. wake_all is
+        // allocation-free and safe from the IRQ/delivery context this path runs in.
+        bigos::sched::wake_all(&endpoint->rx_wait);
         return bigos::net::Status::Ok;
     }
 
@@ -646,6 +650,7 @@ namespace net {
             UdpEndpoint &endpoint = __ctx->udp_endpoints[i];
             if (!endpoint.active) {
                 clear_endpoint(&endpoint);
+                sched::init_wait_queue(&endpoint.rx_wait);
                 endpoint.active = true;
                 endpoint.local_port = __local_port;
                 *__out = &endpoint;

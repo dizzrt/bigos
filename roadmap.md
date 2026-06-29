@@ -471,10 +471,10 @@ descriptor at a time.
 
 用户可见目标：单线程用户程序可以一次等待多个描述符并编写事件循环，而不再逐个描述符忙等。
 
-- [ ] Task M13.1: a kernel fd readiness model expressing readable, writable, and
+- [x] Task M13.1: a kernel fd readiness model expressing readable, writable, and
   error readiness for socket, pipe, and terminal descriptors over the existing
   blocking primitives, without implying broad POSIX poll semantics.
-- [ ] 任务 M13.1：内核 fd readiness 模型，在既有阻塞原语之上为 socket、pipe 与终端描述符
+- [x] 任务 M13.1：内核 fd readiness 模型，在既有阻塞原语之上为 socket、pipe 与终端描述符
   表达可读、可写与错误就绪状态，不暗示完整 POSIX poll 语义。
 - [ ] Task M13.2: bounded non-blocking descriptor behavior so reads and writes
   return a deterministic would-block status instead of blocking, integrated with

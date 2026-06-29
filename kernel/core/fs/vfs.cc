@@ -169,7 +169,7 @@ namespace {
     }
 
     const bigos::vfs::FileOperations EXFAT_FILE_OPS = {
-        &exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir};
+        &exfat_read, &exfat_close, nullptr, nullptr, nullptr, &exfat_readdir, nullptr};
 
     bigos::vfs::FileIdentity exfat_identity(const bigos::fs::FileMetadata *__metadata) noexcept {
         bigos::vfs::FileIdentity identity = {bigos::vfs::FILE_BACKEND_EXFAT, 1, 0};
@@ -366,7 +366,7 @@ namespace {
     }
 
     const bigos::vfs::FileOperations BIGFS_FILE_OPS = {
-        &bigfs_read, &bigfs_close, &bigfs_write, nullptr, &bigfs_truncate, &bigfs_readdir};
+        &bigfs_read, &bigfs_close, &bigfs_write, nullptr, &bigfs_truncate, &bigfs_readdir, nullptr};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG
@@ -764,6 +764,16 @@ namespace vfs {
         if (__file->ops->readdir == nullptr)
             return Status::NotDirectory;
         return __file->ops->readdir(__file, __entries, __max_entries, __entries_read);
+    }
+
+    uint32_t poll_file(File *__file) noexcept {
+        if (__file == nullptr || __file->ops == nullptr)
+            return READY_ERROR;
+        // A backend without a readiness op gets the deterministic default: a
+        // regular file is always readable and writable with no error.
+        if (__file->ops->poll == nullptr)
+            return READY_READABLE | READY_WRITABLE;
+        return __file->ops->poll(__file);
     }
 
     Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept {

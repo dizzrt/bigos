@@ -50,6 +50,14 @@
 #include <bigos/ipc/pipe.h>
 #include <bigos/sched.h>
 #endif
+#ifdef BIGOS_FD_READINESS_SMOKE
+#include <bigos/device.h>
+#include <bigos/ipc/pipe.h>
+#include <bigos/net/socket.h>
+#include <bigos/sched.h>
+#include <bigos/tty.h>
+#include <string.h>
+#endif
 
 struct BootInfoHeader;
 
@@ -1711,6 +1719,312 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_FD_READINESS_SMOKE
+namespace {
+    // Validation-only fd readiness smoke. It builds pipe, UDP socket, and tty
+    // descriptors and asserts that vfs::poll_file()'s readable bit agrees with the
+    // existing blocking behavior ("readable iff a blocking read would not block"),
+    // that poll is a non-dequeuing snapshot, and that two terminal fds sharing
+    // TTY_OPS report identical readiness. It runs from a blockable kernel thread
+    // and emits a deterministic BIGOS_FD_READINESS_PASSED / _FAILED marker.
+
+    // Local fake network device + context so the socket portion runs without a
+    // real tap/network backend, mirroring the kernel-internal socket smoke.
+    struct FdrSmokeDevice {
+        bigos::device::NetworkDevice net;
+        bigos::net::MacAddress mac;
+    };
+
+    FdrSmokeDevice g_fdr_dev = {};
+    bigos::net::Context g_fdr_ctx = {};
+    uint8_t g_fdr_frame[bigos::net::ETHERNET_MAX_FRAME_LEN] = {};
+
+    bool fdr_ready(bigos::device::NetworkDevice *__d) noexcept { return __d != nullptr; }
+    bool fdr_link_up(bigos::device::NetworkDevice *__d) noexcept { return __d != nullptr; }
+    const uint8_t *fdr_mac(bigos::device::NetworkDevice *__d) noexcept {
+        FdrSmokeDevice *dev = __d == nullptr ? nullptr : (FdrSmokeDevice *)__d->context;
+        return dev == nullptr ? nullptr : dev->mac.bytes;
+    }
+    uint16_t fdr_mtu(bigos::device::NetworkDevice *) noexcept { return bigos::net::DEFAULT_MTU; }
+    bigos::device::NetworkTxStatus fdr_transmit(
+        bigos::device::NetworkDevice *, const void *, uint32_t, uint64_t) noexcept {
+        return bigos::device::NetworkTxStatus::Success;
+    }
+    bigos::device::NetworkRxStatus fdr_poll_rx(
+        bigos::device::NetworkDevice *, bigos::device::NetworkRxFrame *) noexcept {
+        return bigos::device::NetworkRxStatus::NoFrame;
+    }
+    bigos::device::NetworkRxStatus fdr_return_rx(
+        bigos::device::NetworkDevice *, const bigos::device::NetworkRxFrame *) noexcept {
+        return bigos::device::NetworkRxStatus::Success;
+    }
+    void fdr_diagnostics(bigos::device::NetworkDevice *, bigos::device::NetworkDiagnostics *) noexcept {}
+
+    void fdr_write_be16(uint8_t *__p, uint16_t __v) noexcept {
+        __p[0] = (uint8_t)(__v >> 8);
+        __p[1] = (uint8_t)__v;
+    }
+    void fdr_write_be32(uint8_t *__p, uint32_t __v) noexcept {
+        __p[0] = (uint8_t)(__v >> 24);
+        __p[1] = (uint8_t)(__v >> 16);
+        __p[2] = (uint8_t)(__v >> 8);
+        __p[3] = (uint8_t)__v;
+    }
+    uint16_t fdr_checksum(const uint8_t *__data, uint32_t __len) noexcept {
+        uint32_t sum = 0;
+        uint32_t i = 0;
+        while (i + 1 < __len) {
+            sum += (uint32_t)((__data[i] << 8) | __data[i + 1]);
+            i += 2;
+        }
+        if (i < __len)
+            sum += (uint32_t)__data[i] << 8;
+        while ((sum >> 16) != 0)
+            sum = (sum & 0xffffu) + (sum >> 16);
+        return (uint16_t)~sum;
+    }
+
+    // Injects one UDP datagram to local:dst_port so a bound endpoint receives it.
+    bigos::net::Status fdr_inject_udp(uint16_t __src_port, uint16_t __dst_port, const uint8_t *__payload,
+        uint16_t __payload_len, bigos::net::Ipv4Address __peer, bigos::net::Ipv4Address __local,
+        const bigos::net::MacAddress &__peer_mac, const bigos::net::MacAddress &__local_mac) noexcept {
+        uint8_t *frame = g_fdr_frame;
+        memcpy(frame, __local_mac.bytes, 6);
+        memcpy(frame + 6, __peer_mac.bytes, 6);
+        fdr_write_be16(frame + 12, bigos::net::ETHERNET_TYPE_IPV4);
+        uint8_t *ip = frame + bigos::net::ETHERNET_HEADER_LEN;
+        const uint16_t udp_len = (uint16_t)(8 + __payload_len);
+        const uint16_t total_len = (uint16_t)(20 + udp_len);
+        memset(ip, 0, total_len);
+        ip[0] = (4 << 4) | 5;
+        fdr_write_be16(ip + 2, total_len);
+        ip[8] = 64;
+        ip[9] = bigos::net::IPV4_PROTOCOL_UDP;
+        fdr_write_be32(ip + 12, __peer.value);
+        fdr_write_be32(ip + 16, __local.value);
+        fdr_write_be16(ip + 10, fdr_checksum(ip, 20));
+        uint8_t *udp = ip + 20;
+        fdr_write_be16(udp + 0, __src_port);
+        fdr_write_be16(udp + 2, __dst_port);
+        fdr_write_be16(udp + 4, udp_len);
+        fdr_write_be16(udp + 6, 0);   // zero checksum: protocol layer skips verification
+        if (__payload_len != 0)
+            memcpy(udp + 8, __payload, __payload_len);
+        return bigos::net::inject_frame(&g_fdr_ctx, frame, bigos::net::ETHERNET_HEADER_LEN + total_len);
+    }
+
+    void fdr_fail(const char *__reason) noexcept {
+        bigos::serial_puts("BIGOS_FD_READINESS_FAILED ");
+        bigos::serial_puts(__reason);
+        bigos::serial_puts("\n");
+    }
+
+    bool fdr_pipe_check() noexcept {
+        bigos::vfs::File *r = nullptr;
+        bigos::vfs::File *w = nullptr;
+        if (bigos::ipc::create(&r, &w) != bigos::vfs::Status::Success)
+            return false;
+
+        // Empty pipe with the writer open: not readable, writable.
+        uint32_t rp = bigos::vfs::poll_file(r);
+        uint32_t wp = bigos::vfs::poll_file(w);
+        if ((rp & bigos::vfs::READY_READABLE) != 0 || (wp & bigos::vfs::READY_WRITABLE) == 0 ||
+            (wp & bigos::vfs::READY_ERROR) != 0) {
+            bigos::vfs::release(r);
+            bigos::vfs::release(w);
+            return false;
+        }
+
+        // After a write, the read end is readable and a blocking read returns the
+        // byte immediately (the readable bit implies read-will-not-block).
+        const char payload = 'R';
+        size_t io = 0;
+        if (bigos::vfs::write(w, &payload, 1, &io) != bigos::vfs::Status::Success || io != 1) {
+            bigos::vfs::release(r);
+            bigos::vfs::release(w);
+            return false;
+        }
+        rp = bigos::vfs::poll_file(r);
+        if ((rp & bigos::vfs::READY_READABLE) == 0) {
+            bigos::vfs::release(r);
+            bigos::vfs::release(w);
+            return false;
+        }
+        char got = 0;
+        io = 0;
+        if (bigos::vfs::read(r, &got, 1, &io) != bigos::vfs::Status::Success || io != 1 || got != payload) {
+            bigos::vfs::release(r);
+            bigos::vfs::release(w);
+            return false;
+        }
+
+        // Writer closed with an empty buffer: the read end reports readable EOF.
+        bigos::vfs::release(w);
+        rp = bigos::vfs::poll_file(r);
+        if ((rp & bigos::vfs::READY_READABLE) == 0) {
+            bigos::vfs::release(r);
+            return false;
+        }
+        size_t eof_io = 0;
+        if (bigos::vfs::read(r, &got, 1, &eof_io) != bigos::vfs::Status::Success || eof_io != 0) {
+            bigos::vfs::release(r);
+            return false;
+        }
+        bigos::vfs::release(r);
+
+        // Reader closed: the write end reports the broken-pipe error bit.
+        bigos::vfs::File *r2 = nullptr;
+        bigos::vfs::File *w2 = nullptr;
+        if (bigos::ipc::create(&r2, &w2) != bigos::vfs::Status::Success)
+            return false;
+        bigos::vfs::release(r2);   // close read end
+        wp = bigos::vfs::poll_file(w2);
+        const bool err = (wp & bigos::vfs::READY_ERROR) != 0;
+        bigos::vfs::release(w2);
+        return err;
+    }
+
+    bool fdr_socket_check() noexcept {
+        g_fdr_dev = {};
+        g_fdr_ctx = {};
+        g_fdr_dev.mac = {{0x52, 0x54, 0x00, 0x12, 0x34, 0x56}};
+        g_fdr_dev.net.context = &g_fdr_dev;
+        g_fdr_dev.net.ready = &fdr_ready;
+        g_fdr_dev.net.link_up = &fdr_link_up;
+        g_fdr_dev.net.mac = &fdr_mac;
+        g_fdr_dev.net.mtu = &fdr_mtu;
+        g_fdr_dev.net.transmit = &fdr_transmit;
+        g_fdr_dev.net.poll_rx = &fdr_poll_rx;
+        g_fdr_dev.net.return_rx = &fdr_return_rx;
+        g_fdr_dev.net.diagnostics = &fdr_diagnostics;
+
+        bigos::net::Config config = {};
+        config.local_ipv4 = bigos::net::make_ipv4(10, 0, 2, 15);
+        config.netmask = bigos::net::make_ipv4(255, 255, 255, 0);
+        config.direct_peer_ipv4 = bigos::net::make_ipv4(10, 0, 2, 2);
+        config.local_mac = g_fdr_dev.mac;
+        config.mtu = bigos::net::DEFAULT_MTU;
+        config.has_direct_peer = true;
+        if (bigos::net::init(&g_fdr_ctx, &g_fdr_dev.net, &config) != bigos::net::Status::Ok)
+            return false;
+
+        bigos::vfs::File *file = nullptr;
+        if (bigos::net::socket_create(&g_fdr_ctx, &file) != bigos::vfs::Status::Success || file == nullptr)
+            return false;
+
+        // Unbound socket: poll reports the error bit (no usable endpoint yet).
+        if ((bigos::vfs::poll_file(file) & bigos::vfs::READY_ERROR) == 0) {
+            bigos::vfs::release(file);
+            return false;
+        }
+
+        const uint16_t local_port = 4100;
+        bigos::net::UdpEndpoint *endpoint = nullptr;
+        if (bigos::net::udp_bind(&g_fdr_ctx, local_port, &endpoint) != bigos::net::Status::Ok || endpoint == nullptr) {
+            bigos::vfs::release(file);
+            return false;
+        }
+        bigos::net::Socket *socket = bigos::net::socket_state(file);
+        socket->endpoint = endpoint;
+        socket->local_port = local_port;
+        socket->bound = true;
+
+        // Bound, empty receive queue: writable, not readable.
+        uint32_t sp = bigos::vfs::poll_file(file);
+        if ((sp & bigos::vfs::READY_WRITABLE) == 0 || (sp & bigos::vfs::READY_READABLE) != 0 ||
+            (sp & bigos::vfs::READY_ERROR) != 0) {
+            bigos::vfs::release(file);
+            return false;
+        }
+
+        // Inject a datagram: the receive path wakes rx_wait and the socket becomes
+        // readable; poll does not dequeue, so a subsequent receive still returns it.
+        const uint8_t msg[] = {'o', 'k'};
+        const bigos::net::MacAddress peer_mac = {{0x52, 0x54, 0x00, 0xaa, 0xbb, 0xcc}};
+        if (fdr_inject_udp(5100, local_port, msg, sizeof(msg), config.direct_peer_ipv4, config.local_ipv4, peer_mac,
+                config.local_mac) != bigos::net::Status::Ok) {
+            bigos::vfs::release(file);
+            return false;
+        }
+        sp = bigos::vfs::poll_file(file);
+        if ((sp & bigos::vfs::READY_READABLE) == 0) {
+            bigos::vfs::release(file);
+            return false;
+        }
+        // poll was a snapshot: the datagram is still queued and receivable.
+        bigos::net::UdpDatagram got = {};
+        if (bigos::net::udp_receive_from(endpoint, &got) != bigos::net::Status::Ok ||
+            got.payload_length != sizeof(msg)) {
+            bigos::vfs::release(file);
+            return false;
+        }
+        // Drained: no longer readable.
+        sp = bigos::vfs::poll_file(file);
+        const bool ok = (sp & bigos::vfs::READY_READABLE) == 0 && (sp & bigos::vfs::READY_WRITABLE) != 0;
+        bigos::vfs::release(file);   // SOCKET_OPS.close recycles the endpoint
+        return ok;
+    }
+
+    bool fdr_tty_check() noexcept {
+        bigos::vfs::File *t0 = bigos::terminal::create_tty_file();
+        bigos::vfs::File *t1 = bigos::terminal::create_tty_file();
+        if (t0 == nullptr || t1 == nullptr) {
+            if (t0 != nullptr)
+                bigos::vfs::release(t0);
+            if (t1 != nullptr)
+                bigos::vfs::release(t1);
+            return false;
+        }
+
+        // No input: writable, not readable; both handles agree.
+        const uint32_t e0 = bigos::vfs::poll_file(t0);
+        const uint32_t e1 = bigos::vfs::poll_file(t1);
+        if (e0 != e1 || (e0 & bigos::vfs::READY_WRITABLE) == 0 || (e0 & bigos::vfs::READY_READABLE) != 0) {
+            bigos::vfs::release(t0);
+            bigos::vfs::release(t1);
+            return false;
+        }
+
+        // Enqueue one input record: both terminal fds become readable and report
+        // identical readiness; poll dequeues nothing.
+        if (!bigos::terminal::enqueue_input('x')) {
+            bigos::vfs::release(t0);
+            bigos::vfs::release(t1);
+            return false;
+        }
+        const uint32_t a0 = bigos::vfs::poll_file(t0);
+        const uint32_t a1 = bigos::vfs::poll_file(t1);
+        bool ok = a0 == a1 && (a0 & bigos::vfs::READY_READABLE) != 0;
+
+        // Poll did not consume the record: it is still available to drain.
+        bigos::terminal::TerminalInputRecord record = {};
+        ok = ok && bigos::terminal::read_input_record(&record) && record.ch == 'x';
+        // Input fully drained again: not readable.
+        ok = ok && (bigos::vfs::poll_file(t0) & bigos::vfs::READY_READABLE) == 0;
+
+        bigos::vfs::release(t0);
+        bigos::vfs::release(t1);
+        return ok;
+    }
+
+    void fd_readiness_smoke_entry(void *) noexcept {
+        if (!fdr_pipe_check()) {
+            fdr_fail("pipe");
+            return;
+        }
+        if (!fdr_socket_check()) {
+            fdr_fail("socket");
+            return;
+        }
+        if (!fdr_tty_check()) {
+            fdr_fail("tty");
+            return;
+        }
+        bigos::serial_puts("BIGOS_FD_READINESS_PASSED\n");
+    }
+}   // namespace
+#endif
+
 #if defined(BIGOS_VIRTIO_BLK_SMOKE) || defined(BIGOS_MODERN_STORAGE_BACKEND_SMOKE)
 namespace {
     void virtio_blk_smoke_entry(void *) noexcept {
@@ -2005,6 +2319,11 @@ void kernel(const BootInfoHeader *boot_info) {
 #ifdef BIGOS_PIPE_SMOKE
     if (bigos::sched::create_kernel_thread(&pipe_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_PIPE_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_FD_READINESS_SMOKE
+    if (bigos::sched::create_kernel_thread(&fd_readiness_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_FD_READINESS_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_SCHEDULER_SMOKE

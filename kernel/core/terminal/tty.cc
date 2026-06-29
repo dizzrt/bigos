@@ -528,14 +528,28 @@ namespace bigos::terminal {
             return vfs::Status::NotSeekable;
         }
 
+        // Read-only readiness snapshot for any terminal handle. Reuses
+        // input_available (input ring records or a pending escape-sequence byte)
+        // for the readable bit; the terminal write-out direction is always
+        // writable and the input path produces no error bit. It dequeues no
+        // TerminalInputRecord and does not touch the input ring head/tail.
+        uint32_t tty_poll(vfs::File *__file) noexcept {
+            if (__file == nullptr)
+                return vfs::READY_ERROR;
+            uint32_t ready = vfs::READY_WRITABLE;
+            if (input_available(nullptr))
+                ready |= vfs::READY_READABLE;
+            return ready;
+        }
+
         // Device-layer no-op: a terminal handle owns no device state, so closing it
         // must not touch the global input ring or wait queue. The File structure
         // itself is freed by vfs::release.
         void tty_close(vfs::File *) noexcept {}
 
-        // read/close occupy the fixed first two ops slots; write/lseek follow. A
-        // poll slot can be appended later (M13.1 readiness) without reordering.
-        const vfs::FileOperations TTY_OPS = {&tty_read, &tty_close, &tty_write, &tty_lseek, nullptr, nullptr};
+        // read/close occupy the fixed first two ops slots; write/lseek follow; the
+        // appended poll slot carries terminal readiness. No existing slot reorders.
+        const vfs::FileOperations TTY_OPS = {&tty_read, &tty_close, &tty_write, &tty_lseek, nullptr, nullptr, &tty_poll};
     }   // namespace
 
     vfs::File *create_tty_file() noexcept {

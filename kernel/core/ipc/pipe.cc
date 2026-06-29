@@ -135,6 +135,31 @@ namespace {
         return bigos::vfs::Status::NotSeekable;
     }
 
+    // Read-only readiness snapshot. Reuses the same read_ready/write_ready
+    // predicates the blocking read/write paths wait on, so "poll says readable"
+    // holds iff a blocking read would not block. It dequeues nothing and changes
+    // no open flags.
+    uint32_t pipe_poll(bigos::vfs::File *__file) noexcept {
+        if (__file == nullptr || __file->private_data == nullptr)
+            return bigos::vfs::READY_ERROR;
+        PipeEnd *end = (PipeEnd *)__file->private_data;
+        Pipe *pipe = end->pipe;
+        uint32_t ready = 0;
+        if (end->is_write) {
+            WriteWait wait = {pipe};
+            if (write_ready(&wait))
+                ready |= bigos::vfs::READY_WRITABLE;
+            // Reader gone -> subsequent writes fail with broken pipe.
+            if (!pipe->read_open)
+                ready |= bigos::vfs::READY_ERROR;
+        } else {
+            ReadWait wait = {pipe};
+            if (read_ready(&wait))
+                ready |= bigos::vfs::READY_READABLE;
+        }
+        return ready;
+    }
+
     void pipe_close(bigos::vfs::File *__file) noexcept {
         if (__file == nullptr || __file->private_data == nullptr)
             return;
@@ -152,8 +177,10 @@ namespace {
         maybe_free(pipe);
     }
 
-    const bigos::vfs::FileOperations PIPE_READ_OPS = {&pipe_read, &pipe_close, nullptr, &pipe_lseek, nullptr, nullptr};
-    const bigos::vfs::FileOperations PIPE_WRITE_OPS = {nullptr, &pipe_close, &pipe_write, &pipe_lseek, nullptr, nullptr};
+    const bigos::vfs::FileOperations PIPE_READ_OPS = {
+        &pipe_read, &pipe_close, nullptr, &pipe_lseek, nullptr, nullptr, &pipe_poll};
+    const bigos::vfs::FileOperations PIPE_WRITE_OPS = {
+        nullptr, &pipe_close, &pipe_write, &pipe_lseek, nullptr, nullptr, &pipe_poll};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG

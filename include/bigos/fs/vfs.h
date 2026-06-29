@@ -20,6 +20,14 @@ namespace vfs {
     constexpr size_t MAX_PATH_LEN = 256;
     constexpr size_t DIRENT_NAME_MAX = 27;
 
+    // Kernel-internal fd readiness bit flags returned by poll_file(). They are a
+    // kernel-only convention combined with bitwise OR; they are NOT a user-visible
+    // syscall ABI. A user-visible multiplexing encoding (POSIX poll-style event
+    // bits) is defined separately later and converted at a single point.
+    constexpr uint32_t READY_READABLE = 1u << 0;
+    constexpr uint32_t READY_WRITABLE = 1u << 1;
+    constexpr uint32_t READY_ERROR = 1u << 2;
+
     enum class Status : int64_t {
         Success = 0,
         InvalidArgument = -22,
@@ -66,6 +74,10 @@ namespace vfs {
     using ReaddirOp = Status (*)(
         File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
     using CloseOp = void (*)(File *__file) noexcept;
+    // Readiness snapshot op. Returns the bitwise OR of READY_* flags for the
+    // file. It MUST be a pure read-only snapshot: no dequeue, no blocking, no
+    // change to the file or backend open state.
+    using PollOp = uint32_t (*)(File *__file) noexcept;
 
     struct FileOperations {
         ReadOp read;
@@ -77,7 +89,21 @@ namespace vfs {
         LseekOp lseek;
         TruncateOp truncate;
         ReaddirOp readdir;
+        // Appended readiness op (do not reorder the slots above). A backend that
+        // leaves this null gets a deterministic readable+writable default from
+        // poll_file().
+        PollOp poll;
     };
+
+    // Layout guard: the appended poll op MUST stay after the existing slots so
+    // statically-initialized backend ops tables keep their meaning.
+    static_assert(__builtin_offsetof(FileOperations, read) == 0, "read slot moved");
+    static_assert(__builtin_offsetof(FileOperations, close) == sizeof(void *), "close slot moved");
+    static_assert(__builtin_offsetof(FileOperations, write) == 2 * sizeof(void *), "write slot moved");
+    static_assert(__builtin_offsetof(FileOperations, lseek) == 3 * sizeof(void *), "lseek slot moved");
+    static_assert(__builtin_offsetof(FileOperations, truncate) == 4 * sizeof(void *), "truncate slot moved");
+    static_assert(__builtin_offsetof(FileOperations, readdir) == 5 * sizeof(void *), "readdir slot moved");
+    static_assert(__builtin_offsetof(FileOperations, poll) == 6 * sizeof(void *), "poll slot must be last");
 
     struct Vnode {
         uint64_t size;
@@ -142,6 +168,13 @@ namespace vfs {
     // namespace synchronization, journaling, or crash/power-loss recovery.
     Status sync_writable_backend() noexcept;
     Status readdir(File *__file, DirectoryEntry *__entries, size_t __max_entries, size_t *__entries_read) noexcept;
+    // Unified kernel-internal fd readiness snapshot. Dispatches to ops->poll when
+    // present; otherwise returns the deterministic default READY_READABLE |
+    // READY_WRITABLE (no error). It is a pure read-only query: it never dequeues
+    // data, blocks, or changes the file/backend open state. A null file returns
+    // READY_ERROR. The returned bits are a kernel-internal convention, not a
+    // user-visible syscall ABI.
+    uint32_t poll_file(File *__file) noexcept;
     Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept;
     Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out) noexcept;
     Status stat(File *__file, bigos::Metadata *__out) noexcept;

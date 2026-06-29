@@ -35,6 +35,22 @@ namespace {
         return bigos::vfs::Status::NotSeekable;
     }
 
+    // Read-only readiness snapshot for a UDP socket. A bound, active endpoint with
+    // a non-empty receive queue is readable and (being able to send) writable; an
+    // unbound or inactive endpoint is reported as an error. It dequeues nothing
+    // and changes no socket state.
+    uint32_t socket_poll(bigos::vfs::File *__file) noexcept {
+        if (__file == nullptr || __file->private_data == nullptr)
+            return bigos::vfs::READY_ERROR;
+        bigos::net::Socket *socket = (bigos::net::Socket *)__file->private_data;
+        if (!socket->bound || socket->endpoint == nullptr || !socket->endpoint->active)
+            return bigos::vfs::READY_ERROR;
+        uint32_t ready = bigos::vfs::READY_WRITABLE;
+        if (socket->endpoint->rx_count > 0)
+            ready |= bigos::vfs::READY_READABLE;
+        return ready;
+    }
+
     // Recycles the protocol endpoint (if bound) and frees the Socket state on the
     // last reference. vfs::release guarantees this runs exactly once when the
     // final fd referencing the File is closed, so there is no double free or
@@ -50,7 +66,7 @@ namespace {
     }
 
     const bigos::vfs::FileOperations SOCKET_OPS = {
-        &socket_read, &socket_close, &socket_write, &socket_lseek, nullptr, nullptr};
+        &socket_read, &socket_close, &socket_write, &socket_lseek, nullptr, nullptr, &socket_poll};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG

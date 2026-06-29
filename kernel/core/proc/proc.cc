@@ -4528,7 +4528,7 @@ namespace bigos::proc {
 
         void close_op(bigos::vfs::File *) noexcept {}
 
-        const bigos::vfs::FileOperations g_ops = {read_op, close_op, nullptr, nullptr, nullptr, nullptr};
+        const bigos::vfs::FileOperations g_ops = {read_op, close_op, nullptr, nullptr, nullptr, nullptr, nullptr};
     }   // namespace filemap_smoke
 
     bool file_backed_mapping_smoke_run(Process *__process) noexcept {

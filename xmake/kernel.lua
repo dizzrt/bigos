@@ -233,6 +233,10 @@ if has_config("dynamic_link_smoke") then
     add_defines("BIGOS_DYNAMIC_LINK_SMOKE")
 end
 
+if has_config("fd_readiness_smoke") then
+    add_defines("BIGOS_FD_READINESS_SMOKE")
+end
+
 if is_mode("debug") then
     set_symbols("debug")
 elseif is_mode("release") then
