@@ -27,6 +27,12 @@ BigOS 引入最小的只读 fd/VFS 边界。后续能力保持这条 exFAT 读�
   调用方最小值的位置分配最低可用 fd，复用同一个 open file object，并清除新
   descriptor 的 close-on-exec。
 - `exec` 保留未设置内部 `close_on_exec` bit 的 descriptor；rollback 不破坏旧 fd table。
+- 全新顶层用户进程在进入 ring3 时，会在 fd `0`、fd `1`、fd `2` 安装同一个共享的终端
+  `vfs::File`（引用计数为 3，`close_on_exec` 为 false）。终端被拆分为长期存在的设备层
+  （input ring 与 wait queue）和此 per-open 句柄层，因此终端读写像任何其它描述符一样
+  统一经 `file->ops` 派发。`fork` 通过普通 fd 表 retain 共享该句柄，`exec` 因其非
+  close-on-exec 而保留它。其 close op 对设备层为 no-op，因此最后一次 `release` 只释放
+  句柄结构本身，绝不释放全局设备状态。
 - 每个用户 `Process` 还拥有一个内联有界 cwd 字符串。它初始化为 `/`，由 `fork`
   独立复制，被 `execve` 保留，并且 safe reap 时不需要 cwd heap teardown。
 - exit 与 fault path 将 fd-backed 对象销毁延后到 `reap_pending_processes()`，并且需要先通过 active-stack 和 active-CR3 检查。
@@ -37,7 +43,7 @@ BigOS 引入最小的只读 fd/VFS 边界。后续能力保持这条 exFAT 读�
 - `SYS_READ = 6`：`rdi=fd`，`rsi=user_buffer`，`rdx=len`，通过有界 kernel buffer copy，返回 byte count 或负错误码。
 - `SYS_CLOSE = 7`：`rdi=fd`，移除 descriptor 并 drop file reference。
 - `SYS_STAT = 29`：`rdi=path`，`rsi=struct stat*`，返回绝对路径的 BigOS 有界 metadata snapshot。
-- `SYS_FSTAT = 30`：`rdi=fd`，`rsi=struct stat*`，返回 open file object 的 metadata，且不推进 offset。
+- `SYS_FSTAT = 30`：`rdi=fd`，`rsi=struct stat*`，返回 open file object 的 metadata，且不推进 offset。终端句柄报告为字符设备（`S_IFCHR`），用户态 `isatty()` 据此判断。
 - `SYS_FTRUNCATE = 39`：`rdi=fd`，`rsi=length`，对可写 `/rw` 常规文件执行有界
   truncate。收缩保留前缀并在发布新 size 后释放尾部块；扩展暴露 zero-read 字节。它
   不是完整 POSIX `ftruncate(2)`。
@@ -60,7 +66,7 @@ BigOS 引入最小的只读 fd/VFS 边界。后续能力保持这条 exFAT 读�
 
 ## 有界元数据
 
-- BigOS 通过 `stat`/`fstat` wrapper 和打包的 `/bin/stat` 观察工具暴露小型 metadata 结构。字段包含对象类型、大小、mode、uid、gid、有界 link-count 默认值、第一版始终为零的用户可见对象编号，以及显式零填充保留字段。
+- BigOS 通过 `stat`/`fstat` wrapper 和打包的 `/bin/stat` 观察工具暴露小型 metadata 结构。字段包含对象类型、大小、mode、uid、gid、有界 link-count 默认值、第一版始终为零的用户可见对象编号，以及显式零填充保留字段。有界类型集合为常规文件、目录和字符设备；终端句柄报告字符设备类型与 `S_IFCHR` mode，使 `isatty()` 能识别它。
 - exFAT metadata 是只读的，并为 owner/mode 返回文档化默认值。`/rw` metadata 反映运行期 create、write、truncate、mkdir、unlink 和权限 metadata 变化。RAM-backed `/rw` 仍不跨重启持久化；persistent 测试后端只声明成功 `fsync` 与 clean reboot 后的 clean-sync 状态。
 - 这是 BigOS bounded metadata subset，不是完整 POSIX `struct stat`、设备节点、符号链接、ACL、xattr、完整时间戳、稳定 inode 或持久对象身份语义。
 

@@ -6,11 +6,14 @@
 #define BIGOS_METADATA_TYPE_UNKNOWN   0u
 #define BIGOS_METADATA_TYPE_REGULAR   1u
 #define BIGOS_METADATA_TYPE_DIRECTORY 2u
+#define BIGOS_METADATA_TYPE_CHARDEV   3u
 
 #define S_IFREG 0100000
 #define S_IFDIR 0040000
+#define S_IFCHR 0020000
 #define S_ISREG(m) (((m) & 0170000) == S_IFREG)
 #define S_ISDIR(m) (((m) & 0170000) == S_IFDIR)
+#define S_ISCHR(m) (((m) & 0170000) == S_IFCHR)
 
 /* BigOS bounded metadata subset, not a complete POSIX struct stat. */
 struct stat {

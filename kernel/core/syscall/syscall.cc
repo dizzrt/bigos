@@ -132,32 +132,11 @@ namespace sys {
         }
 
         static int64_t sys_write(uint64_t __fd, uint64_t __buffer, uint64_t __len) noexcept {
-            // Default console fast path: fd 1/2 with no installed file writes to
-            // the visible runtime console while preserving the serial marker path
-            // used by headless validation. Once a pipe or redirected file is
-            // installed at the descriptor, writes route through the fd table.
-            if ((__fd == 1 || __fd == 2) && bigos::proc::file_for_fd_current((uint32_t)__fd) == nullptr) {
-                if (!bigos::proc::validate_user_buffer(__buffer, __len))
-                    bigos::proc::fault_current_and_exit(-bigos::EFAULT);
-                char bounded[SYS_WRITE_MAX_LEN + 1];
-                if (__len > SYS_WRITE_MAX_LEN || !bigos::proc::copy_current_user_buffer(__buffer, bounded, __len))
-                    bigos::proc::fault_current_and_exit(-bigos::EFAULT);
-                bounded[__len] = 0;
-                serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
-                serial_puts(bounded);
-                const uint64_t active_root = bigos::arch::vm_user::active_address_space_root();
-                const bigos::proc::Process *process = bigos::proc::current_process();
-                if (process != nullptr && process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
-                    !bigos::arch::vm_user::is_active_address_space(process->kernel_address_space_root))
-                    bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
-                (void)bigos::terminal::default_terminal_write(bounded);
-                if (!bigos::arch::vm_user::is_active_address_space(active_root))
-                    bigos::arch::vm_user::activate_address_space(active_root);
-                return (int64_t)__len;
-            }
-
-            // File / pipe write. Blockable context required (pipe write may block,
-            // file write may perform synchronous block IO).
+            // All descriptors (terminal fd 0/1/2, pipes, redirected files) route
+            // through the fd table. The terminal handle's write op preserves the
+            // headless serial marker path; pipe/file writes route to their ops.
+            // Blockable context required (pipe write may block, file write may
+            // perform synchronous block IO).
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
             if (__len == 0)
@@ -219,24 +198,9 @@ namespace sys {
             if (__len > SYS_IO_MAX_LEN || !bigos::proc::validate_user_io_buffer(__buffer, __len))
                 return -bigos::EFAULT;
 
-            // Console stdin fast path: fd 0 with no installed file reads from the
-            // TTY keyboard input ring (blocking until at least one byte). This
-            // lets the interactive shell read commands without a backing vnode.
-            if (__fd == 0 && bigos::proc::file_for_fd_current(0) == nullptr) {
-                char bounded[SYS_IO_MAX_LEN];
-                const bool raw_mode = bigos::terminal::input_mode() == bigos::terminal::TerminalInputMode::Raw;
-                const int r = raw_mode
-                                  ? bigos::terminal::read_raw_available_blocking(bounded, (size_t)__len, 0)
-                                  : bigos::terminal::read_char_blocking(bounded, 0);
-                if (r < 0)
-                    return -bigos::EIO;
-                if (r == 0)
-                    return 0;
-                if (!bigos::proc::copy_to_current_user_buffer(__buffer, bounded, (size_t)r))
-                    return -bigos::EFAULT;
-                return r;
-            }
-
+            // All descriptors (terminal fd 0, pipes, files) route through the fd
+            // table. The terminal handle's read op enters the existing blocking
+            // terminal read path (canonical or raw per input_mode()).
             char bounded[SYS_IO_MAX_LEN];
             size_t bytes_read = 0;
             const bigos::vfs::Status read_status =

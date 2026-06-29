@@ -22,17 +22,8 @@
 
 static void sh_errno_error(const char *prefix, const char *detail, int err);
 
-static int fd_has_installed_file(int fd) {
-    int dup_fd = dup(fd);
-    if (dup_fd >= 0) {
-        close(dup_fd);
-        return 1;
-    }
-    return errno != EBADF;
-}
-
 static int is_interactive_session(void) {
-    return !fd_has_installed_file(0) && !fd_has_installed_file(1);
+    return isatty(0) && isatty(1);
 }
 
 static void install_shell_signal_policy(void) {

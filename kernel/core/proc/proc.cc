@@ -1725,6 +1725,36 @@ namespace {
         return true;
     }
 
+    // Installs a single shared RDWR terminal handle at the standard descriptors
+    // fd 0/1/2 of __process. The three descriptors share one vfs::File whose
+    // ref_count ends at 3 (one per descriptor), all with close_on_exec = false so
+    // they survive exec. Returns false (fd table unchanged) on fd-table growth or
+    // handle-allocation failure, or when any of fd 0/1/2 is already occupied.
+    // Non-IRQ / allocation-permitted context only.
+    bool install_standard_fds(bigos::proc::Process *__process) noexcept {
+        if (__process == nullptr)
+            return false;
+        if (!grow_fd_table(__process, 3))
+            return false;
+        for (uint32_t fd = 0; fd < 3; fd++) {
+            if (__process->fd_table[fd].file != nullptr)
+                return false;
+        }
+        bigos::vfs::File *file = bigos::terminal::create_tty_file();
+        if (file == nullptr)
+            return false;
+        // create_tty_file returns ref_count == 1 (consumed by fd 0); fd 1 and fd 2
+        // each retain, bringing the shared handle to ref_count == 3.
+        for (uint32_t fd = 0; fd < 3; fd++) {
+            if (fd != 0)
+                bigos::vfs::retain(file);
+            __process->fd_table[fd].file = file;
+            __process->fd_table[fd].close_on_exec = false;
+            __process->fd_table[fd].readable = file->readable;
+        }
+        return true;
+    }
+
     uint64_t bounded_strlen(const char *__value, uint64_t __limit) noexcept {
         if (__value == nullptr)
             return UINT64_MAX;
@@ -2993,6 +3023,13 @@ namespace bigos::proc {
 
         set_current_process_slot(__process);
         __process->state = ProcessState::Running;
+        // Install the standard tty descriptors fd 0/1/2 for a freshly entered
+        // top-level process. fork inherits them through clone_fd_table and exec
+        // keeps the existing table (close_on_exec = false), so this is the single
+        // fresh-entry chokepoint; it must not run for forked children (they resume
+        // via fork_child_entry) or bounded fd-table smokes (they never reach here).
+        if (!install_standard_fds(__process))
+            halt_failed("BIGOS_USER_ENTER_FAILED stdio-fds\n");
         // Bind this kernel thread to the process so the scheduler restores the
         // correct ring3 context (current process / user CR3 / rsp0) on resume.
         bigos::sched::set_current_user_process(__process);

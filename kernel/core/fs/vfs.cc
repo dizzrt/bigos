@@ -6,6 +6,7 @@
 #include <bigos/fs/exfat.h>
 #include <bigos/memory.h>
 #include <bigos/sched.h>
+#include <bigos/tty.h>
 #include <string.h>
 
 namespace {
@@ -812,6 +813,16 @@ namespace vfs {
             return Status::InvalidArgument;
         if (__file == nullptr || __file->ops == nullptr)
             return Status::BadFileDescriptor;
+        // The terminal handle has no vnode; report it as a character device so a
+        // userland isatty() can distinguish it from regular files and pipes.
+        if (bigos::terminal::is_tty_file(__file)) {
+            __out->type = BIGOS_METADATA_TYPE_CHARDEV;
+            __out->mode = BIGOS_MODE_IFCHR | 0666;
+            __out->uid = bigos::cred::ROOT_UID;
+            __out->gid = 0;
+            __out->size = 0;
+            return Status::Success;
+        }
         if (__file->vnode == nullptr)
             return Status::Unsupported;
 

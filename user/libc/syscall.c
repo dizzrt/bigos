@@ -259,6 +259,13 @@ int fstat(int fd, struct stat *st) {
     return (int)errno_translate(syscall2(SYS_FSTAT, (long)fd, (long)st));
 }
 
+int isatty(int fd) {
+    struct stat st;
+    if (fstat(fd, &st) != 0)
+        return 0;
+    return S_ISCHR(st.st_mode) ? 1 : 0;
+}
+
 int chdir(const char *path) {
     return (int)errno_translate(syscall1(SYS_CHDIR, (long)path));
 }

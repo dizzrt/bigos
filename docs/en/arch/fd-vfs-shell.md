@@ -45,6 +45,15 @@ and the minimal userland runtime.
   cleared.
 - `exec` preserves descriptors unless their internal `close_on_exec` bit is set;
   rollback leaves the old fd table untouched.
+- A fresh top-level user process has one shared terminal `vfs::File` installed at
+  fd `0`, fd `1`, and fd `2` when it enters ring3 (reference count three,
+  `close_on_exec` false). The terminal is split into a long-lived device layer
+  (input ring and wait queue) and this per-open handle layer, so terminal reads
+  and writes dispatch uniformly through `file->ops` like any other descriptor.
+  `fork` shares the handle through the ordinary fd-table retain, and `exec` keeps
+  it because it is not close-on-exec. Its close op is a device-layer no-op, so
+  the last `release` frees only the handle structure, never the global device
+  state.
 - Each user `Process` also owns an inline bounded cwd string. It initializes to
   `/`, is copied independently by `fork`, is preserved by `execve`, and requires
   no heap teardown during safe reap.
@@ -61,7 +70,8 @@ and the minimal userland runtime.
 - `SYS_STAT = 29`: `rdi=path`, `rsi=struct stat*`, returns a bounded BigOS
   metadata snapshot for an absolute path.
 - `SYS_FSTAT = 30`: `rdi=fd`, `rsi=struct stat*`, returns metadata for the open
-  file object without advancing its offset.
+  file object without advancing its offset. The terminal handle reports a
+  character device (`S_IFCHR`), which backs the userland `isatty()` helper.
 - `SYS_FTRUNCATE = 39`: `rdi=fd`, `rsi=length`, applies bounded truncate to a
   writable `/rw` regular file. Shrink preserves the retained prefix and releases
   tail blocks after publishing the new size; extend exposes zero-read bytes. It
@@ -101,7 +111,9 @@ and the minimal userland runtime.
 - BigOS exposes a small metadata structure through `stat`/`fstat` wrappers and a
   packaged `/bin/stat` observer. It contains object type, size, mode, uid, gid, a
   bounded link-count default, a user-visible object id that is zero in this ABI
-  version, and reserved zero fields.
+  version, and reserved zero fields. The bounded type set is regular, directory,
+  and character device; the terminal handle reports the character-device type and
+  an `S_IFCHR` mode so `isatty()` can identify it.
 - exFAT metadata is read-only and reports documented defaults for owner and
   mode. `/rw` metadata reflects successful runtime create, write, truncate,
   mkdir, unlink, and permission metadata changes. RAM-backed `/rw` remains

@@ -232,9 +232,11 @@ def test_existing_smokes_use_vfs_open_read_close_path() -> None:
 def test_shell_prompts_only_for_default_console_stdio() -> None:
     shell = read_source('user/sh/sh.c')
 
-    assert 'static int fd_has_installed_file(int fd)' in shell
-    assert 'int dup_fd = dup(fd);' in shell
-    assert 'return !fd_has_installed_file(0) && !fd_has_installed_file(1);' in shell
+    # Interactivity is detected via isatty (fstat-backed) so the prompt/echo run
+    # only when stdin and stdout are the terminal character device, not when
+    # redirected to a file or pipe.
+    assert 'static int is_interactive_session(void)' in shell
+    assert 'return isatty(0) && isatty(1);' in shell
     assert 'int interactive = is_interactive_session();' in shell
     assert 'if (interactive)\n            write_all(1, prompt);' in shell
     assert 'read_line(line, sizeof(line), interactive)' in shell

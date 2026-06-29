@@ -180,12 +180,16 @@ def test_syscall_dispatch_routes_new_calls_and_guards_blocking() -> None:
         assert branch in source
     # Allocation / blocking syscalls check the scheduler blocking guard.
     assert 'if (!bigos::sched::can_block())' in source
-    # SYS_OPEN extended with mode + identity, SYS_WRITE keeps console fast path.
+    # SYS_OPEN extended with mode + identity; SYS_WRITE routes all fds (terminal,
+    # pipe, file) through the fd table -> file->ops (no bare-fd console branch).
     assert 'sys_open(__frame->rdi, __frame->rsi, __frame->rdx)' in source
     assert 'sys_ftruncate(__frame->rdi, __frame->rsi)' in source
     assert 'static int64_t sys_sync()' in source
     assert 'bigos::vfs::sync_writable_backend()' in source
-    assert 'BIGOS_USER_WRITE_SYSCALL' in source
+    # The headless write marker moved into the terminal write op alongside the
+    # device/handle split.
+    tty = read_source('kernel/core/terminal/tty.cc')
+    assert 'BIGOS_USER_WRITE_SYSCALL' in tty
 
 
 def test_runtime_directory_enum_and_unlink_lifetime_contracts() -> None:

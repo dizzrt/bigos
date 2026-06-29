@@ -89,11 +89,11 @@ blocking API 只能在 `sched::can_block()` 允许的普通 running kernel-threa
 
 自动化 blocking smoke 使用 synthetic producer 调用 `terminal::enqueue_input()`，因此不依赖手工键盘输入也能覆盖同一 TTY wakeup 路径。手工键盘验证仍是可选项，使用时需要记录 emulator input capability。
 
-交互控制台可用性将同一组 blocking consumer 接到默认用户态 stdin：当用户进程读取 fd `0` 且该描述符没有安装文件或 pipe 时，`SYS_READ` 会在 TTY ring 上阻塞，并根据 terminal mode 返回 canonical byte 或 raw 当前可用 byte。如果 fd `0` 通过 `dup2()` 或重定向替换为 pipe/file，读取会走普通 fd/VFS 路径，而不是默认 console。
+交互控制台可用性通过标准 `vfs::File` 把同一组 blocking consumer 接到默认用户态 stdin。全局终端被拆分为长期存在的"设备"层（input ring 与 wait queue）和 per-open 的"句柄"层（`vfs::File`），终端句柄的 read op 进入既有阻塞终端读路径。当用户进程读取 fd `0` 且该描述符持有终端句柄时，`SYS_READ` 经 fd 表派发到 `file->ops->read`，在 TTY ring 上阻塞，并根据 terminal mode 返回 canonical byte 或 raw 当前可用 byte。如果 fd `0` 通过 `dup2()` 或重定向替换为 pipe/file，读取会走该描述符自己的 ops，而不是终端句柄。
 
 ## Console 输出边界
 
-普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装 `terminal::console_put()` 和 `terminal::console_write()`。runtime console 统一拥有固定容量 cell storage、display attributes、有界 ANSI/CSI parser、UTF-8 decoder state、cursor position、saved cursor coordinates、256 行内核 scrollback buffer、viewport policy 和 clear policy；可见列数和行数由选中的内部 render backend 提供。VGA text 仍是固定 80x25 Legacy fallback；UEFI framebuffer text backend 只有在 framebuffer metadata 已校验、通过显式 `map_device_mmio()` 完成映射、像素格式是受支持的 32-bit RGBX/BGRX、glyph lookup view 可用，并且能从 framebuffer 几何计算出有界完整 cell grid 时才会被选择。交互控制台可用性在 fd `1` 或 fd `2` 没有安装 file/pipe 时，将用户态写入路由到同一默认 console 路径；已重定向的描述符仍走普通 fd/VFS 路径。syscall 路径也保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
+普通运行期文本输出使用 default terminal sink `terminal::default_terminal_write()`，它包装 `terminal::console_put()` 和 `terminal::console_write()`。runtime console 统一拥有固定容量 cell storage、display attributes、有界 ANSI/CSI parser、UTF-8 decoder state、cursor position、saved cursor coordinates、256 行内核 scrollback buffer、viewport policy 和 clear policy；可见列数和行数由选中的内部 render backend 提供。VGA text 仍是固定 80x25 Legacy fallback；UEFI framebuffer text backend 只有在 framebuffer metadata 已校验、通过显式 `map_device_mmio()` 完成映射、像素格式是受支持的 32-bit RGBX/BGRX、glyph lookup view 可用，并且能从 framebuffer 几何计算出有界完整 cell grid 时才会被选择。用户态对 fd `1` 或 fd `2` 的写入经 fd 表路由到终端句柄的 write op（`file->ops->write`）；该 op 在默认 console 写出之前保留现有 bounded serial write marker，使 headless smoke 仍能观察默认 userland 进度。被重定向到 pipe/file 的描述符则走该描述符自己的 ops。console API 本身不默认 mirror 到 COM1 serial，serial 仍保留给 bounded marker、smoke 和 fatal diagnostic。
 
 基础控制字符行为：
 
@@ -141,8 +141,12 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 - 默认终端保存一个数值型 foreground `pgid`。查询和变更只在普通 syscall/用户进程上下文执行；IRQ1 不遍历 process group、不执行 shell 策略、不分配、不阻塞，也不做文件系统 I/O。
 - Interrupt-like input 在 canonical mode 下仍向 consumer 返回有界 `0x03` byte，并尝试向当前 foreground group 进行有界 `SIGINT` 投递；raw mode 只把该 byte 交给用户态，不自动 signal。foreground group 缺失或为空时只产生确定性 no-op/错误结果，不解引用悬垂进程对象。
 - `/bin/sh` 在前台命令或 pipeline 结束并恢复 shell foreground group 后，会把单一默认终端恢复为 canonical mode。
-- `/bin/sh` 只在 fd `0` 与 fd `1` 仍绑定到默认 console fast path 时显示确定性的 `$ ` prompt；pipe 或重定向文件会抑制 prompt。
+- `/bin/sh` 只在 fd `0` 与 fd `1` 都通过 `isatty()`（基于 `fstat` 的字符设备判断）报告为终端时显示确定性的 `$ ` prompt；pipe 或重定向到普通文件会报告非终端并抑制 prompt。
 - 当 fd `1` 与 fd `2` 未被重定向时，stdout 和 stderr 会通过选中的默认 console render backend 可见。
+
+## 标准描述符作为终端文件
+
+当一个全新的顶层用户进程进入 ring3 时，内核会在 fd `0`、fd `1`、fd `2` 安装同一个共享的终端 `vfs::File`（即"句柄"层）。三个描述符指向同一句柄，因此其引用计数达到 3，单次 close 不会释放它。该句柄可读可写（`readable = writable = true`），`close_on_exec` 为 false，其 `private_data` 指向长期存在的全局终端"设备"层。`fork` 通过普通 fd 表复制共享该句柄（每个被复制的描述符一次 retain）；`exec` 保留既有 fd 表（只丢弃 `close_on_exec` 的描述符），因此标准终端描述符在 `exec` 后天然保留、无需重装。该句柄遵循与 pipe/socket 一致的 `retain`/`release` 生命周期；其 close op 对设备层为 no-op，因此释放最后一个引用只释放 `vfs::File` 结构本身，绝不释放全局 input ring 或 wait queue。对终端句柄执行 `fstat` 会报告为字符设备（`S_IFCHR`），用户态 `isatty()` 据此把它与普通文件、pipe 区分开，且不新增 syscall 编号。
 
 ## 非目标
 

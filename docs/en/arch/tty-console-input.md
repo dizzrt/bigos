@@ -97,11 +97,11 @@ The blocking API is valid only from ordinary running kernel-thread context where
 
 The automated blocking smoke uses a synthetic producer that calls `terminal::enqueue_input()` and therefore exercises the same TTY wakeup path without requiring manual keyboard input. Manual keyboard validation remains optional and should record emulator input capability when used.
 
-Interactive console usability connects the same blocking consumers to default user stdin: when a user process reads fd `0` and no file or pipe is installed there, `SYS_READ` blocks on the TTY ring and returns canonical bytes or raw currently available bytes according to the terminal mode. If fd `0` is replaced by a pipe or file through `dup2()` or redirection, reads use the normal fd/VFS path instead of the default console.
+Interactive console usability connects the same blocking consumers to default user stdin through a standard `vfs::File`. The global terminal is split into a long-lived "device" layer (the input ring and wait queue) and a per-open "handle" layer (`vfs::File`), and the terminal handle's read op enters the existing blocking terminal read path. When a user process reads fd `0` and that descriptor holds the terminal handle, `SYS_READ` routes through the fd table to `file->ops->read`, which blocks on the TTY ring and returns canonical bytes or raw currently available bytes according to the terminal mode. If fd `0` is replaced by a pipe or file through `dup2()` or redirection, reads use that descriptor's ops instead of the terminal handle.
 
 ## Console Output Boundary
 
-Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps `terminal::console_put()` and `terminal::console_write()`. The runtime console owns fixed-capacity cell storage, display attributes, a bounded ANSI/CSI parser, UTF-8 decoder state, cursor position, saved cursor coordinates, a 256-line in-kernel scrollback buffer, viewport policy, and clear policy. Its visible columns and rows come from the selected internal render backend: VGA text remains the fixed 80x25 Legacy fallback, while a UEFI framebuffer text backend may be selected only after validated framebuffer metadata, an explicit `map_device_mmio()` mapping, a supported 32-bit RGBX/BGRX pixel format, a usable glyph lookup view, and a bounded complete-cell grid computed from framebuffer geometry. Interactive console usability routes user writes to fd `1` or fd `2` through this same default console path when no file or pipe is installed at that descriptor; redirected descriptors still use the normal fd/VFS path. The syscall path also preserves the existing bounded serial write marker so headless smokes can continue to observe default userland progress. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
+Ordinary runtime text output uses the default terminal sink over `terminal::default_terminal_write()`, which wraps `terminal::console_put()` and `terminal::console_write()`. The runtime console owns fixed-capacity cell storage, display attributes, a bounded ANSI/CSI parser, UTF-8 decoder state, cursor position, saved cursor coordinates, a 256-line in-kernel scrollback buffer, viewport policy, and clear policy. Its visible columns and rows come from the selected internal render backend: VGA text remains the fixed 80x25 Legacy fallback, while a UEFI framebuffer text backend may be selected only after validated framebuffer metadata, an explicit `map_device_mmio()` mapping, a supported 32-bit RGBX/BGRX pixel format, a usable glyph lookup view, and a bounded complete-cell grid computed from framebuffer geometry. User writes to fd `1` or fd `2` route through the fd table to the terminal handle's write op (`file->ops->write`); that op preserves the existing bounded serial write marker before the default console write, so headless smokes can continue to observe default userland progress. Descriptors redirected to a pipe or file route to that descriptor's ops instead. The console API itself does not mirror to COM1 serial by default; serial stays reserved for bounded markers, smokes, and fatal diagnostics.
 
 Basic control-character behavior:
 
@@ -157,8 +157,28 @@ The default interactive shell path intentionally stays below POSIX terminal scop
   dereference.
 - `/bin/sh` restores the single default terminal to canonical mode when it
   regains the foreground group after a foreground command or pipeline.
-- `/bin/sh` shows its deterministic `$ ` prompt only when fd `0` and fd `1` are still bound to the default console fast paths; pipes or redirected files suppress the prompt.
+- `/bin/sh` shows its deterministic `$ ` prompt only when both fd `0` and fd `1`
+  report a terminal through `isatty()` (an `fstat`-backed character-device
+  check); pipes or redirected regular files report non-terminal and suppress the
+  prompt.
 - stdout and stderr are visible through the selected default console render backend through fd `1` and fd `2` when those descriptors are not redirected.
+
+## Standard Descriptors As Terminal Files
+
+When a fresh top-level user process enters ring3, the kernel installs one shared
+terminal `vfs::File` (the "handle" layer) at fd `0`, fd `1`, and fd `2`. The
+three descriptors point at the same handle, so its reference count reaches three
+and a single close does not free it. The handle is read/write (`readable =
+writable = true`), `close_on_exec` is false, and its `private_data` points at the
+long-lived global terminal "device" layer. `fork` shares the handle through the
+ordinary fd-table copy (one retain per duplicated descriptor); `exec` keeps the
+existing fd table (only `close_on_exec` descriptors are dropped), so the standard
+terminal descriptors survive `exec` without reinstallation. The handle follows
+the same `retain`/`release` lifecycle as pipes and sockets; its close op is a
+device-layer no-op, so releasing the last reference frees only the `vfs::File`
+structure and never the global input ring or wait queue. `fstat` on the terminal
+handle reports a character device (`S_IFCHR`), which is how userland `isatty()`
+distinguishes it from regular files and pipes without a new syscall number.
 
 ## Non-Goals
 

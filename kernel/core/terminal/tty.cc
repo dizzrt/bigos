@@ -1,10 +1,13 @@
+#include <bigos/arch_vm_user_boundary.h>
 #include <bigos/console.h>
 #include <bigos/errno.h>
 #include <bigos/io.h>
 #include <bigos/keyboard.h>
+#include <bigos/memory.h>
 #include <bigos/proc.h>
 #include <bigos/sched.h>
 #include <bigos/signal.h>
+#include <bigos/syscall.h>
 #include <bigos/tty.h>
 
 namespace bigos::terminal {
@@ -455,5 +458,103 @@ namespace bigos::terminal {
 
     TTYInputStats input_stats() noexcept {
         return {g_input.dropped};
+    }
+
+    namespace {
+        // Handle layer over the global terminal device. The vfs::File read/write
+        // ops dispatch here; the device-layer global state (g_input/g_input_wait)
+        // is shared by every handle, so close is a no-op and create/release only
+        // manage the File structure itself.
+        vfs::Status tty_read(vfs::File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
+            if (__bytes_read != nullptr)
+                *__bytes_read = 0;
+            if (__file == nullptr)
+                return vfs::Status::BadFileDescriptor;
+            if (__len == 0)
+                return vfs::Status::Success;
+            if (__dst == nullptr)
+                return vfs::Status::InvalidArgument;
+            if (!sched::can_block())
+                return vfs::Status::WouldBlock;
+
+            char *out = (char *)__dst;
+            const bool raw_mode = input_mode() == TerminalInputMode::Raw;
+            const int r = raw_mode ? read_raw_available_blocking(out, __len, 0) : read_char_blocking(out, 0);
+            if (r < 0)
+                return vfs::Status::BlockError;
+            if (__bytes_read != nullptr)
+                *__bytes_read = (size_t)r;
+            return vfs::Status::Success;
+        }
+
+        // Terminal write. Byte-for-byte equivalent to the former sys_write fd 1/2
+        // branch: emit the BIGOS_USER_WRITE_SYSCALL marker plus content on COM1,
+        // then write the bounded content to the default console with the same
+        // user/kernel address-space switch and restore as before. SYS_WRITE_MAX_LEN
+        // still bounds the bytes consumed in a single call.
+        vfs::Status tty_write(vfs::File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept {
+            if (__bytes_written != nullptr)
+                *__bytes_written = 0;
+            if (__file == nullptr)
+                return vfs::Status::BadFileDescriptor;
+            if (__len == 0)
+                return vfs::Status::Success;
+            if (__src == nullptr)
+                return vfs::Status::InvalidArgument;
+            if (__len > bigos::sys::SYS_WRITE_MAX_LEN)
+                return vfs::Status::InvalidArgument;
+
+            char bounded[bigos::sys::SYS_WRITE_MAX_LEN + 1];
+            const char *in = (const char *)__src;
+            for (size_t i = 0; i < __len; ++i)
+                bounded[i] = in[i];
+            bounded[__len] = 0;
+            serial_puts("BIGOS_USER_WRITE_SYSCALL\n");
+            serial_puts(bounded);
+            const uint64_t active_root = bigos::arch::vm_user::active_address_space_root();
+            const bigos::proc::Process *process = bigos::proc::current_process();
+            if (process != nullptr && process->kernel_address_space_root != bigos::mm::INVALID_PHYS_ADDR &&
+                !bigos::arch::vm_user::is_active_address_space(process->kernel_address_space_root))
+                bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);
+            (void)default_terminal_write(bounded);
+            if (!bigos::arch::vm_user::is_active_address_space(active_root))
+                bigos::arch::vm_user::activate_address_space(active_root);
+            if (__bytes_written != nullptr)
+                *__bytes_written = __len;
+            return vfs::Status::Success;
+        }
+
+        vfs::Status tty_lseek(vfs::File *, int64_t, int, uint64_t *) noexcept {
+            return vfs::Status::NotSeekable;
+        }
+
+        // Device-layer no-op: a terminal handle owns no device state, so closing it
+        // must not touch the global input ring or wait queue. The File structure
+        // itself is freed by vfs::release.
+        void tty_close(vfs::File *) noexcept {}
+
+        // read/close occupy the fixed first two ops slots; write/lseek follow. A
+        // poll slot can be appended later (M13.1 readiness) without reordering.
+        const vfs::FileOperations TTY_OPS = {&tty_read, &tty_close, &tty_write, &tty_lseek, nullptr, nullptr};
+    }   // namespace
+
+    vfs::File *create_tty_file() noexcept {
+        auto *file = (vfs::File *)bigos::kmalloc(sizeof(vfs::File));
+        if (file == nullptr)
+            return nullptr;
+        file->ops = &TTY_OPS;
+        file->vnode = nullptr;
+        file->offset = 0;
+        file->ref_count = 1;
+        file->readable = true;
+        file->close_on_exec = false;
+        file->private_data = &g_input;
+        file->writable = true;
+        file->identity = {};
+        return file;
+    }
+
+    bool is_tty_file(const vfs::File *__file) noexcept {
+        return __file != nullptr && __file->ops == &TTY_OPS;
     }
 }   // namespace bigos::terminal

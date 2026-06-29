@@ -117,7 +117,12 @@ def test_syscall_gate_user_buffer_exit_and_fault_boundaries() -> None:
     assert 'send_eoi' not in syscall_body
 
     assert 'validate_user_buffer(__buffer, __len)' in syscall
-    assert 'bounded[SYS_WRITE_MAX_LEN + 1]' in syscall
+    # The SYS_WRITE_MAX_LEN bounded buffer now lives in the terminal write op
+    # (device/handle layering); the syscall write path uses the SYS_IO_MAX_LEN
+    # bounded copy shared by all fd-table writes.
+    tty = read_source('kernel/core/terminal/tty.cc')
+    assert 'bounded[bigos::sys::SYS_WRITE_MAX_LEN + 1]' in tty
+    assert 'char bounded[SYS_IO_MAX_LEN];' in syscall
     assert 'bigos::proc::exit_current((int64_t)__frame->rdi);' in syscall
     assert 'user_mode = (__frame->cs & 0x3) == 0x3' in interrupt
     assert 'bigos::proc::fault_current_and_exit(-14);' in interrupt

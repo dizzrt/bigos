@@ -11,10 +11,20 @@
 // compiled with the LLP64 Windows x64 ABI, so the `long` width check is gated
 // on the LP64 data model while the width-only checks hold on any x86_64 ABI.
 static_assert(sizeof(size_t) == 8, "BigOS assumes x86_64: size_t is 8 bytes");
-static_assert(sizeof(uint64_t) == 8 && sizeof(uint32_t) == 4, "fixed-width integer widths must match their nominal sizes");
+static_assert(
+    sizeof(uint64_t) == 8 && sizeof(uint32_t) == 4, "fixed-width integer widths must match their nominal sizes");
 static_assert(__CHAR_BIT__ == 8, "BigOS assumes an 8-bit byte");
 #if defined(__LP64__) || defined(_LP64)
 static_assert(sizeof(long) == 8, "BigOS assumes LP64 x86_64: long is 8 bytes");
+#endif
+
+#ifdef __cplusplus
+// std::nullptr_t equivalent in the global namespace for freestanding use.
+// Shares the toolchain <stddef.h> guard so the typedef is defined exactly once.
+#ifndef _GXX_NULLPTR_T
+#define _GXX_NULLPTR_T
+typedef decltype(nullptr) nullptr_t;
+#endif
 #endif
 
 // get free memory

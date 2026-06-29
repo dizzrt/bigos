@@ -3,6 +3,7 @@
 
 #include <bigos/types.h>
 #include <bigos/timer.h>
+#include <bigos/fs/vfs.h>
 
 namespace bigos::terminal {
     constexpr size_t TTY_INPUT_CAPACITY = 128;
@@ -87,6 +88,18 @@ namespace bigos::terminal {
     int read_raw_available_blocking(char *out, size_t capacity, timer::tick_t timeout_ticks = 0) noexcept;
     int read_input_record_blocking(TerminalInputRecord *out, timer::tick_t timeout_ticks = 0) noexcept;
     TTYInputStats input_stats() noexcept;
+
+    // Device/handle split: the global terminal above is the long-lived "device"
+    // layer; a terminal vfs::File is a per-open "handle" whose private_data points
+    // at the device. create_tty_file allocates an RDWR handle (readable = writable
+    // = true) routed through TTY_OPS; its read reuses the blocking terminal read
+    // path and its write reuses the default console write path while preserving
+    // the headless BIGOS_USER_WRITE_SYSCALL serial marker. The handle follows the
+    // standard vfs::retain/release lifecycle; TTY_OPS.close is a device-layer
+    // no-op. is_tty_file identifies such a handle by its ops pointer (analogous to
+    // ipc::is_pipe_file). Non-IRQ / allocation-permitted context only.
+    bigos::vfs::File *create_tty_file() noexcept;
+    bool is_tty_file(const bigos::vfs::File *file) noexcept;
 }   // namespace bigos::terminal
 
 #endif   // BIGOS_TTY_H

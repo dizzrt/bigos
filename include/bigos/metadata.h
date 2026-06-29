@@ -7,9 +7,11 @@ namespace bigos {
     constexpr uint32_t BIGOS_METADATA_TYPE_UNKNOWN = 0;
     constexpr uint32_t BIGOS_METADATA_TYPE_REGULAR = 1;
     constexpr uint32_t BIGOS_METADATA_TYPE_DIRECTORY = 2;
+    constexpr uint32_t BIGOS_METADATA_TYPE_CHARDEV = 3;
 
     constexpr uint32_t BIGOS_MODE_IFREG = 0100000;
     constexpr uint32_t BIGOS_MODE_IFDIR = 0040000;
+    constexpr uint32_t BIGOS_MODE_IFCHR = 0020000;
 
     struct Metadata {
         uint32_t type;

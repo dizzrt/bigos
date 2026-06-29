@@ -59,6 +59,10 @@ int setpgid(pid_t pid, pid_t pgid);
 pid_t setsid(void);
 pid_t tcgetpgrp(int fd);
 int tcsetpgrp(int fd, pid_t pgid);
+/* Returns 1 when fd refers to the terminal (character device), 0 otherwise
+ * (regular file, pipe, or invalid fd). Implemented over fstat; not full
+ * POSIX isatty (no ENOTTY/EBADF distinction beyond the 0 return). */
+int isatty(int fd);
 int getuid(void);
 int getgid(void);
 int kill(pid_t pid, int signo);

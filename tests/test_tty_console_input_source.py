@@ -205,7 +205,6 @@ def test_tty_char_consumers_expand_navigation_and_keep_shift_page_scrollback_pri
 def test_raw_mode_delivers_control_bytes_without_canonical_side_effects() -> None:
     tty_h = read_source('include/bigos/tty.h')
     tty = read_source('kernel/core/terminal/tty.cc')
-    syscall = read_source('kernel/core/syscall/syscall.cc')
 
     assert 'bool read_raw_char(char *out) noexcept;' in tty_h
     assert 'int read_raw_available_blocking(char *out, size_t capacity, timer::tick_t timeout_ticks = 0) noexcept;' in tty_h
@@ -218,8 +217,10 @@ def test_raw_mode_delivers_control_bytes_without_canonical_side_effects() -> Non
     assert 'signal_process_group_from_current' not in raw_body
     assert 'console_scroll_page_up' not in raw_body
     assert 'console_scroll_page_down' not in raw_body
-    assert 'read_raw_available_blocking(bounded, (size_t)__len, 0)' in syscall
-    assert 'input_mode() == bigos::terminal::TerminalInputMode::Raw' in syscall
+    # Raw/canonical selection now lives in the terminal read op, not a syscall
+    # bare-fd branch.
+    assert 'read_raw_available_blocking(out, __len, 0)' in tty
+    assert 'input_mode() == TerminalInputMode::Raw' in tty
 
 
 def test_tty_blocking_consumer_is_additive_and_uses_wait_queue() -> None:
@@ -377,16 +378,43 @@ def test_unicode_console_cell_layout_width_backspace_and_tab_stop() -> None:
 
 def test_default_user_stdout_and_stderr_reach_visible_console() -> None:
     syscall = read_source('kernel/core/syscall/syscall.cc')
+    tty = read_source('kernel/core/terminal/tty.cc')
+    tty_h = read_source('include/bigos/tty.h')
+    proc = read_source('kernel/core/proc/proc.cc')
 
-    assert '#include <bigos/console.h>' in syscall
-    assert '(__fd == 1 || __fd == 2)' in syscall
-    assert 'bigos::proc::file_for_fd_current((uint32_t)__fd) == nullptr' in syscall
-    assert 'serial_puts("BIGOS_USER_WRITE_SYSCALL\\n");' in syscall
-    assert 'serial_puts(bounded);' in syscall
-    assert 'bigos::proc::copy_current_user_buffer(__buffer, bounded, __len)' in syscall
-    assert 'bigos::proc::validate_user_buffer(__buffer, __len)' in syscall
-    assert 'bigos::terminal::default_terminal_write(bounded);' in syscall
-    assert 'bigos::arch::vm_user::activate_address_space(active_root);' in syscall
+    # The terminal is a standard vfs::File: bare fd 0/1/2 special cases are gone
+    # and read/write route uniformly through the fd table -> file->ops.
+    assert '(__fd == 1 || __fd == 2)' not in syscall
+    assert 'bigos::proc::file_for_fd_current(0) == nullptr' not in syscall
+    assert 'bigos::proc::write_fd_current((uint32_t)__fd, bounded, (size_t)__len, &bytes_written)' in syscall
+    assert 'bigos::proc::read_fd_current((uint32_t)__fd, bounded, (size_t)__len, &bytes_read)' in syscall
+
+    # The headless write marker and default console write now live inside the
+    # terminal write op (device/handle layering), preserving text and order.
+    assert 'serial_puts("BIGOS_USER_WRITE_SYSCALL\\n");' in tty
+    assert 'serial_puts(bounded);' in tty
+    assert 'default_terminal_write(bounded);' in tty
+    assert '__len > bigos::sys::SYS_WRITE_MAX_LEN' in tty
+    assert 'bigos::arch::vm_user::activate_kernel_address_space(process->kernel_address_space_root);' in tty
+    assert 'bigos::arch::vm_user::activate_address_space(active_root);' in tty
+
+    # The terminal read op reuses the existing blocking terminal read path,
+    # selecting raw vs canonical via input_mode().
+    assert 'input_mode() == TerminalInputMode::Raw' in tty
+    assert 'read_raw_available_blocking(out, __len, 0)' in tty
+    assert 'read_char_blocking(out, 0)' in tty
+
+    # Device/handle split: TTY_OPS table, RDWR handle constructor, ops-pointer id.
+    assert 'const vfs::FileOperations TTY_OPS = {&tty_read, &tty_close, &tty_write, &tty_lseek,' in tty
+    assert 'void tty_close(vfs::File *) noexcept {}' in tty
+    assert 'bigos::vfs::File *create_tty_file() noexcept;' in tty_h
+    assert 'bool is_tty_file(const bigos::vfs::File *file) noexcept;' in tty_h
+
+    # Standard fd 0/1/2 are installed as one shared terminal handle (ref_count 3)
+    # at the single fresh ring3 entry point.
+    assert 'bool install_standard_fds(bigos::proc::Process *__process) noexcept' in proc
+    assert 'bigos::terminal::create_tty_file();' in proc
+    assert 'if (!install_standard_fds(__process))' in proc
 
 
 def test_keyboard_irq_echo_stays_in_non_interrupt_shell_consumer() -> None:
