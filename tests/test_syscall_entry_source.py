@@ -240,6 +240,58 @@ def test_blocking_sleep_syscall_is_bounded_and_tick_based() -> None:
     assert "'BIGOS_SLEEP_SYSCALL_PASSED'" in bigosdev
 
 
+def test_nonblocking_fcntl_constants_match_across_kernel_and_user() -> None:
+    """O_NONBLOCK / F_GETFL / F_SETFL must agree between the kernel sources and
+    the user libc mirror, and must not collide with the existing open flags or
+    fcntl command numbers."""
+    vfs_h = read_source('include/bigos/fs/vfs.h')
+    proc_h = read_source('include/bigos/proc.h')
+    user_fcntl = read_source('user/libc/include/fcntl.h')
+
+    # Kernel single source of O_NONBLOCK lives in vfs.h as OPEN_NONBLOCK = 1<<11.
+    assert 'OPEN_NONBLOCK = 1ull << 11' in vfs_h
+    # proc.h mirrors it for the fd-control surface and adds the new fcntl cmds.
+    assert 'O_NONBLOCK = bigos::vfs::OPEN_NONBLOCK' in proc_h
+    assert 'FCNTL_F_GETFL = 3' in proc_h
+    assert 'FCNTL_F_SETFL = 4' in proc_h
+    # Existing fcntl command numbers are unchanged and do not collide.
+    assert 'FCNTL_F_DUPFD = 0' in proc_h
+    assert 'FCNTL_F_GETFD = 1' in proc_h
+    assert 'FCNTL_F_SETFD = 2' in proc_h
+
+    # Parse the user libc fcntl mirror, evaluating the simple #define expressions
+    # (plain integers and `(1 << n)` shifts) that this bounded header uses.
+    def parse_fcntl_defines(source: str) -> dict[str, int]:
+        values: dict[str, int] = {}
+        for name, expr in re.findall(r'^#define\s+([A-Z][A-Z0-9_]+)\s+(.+)$', source, re.M):
+            expr = expr.strip()
+            plain = re.fullmatch(r'(\d+)', expr)
+            shift = re.fullmatch(r'\(1\s*<<\s*(\d+)\)', expr)
+            if plain is not None:
+                values[name] = int(plain.group(1))
+            elif shift is not None:
+                values[name] = 1 << int(shift.group(1))
+        return values
+
+    user_defines = parse_fcntl_defines(user_fcntl)
+    assert user_defines['O_NONBLOCK'] == (1 << 11)
+    assert user_defines['F_GETFL'] == 3
+    assert user_defines['F_SETFL'] == 4
+    assert user_defines['F_DUPFD'] == 0
+    assert user_defines['F_GETFD'] == 1
+    assert user_defines['F_SETFD'] == 2
+
+    # O_NONBLOCK must not collide with the user open flags.
+    open_flags = {
+        user_defines['O_RDONLY'],
+        user_defines['O_WRONLY'],
+        user_defines['O_RDWR'],
+        user_defines['O_CREAT'],
+        user_defines['O_TRUNC'],
+    }
+    assert user_defines['O_NONBLOCK'] not in open_flags
+
+
 def test_terminal_mode_syscall_and_libc_contract_is_bigos_specific() -> None:
     syscall_h = read_source('include/bigos/syscall.h')
     syscall = read_source('kernel/core/syscall/syscall.cc')

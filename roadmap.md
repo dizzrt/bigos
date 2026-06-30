@@ -476,10 +476,10 @@ descriptor at a time.
   blocking primitives, without implying broad POSIX poll semantics.
 - [x] 任务 M13.1：内核 fd readiness 模型，在既有阻塞原语之上为 socket、pipe 与终端描述符
   表达可读、可写与错误就绪状态，不暗示完整 POSIX poll 语义。
-- [ ] Task M13.2: bounded non-blocking descriptor behavior so reads and writes
+- [x] Task M13.2: bounded non-blocking descriptor behavior so reads and writes
   return a deterministic would-block status instead of blocking, integrated with
   the existing fd-control path.
-- [ ] 任务 M13.2：有界非阻塞描述符行为，使读写返回确定性 would-block 状态而非阻塞，
+- [x] 任务 M13.2：有界非阻塞描述符行为，使读写返回确定性 would-block 状态而非阻塞，
   并与既有 fd-control 路径集成。
 - [ ] Task M13.3: a bounded multiplexing syscall that waits on a fixed-capacity
   set of descriptors with a timeout and reports per-descriptor readiness, reusing

@@ -298,6 +298,7 @@ SMOKE_OPTIONS = (
     'userland_smoke',
     'sleep_syscall_smoke',
     'filesystem_maturity_smoke',
+    'nonblocking_fd_smoke',
 )
 RUNTIME_SMOKE_MATRIX = (
     RuntimeSmokeCase(

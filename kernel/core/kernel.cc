@@ -2326,6 +2326,12 @@ void kernel(const BootInfoHeader *boot_info) {
         bigos::serial_puts("BIGOS_FD_READINESS_FAILED thread\n");
 #endif
 
+#ifdef BIGOS_NONBLOCKING_FD_SMOKE
+    if (bigos::sched::create_kernel_thread(&bigos::proc::nonblocking_fd_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_NONBLOCKING_FD_FAILED thread\n");
+#endif
+
 #ifdef BIGOS_SCHEDULER_SMOKE
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_a, nullptr);
     bigos::sched::create_kernel_thread(&scheduler_smoke_worker_b, nullptr);

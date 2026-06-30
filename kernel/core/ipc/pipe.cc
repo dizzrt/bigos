@@ -61,7 +61,11 @@ namespace {
 
         // Block while empty and writers remain open.
         if (pipe->count == 0 && pipe->write_open) {
-            if (!bigos::sched::can_block())
+            // Nonblocking fd or non-blockable context short-circuits to
+            // would-block instead of entering the read wait queue. The
+            // read_ready predicate above already captured the "empty + writers
+            // open" condition, so this is the same point a blocking read waits.
+            if (bigos::vfs::file_is_nonblocking(__file) || !bigos::sched::can_block())
                 return bigos::vfs::Status::WouldBlock;
             ReadWait wait = {pipe};
             const int rc = bigos::sched::wait_queue_wait_until(&pipe->read_wq, &read_ready, &wait, 0);
@@ -110,7 +114,10 @@ namespace {
             if (!pipe->read_open)
                 return done > 0 ? bigos::vfs::Status::Success : bigos::vfs::Status::BrokenPipe;
             if (pipe->count == bigos::ipc::PIPE_CAPACITY) {
-                if (!bigos::sched::can_block())
+                // Nonblocking fd or non-blockable context short-circuits instead
+                // of entering the write wait queue. If bytes were already written
+                // this call, return them (done > 0) rather than would-block.
+                if (bigos::vfs::file_is_nonblocking(__file) || !bigos::sched::can_block())
                     return done > 0 ? bigos::vfs::Status::Success : bigos::vfs::Status::WouldBlock;
                 WriteWait wait = {pipe};
                 const int rc = bigos::sched::wait_queue_wait_until(&pipe->write_wq, &write_ready, &wait, 0);
@@ -232,6 +239,7 @@ namespace ipc {
         read_file->close_on_exec = false;
         read_file->private_data = read_end;
         read_file->writable = false;
+        read_file->nonblocking = false;
 
         write_file->ops = &PIPE_WRITE_OPS;
         write_file->vnode = nullptr;
@@ -241,6 +249,7 @@ namespace ipc {
         write_file->close_on_exec = false;
         write_file->private_data = write_end;
         write_file->writable = true;
+        write_file->nonblocking = false;
 
         *__read_file = read_file;
         *__write_file = write_file;

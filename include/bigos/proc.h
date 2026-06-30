@@ -67,7 +67,13 @@ namespace bigos::proc {
     constexpr int FCNTL_F_DUPFD = 0;
     constexpr int FCNTL_F_GETFD = 1;
     constexpr int FCNTL_F_SETFD = 2;
+    constexpr int FCNTL_F_GETFL = 3;
+    constexpr int FCNTL_F_SETFL = 4;
     constexpr int FCNTL_FD_CLOEXEC = 1;
+    // Bounded O_NONBLOCK status flag for F_GETFL/F_SETFL. Mirrors the single
+    // kernel-internal source bigos::vfs::OPEN_NONBLOCK (1<<11) and the user libc
+    // O_NONBLOCK; it does not collide with the OPEN_* access/creation flags.
+    constexpr uint64_t O_NONBLOCK = bigos::vfs::OPEN_NONBLOCK;
     constexpr uint32_t EXEC_MAX_ARGC = 8;
     constexpr uint32_t EXEC_MAX_ENVC = 8;
     constexpr uint64_t EXEC_MAX_STRING_BYTES = 256;
@@ -447,6 +453,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_DYNAMIC_LINK_SMOKE
     void dynamic_link_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_NONBLOCKING_FD_SMOKE
+    void nonblocking_fd_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 

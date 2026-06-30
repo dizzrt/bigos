@@ -104,6 +104,7 @@ namespace net {
         file->close_on_exec = false;
         file->private_data = socket;
         file->identity = {};
+        file->nonblocking = false;
 
         *__out_file = file;
         return vfs::Status::Success;

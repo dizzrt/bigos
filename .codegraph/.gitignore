@@ -15,5 +15,7 @@ cache/
 # Hook markers
 .dirty
 
+# Runtime
 *.pid
 *.sock
+*.lock

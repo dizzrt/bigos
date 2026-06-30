@@ -818,6 +818,9 @@ namespace sys {
         }
 
         static int64_t sys_fcntl(uint64_t __fd, uint64_t __cmd, uint64_t __arg) noexcept {
+            // Only F_DUPFD may grow the fd table / allocate, so only it needs the
+            // blocking guard. F_GETFL/F_SETFL (and F_GETFD/F_SETFD) are pure flag
+            // reads/writes with no allocation and need no can_block() guard.
             if (__cmd == (uint64_t)bigos::proc::FCNTL_F_DUPFD && !bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
             return bigos::proc::fcntl_fd_current((uint32_t)__fd, (int)__cmd, __arg);
@@ -1068,6 +1071,12 @@ namespace sys {
             bigos::net::Socket *socket = socket_for_fd(__fd);
             if (socket == nullptr)
                 return -bigos::ENOTSOCK;
+            // A nonblocking socket fd does a single bounded RX advance and never
+            // yields; with no datagram it returns -EAGAIN immediately. A blocking
+            // fd keeps the existing bounded poll-and-yield rounds. The flag lives
+            // on the shared open file description (vfs::File).
+            const bool nonblocking = bigos::vfs::file_is_nonblocking(bigos::proc::file_for_fd_current((uint32_t)__fd));
+            const uint32_t recv_rounds = nonblocking ? 1u : RECV_MAX_ROUNDS;
             if (!socket->bound || socket->endpoint == nullptr)
                 return -bigos::EDESTADDRREQ;
             if (__len == 0)
@@ -1087,12 +1096,15 @@ namespace sys {
 
             bigos::net::UdpDatagram datagram = {};
             bigos::net::Status status = bigos::net::Status::NoData;
-            for (uint32_t round = 0; round < RECV_MAX_ROUNDS; round++) {
+            for (uint32_t round = 0; round < recv_rounds; round++) {
                 (void)bigos::net::pump(socket->context, RECV_PUMP_FRAMES);
                 status = bigos::net::udp_receive_from(socket->endpoint, &datagram);
                 if (status != bigos::net::Status::NoData)
                     break;
-                bigos::sched::yield();
+                // Blocking fd yields between rounds; nonblocking fd never reaches
+                // here a second time (recv_rounds == 1).
+                if (!nonblocking)
+                    bigos::sched::yield();
             }
             if (status != bigos::net::Status::Ok)
                 return net_status_to_errno(status);

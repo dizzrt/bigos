@@ -474,7 +474,16 @@ namespace bigos::terminal {
                 return vfs::Status::Success;
             if (__dst == nullptr)
                 return vfs::Status::InvalidArgument;
+            // Non-blockable context (IRQ/scheduler-critical) preserves the
+            // existing strict short-circuit: never enter the input wait queue.
             if (!sched::can_block())
+                return vfs::Status::WouldBlock;
+            // Nonblocking fd with no input available returns would-block instead
+            // of waiting on g_input_wait. input_available is the same read-only
+            // predicate tty_poll uses, so "poll readable" holds iff a nonblocking
+            // read here would not would-block. It dequeues no input record and
+            // leaves the input ring untouched.
+            if (vfs::file_is_nonblocking(__file) && !input_available(nullptr))
                 return vfs::Status::WouldBlock;
 
             char *out = (char *)__dst;
@@ -565,6 +574,7 @@ namespace bigos::terminal {
         file->private_data = &g_input;
         file->writable = true;
         file->identity = {};
+        file->nonblocking = false;
         return file;
     }
 

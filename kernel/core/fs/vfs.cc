@@ -597,6 +597,7 @@ namespace vfs {
             file->private_data = state;
             file->writable = wants_write;
             file->identity = bigfs_identity(inode);
+            file->nonblocking = false;
             *__out_file = file;
             return Status::Success;
         }
@@ -640,6 +641,7 @@ namespace vfs {
         file->private_data = state;
         file->writable = false;
         file->identity = exfat_identity(&metadata);
+        file->nonblocking = false;
         *__out_file = file;
         return Status::Success;
     }

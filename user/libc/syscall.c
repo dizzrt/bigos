@@ -169,7 +169,9 @@ int dup2(int oldfd, int newfd) {
 int fcntl(int fd, int cmd, ...) {
     __builtin_va_list ap;
     long arg = 0;
-    if (cmd == F_DUPFD || cmd == F_SETFD) {
+    /* F_DUPFD/F_SETFD/F_SETFL carry an int argument; F_GETFD/F_GETFL take none
+     * and pass arg = 0. The kernel ignores arg for the GET commands. */
+    if (cmd == F_DUPFD || cmd == F_SETFD || cmd == F_SETFL) {
         __builtin_va_start(ap, cmd);
         arg = (long)__builtin_va_arg(ap, int);
         __builtin_va_end(ap);

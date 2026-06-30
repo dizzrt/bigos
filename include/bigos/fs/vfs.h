@@ -11,6 +11,13 @@ namespace vfs {
     constexpr uint64_t OPEN_RDWR = 1ull << 1;
     constexpr uint64_t OPEN_CREAT = 1ull << 6;
     constexpr uint64_t OPEN_TRUNC = 1ull << 9;
+    // OPEN_ACCMODE masks the access-mode bits synthesized for F_GETFL.
+    // OPEN_NONBLOCK is the bounded nonblocking status flag and the single
+    // kernel-internal source for O_NONBLOCK; fd-control (proc::O_NONBLOCK) and
+    // the user libc mirror reuse this value. It is the common 1<<11 bit and does
+    // not collide with the OPEN_* access/creation flags above.
+    constexpr uint64_t OPEN_ACCMODE = OPEN_WRONLY | OPEN_RDWR;
+    constexpr uint64_t OPEN_NONBLOCK = 1ull << 11;
     constexpr uint32_t UTIME_ATIME_NOW = 1u << 0;
     constexpr uint32_t UTIME_MTIME_NOW = 1u << 1;
     constexpr uint32_t UTIME_ATIME_OMIT = 1u << 2;
@@ -133,7 +140,44 @@ namespace vfs {
         // object was opened with write access.
         bool writable;
         FileIdentity identity;
+        // Appended field (do not reorder the layout above). Bounded O_NONBLOCK
+        // status flag at open-file-description granularity, default false. It is
+        // shared through dup/fork because those paths share the same File object
+        // (vfs::retain), matching POSIX "the flag belongs to the open file
+        // description". Backends consult file_is_nonblocking() at their
+        // would-block decision points.
+        bool nonblocking;
     };
+
+    // Layout guard: the nonblocking flag MUST stay appended after identity (and
+    // identity after writable) so the earlier fields keep their offsets for
+    // backends and statically-built smoke state.
+    static_assert(__builtin_offsetof(File, ops) == 0, "File ops slot moved");
+    static_assert(__builtin_offsetof(File, identity) > __builtin_offsetof(File, writable),
+        "File identity must stay after writable");
+    static_assert(__builtin_offsetof(File, nonblocking) > __builtin_offsetof(File, identity),
+        "File nonblocking must be appended after identity");
+
+    // Kernel-internal helpers shared by fd-control and the would-block decision
+    // points in each blockable backend.
+    //
+    // file_is_nonblocking reports the open file description's bounded O_NONBLOCK
+    // flag; a null file reports false (callers fall back to the !can_block()
+    // short-circuit). file_access_mode synthesizes the OPEN_RDONLY/WRONLY/RDWR
+    // access bits from the file's readable/writable state for F_GETFL.
+    inline bool file_is_nonblocking(const File *__file) noexcept {
+        return __file != nullptr && __file->nonblocking;
+    }
+
+    inline uint64_t file_access_mode(const File *__file) noexcept {
+        if (__file == nullptr)
+            return OPEN_RDONLY;
+        if (__file->readable && __file->writable)
+            return OPEN_RDWR;
+        if (__file->writable)
+            return OPEN_WRONLY;
+        return OPEN_RDONLY;
+    }
 
     const char *status_name(Status __status) noexcept;
     Status init() noexcept;

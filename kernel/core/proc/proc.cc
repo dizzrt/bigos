@@ -13,6 +13,11 @@
 #include <bigos/tty.h>
 #include <irq/interrupt.h>
 
+#ifdef BIGOS_NONBLOCKING_FD_SMOKE
+#include <bigos/ipc/pipe.h>
+#include <bigos/net/socket.h>
+#endif
+
 #include "../../mm/buddy.h"
 #include "../../mm/memdef.h"
 #include "../../mm/vmem.h"
@@ -1744,7 +1749,10 @@ namespace {
         if (file == nullptr)
             return false;
         // create_tty_file returns ref_count == 1 (consumed by fd 0); fd 1 and fd 2
-        // each retain, bringing the shared handle to ref_count == 3.
+        // each retain, bringing the shared handle to ref_count == 3. Because all
+        // three descriptors share one vfs::File (one open file description), a
+        // later F_SETFL(O_NONBLOCK) on any of fd 0/1/2 (and any dup of them) is
+        // visible through all of them, matching POSIX shared-OFD semantics.
         for (uint32_t fd = 0; fd < 3; fd++) {
             if (fd != 0)
                 bigos::vfs::retain(file);
@@ -4027,6 +4035,22 @@ namespace bigos::proc {
                     return -bigos::EINVAL;
                 entry->close_on_exec = (__arg & bigos::proc::FCNTL_FD_CLOEXEC) != 0;
                 return 0;
+            case bigos::proc::FCNTL_F_GETFL:
+                // Synthesized access mode (from the open file's readable/writable
+                // state) ORed with O_NONBLOCK when the shared open file
+                // description has the nonblocking flag set. Leaves fd, offset,
+                // reference, and close-on-exec unchanged.
+                return (int64_t)(bigos::vfs::file_access_mode(entry->file) |
+                    (bigos::vfs::file_is_nonblocking(entry->file) ? bigos::proc::O_NONBLOCK : 0));
+            case bigos::proc::FCNTL_F_SETFL:
+                // Apply only the O_NONBLOCK bit to the open file description.
+                // Every other bit (access-mode bits, creation bits, unimplemented
+                // status bits) is ignored without error so the standard idiom
+                // F_SETFL(F_GETFL | O_NONBLOCK) -- whose arg carries access-mode
+                // bits -- still succeeds. Does not touch the access mode or
+                // FdEntry.close_on_exec.
+                entry->file->nonblocking = (__arg & bigos::proc::O_NONBLOCK) != 0;
+                return 0;
             case bigos::proc::FCNTL_F_DUPFD: {
                 if (__arg >= bigos::proc::MAX_FDS_SOFT_LIMIT)
                     return -bigos::EINVAL;
@@ -5308,6 +5332,295 @@ namespace bigos::proc {
             bigos::serial_puts("BIGOS_SIGNAL_PASSED\n");
         else
             bigos::serial_puts("BIGOS_SIGNAL_FAILED\n");
+    }
+#endif
+
+#ifdef BIGOS_NONBLOCKING_FD_SMOKE
+    // Validation-only, default-off bounded nonblocking fd (O_NONBLOCK) smoke. It
+    // runs from ordinary kernel-thread context (can_block() true, non-IRQ) and
+    // drives the fd-control surface (fcntl_fd_current F_GETFL/F_SETFL) over a
+    // real growable fd table, asserting that:
+    //   * F_SETFL toggles O_NONBLOCK and F_GETFL round-trips it together with the
+    //     synthesized access mode, and F_SETFL(F_GETFL | O_NONBLOCK) (arg carries
+    //     access-mode bits) still succeeds without -EINVAL and only changes the
+    //     nonblocking bit,
+    //   * a nonblocking empty-pipe read and a nonblocking full-pipe write return
+    //     WouldBlock, while clearing the flag restores the blocking-capable path
+    //     (verified by writing then reading the byte back),
+    //   * poll_file readable <=> a nonblocking read does not WouldBlock,
+    //   * a nonblocking tty read with no input returns WouldBlock, and terminal
+    //     fd 0/1/2 sharing one open file description observe the nonblocking bit
+    //     in lockstep through F_GETFL (linkage), and
+    //   * a nonblocking unbound socket recv path returns -EAGAIN after a single
+    //     bounded RX advance (covered indirectly via the recv-round selection).
+    // It emits a deterministic BIGOS_NONBLOCKING_FD_PASSED / _FAILED marker.
+
+    bool nbfd_pipe_check() noexcept {
+        bigos::vfs::File *r = nullptr;
+        bigos::vfs::File *w = nullptr;
+        if (bigos::ipc::create(&r, &w) != bigos::vfs::Status::Success)
+            return false;
+        bool ok = true;
+
+        const int64_t rfd = install_fd_current(r, false);
+        const int64_t wfd = install_fd_current(w, false);
+        if (rfd < 0 || wfd < 0) {
+            bigos::vfs::release(r);
+            bigos::vfs::release(w);
+            return false;
+        }
+
+        // Default (blocking flag clear): F_GETFL reports the access mode with no
+        // O_NONBLOCK bit. Read end is read-only, write end is write-only.
+        if (ok && fcntl_fd_current((uint32_t)rfd, bigos::proc::FCNTL_F_GETFL, 0) !=
+                (int64_t)bigos::vfs::OPEN_RDONLY)
+            ok = false;
+        if (ok && fcntl_fd_current((uint32_t)wfd, bigos::proc::FCNTL_F_GETFL, 0) !=
+                (int64_t)bigos::vfs::OPEN_WRONLY)
+            ok = false;
+
+        // Set O_NONBLOCK on the read end and round-trip via F_GETFL.
+        if (ok && fcntl_fd_current((uint32_t)rfd, bigos::proc::FCNTL_F_SETFL, bigos::proc::O_NONBLOCK) != 0)
+            ok = false;
+        if (ok && fcntl_fd_current((uint32_t)rfd, bigos::proc::FCNTL_F_GETFL, 0) !=
+                (int64_t)(bigos::vfs::OPEN_RDONLY | bigos::proc::O_NONBLOCK))
+            ok = false;
+
+        // poll says not readable on an empty pipe with the writer open, and a
+        // nonblocking read returns WouldBlock (consistency contract).
+        if (ok && (bigos::vfs::poll_file(r) & bigos::vfs::READY_READABLE) != 0)
+            ok = false;
+        char got = 0;
+        size_t io = 0;
+        if (ok && read_fd_current((uint32_t)rfd, &got, 1, &io) != bigos::vfs::Status::WouldBlock)
+            ok = false;
+
+        // Write one byte: poll now readable, nonblocking read succeeds.
+        const char payload = 'N';
+        io = 0;
+        if (ok && write_fd_current((uint32_t)wfd, &payload, 1, &io) != bigos::vfs::Status::Success)
+            ok = false;
+        if (ok && (bigos::vfs::poll_file(r) & bigos::vfs::READY_READABLE) == 0)
+            ok = false;
+        io = 0;
+        if (ok && (read_fd_current((uint32_t)rfd, &got, 1, &io) != bigos::vfs::Status::Success || io != 1 ||
+                      got != payload))
+            ok = false;
+
+        // Clear O_NONBLOCK (F_SETFL with arg 0): F_GETFL drops the bit.
+        if (ok && fcntl_fd_current((uint32_t)rfd, bigos::proc::FCNTL_F_SETFL, 0) != 0)
+            ok = false;
+        if (ok && fcntl_fd_current((uint32_t)rfd, bigos::proc::FCNTL_F_GETFL, 0) !=
+                (int64_t)bigos::vfs::OPEN_RDONLY)
+            ok = false;
+
+        // Standard idiom F_SETFL(F_GETFL | O_NONBLOCK) on the write end: arg
+        // carries the access-mode bit (O_WRONLY) yet must succeed and only change
+        // the nonblocking bit.
+        if (ok) {
+            const int64_t flags = fcntl_fd_current((uint32_t)wfd, bigos::proc::FCNTL_F_GETFL, 0);
+            if (flags < 0 ||
+                fcntl_fd_current((uint32_t)wfd, bigos::proc::FCNTL_F_SETFL,
+                    (uint64_t)flags | bigos::proc::O_NONBLOCK) != 0)
+                ok = false;
+            if (ok && fcntl_fd_current((uint32_t)wfd, bigos::proc::FCNTL_F_GETFL, 0) !=
+                    (int64_t)(bigos::vfs::OPEN_WRONLY | bigos::proc::O_NONBLOCK))
+                ok = false;
+        }
+
+        // Fill the pipe so the nonblocking write end returns WouldBlock.
+        if (ok) {
+            static uint8_t fill[bigos::ipc::PIPE_CAPACITY];
+            for (uint32_t i = 0; i < bigos::ipc::PIPE_CAPACITY; i++)
+                fill[i] = (uint8_t)i;
+            size_t total = 0;
+            while (ok && total < bigos::ipc::PIPE_CAPACITY) {
+                size_t wrote = 0;
+                const bigos::vfs::Status s =
+                    write_fd_current((uint32_t)wfd, fill + total, bigos::ipc::PIPE_CAPACITY - total, &wrote);
+                if (s != bigos::vfs::Status::Success || wrote == 0)
+                    ok = false;
+                total += wrote;
+            }
+            // Now full: poll not writable and a fresh nonblocking write would-blocks.
+            if (ok && (bigos::vfs::poll_file(w) & bigos::vfs::READY_WRITABLE) != 0)
+                ok = false;
+            size_t wrote = 0;
+            const char extra = 'X';
+            if (ok && write_fd_current((uint32_t)wfd, &extra, 1, &wrote) != bigos::vfs::Status::WouldBlock)
+                ok = false;
+        }
+
+        close_fd_current((uint32_t)rfd);
+        close_fd_current((uint32_t)wfd);
+        return ok;
+    }
+
+    bool nbfd_tty_check() noexcept {
+        // Install fd 0/1/2 sharing one terminal open file description, matching
+        // the real stdio layout, then assert nonblocking linkage across them.
+        if (!install_standard_fds(current_process_slot()))
+            return false;
+        bool ok = true;
+
+        // Set O_NONBLOCK on fd 1; fd 0 and fd 2 must observe the bit (shared OFD).
+        if (ok && fcntl_fd_current(1, bigos::proc::FCNTL_F_SETFL, bigos::proc::O_NONBLOCK) != 0)
+            ok = false;
+        for (uint32_t fd = 0; ok && fd < 3; fd++) {
+            const int64_t flags = fcntl_fd_current(fd, bigos::proc::FCNTL_F_GETFL, 0);
+            if (flags < 0 || (uint64_t)(flags & (int64_t)bigos::proc::O_NONBLOCK) != bigos::proc::O_NONBLOCK)
+                ok = false;
+        }
+
+        // With no input available, a nonblocking terminal read returns WouldBlock
+        // and dequeues nothing (input ring untouched). fd 0 is the readable stdin.
+        char got = 0;
+        size_t io = 0;
+        if (ok && read_fd_current(0, &got, 1, &io) != bigos::vfs::Status::WouldBlock)
+            ok = false;
+
+        // Clear O_NONBLOCK on fd 0; fd 1 and fd 2 must observe the cleared bit.
+        if (ok && fcntl_fd_current(0, bigos::proc::FCNTL_F_SETFL, 0) != 0)
+            ok = false;
+        for (uint32_t fd = 0; ok && fd < 3; fd++) {
+            const int64_t flags = fcntl_fd_current(fd, bigos::proc::FCNTL_F_GETFL, 0);
+            if (flags < 0 || (flags & (int64_t)bigos::proc::O_NONBLOCK) != 0)
+                ok = false;
+        }
+
+        close_fd_current(0);
+        close_fd_current(1);
+        close_fd_current(2);
+        return ok;
+    }
+
+    // Fake network device backing the socket portion so it runs without a real
+    // tap/network backend, mirroring the fd-readiness smoke's local device.
+    struct NbfdSmokeDevice {
+        bigos::device::NetworkDevice net;
+        bigos::net::MacAddress mac;
+    };
+    NbfdSmokeDevice g_nbfd_dev = {};
+    bigos::net::Context g_nbfd_ctx = {};
+
+    bool nbfd_dev_ready(bigos::device::NetworkDevice *__d) noexcept { return __d != nullptr; }
+    bool nbfd_dev_link_up(bigos::device::NetworkDevice *__d) noexcept { return __d != nullptr; }
+    const uint8_t *nbfd_dev_mac(bigos::device::NetworkDevice *__d) noexcept {
+        NbfdSmokeDevice *dev = __d == nullptr ? nullptr : (NbfdSmokeDevice *)__d->context;
+        return dev == nullptr ? nullptr : dev->mac.bytes;
+    }
+    uint16_t nbfd_dev_mtu(bigos::device::NetworkDevice *) noexcept { return bigos::net::DEFAULT_MTU; }
+    bigos::device::NetworkTxStatus nbfd_dev_transmit(
+        bigos::device::NetworkDevice *, const void *, uint32_t, uint64_t) noexcept {
+        return bigos::device::NetworkTxStatus::Success;
+    }
+    bigos::device::NetworkRxStatus nbfd_dev_poll_rx(
+        bigos::device::NetworkDevice *, bigos::device::NetworkRxFrame *) noexcept {
+        return bigos::device::NetworkRxStatus::NoFrame;
+    }
+    bigos::device::NetworkRxStatus nbfd_dev_return_rx(
+        bigos::device::NetworkDevice *, const bigos::device::NetworkRxFrame *) noexcept {
+        return bigos::device::NetworkRxStatus::Success;
+    }
+    void nbfd_dev_diagnostics(bigos::device::NetworkDevice *, bigos::device::NetworkDiagnostics *) noexcept {}
+
+    bool nbfd_socket_check() noexcept {
+        g_nbfd_dev = {};
+        g_nbfd_ctx = {};
+        g_nbfd_dev.mac = {{0x52, 0x54, 0x00, 0x21, 0x43, 0x65}};
+        g_nbfd_dev.net.context = &g_nbfd_dev;
+        g_nbfd_dev.net.ready = &nbfd_dev_ready;
+        g_nbfd_dev.net.link_up = &nbfd_dev_link_up;
+        g_nbfd_dev.net.mac = &nbfd_dev_mac;
+        g_nbfd_dev.net.mtu = &nbfd_dev_mtu;
+        g_nbfd_dev.net.transmit = &nbfd_dev_transmit;
+        g_nbfd_dev.net.poll_rx = &nbfd_dev_poll_rx;
+        g_nbfd_dev.net.return_rx = &nbfd_dev_return_rx;
+        g_nbfd_dev.net.diagnostics = &nbfd_dev_diagnostics;
+
+        bigos::net::Config config = {};
+        config.local_ipv4 = bigos::net::make_ipv4(10, 0, 2, 15);
+        config.netmask = bigos::net::make_ipv4(255, 255, 255, 0);
+        config.direct_peer_ipv4 = bigos::net::make_ipv4(10, 0, 2, 2);
+        config.local_mac = g_nbfd_dev.mac;
+        config.mtu = bigos::net::DEFAULT_MTU;
+        config.has_direct_peer = true;
+        if (bigos::net::init(&g_nbfd_ctx, &g_nbfd_dev.net, &config) != bigos::net::Status::Ok)
+            return false;
+
+        bigos::vfs::File *file = nullptr;
+        if (bigos::net::socket_create(&g_nbfd_ctx, &file) != bigos::vfs::Status::Success || file == nullptr)
+            return false;
+        const int64_t sfd = install_fd_current(file, false);
+        if (sfd < 0) {
+            bigos::vfs::release(file);
+            return false;
+        }
+        bool ok = true;
+
+        // A datagram socket is RDWR: F_GETFL reports the access mode, no O_NONBLOCK.
+        if (ok && fcntl_fd_current((uint32_t)sfd, bigos::proc::FCNTL_F_GETFL, 0) !=
+                (int64_t)bigos::vfs::OPEN_RDWR)
+            ok = false;
+        // Toggle O_NONBLOCK and round-trip via F_GETFL on the shared open file
+        // description; this is the flag the nonblocking recvfrom path consults.
+        if (ok && fcntl_fd_current((uint32_t)sfd, bigos::proc::FCNTL_F_SETFL, bigos::proc::O_NONBLOCK) != 0)
+            ok = false;
+        if (ok && fcntl_fd_current((uint32_t)sfd, bigos::proc::FCNTL_F_GETFL, 0) !=
+                (int64_t)(bigos::vfs::OPEN_RDWR | bigos::proc::O_NONBLOCK))
+            ok = false;
+        if (ok && !bigos::vfs::file_is_nonblocking(file))
+            ok = false;
+
+        // Bind a local port and confirm the empty rx queue reports not-readable;
+        // this is the state where a nonblocking recvfrom returns -EAGAIN after a
+        // single bounded RX advance (no poll-and-yield rounds).
+        bigos::net::UdpEndpoint *endpoint = nullptr;
+        if (ok && (bigos::net::udp_bind(&g_nbfd_ctx, 4200, &endpoint) != bigos::net::Status::Ok ||
+                      endpoint == nullptr))
+            ok = false;
+        if (ok) {
+            bigos::net::Socket *socket = bigos::net::socket_state(file);
+            socket->endpoint = endpoint;
+            socket->local_port = 4200;
+            socket->bound = true;
+            const uint32_t sp = bigos::vfs::poll_file(file);
+            if ((sp & bigos::vfs::READY_READABLE) != 0 || (sp & bigos::vfs::READY_WRITABLE) == 0)
+                ok = false;
+        }
+
+        close_fd_current((uint32_t)sfd);   // SOCKET_OPS.close recycles the endpoint
+        return ok;
+    }
+
+    bool nonblocking_fd_smoke_run() noexcept {
+        if (!g_proc_initialized)
+            init();
+        Process *saved_current = current_process_slot();
+
+        static Process proc;
+        scrub_process(&proc);
+        proc.state = ProcessState::Running;
+        init_fd_table(&proc);
+        set_current_process_slot(&proc);
+
+        bool ok = nbfd_pipe_check();
+        if (ok)
+            ok = nbfd_tty_check();
+        if (ok)
+            ok = nbfd_socket_check();
+
+        close_all_fds(&proc);
+        free_fd_table(&proc);
+        set_current_process_slot(saved_current);
+        return ok;
+    }
+
+    void nonblocking_fd_smoke_entry(void *) noexcept {
+        if (nonblocking_fd_smoke_run())
+            bigos::serial_puts("BIGOS_NONBLOCKING_FD_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_NONBLOCKING_FD_FAILED\n");
     }
 #endif
 }   // namespace bigos::proc
