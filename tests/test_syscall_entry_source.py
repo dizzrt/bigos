@@ -107,6 +107,81 @@ def test_user_libc_syscall_and_errno_mirrors_match_kernel_headers() -> None:
     assert user_errno['ENOEXEC'] == 8
 
 
+def test_bounded_fd_multiplexing_poll_contract_matches_across_kernel_and_user() -> None:
+    """SYS_POLL is appended at 61 without renumbering existing syscalls, and the
+    kernel and user libc pollfd layout / POLL* event bits / POLL_MAX_FDS agree and
+    stay distinct from one another."""
+    syscall_h = read_source('include/bigos/syscall.h')
+    syscall = read_source('kernel/core/syscall/syscall.cc')
+    user_sys_nr = read_source('user/libc/include/sys_nr.h')
+    user_poll = read_source('user/libc/include/poll.h')
+    user_libc = read_source('user/libc/syscall.c')
+
+    # Appended syscall number; the previous max was SYS_DYN_PROTECT = 60.
+    assert 'SYS_POLL = 61' in syscall_h
+    assert 'SYS_DYN_PROTECT = 60' in syscall_h
+    assert '#define SYS_POLL        61' in user_sys_nr
+
+    # Dispatch routes SYS_POLL to sys_poll with the documented rdi/rsi/rdx order.
+    assert 'case SYS_POLL:' in syscall
+    assert 'sys_poll(__frame->rdi, __frame->rsi, __frame->rdx)' in syscall
+
+    # Kernel struct pollfd layout: fd:int32, events:uint16, revents:uint16.
+    kernel_pollfd = re.search(
+        r'struct pollfd\s*\{\s*'
+        r'int32_t\s+fd;.*?'
+        r'uint16_t\s+events;.*?'
+        r'uint16_t\s+revents;.*?\}',
+        syscall_h, re.S)
+    assert kernel_pollfd is not None
+
+    # User mirror struct pollfd layout: int fd, unsigned short events/revents.
+    user_pollfd = re.search(
+        r'struct pollfd\s*\{\s*'
+        r'int\s+fd;.*?'
+        r'unsigned short\s+events;.*?'
+        r'unsigned short\s+revents;.*?\}',
+        user_poll, re.S)
+    assert user_pollfd is not None
+
+    def parse_kernel_poll_bits(source: str) -> dict[str, int]:
+        values: dict[str, int] = {}
+        for name, expr in re.findall(r'constexpr uint16_t (POLL[A-Z]+)\s*=\s*(0x[0-9a-fA-F]+|\d+);', source):
+            values[name] = int(expr, 0)
+        return values
+
+    kernel_bits = parse_kernel_poll_bits(syscall_h)
+    assert kernel_bits['POLLIN'] == 0x001
+    assert kernel_bits['POLLOUT'] == 0x004
+    assert kernel_bits['POLLERR'] == 0x008
+    assert kernel_bits['POLLHUP'] == 0x010
+    assert kernel_bits['POLLNVAL'] == 0x020
+    assert 'constexpr uint64_t POLL_MAX_FDS = 16;' in syscall_h
+
+    def parse_user_poll_bits(source: str) -> dict[str, int]:
+        values: dict[str, int] = {}
+        for name, expr in re.findall(r'^#define\s+(POLL[A-Z_]+)\s+(0x[0-9a-fA-F]+|\d+)$', source, re.M):
+            values[name] = int(expr, 0)
+        return values
+
+    user_bits = parse_user_poll_bits(user_poll)
+    assert user_bits['POLLIN'] == kernel_bits['POLLIN']
+    assert user_bits['POLLOUT'] == kernel_bits['POLLOUT']
+    assert user_bits['POLLERR'] == kernel_bits['POLLERR']
+    assert user_bits['POLLHUP'] == kernel_bits['POLLHUP']
+    assert user_bits['POLLNVAL'] == kernel_bits['POLLNVAL']
+    assert user_bits['POLL_MAX_FDS'] == 16
+
+    # The POLL* event bits must be pairwise distinct (no aliasing).
+    event_values = [kernel_bits['POLLIN'], kernel_bits['POLLOUT'], kernel_bits['POLLERR'],
+                    kernel_bits['POLLHUP'], kernel_bits['POLLNVAL']]
+    assert len(set(event_values)) == len(event_values)
+
+    # User libc exposes the poll() wrapper transparently forwarding SYS_POLL.
+    assert 'int poll(struct pollfd *fds, unsigned long nfds, int timeout)' in user_libc
+    assert 'syscall3(SYS_POLL, (long)fds, (long)nfds, (long)timeout)' in user_libc
+
+
 def test_user_crt0_exit_number_matches_shared_syscall_mirror() -> None:
     crt0 = read_source('user/crt0/crt0.s')
     user_sys = read_source('user/libc/syscall.c')

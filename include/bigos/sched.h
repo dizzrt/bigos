@@ -21,6 +21,14 @@ namespace sched {
 
     using WaitPredicate = bool (*)(void *__arg) noexcept;
 
+    // Upper bound on the number of wait queues a single thread may register on
+    // at once through wait_queue_wait_any(). It is sized to cover a bounded
+    // multiplexing set where each descriptor may contribute at most a read and a
+    // write queue after de-duplication. Each waiting thread owns this many poll
+    // nodes in stable per-thread storage so multi-queue registration/wakeup is
+    // allocation-free.
+    constexpr uint32_t POLL_MAX_WAIT_QUEUES = 32;
+
     // Intrusive scheduler wait queue. The opaque links point at scheduler-owned
     // TCBs; callers own only the queue head/tail storage and never allocate nodes
     // on the sleep/wakeup fast path. The scheduler serializes queue membership
@@ -31,7 +39,23 @@ namespace sched {
         void *head;
         void *tail;
         volatile uint32_t lock;
+        // Appended field (do not reorder head/tail/lock above). Singly-linked
+        // list head of per-thread poll nodes for threads registered through
+        // wait_queue_wait_any(). It is null for a queue that has never had a
+        // multi-queue waiter and stays independent of the single-waiter head/tail
+        // chain so wait_queue_wait_until()/wake_* single-queue semantics are
+        // unchanged.
+        void *poll_head;
     };
+
+    // Layout guard: the appended poll_head MUST stay after the existing fields so
+    // statically-initialized WaitQueue storage in each backend keeps its meaning.
+    static_assert(__builtin_offsetof(WaitQueue, head) == 0, "WaitQueue head slot moved");
+    static_assert(__builtin_offsetof(WaitQueue, tail) == sizeof(void *), "WaitQueue tail slot moved");
+    static_assert(__builtin_offsetof(WaitQueue, lock) == 2 * sizeof(void *), "WaitQueue lock slot moved");
+    static_assert(
+        __builtin_offsetof(WaitQueue, poll_head) > __builtin_offsetof(WaitQueue, lock),
+        "WaitQueue poll_head must be appended last");
 
     // Create a kernel thread.
     //
@@ -112,6 +136,22 @@ namespace sched {
     // missed producer wakeup between the caller's empty check and enqueue.
     int wait_queue_wait_until(WaitQueue *__queue, WaitPredicate __predicate, void *__arg,
                               timer::tick_t __timeout_ticks = 0) noexcept;
+
+    // Multi-queue blocking wait. The current non-interrupt thread first checks
+    // __predicate under the scheduler critical section; if it is already true no
+    // registration happens and WAIT_OK is returned. Otherwise the thread is
+    // registered on the first __count wait queues (bounded by
+    // POLL_MAX_WAIT_QUEUES) and blocked until any one of them is woken through
+    // wake_one()/wake_all(), or the optional monotonic-tick timeout expires.
+    // timeout_ticks == 0 means no timeout. It returns WAIT_OK on a queue wakeup,
+    // WAIT_TIMEOUT on deadline expiry, WAIT_INVALID for bad arguments, and
+    // WAIT_BLOCK_FORBIDDEN when the context may not block. Registration nodes come
+    // from the thread's own stable storage, so this path never allocates. Duplicate
+    // queue pointers in the array are tolerated (registered once each; a woken
+    // thread self-removes from every queue it registered on). This does not change
+    // single-queue wait_queue_wait_until()/wake_* semantics.
+    int wait_queue_wait_any(WaitQueue **__queues, uint32_t __count, WaitPredicate __predicate, void *__arg,
+                            timer::tick_t __timeout_ticks = 0) noexcept;
 
     // Allocation-free wakeups. IRQ handlers may call these bounded helpers. They
     // make waiters runnable on the waiter-owned scheduler domain and may request

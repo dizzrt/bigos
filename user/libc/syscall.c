@@ -8,6 +8,7 @@
 #include "bigos_syscall.h"
 #include "sys_nr.h"
 #include "sys/socket.h"
+#include "poll.h"
 
 int errno = 0;
 
@@ -627,4 +628,8 @@ ssize_t recvfrom(int fd, void *buf, size_t len, int flags,
     }
     return (ssize_t)errno_translate(
         syscall5(SYS_RECVFROM, (long)fd, (long)buf, (long)len, (long)src, (long)addrlen));
+}
+
+int poll(struct pollfd *fds, unsigned long nfds, int timeout) {
+    return (int)errno_translate(syscall3(SYS_POLL, (long)fds, (long)nfds, (long)timeout));
 }

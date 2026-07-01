@@ -481,10 +481,10 @@ descriptor at a time.
   the existing fd-control path.
 - [x] 任务 M13.2：有界非阻塞描述符行为，使读写返回确定性 would-block 状态而非阻塞，
   并与既有 fd-control 路径集成。
-- [ ] Task M13.3: a bounded multiplexing syscall that waits on a fixed-capacity
+- [x] Task M13.3: a bounded multiplexing syscall that waits on a fixed-capacity
   set of descriptors with a timeout and reports per-descriptor readiness, reusing
   the scheduler wait queues.
-- [ ] 任务 M13.3：有界多路复用 syscall，对定容描述符集合带超时等待并报告各描述符就绪状态，
+- [x] 任务 M13.3：有界多路复用 syscall，对定容描述符集合带超时等待并报告各描述符就绪状态，
   复用调度等待队列。
 
 ### Milestone M14 — Connection-Oriented Networking / 里程碑 M14 — 面向连接的网络栈

@@ -133,7 +133,39 @@ namespace bigos::sys {
         SYS_DYN_PROTECT = 60,   // (base, len, permissions) -> 0 or negative errno. Default-off bounded
                                 // dynamic-link path only: changes permissions of an already-mapped
                                 // shared-object sub-range (e.g. dropping write after copying text bytes).
+        SYS_POLL = 61,          // (rdi=pollfd*, rsi=nfds, rdx=timeout_ms) -> ready descriptor count,
+                                // 0 on timeout with none ready, or negative errno
+                                // (-EINVAL when nfds exceeds POLL_MAX_FDS, -EFAULT on a
+                                // bad user array). Bounded multiplexing (poll-style):
+                                // fixed-capacity descriptor set, millisecond timeout,
+                                // level-triggered readiness reusing vfs::poll_file and
+                                // the scheduler multi-queue wait. NOT full POSIX
+                                // poll/select/epoll/ppoll, no unbounded/dynamic sets, no
+                                // edge-triggered/event-object/priority/signal-restart
+                                // semantics.
     };
+
+    // Bounded user-visible poll(2)-style descriptor entry. Fixed-size; the mirror
+    // user/libc header user/libc/include/poll.h MUST match this layout and the
+    // POLL* event bits below. fd < 0 means "ignore this entry" (revents cleared).
+    struct pollfd {
+        int32_t fd;        // watched descriptor; negative to ignore this entry
+        uint16_t events;   // requested event bits (POLLIN/POLLOUT subset)
+        uint16_t revents;  // kernel-filled ready bits (may add POLLERR/POLLHUP/POLLNVAL)
+    };
+
+    // Bounded poll event bits (values aligned with common Linux poll(2) constants
+    // for portability). POLLERR/POLLHUP/POLLNVAL are output-only: the kernel fills
+    // them under the corresponding condition even if events did not request them.
+    constexpr uint16_t POLLIN = 0x001;    // readable
+    constexpr uint16_t POLLOUT = 0x004;   // writable
+    constexpr uint16_t POLLERR = 0x008;   // error condition (output only)
+    constexpr uint16_t POLLHUP = 0x010;   // peer hung up (output only)
+    constexpr uint16_t POLLNVAL = 0x020;  // invalid descriptor (output only)
+
+    // Fixed capacity of a single SYS_POLL descriptor set. nfds > POLL_MAX_FDS is
+    // rejected with -EINVAL; nfds == 0 is legal (degenerate timeout-only wait).
+    constexpr uint64_t POLL_MAX_FDS = 16;
 
     // Bounded user-visible UDP socket address (BigOS sockaddr-lite). Fixed-size,
     // host byte order, IPv4 + port only. It deliberately avoids POSIX sockaddr

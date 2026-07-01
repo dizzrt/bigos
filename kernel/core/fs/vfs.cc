@@ -778,6 +778,18 @@ namespace vfs {
         return __file->ops->poll(__file);
     }
 
+    uint32_t file_poll_wait_queues(
+        File *__file, uint32_t __events, sched::WaitQueue **__out, uint32_t __max) noexcept {
+        if (__file == nullptr || __file->ops == nullptr || __out == nullptr || __max == 0)
+            return 0;
+        // A backend without the readiness wait-queue op contributes no queues; it
+        // is either always ready (regular file) or reports readiness/error through
+        // poll_file() so the multiplexing path never needs to block on it.
+        if (__file->ops->poll_wait == nullptr)
+            return 0;
+        return __file->ops->poll_wait(__file, __events, __out, __max);
+    }
+
     Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept {
         fill_metadata_defaults(__out);
         if (__out == nullptr)

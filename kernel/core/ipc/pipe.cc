@@ -167,6 +167,22 @@ namespace {
         return ready;
     }
 
+    // Read-only readiness wait-queue op. Returns the single wakeup queue for this
+    // pipe end: the read end blocks on read_wq (woken by writers / writer close),
+    // the write end on write_wq (woken by readers / reader close). It is the same
+    // queue the blocking read/write path in this file waits on, so a multiplexing
+    // wait is woken by exactly the events that change readiness. It returns queue
+    // handles only and changes no pipe state.
+    uint32_t pipe_poll_wait(
+        bigos::vfs::File *__file, uint32_t, bigos::sched::WaitQueue **__out, uint32_t __max) noexcept {
+        if (__file == nullptr || __file->private_data == nullptr || __out == nullptr || __max == 0)
+            return 0;
+        PipeEnd *end = (PipeEnd *)__file->private_data;
+        Pipe *pipe = end->pipe;
+        __out[0] = end->is_write ? &pipe->write_wq : &pipe->read_wq;
+        return 1;
+    }
+
     void pipe_close(bigos::vfs::File *__file) noexcept {
         if (__file == nullptr || __file->private_data == nullptr)
             return;
@@ -185,9 +201,9 @@ namespace {
     }
 
     const bigos::vfs::FileOperations PIPE_READ_OPS = {
-        &pipe_read, &pipe_close, nullptr, &pipe_lseek, nullptr, nullptr, &pipe_poll};
+        &pipe_read, &pipe_close, nullptr, &pipe_lseek, nullptr, nullptr, &pipe_poll, &pipe_poll_wait};
     const bigos::vfs::FileOperations PIPE_WRITE_OPS = {
-        nullptr, &pipe_close, &pipe_write, &pipe_lseek, nullptr, nullptr, &pipe_poll};
+        nullptr, &pipe_close, &pipe_write, &pipe_lseek, nullptr, nullptr, &pipe_poll, &pipe_poll_wait};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG

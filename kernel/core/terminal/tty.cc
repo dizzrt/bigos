@@ -551,14 +551,29 @@ namespace bigos::terminal {
             return ready;
         }
 
+        // Read-only readiness wait-queue op. Every terminal handle shares the one
+        // global input wait queue (woken when a scancode/input record is enqueued
+        // from the IRQ path), so all terminal fds return the same handle and a
+        // multiplexing wait is woken when terminal input arrives. The write-out
+        // direction is always ready and needs no queue. Returns queue handles only
+        // and changes no terminal state.
+        uint32_t tty_poll_wait(
+            vfs::File *__file, uint32_t, sched::WaitQueue **__out, uint32_t __max) noexcept {
+            if (__file == nullptr || __out == nullptr || __max == 0)
+                return 0;
+            __out[0] = &g_input_wait;
+            return 1;
+        }
+
         // Device-layer no-op: a terminal handle owns no device state, so closing it
         // must not touch the global input ring or wait queue. The File structure
         // itself is freed by vfs::release.
         void tty_close(vfs::File *) noexcept {}
 
         // read/close occupy the fixed first two ops slots; write/lseek follow; the
-        // appended poll slot carries terminal readiness. No existing slot reorders.
-        const vfs::FileOperations TTY_OPS = {&tty_read, &tty_close, &tty_write, &tty_lseek, nullptr, nullptr, &tty_poll};
+        // appended poll and poll_wait slots carry terminal readiness. No existing
+        // slot reorders.
+        const vfs::FileOperations TTY_OPS = {&tty_read, &tty_close, &tty_write, &tty_lseek, nullptr, nullptr, &tty_poll, &tty_poll_wait};
     }   // namespace
 
     vfs::File *create_tty_file() noexcept {

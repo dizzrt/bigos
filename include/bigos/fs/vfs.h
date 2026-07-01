@@ -5,6 +5,12 @@
 #include <bigos/types.h>
 
 NAMESPACE_BIGOS_BEG
+namespace sched {
+    // Forward declaration only; the readiness wait-queue op returns opaque
+    // scheduler wait-queue handles. vfs.h must not depend on the scheduler
+    // layout, so it only names the type here.
+    struct WaitQueue;
+}   // namespace sched
 namespace vfs {
     constexpr uint64_t OPEN_RDONLY = 0;
     constexpr uint64_t OPEN_WRONLY = 1ull << 0;
@@ -85,6 +91,13 @@ namespace vfs {
     // file. It MUST be a pure read-only snapshot: no dequeue, no blocking, no
     // change to the file or backend open state.
     using PollOp = uint32_t (*)(File *__file) noexcept;
+    // Readiness wait-queue collection op. Writes up to __max scheduler wait-queue
+    // handles into __out that a multiplexing wait should register on for the
+    // requested __events, and returns the number written (0..__max). It MUST be
+    // read-only: it returns queue handles only, dequeues nothing, and changes no
+    // backend state. A backend that leaves this null contributes no wait queues
+    // (e.g. a regular file that poll_file() reports as always ready).
+    using PollWaitOp = uint32_t (*)(File *__file, uint32_t __events, sched::WaitQueue **__out, uint32_t __max) noexcept;
 
     struct FileOperations {
         ReadOp read;
@@ -100,6 +113,10 @@ namespace vfs {
         // leaves this null gets a deterministic readable+writable default from
         // poll_file().
         PollOp poll;
+        // Appended readiness wait-queue op (do not reorder the slots above). A
+        // backend that leaves this null contributes no wait queues to a
+        // multiplexing wait.
+        PollWaitOp poll_wait;
     };
 
     // Layout guard: the appended poll op MUST stay after the existing slots so
@@ -110,7 +127,9 @@ namespace vfs {
     static_assert(__builtin_offsetof(FileOperations, lseek) == 3 * sizeof(void *), "lseek slot moved");
     static_assert(__builtin_offsetof(FileOperations, truncate) == 4 * sizeof(void *), "truncate slot moved");
     static_assert(__builtin_offsetof(FileOperations, readdir) == 5 * sizeof(void *), "readdir slot moved");
-    static_assert(__builtin_offsetof(FileOperations, poll) == 6 * sizeof(void *), "poll slot must be last");
+    static_assert(__builtin_offsetof(FileOperations, poll) == 6 * sizeof(void *), "poll slot moved");
+    static_assert(
+        __builtin_offsetof(FileOperations, poll_wait) == 7 * sizeof(void *), "poll_wait slot must be last");
 
     struct Vnode {
         uint64_t size;
@@ -219,6 +238,14 @@ namespace vfs {
     // READY_ERROR. The returned bits are a kernel-internal convention, not a
     // user-visible syscall ABI.
     uint32_t poll_file(File *__file) noexcept;
+    // Kernel-internal helper collecting the scheduler wait queues a multiplexing
+    // wait should register on for __file given the requested __events. Dispatches
+    // to ops->poll_wait when present; a backend without it contributes 0 queues
+    // (those files are always ready by poll_file() and need no wait). Writes up to
+    // __max handles into __out and returns the count written. Read-only: it never
+    // dequeues, blocks, or changes backend state. A null file or null out returns 0.
+    uint32_t file_poll_wait_queues(
+        File *__file, uint32_t __events, sched::WaitQueue **__out, uint32_t __max) noexcept;
     Status stat_absolute(const char *__path, bigos::Metadata *__out) noexcept;
     Status stat_path(const char *__path, const char *__cwd, bigos::Metadata *__out) noexcept;
     Status stat(File *__file, bigos::Metadata *__out) noexcept;

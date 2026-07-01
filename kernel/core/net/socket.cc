@@ -65,8 +65,25 @@ namespace {
         __file->private_data = nullptr;
     }
 
+    // Read-only readiness wait-queue op. A bound, active endpoint contributes its
+    // receive wait queue (woken by the protocol RX delivery path when a datagram
+    // arrives). An unbound or inactive endpoint contributes no queue: its
+    // poll_file() already reports READY_ERROR, so a multiplexing wait treats it as
+    // immediately ready and never blocks on it. Returns queue handles only and
+    // changes no socket state.
+    uint32_t socket_poll_wait(
+        bigos::vfs::File *__file, uint32_t, bigos::sched::WaitQueue **__out, uint32_t __max) noexcept {
+        if (__file == nullptr || __file->private_data == nullptr || __out == nullptr || __max == 0)
+            return 0;
+        bigos::net::Socket *socket = (bigos::net::Socket *)__file->private_data;
+        if (!socket->bound || socket->endpoint == nullptr || !socket->endpoint->active)
+            return 0;
+        __out[0] = &socket->endpoint->rx_wait;
+        return 1;
+    }
+
     const bigos::vfs::FileOperations SOCKET_OPS = {
-        &socket_read, &socket_close, &socket_write, &socket_lseek, nullptr, nullptr, &socket_poll};
+        &socket_read, &socket_close, &socket_write, &socket_lseek, nullptr, nullptr, &socket_poll, &socket_poll_wait};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG

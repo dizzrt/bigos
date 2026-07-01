@@ -69,5 +69,6 @@
 #define SYS_RECVFROM    58
 #define SYS_DYN_MAP     59
 #define SYS_DYN_PROTECT 60
+#define SYS_POLL        61
 
 #endif /* _BIGOS_USER_SYS_H */

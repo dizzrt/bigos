@@ -36,6 +36,21 @@ namespace sched {
         static_assert(KERNEL_THREAD_STACK_PAGES > 0);
         static_assert(DEFAULT_TIME_SLICE_TICKS > 0);
 
+        struct TCB;
+
+        // Per-thread multi-queue registration node used by wait_queue_wait_any().
+        // Each waiting thread owns POLL_MAX_WAIT_QUEUES of these in its TCB, so a
+        // thread can register on that many wait queues at once without any
+        // allocation on the sleep/wakeup path. A node is linked into at most one
+        // queue's poll_head chain at a time (node i tracks queues[i]); q_next
+        // threads that per-queue chain and is manipulated only under the owning
+        // queue's lock.
+        struct PollWaitNode {
+            WaitQueue *queue;
+            TCB *owner;
+            PollWaitNode *q_next;
+        };
+
         struct TCB {
             ThreadId id;
             ThreadState state;
@@ -75,6 +90,13 @@ namespace sched {
             // wrong process / address space active. Untyped here to avoid a
             // scheduler dependency on the proc layout.
             void *user_process;
+            // Multi-queue (poll) registration state. poll_registered is the
+            // number of poll_nodes currently linked into wait-queue poll_head
+            // chains (0 unless this thread is blocked inside
+            // wait_queue_wait_any). The array is stable per-thread storage so the
+            // sleep/wakeup path never allocates.
+            PollWaitNode poll_nodes[POLL_MAX_WAIT_QUEUES];
+            uint32_t poll_registered;
         };
 
         struct SchedulerSpinLock {
@@ -412,6 +434,33 @@ namespace sched {
             __t->wait_next = nullptr;
         }
 
+        // Push a poll node onto a queue's poll_head chain. Caller holds the
+        // queue's lock. The node's queue pointer is set by the registration path.
+        void poll_queue_push_locked(WaitQueue *__queue, PollWaitNode *__node) noexcept {
+            __node->q_next = (PollWaitNode *)__queue->poll_head;
+            __queue->poll_head = __node;
+        }
+
+        // Remove a poll node from its queue's poll_head chain if still linked.
+        // Caller holds the queue's lock. Idempotent: a node already unlinked by a
+        // producer wake path (its queue slot cleared) is skipped.
+        void poll_queue_remove_locked(WaitQueue *__queue, PollWaitNode *__node) noexcept {
+            PollWaitNode *prev = nullptr;
+            PollWaitNode *cur = (PollWaitNode *)__queue->poll_head;
+            while (cur != nullptr) {
+                if (cur == __node) {
+                    if (prev == nullptr)
+                        __queue->poll_head = cur->q_next;
+                    else
+                        prev->q_next = cur->q_next;
+                    cur->q_next = nullptr;
+                    return;
+                }
+                prev = cur;
+                cur = cur->q_next;
+            }
+        }
+
         void sleep_push_locked(SchedulerCpuState *__domain, TCB *__t) noexcept {
             __t->sleep_next = __domain->sleep_head;
             __domain->sleep_head = __t;
@@ -475,6 +524,47 @@ namespace sched {
             if (result.status != smp::IpiDeliveryStatus::Delivered) {
                 SchedulerCpuState *domain = domain_for_cpu(__target_cpu);
                 record_scheduler_diag(domain, nullptr, __target_cpu, SCHED_DIAG_OP_NUDGE);
+            }
+        }
+
+        // Drain the poll_head chain of a queue and make each registered owner
+        // runnable. Called by wake_one()/wake_all() (producers, possibly in IRQ
+        // context). The queue lock MUST NOT be held on entry; this helper acquires
+        // it only to unlink one node at a time, then takes the owner's domain lock
+        // separately (never both at once, matching the single-waiter wake
+        // discipline). It only removes each node from THIS queue's poll_head; the
+        // woken thread self-clears its remaining registrations on its resume path.
+        // wake_thread_locked() is idempotent, so a thread already made runnable via
+        // another queue is simply skipped here.
+        void drain_poll_head(WaitQueue *__queue) noexcept {
+            for (;;) {
+                wait_queue_lock(__queue);
+                PollWaitNode *node = (PollWaitNode *)__queue->poll_head;
+                if (node == nullptr) {
+                    wait_queue_unlock(__queue);
+                    return;
+                }
+                // Unlink this node from the queue before dropping the lock so a
+                // concurrent producer never re-processes it.
+                __queue->poll_head = node->q_next;
+                node->q_next = nullptr;
+                TCB *owner = node->owner;
+                // Clear the node's queue tag so the owner's self-cleanup skips this
+                // already-unlinked slot.
+                node->queue = nullptr;
+                wait_queue_unlock(__queue);
+
+                if (owner == nullptr)
+                    continue;
+                SchedulerCpuState *domain = domain_for_cpu(owner->owner_cpu);
+                if (domain == nullptr)
+                    continue;
+                spin_lock(&domain->lock);
+                const bool woke = wake_thread_locked(domain, owner, WAIT_OK);
+                const cpu::CpuId target_cpu = domain->cpu_id;
+                spin_unlock(&domain->lock);
+                if (woke)
+                    nudge_cpu(target_cpu);
             }
         }
 
@@ -557,6 +647,7 @@ namespace sched {
             tcb->policy_slot = DEFAULT_POLICY_SLOT;
             tcb->term_next = nullptr;
             tcb->user_process = nullptr;
+            tcb->poll_registered = 0;
 
             // Build the initial stack frame so the first switch_context resume lands
             // in thread_trampoline with a 16-byte-aligned System V frame. Layout from
@@ -706,6 +797,7 @@ namespace sched {
         idle->policy_slot = __detail::DEFAULT_POLICY_SLOT;
         idle->term_next = nullptr;
         idle->user_process = nullptr;
+        idle->poll_registered = 0;
 
         {
             bigos::irq::InterruptGuard guard;
@@ -780,6 +872,7 @@ namespace sched {
         __queue->head = nullptr;
         __queue->tail = nullptr;
         __queue->lock = 0;
+        __queue->poll_head = nullptr;
     }
 
     bool wait_queue_empty(const WaitQueue *__queue) noexcept {
@@ -828,6 +921,94 @@ namespace sched {
         return self->wait_result;
     }
 
+    int wait_queue_wait_any(
+        WaitQueue **__queues, uint32_t __count, WaitPredicate __predicate, void *__arg,
+        timer::tick_t __timeout_ticks) noexcept {
+        if (__count > POLL_MAX_WAIT_QUEUES)
+            return WAIT_INVALID;
+        if (__count > 0 && __queues == nullptr)
+            return WAIT_INVALID;
+        if (!can_block())
+            return WAIT_BLOCK_FORBIDDEN;
+
+        bigos::irq::disableIRQ();
+        __detail::SchedulerCpuState *domain = __detail::current_domain();
+        __detail::spin_lock(&domain->lock);
+        __detail::enter_scheduler_critical();
+
+        __detail::TCB *self = domain->current;
+
+        // Register-first: link one poll node per queue before checking the
+        // predicate. Because self holds the domain lock across registration, the
+        // predicate check, and the block decision, a producer that fires after we
+        // register can unlink our node (queue lock) but cannot complete the wake
+        // (needs the domain lock) until we release it in schedule_blocked. This
+        // closes the check/enqueue race the same way the single-queue path does.
+        for (uint32_t i = 0; i < __count; i++) {
+            __detail::PollWaitNode *node = &self->poll_nodes[i];
+            node->owner = self;
+            node->queue = __queues[i];
+            node->q_next = nullptr;
+            if (__queues[i] != nullptr) {
+                __detail::wait_queue_lock(__queues[i]);
+                __detail::poll_queue_push_locked(__queues[i], node);
+                __detail::wait_queue_unlock(__queues[i]);
+            }
+        }
+        self->poll_registered = __count;
+
+        // Level-triggered readiness: if already satisfied, undo registration and
+        // return without blocking.
+        if (__predicate != nullptr && __predicate(__arg)) {
+            for (uint32_t i = 0; i < __count; i++) {
+                __detail::PollWaitNode *node = &self->poll_nodes[i];
+                if (__queues[i] != nullptr) {
+                    __detail::wait_queue_lock(__queues[i]);
+                    __detail::poll_queue_remove_locked(__queues[i], node);
+                    __detail::wait_queue_unlock(__queues[i]);
+                }
+                node->queue = nullptr;
+            }
+            self->poll_registered = 0;
+            __detail::leave_scheduler_critical();
+            __detail::spin_unlock(&domain->lock);
+            bigos::irq::enableIRQ();
+            return WAIT_OK;
+        }
+
+        self->wait_result = WAIT_OK;
+        if (__timeout_ticks > 0) {
+            self->deadline_tick = timer::ticks() + __timeout_ticks;
+            self->state = ThreadState::Sleeping;
+            __detail::sleep_push_locked(domain, self);
+        } else {
+            self->deadline_tick = 0;
+            self->state = ThreadState::Blocked;
+        }
+
+        __detail::leave_scheduler_critical();
+        __detail::schedule_blocked_current_locked(domain, self);
+
+        // Resumed by any registered queue's wake or by timeout. Self-clean every
+        // poll node from its queue (the waker only removed nodes from the queue it
+        // fired on; other registrations remain and must be removed here). The
+        // remove is idempotent for an already-unlinked node.
+        for (uint32_t i = 0; i < self->poll_registered; i++) {
+            __detail::PollWaitNode *node = &self->poll_nodes[i];
+            WaitQueue *queue = __queues[i];
+            if (queue != nullptr) {
+                __detail::wait_queue_lock(queue);
+                __detail::poll_queue_remove_locked(queue, node);
+                __detail::wait_queue_unlock(queue);
+            }
+            node->queue = nullptr;
+        }
+        self->poll_registered = 0;
+
+        bigos::irq::enableIRQ();
+        return self->wait_result;
+    }
+
     uint32_t wake_one(WaitQueue *__queue) noexcept {
         if (__queue == nullptr)
             return 0;
@@ -842,6 +1023,9 @@ namespace sched {
         }
         if (t == nullptr) {
             __detail::wait_queue_unlock(__queue);
+            // No single-waiter, but multi-queue poll waiters are level-triggered
+            // and must still be woken to re-scan their readiness set.
+            __detail::drain_poll_head(__queue);
             return 0;
         }
         const bigos::cpu::CpuId owner_cpu = t->owner_cpu;
@@ -849,14 +1033,19 @@ namespace sched {
         __detail::wait_queue_unlock(__queue);
 
         __detail::SchedulerCpuState *domain = __detail::domain_for_cpu(owner_cpu);
-        if (domain == nullptr)
+        if (domain == nullptr) {
+            __detail::drain_poll_head(__queue);
             return 0;
+        }
         __detail::spin_lock(&domain->lock);
         const uint32_t woke = __detail::wake_thread_locked(domain, t, WAIT_OK) ? 1u : 0u;
         const cpu::CpuId target_cpu = domain->cpu_id;
         __detail::spin_unlock(&domain->lock);
         if (woke != 0)
             __detail::nudge_cpu(target_cpu);
+        // Poll waiters on this queue are level-triggered; wake them all so each
+        // re-scans and re-registers if still not ready.
+        __detail::drain_poll_head(__queue);
         return woke;
     }
 
@@ -889,6 +1078,8 @@ namespace sched {
             __detail::wait_queue_lock(__queue);
         }
         __detail::wait_queue_unlock(__queue);
+        // Wake every multi-queue poll waiter registered on this queue too.
+        __detail::drain_poll_head(__queue);
         return count;
     }
 

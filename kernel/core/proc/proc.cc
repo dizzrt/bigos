@@ -18,6 +18,10 @@
 #include <bigos/net/socket.h>
 #endif
 
+#ifdef BIGOS_FD_MULTIPLEXING_SMOKE
+#include <bigos/ipc/pipe.h>
+#endif
+
 #include "../../mm/buddy.h"
 #include "../../mm/memdef.h"
 #include "../../mm/vmem.h"
@@ -3967,6 +3971,122 @@ namespace bigos::proc {
         return process->fd_table[__fd].file;
     }
 
+    namespace {
+        // Fills one pollfd's revents from the unified readiness snapshot and
+        // returns whether the entry is ready (revents != 0). fd < 0 is ignored
+        // (revents cleared, not counted). An invalid/unopened fd yields POLLNVAL
+        // (counted). A valid fd maps READY_* to POLL* bits: READY_READABLE ->
+        // POLLIN and READY_WRITABLE -> POLLOUT intersected with the requested
+        // events, READY_ERROR -> POLLERR|POLLHUP unconditionally (peer close). It
+        // is read-only: it dequeues nothing and changes no descriptor state.
+        bool poll_scan_entry(bigos::sys::pollfd *__pfd) noexcept {
+            __pfd->revents = 0;
+            if (__pfd->fd < 0)
+                return false;
+            bigos::vfs::File *file = file_for_fd_current((uint32_t)__pfd->fd);
+            if (file == nullptr) {
+                __pfd->revents = bigos::sys::POLLNVAL;
+                return true;
+            }
+            const uint32_t ready = bigos::vfs::poll_file(file);
+            uint16_t revents = 0;
+            if ((ready & bigos::vfs::READY_READABLE) != 0 && (__pfd->events & bigos::sys::POLLIN) != 0)
+                revents |= bigos::sys::POLLIN;
+            if ((ready & bigos::vfs::READY_WRITABLE) != 0 && (__pfd->events & bigos::sys::POLLOUT) != 0)
+                revents |= bigos::sys::POLLOUT;
+            if ((ready & bigos::vfs::READY_ERROR) != 0)
+                revents |= (uint16_t)(bigos::sys::POLLERR | bigos::sys::POLLHUP);
+            __pfd->revents = revents;
+            return revents != 0;
+        }
+
+        uint32_t poll_scan_all(bigos::sys::pollfd *__fds, uint32_t __nfds) noexcept {
+            uint32_t ready = 0;
+            for (uint32_t i = 0; i < __nfds; i++) {
+                if (poll_scan_entry(&__fds[i]))
+                    ++ready;
+            }
+            return ready;
+        }
+
+        struct PollPredicateArg {
+            bigos::sys::pollfd *fds;
+            uint32_t nfds;
+        };
+
+        // Level-triggered readiness predicate for wait_queue_wait_any(): re-scan
+        // the whole set and report true when any descriptor is ready. Read-only.
+        bool poll_predicate(void *__arg) noexcept {
+            PollPredicateArg *arg = (PollPredicateArg *)__arg;
+            return poll_scan_all(arg->fds, arg->nfds) > 0;
+        }
+    }   // namespace
+
+    int64_t poll_fds_current(bigos::sys::pollfd *__fds, uint32_t __nfds, int64_t __timeout_ms) noexcept {
+        if (__nfds > bigos::sys::POLL_MAX_FDS)
+            return -bigos::EINVAL;
+
+        // First scan: fill revents and count ready descriptors.
+        uint32_t ready = poll_scan_all(__fds, __nfds);
+
+        // Immediate return: something ready, a zero timeout (non-blocking probe),
+        // or a non-blockable context. No wait-queue registration.
+        if (ready > 0 || __timeout_ms == 0 || !bigos::sched::can_block())
+            return (int64_t)ready;
+
+        // Collect and de-duplicate the wait queues of every valid descriptor,
+        // bounded by POLL_MAX_WAIT_QUEUES.
+        bigos::sched::WaitQueue *queues[bigos::sched::POLL_MAX_WAIT_QUEUES];
+        uint32_t count = 0;
+        for (uint32_t i = 0; i < __nfds && count < bigos::sched::POLL_MAX_WAIT_QUEUES; i++) {
+            if (__fds[i].fd < 0)
+                continue;
+            bigos::vfs::File *file = file_for_fd_current((uint32_t)__fds[i].fd);
+            if (file == nullptr)
+                continue;
+            bigos::sched::WaitQueue *local[2] = {nullptr, nullptr};
+            const uint32_t got = bigos::vfs::file_poll_wait_queues(file, __fds[i].events, local, 2);
+            for (uint32_t g = 0; g < got && count < bigos::sched::POLL_MAX_WAIT_QUEUES; g++) {
+                if (local[g] == nullptr)
+                    continue;
+                bool duplicate = false;
+                for (uint32_t q = 0; q < count; q++) {
+                    if (queues[q] == local[g]) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate)
+                    queues[count++] = local[g];
+            }
+        }
+
+        // Millisecond -> monotonic tick. timeout_ms < 0 means infinite wait
+        // (timeout_ticks == 0). A positive timeout rounds up to at least one tick.
+        timer::tick_t timeout_ticks = 0;
+        if (__timeout_ms > 0) {
+            const uint64_t hz = bigos::timer::TIMER_HZ;
+            uint64_t ticks = ((uint64_t)__timeout_ms * hz + 999) / 1000;
+            if (ticks == 0)
+                ticks = 1;
+            timeout_ticks = ticks;
+        }
+
+        PollPredicateArg parg = {__fds, __nfds};
+        // Block on any of the collected queues; woken by any producer wake or the
+        // timeout. WAIT_OK and WAIT_TIMEOUT both lead to a re-scan; the scheduler
+        // private constant is not surfaced to the caller. The scheduler restores
+        // the caller's current-process slot on resume (ring3 threads via their
+        // registered user process; see the smoke, which registers its bounded
+        // process the same way), so the post-wakeup re-scan resolves the same fd
+        // table.
+        (void)bigos::sched::wait_queue_wait_any(queues, count, &poll_predicate, &parg, timeout_ticks);
+
+        // Re-scan after wakeup: refill revents and recount.
+        ready = poll_scan_all(__fds, __nfds);
+        return (int64_t)ready;
+    }
+
     int64_t dup_fd_current(uint32_t __oldfd) noexcept {
         Process *process = current_process_slot();
         if (process == nullptr || process->state != ProcessState::Running || __oldfd >= process->fd_capacity)
@@ -5621,6 +5741,198 @@ namespace bigos::proc {
             bigos::serial_puts("BIGOS_NONBLOCKING_FD_PASSED\n");
         else
             bigos::serial_puts("BIGOS_NONBLOCKING_FD_FAILED\n");
+    }
+#endif
+
+#ifdef BIGOS_FD_MULTIPLEXING_SMOKE
+    // Validation-only bounded fd multiplexing (SYS_POLL) smoke. It runs from a
+    // blockable kernel thread inside a temporary process context (so the shared
+    // poll_fds_current core resolves current-process fds) and asserts, through the
+    // kernel core the syscall uses:
+    //   - nfds > POLL_MAX_FDS is rejected with -EINVAL;
+    //   - a zero timeout is a non-blocking probe returning immediately;
+    //   - a positive timeout with no descriptor ready truly blocks (yields, tick
+    //     elapses) and returns 0;
+    //   - a bad fd entry is marked POLLNVAL and counted without failing the call;
+    //   - once a pipe becomes readable poll wakes and reports only that entry, and
+    //     "poll readable" implies a nonblocking read does not would-block;
+    //   - a producer write while poll blocks wakes the waiter (real block+wake).
+    // It emits a deterministic BIGOS_FD_MULTIPLEXING_PASSED / _FAILED marker.
+    namespace {
+        // Shared write end for the producer thread. The producer runs with no
+        // process context, so it writes through the vfs::File directly (which needs
+        // none) to wake the poll waiter's pipe read_wq.
+        bigos::vfs::File *g_fdmx_producer_write = nullptr;
+
+        void fdmx_producer_entry(void *) noexcept {
+            // Give the main thread time to enter poll() and block.
+            (void)bigos::sched::sleep_for(3);
+            if (g_fdmx_producer_write != nullptr) {
+                const char payload = 'P';
+                size_t io = 0;
+                (void)bigos::vfs::write(g_fdmx_producer_write, &payload, 1, &io);
+            }
+        }
+
+        bool fdmx_invalid_nfds_rejected() noexcept {
+            bigos::sys::pollfd big[1] = {};
+            // nfds beyond the fixed capacity is a deterministic -EINVAL.
+            return poll_fds_current(big, (uint32_t)bigos::sys::POLL_MAX_FDS + 1, 0) == -bigos::EINVAL;
+        }
+
+        bool fdmx_zero_timeout_probe(bigos::vfs::File *__r, uint32_t __rfd) noexcept {
+            // Empty pipe, zero timeout: immediate probe, nothing ready, revents 0.
+            bigos::sys::pollfd pfd = {(int32_t)__rfd, bigos::sys::POLLIN, 0};
+            const int64_t ready = poll_fds_current(&pfd, 1, 0);
+            return ready == 0 && pfd.revents == 0 && (bigos::vfs::poll_file(__r) & bigos::vfs::READY_READABLE) == 0;
+        }
+
+        bool fdmx_timeout_blocks_returns_zero(uint32_t __rfd) noexcept {
+            // Positive timeout, nothing ready: must block (yield) and return 0. Use
+            // the monotonic tick to confirm the deadline actually elapsed rather
+            // than a busy spin returning early.
+            bigos::sys::pollfd pfd = {(int32_t)__rfd, bigos::sys::POLLIN, 0};
+            const uint64_t start = bigos::timer::ticks();
+            const int64_t ready = poll_fds_current(&pfd, 1, 40);   // ~40ms
+            const uint64_t elapsed = bigos::timer::ticks() - start;
+            return ready == 0 && pfd.revents == 0 && elapsed >= 1;
+        }
+
+        bool fdmx_badfd_marked(uint32_t __rfd) noexcept {
+            // A closed/never-opened fd is marked POLLNVAL and counted, and does not
+            // fail the whole call; a negative fd entry is ignored (revents 0).
+            bigos::sys::pollfd set[3] = {};
+            set[0].fd = (int32_t)__rfd;   // valid, not-ready
+            set[0].events = bigos::sys::POLLIN;
+            set[1].fd = 4096;             // never opened -> POLLNVAL
+            set[1].events = bigos::sys::POLLIN;
+            set[2].fd = -1;               // ignored
+            set[2].events = bigos::sys::POLLIN;
+            const int64_t ready = poll_fds_current(set, 3, 0);
+            return ready == 1 && set[0].revents == 0 && set[1].revents == bigos::sys::POLLNVAL &&
+                   set[2].revents == 0;
+        }
+
+        bool fdmx_ready_reported(bigos::vfs::File *__r, uint32_t __rfd, uint32_t __wfd) noexcept {
+            // Write one byte: poll (zero timeout) now reports only the read fd
+            // readable, and a nonblocking read does not would-block (consistency).
+            const char payload = 'R';
+            size_t io = 0;
+            if (write_fd_current(__wfd, &payload, 1, &io) != bigos::vfs::Status::Success || io != 1)
+                return false;
+            bigos::sys::pollfd pfd = {(int32_t)__rfd, bigos::sys::POLLIN, 0};
+            const int64_t ready = poll_fds_current(&pfd, 1, 0);
+            if (ready != 1 || (pfd.revents & bigos::sys::POLLIN) == 0)
+                return false;
+            // poll did not dequeue: the byte is still readable.
+            char got = 0;
+            io = 0;
+            const bool nonblock_ok =
+                bigos::vfs::file_is_nonblocking(__r) == false && (bigos::vfs::poll_file(__r) & bigos::vfs::READY_READABLE) != 0;
+            if (!nonblock_ok)
+                return false;
+            return read_fd_current(__rfd, &got, 1, &io) == bigos::vfs::Status::Success && io == 1 && got == payload;
+        }
+
+        bool fdmx_block_then_wake(uint32_t __rfd, bigos::vfs::File *__w) noexcept {
+            // Real block-and-wake: a producer thread writes to the pipe after this
+            // thread enters poll() with a generous timeout. poll must wake before
+            // the timeout and report the read fd readable.
+            g_fdmx_producer_write = __w;
+            if (bigos::sched::create_kernel_thread(&fdmx_producer_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+                return false;
+            bigos::sys::pollfd pfd = {(int32_t)__rfd, bigos::sys::POLLIN, 0};
+            const int64_t ready = poll_fds_current(&pfd, 1, 2000);   // ~2s upper bound
+            g_fdmx_producer_write = nullptr;
+            if (ready != 1 || (pfd.revents & bigos::sys::POLLIN) == 0)
+                return false;
+            // Drain the byte the producer wrote so the pipe returns to empty.
+            char got = 0;
+            size_t io = 0;
+            (void)read_fd_current(__rfd, &got, 1, &io);
+            return true;
+        }
+
+        bool fd_multiplexing_smoke_run() noexcept {
+            if (!g_proc_initialized)
+                init();
+            Process *saved_current = current_process_slot();
+
+            static Process proc;
+            scrub_process(&proc);
+            proc.state = ProcessState::Running;
+            // No user address space: the smoke drives the kernel-internal fd table
+            // only. Mark both roots INVALID so the scheduler's resume-time context
+            // restore rebinds the current-process slot (needed after poll blocks)
+            // without ever activating a CR3.
+            proc.address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+            proc.kernel_address_space_root = bigos::mm::INVALID_PHYS_ADDR;
+            init_fd_table(&proc);
+            set_current_process_slot(&proc);
+            // Register the bounded process with the scheduler so a blocking poll
+            // that yields to init/shell has its slot restored on resume, exactly
+            // as a ring3 thread's user process would be.
+            bigos::sched::set_current_user_process(&proc);
+
+            bool ok = fdmx_invalid_nfds_rejected();
+            if (!ok) bigos::serial_puts("BIGOS_FDMX_STAGE einval\n");
+
+            bigos::vfs::File *r = nullptr;
+            bigos::vfs::File *w = nullptr;
+            int64_t rfd = -1;
+            int64_t wfd = -1;
+            if (ok) {
+                if (bigos::ipc::create(&r, &w) != bigos::vfs::Status::Success) {
+                    ok = false;
+                } else {
+                    rfd = install_fd_current(r, false);
+                    wfd = install_fd_current(w, false);
+                    if (rfd < 0 || wfd < 0)
+                        ok = false;
+                }
+                if (!ok) bigos::serial_puts("BIGOS_FDMX_STAGE setup\n");
+            }
+
+            if (ok) {
+                ok = fdmx_zero_timeout_probe(r, (uint32_t)rfd);
+                if (!ok) bigos::serial_puts("BIGOS_FDMX_STAGE zero-timeout\n");
+            }
+            if (ok) {
+                ok = fdmx_timeout_blocks_returns_zero((uint32_t)rfd);
+                if (!ok) bigos::serial_puts("BIGOS_FDMX_STAGE timeout-block\n");
+            }
+            if (ok) {
+                ok = fdmx_badfd_marked((uint32_t)rfd);
+                if (!ok) bigos::serial_puts("BIGOS_FDMX_STAGE badfd\n");
+            }
+            if (ok) {
+                ok = fdmx_block_then_wake((uint32_t)rfd, w);
+                if (!ok) bigos::serial_puts("BIGOS_FDMX_STAGE block-wake\n");
+            }
+            if (ok) {
+                ok = fdmx_ready_reported(r, (uint32_t)rfd, (uint32_t)wfd);
+                if (!ok) bigos::serial_puts("BIGOS_FDMX_STAGE ready-report\n");
+            }
+
+            if (rfd >= 0)
+                close_fd_current((uint32_t)rfd);
+            if (wfd >= 0)
+                close_fd_current((uint32_t)wfd);
+            close_all_fds(&proc);
+            free_fd_table(&proc);
+            // Clear the scheduler registration before dropping the bounded process
+            // so this thread returns to pure kernel-thread semantics on exit.
+            bigos::sched::set_current_user_process(nullptr);
+            set_current_process_slot(saved_current);
+            return ok;
+        }
+    }   // namespace
+
+    void fd_multiplexing_smoke_entry(void *) noexcept {
+        if (fd_multiplexing_smoke_run())
+            bigos::serial_puts("BIGOS_FD_MULTIPLEXING_PASSED\n");
+        else
+            bigos::serial_puts("BIGOS_FD_MULTIPLEXING_FAILED\n");
     }
 #endif
 }   // namespace bigos::proc

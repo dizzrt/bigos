@@ -8,6 +8,12 @@
 #include <bigos/memory.h>
 #include <bigos/signal.h>
 
+namespace bigos::sys {
+    // Forward declaration only; poll_fds_current takes a kernel-side pollfd array.
+    // proc.h avoids pulling in the full syscall ABI header for this one type.
+    struct pollfd;
+}   // namespace bigos::sys
+
 namespace bigos::proc {
     constexpr uint64_t USER_CODE_BASE = 0x0000000000400000ull;
     constexpr uint64_t USER_DATA_BASE = 0x0000000000401000ull;
@@ -397,6 +403,17 @@ namespace bigos::proc {
     // Returns the vfs::File bound to a current-process fd, or nullptr on an
     // invalid/unused descriptor. The reference count is not changed.
     bigos::vfs::File *file_for_fd_current(uint32_t __fd) noexcept;
+    // Kernel-internal bounded multiplexing core shared by SYS_POLL and the smoke.
+    // __fds is a kernel-side pollfd array of __nfds entries (already validated and
+    // copied in from user space by the syscall wrapper). It fills each entry's
+    // revents from vfs::poll_file (level-triggered), and when nothing is ready and
+    // blocking is allowed with a nonzero timeout it registers on the descriptors'
+    // wait queues through sched::wait_queue_wait_any and re-scans on wakeup.
+    // timeout_ms > 0 blocks up to that many ms, == 0 probes once, < 0 waits
+    // without timeout. Returns the ready descriptor count (0 on timeout with none
+    // ready) or -EINVAL when __nfds exceeds bigos::sys::POLL_MAX_FDS. It never
+    // dequeues data or changes descriptor state.
+    int64_t poll_fds_current(bigos::sys::pollfd *__fds, uint32_t __nfds, int64_t __timeout_ms) noexcept;
     // dup/dup2 share the underlying vfs::File (offset and ref count). dup picks
     // the lowest free fd; dup2 closes an already-open newfd first then binds it.
     int64_t dup_fd_current(uint32_t __oldfd) noexcept;
@@ -456,6 +473,9 @@ namespace bigos::proc {
 #endif
 #ifdef BIGOS_NONBLOCKING_FD_SMOKE
     void nonblocking_fd_smoke_entry(void *) noexcept;
+#endif
+#ifdef BIGOS_FD_MULTIPLEXING_SMOKE
+    void fd_multiplexing_smoke_entry(void *) noexcept;
 #endif
 }   // namespace bigos::proc
 

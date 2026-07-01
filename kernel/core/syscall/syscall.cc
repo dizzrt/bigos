@@ -1125,6 +1125,31 @@ namespace sys {
             }
             return (int64_t)copy_len;
         }
+
+        // SYS_POLL(pollfd* fds, nfds, timeout_ms): bounded poll(2)-style
+        // multiplexing. Validate the count, copy the user pollfd array into a
+        // fixed kernel work buffer, run the shared kernel core (which fills
+        // revents and blocks on the descriptors' wait queues when nothing is
+        // ready), then copy the array back. nfds == 0 is legal (timeout-only).
+        static int64_t sys_poll(uint64_t __fds, uint64_t __nfds, uint64_t __timeout_ms) noexcept {
+            if (__nfds > POLL_MAX_FDS)
+                return -bigos::EINVAL;
+            bigos::sys::pollfd work[POLL_MAX_FDS];
+            const uint32_t nfds = (uint32_t)__nfds;
+            const uint64_t bytes = (uint64_t)nfds * sizeof(bigos::sys::pollfd);
+            if (nfds != 0) {
+                if (!bigos::proc::validate_user_io_buffer(__fds, bytes))
+                    return -bigos::EFAULT;
+                if (!bigos::proc::copy_current_user_buffer(__fds, work, bytes))
+                    return -bigos::EFAULT;
+            }
+            const int64_t result = bigos::proc::poll_fds_current(work, nfds, (int64_t)__timeout_ms);
+            if (result < 0)
+                return result;
+            if (nfds != 0 && !bigos::proc::copy_to_current_user_buffer(__fds, work, bytes))
+                return -bigos::EFAULT;
+            return result;
+        }
 #endif
     }   // namespace __detail
 
@@ -1230,6 +1255,9 @@ namespace sys {
                 break;
             case SYS_RECVFROM:
                 result = __detail::sys_recvfrom(__frame->rdi, __frame->rsi, __frame->rdx, __frame->r10, __frame->r8);
+                break;
+            case SYS_POLL:
+                result = __detail::sys_poll(__frame->rdi, __frame->rsi, __frame->rdx);
                 break;
             case SYS_EXECVE:
                 // execve replaces the current process image and enters the new
