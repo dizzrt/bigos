@@ -160,6 +160,10 @@ if has_config("socket_smoke") then
     add_defines("BIGOS_SOCKET_SMOKE")
 end
 
+if has_config("loopback_network_smoke") then
+    add_defines("BIGOS_LOOPBACK_NETWORK_SMOKE")
+end
+
 if has_config("modern_storage_backend_smoke") then
     add_defines("BIGOS_AP_STARTUP_PERCPU_TIMERS")
     add_defines("BIGOS_MODERN_STORAGE_BACKEND_SMOKE")

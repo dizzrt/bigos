@@ -144,6 +144,12 @@ option("socket_smoke")
     set_description("enable validation-only minimal UDP socket interface closed-loop smoke marker")
 option_end()
 
+option("loopback_network_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only local-address loopback network path closed-loop smoke marker")
+option_end()
+
 option("modern_storage_backend_smoke")
     set_default(false)
     set_showmenu(true)

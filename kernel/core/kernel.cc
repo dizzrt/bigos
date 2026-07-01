@@ -2305,6 +2305,15 @@ void kernel(const BootInfoHeader *boot_info) {
         bigos::serial_puts("BIGOS_SOCKET_FAILED thread\n");
 #endif
 
+#ifdef BIGOS_LOOPBACK_NETWORK_SMOKE
+    // Validation-only local-address loopback network smoke. Kernel-internal
+    // closed loop over the loopback-ready protocol path (no frame-level device);
+    // does not expose socket/fd/syscall ABI and does not change default boot.
+    if (bigos::sched::create_kernel_thread(&bigos::net::loopback_network_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_LOOPBACK_NETWORK_FAILED thread\n");
+#endif
+
 #ifdef BIGOS_WRITABLE_FS_SMOKE
     if (bigos::sched::create_kernel_thread(&writable_fs_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_WRITABLE_FS_FAILED thread\n");

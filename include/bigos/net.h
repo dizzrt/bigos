@@ -22,6 +22,12 @@ namespace net {
     constexpr uint32_t UDP_ENDPOINT_CAPACITY = 4;
     constexpr uint32_t UDP_RX_QUEUE_CAPACITY = 4;
     constexpr uint32_t UDP_MAX_PAYLOAD = 512;
+    // Local-address (loopback) recognition. The loopback network is the whole
+    // 127.0.0.0/8 block, not only 127.0.0.1: a destination is a loopback address
+    // when (value & IPV4_LOOPBACK_MASK) == IPV4_LOOPBACK_PREFIX.
+    constexpr uint32_t IPV4_LOOPBACK = 0x7f000001u;         // 127.0.0.1
+    constexpr uint32_t IPV4_LOOPBACK_PREFIX = 0x7f000000u;  // 127.0.0.0
+    constexpr uint32_t IPV4_LOOPBACK_MASK = 0xff000000u;    // /8
 
     struct MacAddress {
         uint8_t bytes[6];
@@ -36,6 +42,10 @@ namespace net {
         Ready,
         SkippedNoDevice,
         SkippedInvalidConfig,
+        // Appended: valid local IPv4 config but no ready frame-level device. The
+        // local-address (loopback) delivery path is usable; outbound (non-local)
+        // transmission stays gated on a ready device.
+        LoopbackReady,
     };
 
     enum class Status : uint8_t {
@@ -106,8 +116,29 @@ namespace net {
         uint32_t udp_queue_full;
         uint32_t udp_malformed;
         uint32_t udp_payload_overflow;
+        // Append-only loopback counters. loopback_delivered counts local-address
+        // packets that reached the local input path successfully (UDP enqueued or
+        // ICMP echo handled); loopback_dropped counts local-address packets the
+        // loopback split dropped (unbound, queue full, or checksum/validation
+        // failure). They let validation distinguish a local-loopback hit from an
+        // outbound frame-level device hit without inspecting device counters.
+        uint32_t loopback_delivered;
+        uint32_t loopback_dropped;
         Status last_status;
     };
+
+    // Guard the existing Diagnostics layout: the historical counters keep their
+    // offsets and the new loopback counters are appended immediately before
+    // last_status, so consumers that read prior fields are unaffected.
+    static_assert(__builtin_offsetof(Diagnostics, init_ready) == 0, "Diagnostics init_ready moved");
+    static_assert(__builtin_offsetof(Diagnostics, udp_payload_overflow) == 32 * sizeof(uint32_t),
+                  "Diagnostics existing counter layout changed");
+    static_assert(__builtin_offsetof(Diagnostics, loopback_delivered) > __builtin_offsetof(Diagnostics, udp_payload_overflow),
+                  "loopback_delivered must be appended after existing counters");
+    static_assert(__builtin_offsetof(Diagnostics, loopback_dropped) > __builtin_offsetof(Diagnostics, loopback_delivered),
+                  "loopback_dropped must follow loopback_delivered");
+    static_assert(__builtin_offsetof(Diagnostics, last_status) > __builtin_offsetof(Diagnostics, loopback_dropped),
+                  "last_status must stay after the appended loopback counters");
 
     struct UdpDatagram {
         Ipv4Address source_ipv4;
@@ -176,6 +207,16 @@ namespace net {
 
 #ifdef BIGOS_NETWORK_PROTOCOL_SMOKE
     void protocol_smoke_entry(void *) noexcept;
+#endif
+
+#ifdef BIGOS_LOOPBACK_NETWORK_SMOKE
+    // Default-off kernel-internal local-address (loopback) closed-loop smoke. It
+    // initializes a context with local IPv4 config and no frame-level device
+    // (LoopbackReady), then exercises the UDP loopback closed loop, unbound/
+    // queue-full/non-local error paths, and an ICMP echo-to-self, emitting a
+    // deterministic BIGOS_LOOPBACK_NETWORK_PASSED / BIGOS_LOOPBACK_NETWORK_FAILED
+    // marker without any real tap/network backend.
+    void loopback_network_smoke_entry(void *) noexcept;
 #endif
 }   // namespace net
 NAMESPACE_BIGOS_END

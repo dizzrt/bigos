@@ -52,6 +52,18 @@ namespace {
         return __ip.value == 0;
     }
 
+    // Read-only local-address predicate for the IPv4 output loopback split. A
+    // destination is local when it equals the configured local IPv4 address or
+    // falls in the whole loopback network 127.0.0.0/8 (not only 127.0.0.1). It has
+    // no side effects and only reads the context config.
+    bool is_local_delivery(const bigos::net::Context *__ctx, bigos::net::Ipv4Address __dest) noexcept {
+        if (__ctx == nullptr)
+            return false;
+        if (__dest.value == __ctx->config.local_ipv4.value)
+            return true;
+        return (__dest.value & bigos::net::IPV4_LOOPBACK_MASK) == bigos::net::IPV4_LOOPBACK_PREFIX;
+    }
+
     bool mac_zero(const bigos::net::MacAddress &__mac) noexcept {
         for (uint32_t i = 0; i < sizeof(__mac.bytes); i++) {
             if (__mac.bytes[i] != 0)
@@ -98,6 +110,28 @@ namespace {
             return false;
         }
         return true;
+    }
+
+    // Readiness gate for local-address-capable operations (bind, send). It accepts
+    // both a fully-ready device context and a loopback-only context (valid local
+    // IPv4 config, no ready frame-level device). Outbound (non-local) sends are
+    // still gated on a ready device inside send_ipv4. Frame-level paths (pump,
+    // inject_frame, arp_resolve) keep using the device-strict validate_ready.
+    bool validate_local_ready(bigos::net::Context *__ctx) noexcept {
+        if (__ctx == nullptr) {
+            return false;
+        }
+        if (!ordinary_context()) {
+            __ctx->diagnostics.irq_context_rejected++;
+            set_status(__ctx, bigos::net::Status::UnsupportedContext);
+            return false;
+        }
+        if (__ctx->state == bigos::net::State::Ready && __ctx->device != nullptr)
+            return true;
+        if (__ctx->state == bigos::net::State::LoopbackReady)
+            return true;
+        set_status(__ctx, bigos::net::Status::Disabled);
+        return false;
     }
 
     bigos::net::ArpEntry *find_arp(bigos::net::Context *__ctx, bigos::net::Ipv4Address __ipv4) noexcept {
@@ -179,6 +213,8 @@ namespace {
         return status;
     }
 
+    bigos::net::Status handle_ipv4(bigos::net::Context *__ctx, const uint8_t *__payload, uint16_t __length) noexcept;
+
     bigos::net::Ipv4Address route_destination(const bigos::net::Context *__ctx,
                                               bigos::net::Ipv4Address __destination) noexcept {
         if (__ctx->config.has_direct_peer)
@@ -203,11 +239,13 @@ namespace {
             return bigos::net::Status::TooLarge;
         }
 
-        bigos::net::MacAddress dst_mac = {};
-        const bigos::net::Status arp =
-            bigos::net::arp_resolve(__ctx, route_destination(__ctx, __destination), &dst_mac, 0);
-        if (arp != bigos::net::Status::Ok)
-            return arp;
+        // Classify the destination once, then build the full IPv4 packet before
+        // any routing decision. Local-address (loopback) traffic normalizes the
+        // destination onto local_ipv4 so the local input path and the existing
+        // UDP pseudo-header checksum (rebuilt against local_ipv4 in handle_udp)
+        // stay self-consistent without a special case.
+        const bool local = is_local_delivery(__ctx, __destination);
+        const bigos::net::Ipv4Address packet_dest = local ? __ctx->config.local_ipv4 : __destination;
 
         uint8_t packet[20 + bigos::net::UDP_MAX_PAYLOAD + 8] = {};
         packet[0] = (IPV4_VERSION << 4) | IPV4_MIN_IHL;
@@ -218,9 +256,36 @@ namespace {
         packet[8] = IPV4_TTL;
         packet[9] = __protocol;
         write_be32(packet + 12, __ctx->config.local_ipv4.value);
-        write_be32(packet + 16, __destination.value);
+        write_be32(packet + 16, packet_dest.value);
         write_be16(packet + 10, internet_checksum(packet, 20));
         memcpy(packet + 20, __payload, __payload_length);
+
+        if (local) {
+            // Loopback split: deliver the just-built packet directly to the local
+            // IPv4 input dispatch, bypassing route/ARP/frame-level device. Bounded
+            // recursion: handle_udp enqueues and stops; handle_icmp turns an echo
+            // request into a single echo reply that re-enters here, is recognized
+            // as a reply (not a request), and produces no new packet (depth <= 1).
+            const bigos::net::Status status = handle_ipv4(__ctx, packet, total_len);
+            if (status == bigos::net::Status::Ok)
+                __ctx->diagnostics.loopback_delivered++;
+            else
+                __ctx->diagnostics.loopback_dropped++;
+            set_status(__ctx, status);
+            return status;
+        }
+
+        // Outbound (non-local): require a ready frame-level device, then keep the
+        // existing route + ARP + frame-level transmit path unchanged.
+        if (__ctx->state != bigos::net::State::Ready || __ctx->device == nullptr) {
+            set_status(__ctx, bigos::net::Status::NotReady);
+            return bigos::net::Status::NotReady;
+        }
+        bigos::net::MacAddress dst_mac = {};
+        const bigos::net::Status arp =
+            bigos::net::arp_resolve(__ctx, route_destination(__ctx, __destination), &dst_mac, 0);
+        if (arp != bigos::net::Status::Ok)
+            return arp;
         return transmit_ethernet(__ctx, dst_mac, bigos::net::ETHERNET_TYPE_IPV4, packet, total_len);
     }
 
@@ -231,6 +296,12 @@ namespace {
             set_status(__ctx, bigos::net::Status::Malformed);
             return bigos::net::Status::Malformed;
         }
+        // A valid echo reply is a terminal accept: it MUST NOT generate a new echo
+        // request. This bounds the loopback echo-to-self recursion to a single
+        // echo (send_ipv4 -> handle_ipv4 -> handle_icmp request -> one reply ->
+        // handle_ipv4 -> handle_icmp reply -> stop), depth <= 1.
+        if (__payload[0] == ICMP_ECHO_REPLY && __payload[1] == 0)
+            return bigos::net::Status::Ok;
         if (__payload[0] != ICMP_ECHO_REQUEST || __payload[1] != 0) {
             __ctx->diagnostics.icmp_malformed++;
             set_status(__ctx, bigos::net::Status::Unsupported);
@@ -352,7 +423,12 @@ namespace {
         }
         const bigos::net::Ipv4Address source = {read_be32(__payload + 12)};
         const bigos::net::Ipv4Address dest = {read_be32(__payload + 16)};
-        if (!ipv4_equal(dest, __ctx->config.local_ipv4) && dest.value != BROADCAST_IPV4) {
+        // Accept the local-address set (configured local IPv4 or the loopback
+        // network 127.0.0.0/8) and the existing broadcast boundary. Loopback
+        // traffic arriving from the send_ipv4 split has its destination normalized
+        // to local_ipv4, so this stays equivalent to the prior local filter for
+        // outbound RX frames; any other destination is still dropped as not-local.
+        if (!is_local_delivery(__ctx, dest) && dest.value != BROADCAST_IPV4) {
             __ctx->diagnostics.ipv4_not_local++;
             return bigos::net::Status::NotLocal;
         }
@@ -506,10 +582,24 @@ namespace net {
             return Status::UnsupportedContext;
         }
         if (__device == nullptr || __device->ready == nullptr || !__device->ready(__device)) {
-            __ctx->state = State::SkippedNoDevice;
-            __ctx->diagnostics.init_skipped_no_device++;
-            __ctx->diagnostics.last_status = Status::NotReady;
-            return Status::NotReady;
+            // No ready frame-level device. With valid local IPv4 config the
+            // local-address (loopback) path stays usable in a loopback-only
+            // readiness mode; outbound (non-local) sends remain gated on a ready
+            // device inside send_ipv4. Without valid config the path stays
+            // disabled so an unconfigured default boot never becomes ready.
+            if (__config == nullptr || ipv4_zero(__config->local_ipv4)) {
+                __ctx->state = State::SkippedNoDevice;
+                __ctx->diagnostics.init_skipped_no_device++;
+                __ctx->diagnostics.last_status = Status::NotReady;
+                return Status::NotReady;
+            }
+            __ctx->device = nullptr;
+            __ctx->config = *__config;
+            if (__ctx->config.mtu == 0 || __ctx->config.mtu > DEFAULT_MTU)
+                __ctx->config.mtu = DEFAULT_MTU;
+            __ctx->state = State::LoopbackReady;
+            __ctx->diagnostics.last_status = Status::Ok;
+            return Status::Ok;
         }
         if (__config == nullptr || ipv4_zero(__config->local_ipv4) || mac_zero(__config->local_mac)) {
             __ctx->state = State::SkippedInvalidConfig;
@@ -639,7 +729,7 @@ namespace net {
     }
 
     Status udp_bind(Context *__ctx, uint16_t __local_port, UdpEndpoint **__out) noexcept {
-        if (!validate_ready(__ctx))
+        if (!validate_local_ready(__ctx))
             return __ctx == nullptr ? Status::InvalidArgument : __ctx->diagnostics.last_status;
         if (__local_port == 0 || __out == nullptr)
             return Status::InvalidArgument;
@@ -676,7 +766,7 @@ namespace net {
     Status udp_send_to(Context *__ctx, UdpEndpoint *__endpoint, Ipv4Address __destination_ipv4,
                        uint16_t __destination_port, const uint8_t *__payload, uint16_t __payload_length,
                        timer::tick_t) noexcept {
-        if (!validate_ready(__ctx))
+        if (!validate_local_ready(__ctx))
             return __ctx == nullptr ? Status::InvalidArgument : __ctx->diagnostics.last_status;
         if (__endpoint == nullptr || !__endpoint->active || __destination_port == 0)
             return Status::NotBound;
@@ -684,6 +774,12 @@ namespace net {
             return Status::InvalidArgument;
         if (__payload_length > UDP_MAX_PAYLOAD)
             return Status::TooLarge;
+        // Normalize a local-address destination onto local_ipv4 before building the
+        // pseudo-header checksum so it matches the checksum handle_udp rebuilds on
+        // the local input path (source = local_ipv4, dest = local_ipv4). send_ipv4
+        // performs the same normalization for the IPv4 header destination.
+        const Ipv4Address checksum_dest =
+            is_local_delivery(__ctx, __destination_ipv4) ? __ctx->config.local_ipv4 : __destination_ipv4;
         const uint16_t udp_len = (uint16_t)(8 + __payload_length);
         uint8_t udp[8 + UDP_MAX_PAYLOAD] = {};
         write_be16(udp + 0, __endpoint->local_port);
@@ -695,7 +791,7 @@ namespace net {
 
         uint8_t pseudo[12 + 8 + UDP_MAX_PAYLOAD] = {};
         write_be32(pseudo + 0, __ctx->config.local_ipv4.value);
-        write_be32(pseudo + 4, __destination_ipv4.value);
+        write_be32(pseudo + 4, checksum_dest.value);
         pseudo[8] = 0;
         pseudo[9] = IPV4_PROTOCOL_UDP;
         write_be16(pseudo + 10, udp_len);
@@ -922,6 +1018,153 @@ namespace net {
             return;
         }
         bigos::serial_puts("BIGOS_NETWORK_PROTOCOL_PASSED\n");
+    }
+#endif
+
+#ifdef BIGOS_LOOPBACK_NETWORK_SMOKE
+    namespace {
+        Context g_loopback_context = {};
+
+        void loopback_fail(const char *__reason) noexcept {
+            bigos::serial_puts("BIGOS_LOOPBACK_NETWORK_FAILED ");
+            bigos::serial_puts(__reason);
+            bigos::serial_puts("\n");
+        }
+
+        // Builds a valid ICMPv4 echo request body (type 8, code 0, id/seq/payload)
+        // with a correct ICMP checksum. Returns the ICMP length.
+        uint16_t loopback_build_icmp_echo(uint8_t *__icmp) noexcept {
+            memset(__icmp, 0, 10);
+            __icmp[0] = ICMP_ECHO_REQUEST;
+            __icmp[1] = 0;
+            write_be16(__icmp + 4, 0x2468);
+            write_be16(__icmp + 6, 7);
+            __icmp[8] = 0xc1;
+            __icmp[9] = 0xd2;
+            write_be16(__icmp + 2, internet_checksum(__icmp, 10));
+            return 10;
+        }
+    }   // namespace
+
+    void loopback_network_smoke_entry(void *) noexcept {
+        g_loopback_context = {};
+
+        // Loopback-only readiness: local IPv4 config, no frame-level device.
+        Config config = {};
+        config.local_ipv4 = make_ipv4(10, 0, 2, 15);
+        config.netmask = make_ipv4(255, 255, 255, 0);
+        config.mtu = DEFAULT_MTU;
+        if (init(&g_loopback_context, nullptr, &config) != Status::Ok ||
+            state(&g_loopback_context) != State::LoopbackReady) {
+            loopback_fail("init");
+            return;
+        }
+
+        // Bind a local UDP port; loopback readiness must allow bind without a
+        // frame-level device.
+        const uint16_t local_port = 4100;
+        UdpEndpoint *endpoint = nullptr;
+        if (udp_bind(&g_loopback_context, local_port, &endpoint) != Status::Ok || endpoint == nullptr) {
+            loopback_fail("bind");
+            return;
+        }
+
+        // 1) UDP loopback closed loop to 127.0.0.1: send, then receive the same
+        //    payload with source = local_ipv4 (normalized) and source port =
+        //    local_port; loopback_delivered must increment.
+        const uint8_t msg[] = {'l', 'o'};
+        const uint32_t delivered_before = g_loopback_context.diagnostics.loopback_delivered;
+        if (udp_send_to(&g_loopback_context, endpoint, {IPV4_LOOPBACK}, local_port, msg, sizeof(msg), 0) !=
+            Status::Ok) {
+            loopback_fail("udp-send");
+            return;
+        }
+        if (g_loopback_context.diagnostics.loopback_delivered != delivered_before + 1) {
+            loopback_fail("delivered-count");
+            return;
+        }
+        UdpDatagram got = {};
+        if (udp_receive_from(endpoint, &got) != Status::Ok || got.payload_length != sizeof(msg) ||
+            got.payload[0] != 'l' || got.payload[1] != 'o' || got.source_port != local_port ||
+            got.source_ipv4.value != config.local_ipv4.value) {
+            loopback_fail("udp-receive");
+            return;
+        }
+
+        // 2) No-data: a second receive with nothing queued returns NoData.
+        UdpDatagram none = {};
+        if (udp_receive_from(endpoint, &none) != Status::NoData) {
+            loopback_fail("no-data");
+            return;
+        }
+
+        // 3) Unbound target port: a loopback send to a port with no endpoint is
+        //    dropped deterministically and counts loopback_dropped.
+        const uint32_t dropped_before_unbound = g_loopback_context.diagnostics.loopback_dropped;
+        if (udp_send_to(&g_loopback_context, endpoint, config.local_ipv4, local_port + 1, msg, sizeof(msg), 0) !=
+            Status::NotBound) {
+            loopback_fail("unbound");
+            return;
+        }
+        if (g_loopback_context.diagnostics.loopback_dropped != dropped_before_unbound + 1) {
+            loopback_fail("unbound-count");
+            return;
+        }
+
+        // 4) Queue full: fill the bounded RX queue, then one more send is dropped
+        //    with QueueFull and counts loopback_dropped.
+        for (uint32_t i = 0; i < UDP_RX_QUEUE_CAPACITY; i++) {
+            if (udp_send_to(&g_loopback_context, endpoint, config.local_ipv4, local_port, msg, sizeof(msg), 0) !=
+                Status::Ok) {
+                loopback_fail("queue-fill");
+                return;
+            }
+        }
+        const uint32_t dropped_before_full = g_loopback_context.diagnostics.loopback_dropped;
+        if (udp_send_to(&g_loopback_context, endpoint, config.local_ipv4, local_port, msg, sizeof(msg), 0) !=
+            Status::QueueFull) {
+            loopback_fail("queue-full");
+            return;
+        }
+        if (g_loopback_context.diagnostics.loopback_dropped != dropped_before_full + 1) {
+            loopback_fail("queue-full-count");
+            return;
+        }
+
+        // 5) Non-local destination under loopback-only readiness: the outbound
+        //    path has no ready device, so it fails deterministically (NotReady)
+        //    rather than reporting success.
+        if (udp_send_to(&g_loopback_context, endpoint, make_ipv4(10, 0, 2, 2), 5000, msg, sizeof(msg), 0) !=
+            Status::NotReady) {
+            loopback_fail("non-local");
+            return;
+        }
+
+        // 6) ICMP echo-to-self: send a valid echo request to 127.0.0.1 through
+        //    send_ipv4. The loopback split delivers it, handle_icmp emits one echo
+        //    reply that re-enters and is recognized as a reply (no new request).
+        //    icmp_echo_requests/replies and loopback_delivered increment
+        //    deterministically; no frame-level device is used.
+        const uint32_t icmp_req_before = g_loopback_context.diagnostics.icmp_echo_requests;
+        const uint32_t icmp_rep_before = g_loopback_context.diagnostics.icmp_echo_replies;
+        const uint32_t delivered_before_icmp = g_loopback_context.diagnostics.loopback_delivered;
+        uint8_t icmp[16] = {};
+        const uint16_t icmp_len = loopback_build_icmp_echo(icmp);
+        if (send_ipv4(&g_loopback_context, {IPV4_LOOPBACK}, IPV4_PROTOCOL_ICMP, icmp, icmp_len) != Status::Ok) {
+            loopback_fail("icmp-send");
+            return;
+        }
+        // One request handled, one reply generated, and both the request send and
+        // the reply re-entry counted as loopback deliveries (>= 2).
+        if (g_loopback_context.diagnostics.icmp_echo_requests != icmp_req_before + 1 ||
+            g_loopback_context.diagnostics.icmp_echo_replies != icmp_rep_before + 1 ||
+            g_loopback_context.diagnostics.loopback_delivered < delivered_before_icmp + 2) {
+            loopback_fail("icmp-count");
+            return;
+        }
+
+        (void)udp_close(&g_loopback_context, endpoint);
+        bigos::serial_puts("BIGOS_LOOPBACK_NETWORK_PASSED\n");
     }
 #endif
 }   // namespace net

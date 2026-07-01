@@ -496,10 +496,10 @@ network path.
 用户可见目标：用户程序可以在既有有界网络路径之上运行真实 TCP client/server 交互、连接
 loopback 地址并解析名字。
 
-- [ ] Task M14.1: a loopback network path so connection-oriented and datagram
+- [x] Task M14.1: a loopback network path so connection-oriented and datagram
   traffic to the local address works without a physical or emulated network
   card, enabling reproducible default-off validation.
-- [ ] 任务 M14.1：loopback 网络路径，使面向连接与 datagram 的本机地址流量无需物理或仿真
+- [x] 任务 M14.1：loopback 网络路径，使面向连接与 datagram 的本机地址流量无需物理或仿真
   网卡即可工作，支撑可复现的默认关闭验证。
 - [ ] Task M14.2: a bounded TCP path with connection setup, bounded retransmission
   and windowing, ordered delivery, and connection teardown, without claiming a
