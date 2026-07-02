@@ -187,6 +187,6 @@ command history, complete POSIX `termios`, pseudo-terminals, complete job contro
 read/write control, USB HID, full graphical terminal behavior, locale,
 Unicode normalization, grapheme clusters, shaping, input methods, persistent or
 unbounded history, USB HID, or internationalized keyboard layouts. The minimal fd
-integration covers only the default console fast paths for bounded userland and
+integration covers only the default console fast paths for the current userland and
 does not introduce `/dev/tty`, a general character-device filesystem, async I/O,
 or full POSIX terminal reads.

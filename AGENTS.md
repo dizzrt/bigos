@@ -1,16 +1,17 @@
 # Agent Guide For BigOS
 
-This repository contains BigOS, an early-stage x86_64 freestanding operating
-system kernel. Treat it as low-level kernel code, not as a hosted application.
+This repository contains BigOS, an x86_64 freestanding operating system kernel
+being developed toward a general-purpose, usable, POSIX-compatible Unix-like
+system. Treat it as low-level kernel code, not as a hosted application.
 
 ## Project Context
 
 - BigOS is written primarily in C++17, C17, and x86/x86_64 assembly.
 - xmake is the primary build system.
 - `x86_64-elf-gcc` is the expected cross toolchain.
-- QEMU is the supported local emulator for the default x86_64 UEFI bounded
-  userland backend. QEMU and Bochs remain supported for the explicit Legacy
-  BIOS/MBR/exFAT compatibility/debug backend.
+- QEMU is the supported local emulator for the default x86_64 UEFI userland
+  backend. QEMU and Bochs remain supported for the explicit Legacy BIOS/MBR/exFAT
+  compatibility/debug backend.
 - Python files are helper scripts unless explicitly stated otherwise.
 - Run Python-related commands through `uv run` by default, including `pytest`,
   helper scripts, linting, formatting, and type checks.
@@ -29,11 +30,11 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
     queues, timeout sleep, guarded IRQ-return preemption, scheduler nudge IPI,
     and context-switch assembly.
   - `kernel/core/syscall`: `int 0x80` dispatcher and ABI.
-  - `kernel/core/proc`: bounded process model, growable fd table, VMA/heap
+  - `kernel/core/proc`: process model, growable fd table, VMA/heap
     metadata, demand-zero/COW handling, `fork`, signals, identity/time state,
     ring3 user-mode entry, `execve`, resident PID-1 init launch, safe
-    teardown/reaping, bounded ELF64 user-program loading, and bounded
-    dynamic-link layout helpers. Flat first-user-program, filesystem-backed
+    teardown/reaping, ELF64 user-program loading, and dynamic-link layout
+    helpers. Flat first-user-program, filesystem-backed
     user ELF, dynamic-link, and userland runtime entries remain default-off
     smoke consumers.
   - `kernel/core/fs`: VFS shell over exFAT, RAM-backed `/rw`, persistent
@@ -47,7 +48,7 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
   PCI/MSI-X, ATA PIO, RAM block, virtio-blk, and virtio-net drivers.
 - `kernel/runtime`: startup assembly source objects.
 - `user`: freestanding user crt0/libc, PID-1 init, `/bin/sh`, small user
-  binaries, bounded dynamic-link runtime/demo sources, and default-off userland
+  binaries, dynamic-link runtime/demo sources, and default-off userland
   smoke sources.
 - `tools`: developer helper scripts such as the boot disk install tool.
 - `cpp`: kernel C++ support library, KTL containers, `new/delete`, ABI stubs.
@@ -87,6 +88,10 @@ system kernel. Treat it as low-level kernel code, not as a hosted application.
   local machine-specific absolute paths or `file://` URLs for repository files.
 - Do not silently change boot addresses, linker addresses, interrupt vectors,
   page-table self-mapping addresses, disk offsets, or ABI assumptions.
+- Treat bounded subsets as staged engineering contracts, not as permanent
+  product limits. New planning and documentation should describe POSIX/Unix
+  compatibility as the long-term direction while keeping each implementation
+  step explicit, deterministic, and testable.
 
 ## Build And Run
 
@@ -150,12 +155,12 @@ xmake f --libc_file_stream_smoke=y # BIGOS_LIBC_FILE_STREAM_PASSED
 xmake f --dynamic_link_smoke=y # BIGOS_DYNAMIC_LINK_PASSED
 ```
 
-Normal boot packages `/boot/user/init.elf`, `/bin/sh`, and bounded `/bin/*`
+Normal boot packages `/boot/user/init.elf`, `/bin/sh`, and `/bin/*`
 programs, enters resident PID-1 init, and starts `/bin/sh`; QEMU UEFI headless
 default validation observes `BIGOS_USER_EXEC`. `--user_program_smoke`,
 `--user_elf_smoke`, and `--userland_smoke` select default-off user-program
 validation paths in place of the normal init payload. `kernel/core/proc/**`,
-`kernel/core/fs/**`, and `user/**` are normal bounded userland baseline
+`kernel/core/fs/**`, and `user/**` are normal incremental userland baseline
 subsystems; smoke switches only select extra validation entry points or marker
 programs.
 
@@ -184,8 +189,8 @@ Notes:
   serial logs, emulator diagnostic logs, and explicitly provided log paths must
   stay under `logs/`. QEMU uses the UEFI ESP/FAT image plus an exFAT
   compatibility root image by default; Legacy BIOS/IDE raw images remain
-  explicit compatibility/debug artifacts. Virtio block/net paths are bounded
-  validation backends and do not create broad storage/device parity.
+  explicit compatibility/debug artifacts. Virtio block/net paths are staged
+  validation backends and do not yet create broad storage/device parity.
 - Prefer QEMU with `--display none` for automated smoke tests, serial marker
   checks, and CI-like local validation, using either the `xmake run qemu -- --display none`
   wrapper or the equivalent Python helper path. Prefer graphical QEMU for quick
@@ -258,9 +263,11 @@ Notes:
   restricted anonymous mapping, demand paging, bounded `fork`/COW, signals,
   time/identity, writable `/rw`, pipes/dup, bounded socket syscalls, bounded
   dynamic linking, userland runtime, and VMA-backed user-buffer validation
-  bounded; do not imply a complete POSIX process/job-control model, broad
-  writable file-backed `mmap`, full libc, full filesystem crash recovery, broad
-  user-visible async I/O, CPU hotplug, NUMA, or broad storage/device support.
+  explicit and testable. Do not describe incomplete areas as already complete
+  POSIX behavior; broader process/job-control semantics, writable file-backed
+  `mmap`, full libc, filesystem crash recovery, user-visible async I/O, CPU
+  hotplug, NUMA, and broad storage/device support remain staged compatibility
+  work unless a roadmap item explicitly excludes them.
 - Driver port IO and hardware state: `kernel/drivers/video/vga.cc`,
   `kernel/drivers/irqchip/i8259.cc`, `kernel/drivers/irqchip/lapic.cc`,
   `kernel/drivers/irqchip/ioapic.cc`, `kernel/drivers/pci/*.cc`,
@@ -297,7 +304,7 @@ Notes:
   interrupt-driven block completion, modern virtio-blk, virtio-net, bounded
   network protocol/socket paths, bounded dynamic linking, libc file streams, and
   core userland utilities are current smoke-backed capabilities.
-- Still bounded or not implemented: a complete POSIX process/job-control model,
+- Not yet complete or still staged: a complete POSIX process/job-control model,
   broad writable file-backed `mmap`, a complete POSIX libc, full filesystem
   crash recovery, broad user-visible async I/O, CPU hotplug, NUMA,
   multi-architecture runtime parity, broad storage/device management, and
@@ -324,9 +331,10 @@ Notes:
   artifact-local checklist numbers instead.
 - For reviews, focus on correctness, undefined behavior, bootability, memory
   safety, interrupt safety, and initialization order.
-- For documentation sync, keep the current bounded userland baseline aligned
-  with `roadmap.md`, current source, and archived OpenSpec specs without
-  describing BigOS as a complete POSIX or general-purpose OS.
+- For documentation sync, keep the current incremental userland baseline aligned
+  with `roadmap.md`, current source, and archived OpenSpec specs. It is fine to
+  describe BigOS as targeting a general-purpose POSIX-compatible Unix-like
+  system; do not claim current implementation areas are complete before they are.
 - Keep `roadmap.md` at project-planning level only: describe implemented
   capabilities, missing capabilities, medium/long-term planning, and staged
   development priorities. Do not add concrete entry points, file paths, commands,

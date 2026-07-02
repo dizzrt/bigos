@@ -4,11 +4,13 @@
 
 Current project-level status lives in `README.md`, `README-zh.md`, `AGENTS.md`,
 `openspec/config.yaml`, and `roadmap.md`. Architecture docs should describe the
-current bounded minimal usable system baseline as a multi-core capable x86_64
-research kernel with a bounded POSIX-like subset. The x86_64 UEFI backend is the
-default runnable baseline; the Legacy BIOS/MBR/exFAT path remains an explicit
-compatibility and debug backend. Do not describe BigOS as complete POSIX
-coverage, a complete network/storage stack, or a complete general-purpose OS.
+current minimal usable system baseline as a multi-core capable x86_64 kernel
+moving toward a general-purpose, POSIX-compatible Unix-like system. The x86_64
+UEFI backend is the default runnable baseline; the Legacy BIOS/MBR/exFAT path
+remains an explicit compatibility and debug backend. Do not overstate current
+implementation coverage as complete POSIX, complete network/storage, or
+release-grade general-purpose behavior; describe such areas as staged
+compatibility-expansion work.
 
 `roadmap.md` is for project-level implemented capabilities, missing capabilities,
 medium/long-term planning, and staged development priorities. Keep concrete
@@ -19,7 +21,8 @@ storage, constrained rename, metadata, cwd/relative paths, pipe/dup, bounded
 socket support, bounded dynamic linking, minimal libc, and static user programs
 separate from full POSIX filesystem, complete journaling/crash recovery, broad
 user-visible async I/O, complete job control, complete POSIX libc, and broad
-storage/device support.
+storage/device support. Those broader capabilities are future compatibility
+targets unless a roadmap stage explicitly declares them out of scope.
 
 ## Language Entry Points
 

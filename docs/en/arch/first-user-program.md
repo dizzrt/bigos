@@ -46,7 +46,7 @@ Init markers are distinct from the smoke `BIGOS_USER_*` markers:
 - When init exits normally via `SYS_EXIT`, the kernel emits `BIGOS_INIT_EXIT`
   (after the shared `BIGOS_USER_EXIT`) and falls through to the existing
   deferred reaper and idle scheduling, rather than panicking. The current
-  bounded userland baseline uses a resident PID-1 that starts and restarts
+  incremental userland baseline uses a resident PID-1 that starts and restarts
   `/bin/sh`, while orphan adoption remains bounded to the current process model.
 
 ## Process Lifecycle

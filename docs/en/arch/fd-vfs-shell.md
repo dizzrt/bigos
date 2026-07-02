@@ -123,12 +123,13 @@ and the minimal userland runtime.
   device-node, symlink, ACL, xattr, complete timestamp, stable inode, or
   persistent object identity semantics.
 
-## Non-Goals
+## Current Stage Boundaries
 
 - This baseline still does not introduce `select`, complete POSIX `stat`, full
   pathname canonicalization, symlink traversal, mount namespaces, or `chroot`;
-  some of those are later bounded capabilities, while others remain non-goals.
-- Current project non-goals remain broad user-visible async I/O, broad writable
-  file-backed `mmap`, full POSIX filesystem/process semantics, complete POSIX
-  dynamic-loader semantics, CPU hotplug, NUMA, and broad storage/device
-  management.
+  these are compatibility-expansion targets unless a later roadmap item
+  explicitly excludes one.
+- Current gaps include broad user-visible async I/O, broad writable file-backed
+  `mmap`, full POSIX filesystem/process semantics, complete POSIX dynamic-loader
+  semantics, CPU hotplug, NUMA, and broad storage/device management. They should
+  be described as staged work rather than permanent product limits.

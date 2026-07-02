@@ -246,12 +246,13 @@ The bounded TCP stream subset appends these calls:
   accepted flag is `MSG_NOSIGNAL`, which suppresses `SIGPIPE` on a broken-pipe
   write while still returning `-EPIPE`. Unknown flag bits return `-EINVAL`.
 
-These socket calls are bounded adapters over the kernel-internal protocol path,
-not a complete POSIX socket layer: there is no `setsockopt`, `shutdown`,
-`getpeername`, `getsockname`, `accept4`, `sendmsg`/`recvmsg`, `SO_REUSEADDR`,
-scatter-gather, ancillary data, full `AF_*`/`SOCK_*` matrix, DHCP, DNS, IPv6, or
-multi-context/multi-NIC selection. `getsockopt` is deliberately limited to
-`SOL_SOCKET`/`SO_ERROR`, and stream `send` deliberately recognizes only
+These socket calls are the current adapters over the kernel-internal protocol
+path. They do not yet provide a complete POSIX socket layer: `setsockopt`,
+`shutdown`, `getpeername`, `getsockname`, `accept4`, `sendmsg`/`recvmsg`,
+`SO_REUSEADDR`, scatter-gather, ancillary data, a full `AF_*`/`SOCK_*` matrix,
+DHCP, DNS integration, IPv6, and multi-context/multi-NIC selection remain staged
+socket/network compatibility work. `getsockopt` is currently limited to
+`SOL_SOCKET`/`SO_ERROR`, and stream `send` currently recognizes only
 `MSG_NOSIGNAL`.
 
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
@@ -268,11 +269,11 @@ remain responsible for translating negative kernel returns into positive
 
 The default-off xmake option `syscall_smoke` (`xmake f --syscall_smoke=y`) continues to validate `SYS_DEBUG_WRITE`, `SYS_GET_TICK`, and unknown numbers from ring0. Additional default-off smokes cover the flat first user program, filesystem-backed user ELF, demand paging, the bounded read-only file-backed mapping (`xmake f --file_backed_mapping_smoke=y`, marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`), anonymous map/unmap/protect lifecycle (`xmake f --anonymous_lifecycle_smoke=y`, marker `BIGOS_ANON_LIFECYCLE_PASSED`/`FAILED`), fork/COW, time/identity, signals, writable FS, pipes, and userland runtime. The userland runtime smoke also asserts representative process-group/session and foreground-terminal wrapper behavior. Normal boot now packages `/boot/user/init.elf`, enters resident PID-1 init, and starts `/bin/sh`; default headless validation observes `BIGOS_USER_EXEC`.
 
-## Non-Goals For This Stage
+## Current Stage Boundaries
 
 - Do not switch to the `syscall`/`sysret` MSR fast path.
-- Do not reinterpret the bounded syscall set as complete POSIX-wide syscall semantics, user threads, job control, dynamic linking, or a full libc.
-- Do not broaden demand paging/COW beyond the current bounded anonymous mappings and the bounded read-only file-backed mapping, and do not add writable/write-back or shared file-backed `mmap`.
+- Do not reinterpret the current syscall set as already-complete POSIX-wide syscall semantics, user threads, job control, dynamic linking, or a full libc. These remain staged compatibility targets unless a later roadmap item explicitly excludes one.
+- Do not broaden demand paging/COW beyond the current bounded anonymous mappings and the bounded read-only file-backed mapping in this stage, and do not add writable/write-back or shared file-backed `mmap` in this stage.
 - Do not relax DPL for IDT gates other than syscall; do not send i8259 EOI from the syscall path.
 
 ## Cross-Cutting Engineering Items

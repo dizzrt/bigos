@@ -1,7 +1,7 @@
 # 用户态运行时、libc 与 Shell
 
-BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源码位于
-`user/`。它仍是研究内核的最小用户态，不是完整 POSIX 环境。
+BigOS 现在具备一条 freestanding 用户态路径，用户程序源码位于 `user/`。它是增量 POSIX
+兼容用户态基线：当前接口以分阶段、可验证的子集实现，更广 POSIX 行为仍是长期兼容方向。
 
 ## 组件
 
@@ -24,10 +24,11 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
 - `user/smoke/userland_smoke.c`：默认关闭的确定性验证程序，覆盖 crt0、libc
   wrapper、errno、stdout/stderr、smoke C 程序执行、fork/exec/wait、pipe、重定向和 malloc。
 
-## 有界核心工具
+## 核心工具
 
-默认 `/bin` 命名空间暴露一组 BigOS 有界核心工具。它们是小型 freestanding 静态
-用户 ELF，不是 GNU coreutils 或完整 POSIX utilities：
+默认 `/bin` 命名空间暴露当前 BigOS 核心工具集合。它们是小型 freestanding 静态用户 ELF。
+这些工具从常见 POSIX/GNU-style utility 行为的分阶段子集起步，并应随着 kernel、libc、
+filesystem 与 shell 兼容面增长而继续扩展：
 
 - 文件字节流和文本过滤：`cat`、`tee`、`head`、`tail`、`wc`、`grep`、
   `hexdump` 和 `more`。`grep` 只做普通字节子串匹配；regex flag 等未支持 option
@@ -40,7 +41,8 @@ BigOS 现在具备一条有界的 freestanding 用户态路径，用户程序源
 - Shell 组合消费者：这些工具继承 fd `0`/`1`/`2`，并通过 `/bin/sh` 支持的 PATH 查找、
   `<`/`>` 重定向和单级 pipe 进行验证。
 
-网络诊断命令刻意不属于本批默认核心工具集合；用户可见 socket/network 体验留给单独的有界网络变更。
+网络诊断命令当前尚不属于默认核心工具集合；用户可见 socket/network 体验应通过分阶段
+networking 与 resolver 兼容工作继续扩展。
 
 ## crt0 栈契约
 
@@ -226,7 +228,7 @@ runtime 边界内：
 - `/bin/smoke/*` 探针：仅用于显式 `userland_smoke` 验证镜像。
 
 默认镜像布局是 UEFI ESP/FAT image 加 exFAT 兼容 root image；Legacy BIOS / MBR /
-exFAT image 作为显式兼容 backend 保留。当前有界用户态基线在 `/boot/user`、`/bin`
+exFAT image 作为显式兼容 backend 保留。当前增量用户态基线在 `/boot/user`、`/bin`
 以及 dynamic-link smoke 的 validation-only `/lib` payload 下打包文件，但不引入 AHCI、
 NVMe、通用 virtio boot device model 或新的文件系统后端。静态用户程序保持为
 freestanding ELF64 `ET_EXEC`，并受共享 64 KiB user-ELF 上限约束；dynamic-link smoke

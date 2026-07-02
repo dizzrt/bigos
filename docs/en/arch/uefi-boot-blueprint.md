@@ -1,13 +1,13 @@
 # UEFI Boot Blueprint
 
-This document is the UEFI boot blueprint for BigOS. BigOS now uses the x86_64 UEFI boot backend as the default runnable boot backend within the current bounded userland baseline. The backend builds `BOOTX64.EFI`, generates an ESP/FAT image, exposes a QEMU/OVMF debug entry, and reaches the existing resident init, `/bin/sh`, and bounded `/bin/*` payload boundary. Legacy BIOS remains available as an explicit compatibility and low-level debug backend.
+This document is the UEFI boot blueprint for BigOS. BigOS now uses the x86_64 UEFI boot backend as the default runnable boot backend within the current incremental userland baseline. The backend builds `BOOTX64.EFI`, generates an ESP/FAT image, exposes a QEMU/OVMF debug entry, and reaches the existing resident init, `/bin/sh`, and `/bin/*` payload boundary. Legacy BIOS remains available as an explicit compatibility and low-level debug backend.
 
 ## Current Scope
 
 The default BigOS boot path is now UEFI:
 
 ```text
-OVMF -> ESP/FAT -> EFI/BOOT/BOOTX64.EFI -> ELF64 kernel -> kernel(BootInfoHeader*) -> bounded userland
+OVMF -> ESP/FAT -> EFI/BOOT/BOOTX64.EFI -> ELF64 kernel -> kernel(BootInfoHeader*) -> userland
 ```
 
 The retained Legacy BIOS path is explicit rather than removed:
@@ -32,7 +32,7 @@ Non-goals for the default UEFI backend:
 
 - Do not change the Legacy BIOS/MBR/exFAT/Bochs semantics of `xmake run bochs` or its `--display sdl2|none` target arguments.
 - Do not replace MBR, DBR, extended DBR, `boot.bin`, or the existing raw exFAT image.
-- Do not claim runtime parity beyond the current bounded userland baseline.
+- Do not claim runtime parity beyond the current incremental userland baseline.
 - Do not implement Secure Boot, ACPI table handoff, UEFI Runtime Services, persistent NVRAM semantics, new SMP scope, or a second ISA.
 - Do not treat GOP framebuffer metadata handoff as glyph rendering, Unicode display, framebuffer scrollback, or graphical console parity.
 - Do not require the kernel to call BIOS interrupts, UEFI Boot Services, or UEFI Runtime Services.
@@ -125,7 +125,7 @@ Implemented foundation:
 
 Still not implemented:
 
-- Runtime parity beyond the current bounded userland baseline.
+- Runtime parity beyond the current incremental userland baseline.
 - Glyph rendering, Unicode display, framebuffer scrollback, ACPI/SMBIOS firmware table sections, and UEFI Runtime Services support.
 - Secure Boot, persistent NVRAM semantics, and non-x86_64 ISA backends.
 
@@ -206,8 +206,8 @@ The default UEFI backend uses separate artifacts from Legacy BIOS:
 UEFI artifact isolation policy:
 
 - BIOS path continues using raw exFAT images and artifacts such as `build/test/os.raw`.
-- UEFI path uses an ESP/FAT image containing `EFI/BOOT/BOOTX64.EFI`, `/boot/kernel`, `/boot/user/init.elf`, and bounded `/bin/*` payloads. Until a FAT runtime filesystem or loader-fed runtime payload exists, QEMU also attaches a separate exFAT compatibility root image as primary IDE so the current kernel VFS can reach the same bounded userland baseline.
-- The ESP/FAT image also contains `/boot/fonts/unifont.bin` for framebuffer handoff metadata and the later kernel glyph lookup view. Missing or invalid font metadata or lookup validation is a documented fallback and must not block serial diagnostics, VGA text fallback, memory initialization, or bounded userland validation.
+- UEFI path uses an ESP/FAT image containing `EFI/BOOT/BOOTX64.EFI`, `/boot/kernel`, `/boot/user/init.elf`, and `/bin/*` payloads. Until a FAT runtime filesystem or loader-fed runtime payload exists, QEMU also attaches a separate exFAT compatibility root image as primary IDE so the current kernel VFS can reach the same incremental userland baseline.
+- The ESP/FAT image also contains `/boot/fonts/unifont.bin` for framebuffer handoff metadata and the later kernel glyph lookup view. Missing or invalid font metadata or lookup validation is a documented fallback and must not block serial diagnostics, VGA text fallback, memory initialization, or userland validation.
 - UEFI firmware configuration, temporary directories, and emulator configuration must not overwrite Legacy BIOS artifacts used by `xmake run qemu`, `xmake run qemu-gdb`, or `xmake run bochs`.
 - UEFI smoke tests primarily use QEMU + OVMF. Bochs UEFI is not required for this backend.
 - Legacy BIOS continues to use the current raw exFAT image with QEMU IDE or Bochs.

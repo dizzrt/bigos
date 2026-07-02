@@ -2,34 +2,36 @@
 
 Language: English | [简体中文](README-zh.md)
 
-BigOS is an early-stage x86_64 operating system kernel written mainly in
-freestanding C++17, C17, and assembly. It has grown from a boot/kernel skeleton
-into a smoke-tested, multi-core capable research kernel with bounded userland.
+BigOS is an x86_64 operating system kernel written mainly in freestanding C++17,
+C17, and assembly. It has grown from a boot/kernel skeleton into a smoke-tested,
+multi-core capable kernel that is now being developed toward a general-purpose,
+usable, POSIX-compatible Unix-like system.
 The current default runnable baseline is the x86_64 UEFI boot backend; the
 Legacy BIOS/MBR/exFAT path remains an explicit compatibility and debug backend.
-Its bounded userland loop includes bootstrapping, text/serial/framebuffer
+Its incremental userland loop includes bootstrapping, text/serial/framebuffer
 output, interrupt/exception/syscall handling, timers, keyboard-driven TTY input,
 multi-core scheduling, wait queues and timeout sleep, an `int 0x80` syscall
-entry, process lifecycle core, fd/VFS services, bounded writable `/rw` storage,
+entry, process lifecycle core, fd/VFS services, writable `/rw` storage,
 persistent writable storage, cwd/relative path handling, constrained rename,
-metadata queries, pipes/dup, bounded network/socket paths, default-on PID-1
-init, a minimal user crt0/libc, bounded FILE streams, bounded dynamic linking,
-`/bin/sh`, bounded ELF64 user-program loading, VMA-backed user-memory
-validation, and a fairly complete early kernel memory-management stack.
+metadata queries, pipes/dup, network/socket paths, default-on PID-1 init, user
+crt0/libc, FILE streams, dynamic linking support, `/bin/sh`, ELF64 user-program
+loading, VMA-backed user-memory validation, and a fairly complete early kernel
+memory-management stack.
 
-This repository is a research/toy OS kernel project, not a hosted application or
-service.
+This repository is a freestanding OS kernel project, not a hosted application or
+service. Earlier bounded subsets remain useful as staged engineering contracts,
+but they are no longer the long-term product boundary.
 
 ## Status
 
-The completed capability baseline is compressed into the current bounded
-minimal usable system baseline: a multi-core capable kernel with timer, input,
-scheduling, syscall, a bounded POSIX-like process/I/O subset, read/write VFS
-primitives, bounded user ELF loading, a resident PID-1 init, static user
-programs, bounded `/rw` runtime and persistent storage, cwd/relative path
-handling, constrained rename, metadata, pipe/dup, bounded socket/dynamic-link
-paths, and a minimal userland runtime on top of the UEFI default backend,
-Legacy compatibility backend, interrupt foundation, and early memory management.
+The completed capability baseline is compressed into the current minimal usable
+system baseline: a multi-core capable kernel with timer, input, scheduling,
+syscall, a growing POSIX-like process/I/O subset, read/write VFS primitives,
+user ELF loading, a resident PID-1 init, static user programs, `/rw` runtime and
+persistent storage, cwd/relative path handling, constrained rename, metadata,
+pipe/dup, socket/dynamic-link paths, and a userland runtime on top of the UEFI
+default backend, Legacy compatibility backend, interrupt foundation, and early
+memory management.
 
 Implemented or partially implemented:
 
@@ -56,7 +58,7 @@ Implemented or partially implemented:
   idle threads, wait queues, timeout sleep, preemption-disable guards,
   scheduler nudge IPI, remote wakeups, TLB shootdown validation, and bounded
   IRQ-return timer preemption.
-- `int 0x80` syscall entry with a minimal register ABI and a bounded dispatcher
+- `int 0x80` syscall entry with a minimal register ABI and a staged dispatcher
   including process, fd/VFS, pipe/dup, identity/time, signal, and `SYS_EXECVE`
   calls used by the user libc and shell.
 - Default-off first ring3 user program smoke: a flat embedded image enters
@@ -100,7 +102,7 @@ Implemented or partially implemented:
 - Switchable early memory runtime self-test (`bigos::mm::self_test`).
 - Small KTL support library for kernel containers and helpers.
 
-Still bounded or not implemented:
+Not yet complete or still staged:
 
 - Multi-architecture runtime parity, firmware parity beyond the tested x86_64
   UEFI/Legacy paths, and broad backend cleanup.
@@ -331,7 +333,7 @@ Current scope:
   `xmake run bochs -- --display sdl2` for explicit SDL2 or `xmake run bochs --
   --display none` for Bochs no-GUI mode. Bochs remains useful for early boot,
   BIOS, ATA PIO, interrupt, and hardware-behavior investigations.
-- Virtio block/net paths are bounded validation backends. They do not create
+- Virtio block/net paths are staged validation backends. They do not yet create
   broad storage/device parity or user-visible device management.
 - The workflow does not change `boot.s`, `boot.cc`, `BootInfo`, `link.lds`, the
   higher-half kernel address, or kernel runtime initialization.
@@ -409,7 +411,7 @@ Notes:
 
 The boot path is specific to x86/x86_64. The default runnable backend is the
 x86_64 UEFI loader, which uses an ESP/FAT image and an exFAT compatibility root
-image for the bounded userland payloads. The Legacy BIOS/MBR/exFAT path remains
+image for the userland payloads. The Legacy BIOS/MBR/exFAT path remains
 an explicit compatibility backend and still assumes an exFAT partition
 containing a file named `kernel`.
 
@@ -589,12 +591,13 @@ The project provides a small amount of freestanding C++ infrastructure.
   services, or dynamic allocation paths that are not initialized yet.
 - Treat boot addresses, linker addresses, page-table layout, interrupt vectors,
   and disk offsets as design-critical.
-- Keep fd/VFS, process lifecycle, and VMA/user-memory descriptions bounded:
-  bounded I/O, RAM-backed and persistent `/rw`, constrained
-  rename/metadata/cwd-relative paths, restricted anonymous/file mapping, bounded
-  demand paging/COW, bounded dynamic linking, no broad POSIX process model, no
-  complete job control, no full journaling/crash recovery, and no broad writable
-  file-backed `mmap`.
+- Keep fd/VFS, process lifecycle, and VMA/user-memory descriptions precise:
+  describe current I/O, RAM-backed and persistent `/rw`, constrained
+  rename/metadata/cwd-relative paths, restricted anonymous/file mapping,
+  demand paging/COW, and dynamic linking as staged compatibility contracts.
+  Broader POSIX process semantics, complete job control, full
+  journaling/crash recovery, and broad writable file-backed `mmap` are future
+  compatibility work unless a roadmap item explicitly excludes them.
 - Prefer small, explicit hardware-facing code.
 - Validate initialization order carefully; many subsystems depend on memory,
   paging, or descriptor tables being available first.

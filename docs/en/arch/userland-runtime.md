@@ -1,8 +1,9 @@
 # Userland Runtime, libc, and Shell
 
-BigOS now has a bounded, freestanding userland path built from C sources under
-`user/`. It is still a minimal research-kernel userland, not a complete POSIX
-environment.
+BigOS now has a freestanding userland path built from C sources under `user/`.
+It is an incremental POSIX-compatible userland baseline: current interfaces are
+implemented in staged, testable subsets, while broader POSIX behavior remains
+the long-term compatibility direction.
 
 ## Components
 
@@ -28,11 +29,12 @@ environment.
   for crt0, libc wrappers, errno, stdout/stderr, smoke C-program execution,
   fork/exec/wait, pipe, redirection, and malloc.
 
-## Bounded Core Utilities
+## Core Utilities
 
-The default `/bin` namespace exposes a bounded BigOS core utility set. These are
-small freestanding static user ELFs, not GNU coreutils or complete POSIX
-utilities:
+The default `/bin` namespace exposes the current BigOS core utility set. These
+are small freestanding static user ELFs. They intentionally start with staged
+subsets of common POSIX/GNU-style utility behavior and should expand as the
+kernel, libc, filesystem, and shell compatibility surface grows:
 
 - File byte-stream and text filters: `cat`, `tee`, `head`, `tail`, `wc`,
   `grep`, `hexdump`, and `more`. `grep` is plain byte substring matching only;
@@ -51,9 +53,9 @@ utilities:
   validated through supported `/bin/sh` PATH lookup, `<`/`>` redirection, and a
   single-stage pipe.
 
-Network diagnostic commands are intentionally not part of this default core
-utility set. User-visible socket/network experience belongs to a separate
-bounded networking change.
+Network diagnostic commands are not part of this default core utility set yet.
+User-visible socket/network experience should expand through the staged
+networking and resolver compatibility work.
 
 ## crt0 Stack Contract
 
@@ -278,7 +280,7 @@ freestanding ELF64 `ET_EXEC` images using `user/crt0`, `user/libc`, and
 
 The default image layout is the UEFI ESP/FAT image plus an exFAT compatibility
 root image; the Legacy BIOS / MBR / exFAT image remains an explicit
-compatibility backend. The current bounded userland baseline adds files under
+compatibility backend. The current incremental userland baseline adds files under
 `/boot/user`, `/bin`, and validation-only `/lib` payloads for dynamic-link
 smoke, but it does not introduce AHCI, NVMe, a general virtio boot device model,
 or a new filesystem backend. Static user programs remain freestanding ELF64

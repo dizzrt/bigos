@@ -150,4 +150,4 @@ sched::start()  (idle thread owns halt; replaces the bare hlt loop)
 
 ## 非目标
 
-该路径不实现多 TTY、完整 xterm/VT100/VT220 行为、命令历史、完整 POSIX `termios`、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史，或国际化 keyboard layout。最小 fd 集成只覆盖有界用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。
+该路径不实现多 TTY、完整 xterm/VT100/VT220 行为、命令历史、完整 POSIX `termios`、伪终端、完整 job control、后台读写控制、USB HID、完整图形 terminal 行为、locale、Unicode normalization、grapheme cluster、shaping、输入法、持久化或无限历史，或国际化 keyboard layout。最小 fd 集成只覆盖当前用户态的默认 console fast path，不引入 `/dev/tty`、通用 character-device filesystem、async I/O 或完整 POSIX terminal read。

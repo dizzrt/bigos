@@ -2,26 +2,27 @@
 
 语言：[English](README.md) | 简体中文
 
-BigOS 是一个早期阶段的 x86_64 操作系统内核，主要使用 freestanding
-C++17、C17 和汇编编写。它已从 boot/kernel 骨架迭代为经过 smoke 验证、具备多核能力的
-研究内核：当前默认可运行基线是 x86_64 UEFI boot backend，Legacy BIOS/MBR/exFAT
-路径作为显式兼容与调试 backend 保留。它的有界用户态闭环包括引导流程、文本/串口/
+BigOS 是一个 x86_64 操作系统内核，主要使用 freestanding C++17、C17 和汇编编写。它已从
+boot/kernel 骨架迭代为经过 smoke 验证、具备多核能力的内核，并正朝通用、可用、兼容
+POSIX 的类 Unix 系统发展。当前默认可运行基线是 x86_64 UEFI boot backend，Legacy
+BIOS/MBR/exFAT 路径作为显式兼容与调试 backend 保留。它的增量用户态闭环包括引导流程、文本/串口/
 framebuffer 输出、中断/异常/syscall 处理、timer、键盘驱动的 TTY 输入路径、多核调度、
 wait queue 与 timeout sleep、`int 0x80` syscall 入口、进程生命周期、fd/VFS 服务、
-有界可写 `/rw` 存储、persistent writable storage、cwd/relative path、受限 rename、
-metadata 查询、pipe/dup、有界 network/socket 路径、默认开启的 PID-1 init、最小用户态
-crt0/libc、有界 FILE stream、有界动态链接、`/bin/sh`、bounded ELF64 用户程序加载器、
+可写 `/rw` 存储、persistent writable storage、cwd/relative path、受限 rename、
+metadata 查询、pipe/dup、network/socket 路径、默认开启的 PID-1 init、用户态
+crt0/libc、FILE stream、dynamic linking 支持、`/bin/sh`、ELF64 用户程序加载器、
 VMA-backed 用户内存校验，以及一套相对完整的早期内核内存管理。
 
-本仓库是一个研究/玩具操作系统内核项目，不是托管应用或服务。
+本仓库是一个 freestanding 操作系统内核项目，不是托管应用或服务。早期有界子集仍作为
+阶段性工程契约保留，但不再作为长期产品能力上限。
 
 ## 状态
 
-已完成能力压缩为当前有界最小可用系统基线：在默认 UEFI backend、Legacy 兼容 backend、
-中断基础设施和早期内存管理之上，具备 timer、输入、调度、syscall、有界 POSIX-like
-进程/I/O 子集、读写 VFS 原语、bounded 用户 ELF 加载、常驻 PID-1 init、静态用户程序、
-有界 `/rw` 运行期与 persistent storage、cwd/relative path、受限 rename、metadata、
-pipe/dup、有界 socket/dynamic-link 路径和最小用户态运行时的多核能力内核。
+已完成能力压缩为当前最小可用系统基线：在默认 UEFI backend、Legacy 兼容 backend、
+中断基础设施和早期内存管理之上，具备 timer、输入、调度、syscall、持续扩展的 POSIX-like
+进程/I/O 子集、读写 VFS 原语、用户 ELF 加载、常驻 PID-1 init、静态用户程序、`/rw`
+运行期与 persistent storage、cwd/relative path、受限 rename、metadata、pipe/dup、
+socket/dynamic-link 路径和用户态运行时的多核能力内核。
 
 已经实现或部分实现：
 
@@ -45,7 +46,7 @@ pipe/dup、有界 socket/dynamic-link 路径和最小用户态运行时的多核
   run queue、round-robin `yield()`、scheduler-owned idle 线程、wait queue、
   timeout sleep、preemption-disable guard、scheduler nudge IPI、remote wakeup、
   TLB shootdown validation，以及 bounded IRQ-return timer preemption。
-- `int 0x80` syscall 入口、最小寄存器 ABI 和 bounded dispatcher，包含用户 libc
+- `int 0x80` syscall 入口、最小寄存器 ABI 和分阶段 dispatcher，包含用户 libc
   与 shell 使用的进程、fd/VFS、pipe/dup、身份/时间、信号和 `SYS_EXECVE` 调用。
 - 默认关闭的首个 ring3 用户程序 smoke：flat embedded image 通过 TSS/RSP0 与
   `iretq` 进入 ring3，并完成 `SYS_WRITE`/`SYS_EXIT` 闭环。
@@ -83,7 +84,7 @@ pipe/dup、有界 socket/dynamic-link 路径和最小用户态运行时的多核
 - 可切换的早期内存运行时自检（`bigos::mm::self_test`）。
 - 小型 KTL 支持库，用于内核容器和辅助工具。
 
-仍然有界或尚未实现：
+尚未完整或仍处于分阶段扩展：
 
 - 多架构 runtime parity、超出已验证 x86_64 UEFI/Legacy 路径的 firmware parity，
   以及更广泛 backend cleanup。
@@ -373,7 +374,7 @@ xmake run bochs -- --display none
 ### 引导
 
 引导路径专用于 x86/x86_64。默认可运行 backend 是 x86_64 UEFI loader，它使用
-ESP/FAT image，并通过 exFAT 兼容 root image 提供有界用户态 payload。Legacy
+ESP/FAT image，并通过 exFAT 兼容 root image 提供用户态 payload。Legacy
 BIOS/MBR/exFAT 路径作为显式兼容 backend 保留，并仍假设磁盘镜像中存在一个包含
 名为 `kernel` 文件的 exFAT 分区。
 

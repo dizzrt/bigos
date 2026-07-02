@@ -1,12 +1,17 @@
 schema: spec-driven
 
 context: |
-  Project: BigOS, an early-stage x86_64 freestanding operating system kernel.
+  Project: BigOS, an x86_64 freestanding operating system kernel being developed
+  toward a general-purpose, usable, POSIX-compatible Unix-like system.
 
   Domain:
-  - The repository is a toy/research OS kernel, not an application service.
+  - The repository is a freestanding OS kernel, not an application service.
+  - Earlier bounded subsets are staged engineering contracts for review,
+    capacity control, deterministic errors, and reproducible validation. They
+    are not permanent product boundaries; future changes should move BigOS
+    toward broader POSIX/Unix compatibility when dependencies are ready.
   - The current default runnable backend is x86_64 UEFI with an ESP/FAT image
-    and an exFAT compatibility root image for the bounded userland payloads. The
+    and an exFAT compatibility root image for the userland payloads. The
     Legacy BIOS/MBR/exFAT path remains runnable as an explicit compatibility and
     cross-validation backend. Additional architectures are not runtime-parity
     backends.
@@ -14,7 +19,7 @@ context: |
     0xffffffff80000000. The UEFI backend loads the same ELF64 kernel through the
     unified handoff ABI; the Legacy backend continues to load a kernel named
     "kernel" from the exFAT disk image.
-  - The current bounded userland baseline covers bootstrapping, VGA text and
+  - The current incremental POSIX-compatible userland baseline covers bootstrapping, VGA text and
     COM1 serial output, a kernel-owned IDT with exception/IRQ/syscall dispatch,
     i8259 PIC, PIT IRQ0 tick, keyboard TTY/console input, buddy/slab/kmalloc/
     virtual memory, direct map, owned empty page-table reclamation, a multi-core
@@ -75,7 +80,7 @@ context: |
 
   Current maturity:
   - The project has iterated from an early boot/kernel skeleton to a multi-core
-    capable bounded userland baseline.
+    capable incremental POSIX-compatible userland baseline.
   - Boot, VGA/serial output, kernel-owned IDT and exception/IRQ/syscall dispatch,
     PIC, PIT timer IRQ0, keyboard decode plus TTY/console input, buddy allocation,
     slab allocation, kernel virtual memory, owned empty page-table reclamation,
@@ -96,16 +101,20 @@ context: |
     time/identity, signals, writable FS, pipe, modern storage/network paths,
     socket behavior, dynamic linking, libc file streams, userland runtime, and
     core user utilities markers.
-  - Still bounded or not implemented: a complete POSIX process/job-control model,
-    broad writable file-backed `mmap`, a complete POSIX libc, full filesystem
-    crash recovery, broad async I/O exposed as a user ABI, broad storage/device
-    management, CPU hotplug, NUMA, multi-architecture runtime parity, and
-    release-grade CI automation.
+  - Not yet complete or still staged: a complete POSIX process/job-control
+    model, broad writable file-backed `mmap`, a complete POSIX libc, full
+    filesystem crash recovery, broad async I/O exposed as a user ABI, broad
+    storage/device management, CPU hotplug, NUMA, multi-architecture runtime
+    parity, and release-grade CI automation.
   - Some paths are scaffolding or TODOs. Inspect call sites before assuming a
     subsystem is wired into normal boot; optional smoke entry threads and runtime
     validation markers remain gated even when shared subsystems compile normally.
 
   Conventions:
+  - Treat POSIX/Unix compatibility as the long-term direction. Use bounded
+    wording to define the current change's deliverable scope, capacity limits,
+    deterministic failure behavior, and validation plan, not to reject future
+    completeness.
   - Prefer small, explicit low-level code over abstractions that hide hardware
     details.
   - Keep kernel code freestanding-safe. Do not assume hosted libc, exceptions,

@@ -70,7 +70,7 @@ BigOS 引入最小的只读 fd/VFS 边界。后续能力保持这条 exFAT 读�
 - exFAT metadata 是只读的，并为 owner/mode 返回文档化默认值。`/rw` metadata 反映运行期 create、write、truncate、mkdir、unlink 和权限 metadata 变化。RAM-backed `/rw` 仍不跨重启持久化；persistent 测试后端只声明成功 `fsync` 与 clean reboot 后的 clean-sync 状态。
 - 这是 BigOS bounded metadata subset，不是完整 POSIX `struct stat`、设备节点、符号链接、ACL、xattr、完整时间戳、稳定 inode 或持久对象身份语义。
 
-## 非目标
+## 当前阶段边界
 
-- 当前基线仍不引入 `select`、完整 POSIX `stat`、完整 pathname canonicalization、symlink traversal、mount namespace 或 `chroot`；其中一部分是后续 bounded 能力，另一部分仍是非目标。
-- 当前项目非目标仍包括广泛 user-visible async I/O、广泛 writable file-backed `mmap`、完整 POSIX 文件系统/进程语义、完整 POSIX dynamic-loader 语义、CPU hotplug、NUMA 和广泛 storage/device management。
+- 当前基线仍不引入 `select`、完整 POSIX `stat`、完整 pathname canonicalization、symlink traversal、mount namespace 或 `chroot`；这些属于后续兼容性扩展目标，除非后续 roadmap 明确排除某项。
+- 当前缺口包括广泛 user-visible async I/O、广泛 writable file-backed `mmap`、完整 POSIX 文件系统/进程语义、完整 POSIX dynamic-loader 语义、CPU hotplug、NUMA 和广泛 storage/device management。文档应将其描述为分阶段工作，而不是永久产品上限。

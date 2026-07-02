@@ -123,13 +123,14 @@ TCP diagnostics counters (`tcp_segments_rx`/`tcp_segments_tx`/`tcp_retransmits`/
 sit after the loopback counters and before `last_status`, guarded by
 `static_assert` offset checks, without changing existing counter semantics.
 
-This capability stays bounded: it implements connection setup, RFC 6298 dynamic
-retransmission, in-order delivery/reassembly, and teardown, but does not
-implement the full TCP feature matrix (no congestion control, SACK, window
-scaling, timestamps/PAWS, urgent pointer, or keepalive). The minimal user-visible
-TCP stream socket adapter exposes only the bounded syscall/fd surface documented
-in `docs/en/arch/syscall-entry.md`; it does not add name resolution or a complete
-POSIX socket model. Validation is default-off through the `tcp_path_smoke`
+This capability is the first TCP compatibility step: it implements connection
+setup, RFC 6298 dynamic retransmission, in-order delivery/reassembly, and
+teardown. Congestion control, SACK, window scaling, timestamps/PAWS, urgent
+pointer, keepalive, and broader POSIX socket behavior remain staged expansion
+work rather than permanent non-goals. The current user-visible TCP stream socket
+adapter exposes the syscall/fd surface documented in
+`docs/en/arch/syscall-entry.md`; name resolution and broader socket behavior are
+handled by later resolver/socket compatibility work. Validation is default-off through the `tcp_path_smoke`
 build switch, which emits `BIGOS_TCP_PATH_PASSED` / `BIGOS_TCP_PATH_FAILED` on
 COM1 and covers the local-address three-way handshake (active + passive),
 Established in-order bidirectional data delivery, bounded reorder and duplicate

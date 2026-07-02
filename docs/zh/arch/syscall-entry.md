@@ -113,7 +113,7 @@ control。
 - `SYS_GETSOCKOPT`（number=65）：ABI `rdi` = fd，`rsi` = level，`rdx` = optname，`r10` = optval，`r8` = optlen in/out。它只支持 `SOL_SOCKET`/`SO_ERROR`，用于读取并清除非阻塞 connect 的 pending error。其它 level/option 返回 `-ENOPROTOOPT`。
 - `SYS_SEND`（number=66）：ABI `rdi` = stream socket fd，`rsi` = 用户缓冲，`rdx` = 长度，`r10` = flags。数据路径与 `write` 相同；唯一接受的 flag 是 `MSG_NOSIGNAL`，用于在 broken-pipe 写入时抑制 `SIGPIPE` 但仍返回 `-EPIPE`。未知 flag 位返回 `-EINVAL`。
 
-这些 socket syscall 是内核内部协议路径之上的有界适配层，不是完整 POSIX socket 层：没有 `setsockopt`、`shutdown`、`getpeername`、`getsockname`、`accept4`、`sendmsg`/`recvmsg`、`SO_REUSEADDR`、scatter-gather、ancillary data、完整 `AF_*`/`SOCK_*` 矩阵、DHCP、DNS、IPv6 或多 context/多网卡选择。`getsockopt` 刻意限制为 `SOL_SOCKET`/`SO_ERROR`，stream `send` 刻意只识别 `MSG_NOSIGNAL`。
+这些 socket syscall 是当前内核内部协议路径之上的适配层，尚未提供完整 POSIX socket 层：`setsockopt`、`shutdown`、`getpeername`、`getsockname`、`accept4`、`sendmsg`/`recvmsg`、`SO_REUSEADDR`、scatter-gather、ancillary data、完整 `AF_*`/`SOCK_*` 矩阵、DHCP、DNS 集成、IPv6 或多 context/多网卡选择都属于后续 socket/network 兼容性扩展工作。`getsockopt` 当前限制为 `SOL_SOCKET`/`SO_ERROR`，stream `send` 当前只识别 `MSG_NOSIGNAL`。
 
 syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU exception 与外部 IRQ 仍是 nonblocking context。fd/VFS syscall 在分配或进入同步 ATA PIO/exFAT read 前检查 `sched::can_block()`；普通用户进程 syscall 可通过该 guard，因为 DPL=3 trap gate 会保留 IF。
 
@@ -123,11 +123,11 @@ syscall dispatcher 保持 exception/IRQ/syscall 的 EOI 分离不变。CPU excep
 
 默认关闭的 xmake 开关 `syscall_smoke`（`xmake f --syscall_smoke=y`）继续从 ring0 验证 `SYS_DEBUG_WRITE`、`SYS_GET_TICK` 和未知 number。额外默认关闭的 smoke 覆盖 flat 首个用户程序、filesystem-backed user ELF、demand paging、有界只读 file-backed 映射（`xmake f --file_backed_mapping_smoke=y`，marker `BIGOS_FILE_BACKED_MAPPING_PASSED`/`FAILED`）、anonymous map/unmap/protect lifecycle（`xmake f --anonymous_lifecycle_smoke=y`，marker `BIGOS_ANON_LIFECYCLE_PASSED`/`FAILED`）、fork/COW、time/identity、signals、writable FS、pipes 和 userland runtime。userland runtime smoke 也断言代表性的 process-group/session 与 foreground-terminal wrapper 行为。普通启动现在会打包 `/boot/user/init.elf`，进入常驻 PID-1 init，并启动 `/bin/sh`；默认 headless 验证观察 `BIGOS_USER_EXEC`。
 
-## 本阶段非目标
+## 当前阶段边界
 
 - 不切换到 `syscall`/`sysret` MSR 快速路径。
-- 不把当前 bounded syscall 集解释为完整 POSIX-wide syscall 语义、用户线程、作业控制、动态链接或完整 libc。
-- 不把 demand paging/COW 扩展到当前 bounded anonymous mapping 与有界只读 file-backed 映射之外，也不引入可写/写回或共享 file-backed `mmap`。
+- 不把当前 syscall 集解释为已经完整的 POSIX-wide syscall 语义、用户线程、作业控制、动态链接或完整 libc；这些仍是分阶段兼容目标，除非后续 roadmap 明确排除某项。
+- 本阶段不把 demand paging/COW 扩展到当前 bounded anonymous mapping 与有界只读 file-backed 映射之外，也不引入可写/写回或共享 file-backed `mmap`。
 - 不对 syscall 以外的 IDT gate 放宽 DPL；不从 syscall path 发送 i8259 EOI。
 
 ## 横切工程化项

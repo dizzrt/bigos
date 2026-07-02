@@ -7,8 +7,8 @@ BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel
 ```
 
 该路径仍是显式可运行的兼容后端，也是 Legacy BIOS kernel handoff 数据的生产者。
-`docs/zh/arch/uefi-boot-blueprint.md` 中的 x86_64 UEFI backend 现在是 bounded userland
-baseline 内的默认可运行后端；它不会替换 MBR/DBR/exDBR/`boot.bin` 流程。当前 Legacy 调试入口是
+`docs/zh/arch/uefi-boot-blueprint.md` 中的 x86_64 UEFI backend 现在是增量用户态基线内的
+默认可运行后端；它不会替换 MBR/DBR/exDBR/`boot.bin` 流程。当前 Legacy 调试入口是
 `xmake run qemu-legacy`、`xmake run qemu-gdb` 和带 `--display sdl2|none` 的 `xmake run bochs`。
 
 早期启动路径依赖以下固定物理地址和虚拟地址：

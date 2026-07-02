@@ -1,14 +1,14 @@
 # Architecture Core Boundaries
 
 BigOS currently has one default runtime-parity architecture/backend path within
-the bounded userland baseline: x86_64 through the UEFI ESP/FAT and QEMU/OVMF
+the incremental userland baseline: x86_64 through the UEFI ESP/FAT and QEMU/OVMF
 boot flow. The Legacy BIOS/MBR/exFAT path remains an explicit runnable
 compatibility backend for low-level BIOS, ATA, port-IO, and Bochs validation.
 Architecture boundary work keeps both paths clear and makes the split between
 kernel core concepts and x86_64 mechanisms explicit. It does not add Secure
 Boot, a broad graphics stack beyond the bounded framebuffer text console, ACPI
 handoff, UEFI Runtime Services, a non-x86 backend, a broad device model, or
-complete POSIX coverage.
+complete POSIX coverage in this stage.
 
 ## Boundary Rule
 

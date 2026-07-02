@@ -43,7 +43,7 @@ init marker 与 smoke `BIGOS_USER_*` marker 区分开：
   （`BIGOS_PANIC ... source=launch_init`）。这是有意的 PID-1 语义雏形，也是一个
   新的 normal-boot 失败模式。
 - init 通过 `SYS_EXIT` 正常退出时，内核在共享的 `BIGOS_USER_EXIT` 之后发出
-  `BIGOS_INIT_EXIT`，并落入现有延后 reaper 与 idle 调度，而非 panic。当前有界用户态基线
+  `BIGOS_INIT_EXIT`，并落入现有延后 reaper 与 idle 调度，而非 panic。当前增量用户态基线
   使用常驻 PID-1，由它启动并重启 `/bin/sh`；孤儿收养仍限定在当前进程模型内。
 
 ## 进程生命周期

@@ -1,9 +1,9 @@
 # UEFI Boot Blueprint
 
 本文档是 BigOS 的 UEFI 启动蓝图。BigOS 现在将 x86_64 UEFI boot backend 作为默认
-可运行启动后端，runtime parity 边界限定为当前 bounded userland baseline。该后端
+可运行启动后端，runtime parity 边界限定为当前增量用户态基线。该后端
 可以构建 `BOOTX64.EFI`、生成 ESP/FAT 镜像、提供 QEMU/OVMF 调试入口，并到达现有
-resident init、`/bin/sh` 和有界 `/bin/*` payload 边界。Legacy BIOS 仍作为显式兼容与
+resident init、`/bin/sh` 和 `/bin/*` payload 边界。Legacy BIOS 仍作为显式兼容与
 低层调试 backend 保留。
 
 ## 当前范围
@@ -11,7 +11,7 @@ resident init、`/bin/sh` 和有界 `/bin/*` payload 边界。Legacy BIOS 仍作
 BigOS 默认启动路径现在是 UEFI：
 
 ```text
-OVMF -> ESP/FAT -> EFI/BOOT/BOOTX64.EFI -> ELF64 kernel -> kernel(BootInfoHeader*) -> bounded userland
+OVMF -> ESP/FAT -> EFI/BOOT/BOOTX64.EFI -> ELF64 kernel -> kernel(BootInfoHeader*) -> userland
 ```
 
 Legacy BIOS 路径显式保留，而不是被删除：
@@ -36,7 +36,7 @@ MBR -> DBR -> exDBR -> boot.bin          BOOTX64.EFI
 
 - 不改变 `xmake run bochs` 及其 `--display sdl2|none` target arguments 的 Legacy BIOS/MBR/exFAT/Bochs 语义。
 - 不替换 MBR、DBR、extended DBR、`boot.bin` 或现有 raw exFAT image。
-- 不宣称超出当前 bounded userland baseline 的 runtime parity。
+- 不宣称超出当前增量用户态基线的 runtime parity。
 - 不实现 Secure Boot、ACPI table handoff、UEFI Runtime Services、持久 NVRAM 语义、新 SMP 范围或第二 ISA。
 - 不把 GOP framebuffer metadata handoff 等同于 glyph rendering、Unicode display、framebuffer scrollback 或图形 console parity。
 - 不要求 kernel 调用 BIOS interrupt、UEFI Boot Services 或 UEFI Runtime Services。
@@ -139,7 +139,7 @@ BootInfoSection[]
 
 仍未实现的范围：
 
-- 超出当前 bounded userland baseline 的 UEFI runtime parity。
+- 超出当前增量用户态基线的 UEFI runtime parity。
 - Glyph rendering、Unicode display、framebuffer scrollback、ACPI/SMBIOS firmware table section 和 UEFI Runtime Services 支持。
 - Secure Boot、持久 NVRAM 语义和非 x86_64 ISA backend。
 
@@ -236,11 +236,11 @@ UEFI 产物隔离策略：
 
 - BIOS 路径继续使用 raw exFAT image 和 `build/test/os.raw` 一类产物。
 - UEFI 路径使用 ESP/FAT image，包含 `EFI/BOOT/BOOTX64.EFI`、`/boot/kernel`、
-  `/boot/user/init.elf` 和有界 `/bin/*` payload。在 FAT runtime filesystem 或 loader-fed runtime payload
-  落地前，QEMU 还会将独立 exFAT 兼容 root image 挂为 primary IDE，使当前 kernel VFS 可以到达同一有界用户态基线。
+  `/boot/user/init.elf` 和 `/bin/*` payload。在 FAT runtime filesystem 或 loader-fed runtime payload
+  落地前，QEMU 还会将独立 exFAT 兼容 root image 挂为 primary IDE，使当前 kernel VFS 可以到达同一增量用户态基线。
 - ESP/FAT image 同时包含 `/boot/fonts/unifont.bin`，供 framebuffer handoff metadata 和后续
   kernel glyph lookup view 使用。font metadata 缺失、非法或 lookup 校验失败都是文档化 fallback，
-  不能阻塞 serial diagnostics、VGA text fallback、memory initialization 或 bounded userland validation。
+  不能阻塞 serial diagnostics、VGA text fallback、memory initialization 或 userland validation。
 - UEFI 固件配置、临时目录和 emulator 配置不得覆盖 `xmake run qemu`、`xmake run qemu-gdb` 或 `xmake run bochs` 使用的 Legacy BIOS 产物。
 - UEFI smoke test 首选 QEMU + OVMF；该后端不要求 Bochs UEFI。
 - Legacy BIOS 继续使用当前 raw exFAT image，并通过 QEMU IDE 或 Bochs 启动。

@@ -6,7 +6,7 @@ BigOS currently uses the Legacy BIOS path:
 BIOS -> MBR -> exFAT DBR -> extended DBR -> boot.bin -> ELF64 kernel
 ```
 
-This path remains an explicit runnable compatibility backend and the producer of the Legacy BIOS kernel handoff data. The x86_64 UEFI backend in `docs/en/arch/uefi-boot-blueprint.md` is now the default runnable backend within the bounded userland baseline, but it does not replace the MBR/DBR/exDBR/`boot.bin` flow; the active Legacy debug entries are `xmake run qemu-legacy`, `xmake run qemu-gdb`, and `xmake run bochs` with `--display sdl2|none`.
+This path remains an explicit runnable compatibility backend and the producer of the Legacy BIOS kernel handoff data. The x86_64 UEFI backend in `docs/en/arch/uefi-boot-blueprint.md` is now the default runnable backend within the incremental userland baseline, but it does not replace the MBR/DBR/exDBR/`boot.bin` flow; the active Legacy debug entries are `xmake run qemu-legacy`, `xmake run qemu-gdb`, and `xmake run bochs` with `--display sdl2|none`.
 
 The early boot path depends on these fixed physical and virtual addresses:
 
