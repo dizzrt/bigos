@@ -511,9 +511,9 @@ loopback 地址并解析名字。
   semantics.
 - [x] 任务 M14.3：与 fd、多路复用与 syscall 路径集成的 stream socket 接口，在有界语义内
   暴露 connect、listen 与 accept。
-- [ ] Task M14.4: a minimal DNS client over the existing UDP path sufficient for
+- [x] Task M14.4: a minimal DNS client over the existing UDP path sufficient for
   basic name resolution, without a general resolver or caching daemon.
-- [ ] 任务 M14.4：基于既有 UDP 路径的最小 DNS client，足以支持基础名字解析，
+- [x] 任务 M14.4：基于既有 UDP 路径的最小 DNS client，足以支持基础名字解析，
   不提供通用 resolver 或缓存守护进程。
 
 ### Milestone M15 — Recoverable Writable Filesystem / 里程碑 M15 — 可恢复可写文件系统

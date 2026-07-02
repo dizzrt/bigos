@@ -37,7 +37,7 @@ on_build(function()
     os.exec("x86_64-elf-as -c %s -o %s", path.join(projectdir, "user", "crt0", "crt0.s"), crt0_obj)
 
     -- Compile the user libc once into a list of object files.
-    local libc_srcs = { "syscall.c", "string.c", "malloc.c", "stdio.c", "env.c", "ctype.c", "assert.c" }
+    local libc_srcs = { "syscall.c", "string.c", "malloc.c", "stdio.c", "env.c", "ctype.c", "assert.c", "dns.c" }
     local libc_objs = {}
     for _, src in ipairs(libc_srcs) do
         local obj = path.join(user_tempdir, "libc_" .. path.basename(src) .. ".o")
@@ -138,10 +138,13 @@ on_build(function()
     --   user_elf_smoke/user_program_smoke -> minimal print+exit smoke ELF
     --                               (preserves BIGOS_USER_ENTER/EXIT),
     --   dynamic_link_smoke        -> dynamic demo executable (ld.so + libdemo.so),
+    --   dns_resolver_smoke       -> userland DNS resolver loopback validation,
     --   otherwise                -> resident C init that launches /bin/sh.
     local init_output = path.join(user_bindir, "init.elf")
     if has_config("anonymous_lifecycle_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "anonymous_lifecycle_smoke.c"), init_output)
+    elseif has_config("dns_resolver_smoke") then
+        build_user_program(path.join(projectdir, "user", "smoke", "dns_resolver_smoke.c"), init_output)
     elseif has_config("sleep_syscall_smoke") then
         build_user_program(path.join(projectdir, "user", "smoke", "sleep_syscall_smoke.c"), init_output)
     elseif has_config("libc_file_stream_smoke") then

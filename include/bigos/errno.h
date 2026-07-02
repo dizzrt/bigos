@@ -53,6 +53,7 @@ constexpr int ECONNRESET = 104;   // connection reset by peer (RST / retransmit 
 constexpr int ENOBUFS = 105;      // no buffer space available
 constexpr int EISCONN = 106;      // socket is already connected
 constexpr int ENOTCONN = 107;     // socket is not connected
+constexpr int ETIMEDOUT = 110;    // operation timed out
 constexpr int ECONNREFUSED = 111; // connection refused (no listener / actively refused)
 constexpr int EHOSTUNREACH = 113; // host unreachable (e.g. ARP unresolved / timeout)
 constexpr int EALREADY = 114;     // connection attempt already in progress

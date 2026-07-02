@@ -3,9 +3,7 @@
 定义 BigOS 有界内核内部网络协议路径：在已有帧级网络设备之上提供静态 IPv4/ARP/ICMP/UDP
 处理、确定性诊断、默认关闭验证，以及明确的 IRQ 和用户态 ABI 边界。该能力不引入 socket、
 fd、syscall、设备节点、挂载点或用户态网络配置接口。
-
 ## Requirements
-
 ### Requirement: 网络协议路径初始化与静态配置
 BigOS SHALL provide a kernel-internal bounded network protocol path that can bind to one ready frame-level network device, initialize local IPv4/MAC/MTU state from boot-time kernel options, and remain disabled when no suitable configuration is available. Initialization MUST run in ordinary kernel context and MUST NOT create user-visible socket, fd, syscall, device-node, mount, or network-configuration ABI. The path SHALL additionally support a loopback-only readiness mode: when valid local IPv4 configuration is present but no ready frame-level network device is available, the kernel-internal local-address (loopback) delivery path MUST remain usable while outbound (non-local) transmission remains gated on a ready frame-level device.
 
@@ -179,3 +177,22 @@ BigOS SHALL provide default-off validation for the bounded network protocol path
 - **WHEN** QEMU, tap setup, host permissions, serial capture, modern virtio-net, MSI-X delivery, reused virtio-net host helper, protocol packet injection, Bochs default-boot validation, cross binutils, or required ROM/display dependencies are unavailable
 - **THEN** validation records MUST identify skipped coverage and remaining risk
 - **AND** they MUST NOT claim runtime network protocol smoke success for a skipped environment
+
+### Requirement: DNS 流量保持为 UDP 上层 payload
+BigOS SHALL treat DNS traffic as ordinary UDP payload carried by the existing bounded IPv4/UDP protocol path. DNS support MUST NOT add DNS parsing to the kernel protocol demultiplexer, MUST NOT alter ARP/IPv4/UDP checksum or routing behavior, and MUST NOT move protocol work into network-device IRQ context. The existing network protocol path MUST continue to expose only bounded packet transport and diagnostics below the socket layer.
+
+#### Scenario: DNS datagram 经既有 IPv4/UDP 路径传输
+- **WHEN** a DNS client sends or receives a DNS UDP datagram
+- **THEN** the datagram MUST pass through the existing UDP, IPv4, loopback/outbound routing, ARP, and frame-device boundaries according to the destination address
+- **AND** DNS support MUST NOT introduce a second IPv4 output path or a special DNS demultiplexing path in the kernel
+
+#### Scenario: DNS 不改变 IRQ 边界
+- **WHEN** a network device reports RX/TX completion while DNS validation or resolution is active
+- **THEN** IRQ handlers MUST remain limited to device completion state as required by the existing network protocol path
+- **AND** DNS parsing MUST occur only in userland resolver code after a UDP payload has been received through the socket API
+
+#### Scenario: 默认无 DNS 配置时协议路径仍独立
+- **WHEN** no DNS server is configured or DNS validation is disabled
+- **THEN** the bounded network protocol path MUST retain its existing initialization, loopback, UDP, TCP, diagnostics, and default-off validation behavior
+- **AND** absence of DNS configuration MUST NOT change protocol readiness or default boot behavior
+

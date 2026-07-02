@@ -3,9 +3,7 @@
 定义 BigOS 用户可见的最小有界 UDP socket 接口：在既有 fd 表、syscall 路径与内核内部
 `bigos::net` UDP API 之上提供 socket 创建、bind、sendto/recvfrom 收发、socket fd 生命周期、
 用户 libc 边界与默认关闭验证。该能力不声称完整 POSIX socket 语义或完整网络栈。
-
 ## Requirements
-
 ### Requirement: 最小 UDP socket 创建与 fd 集成
 BigOS SHALL provide a user-visible minimal UDP socket that is represented as a kernel-internal `vfs::File` backend and installed into the existing per-process fd table. socket 创建 MUST 校验请求的 domain/type/protocol：属于 BigOS 有界 UDP 子集（IPv4 datagram）时创建 datagram socket backend；属于 BigOS 有界 TCP 子集（IPv4 `SOCK_STREAM` + TCP）时创建 stream socket backend（见 `stream-socket-interface`）。成功时返回一个进程本地 fd，并复用既有 fd 分配、`dup`/`dup2`、`close` 与 `close-on-exec` 路径。该 socket fd MUST NOT 改变既有 syscall number、pipe、VFS 或文件 fd 的行为，且 datagram 与 stream socket MUST 使用各自独立的 backend ops 表以区分类型。
 
@@ -122,3 +120,22 @@ BigOS SHALL validate the minimal socket interface through a default-off smoke th
 #### Scenario: 验证不可用时记录跳过
 - **WHEN** QEMU、tap 权限、MSI-X、串口捕获或 x86_64-elf 工具链等验证依赖不可用
 - **THEN** 验证记录 MUST 区分已通过、无法运行（含原因与剩余风险）与历史诊断，且 MUST NOT 声称运行成功
+
+### Requirement: DNS client 复用既有 UDP socket 语义
+BigOS DNS client behavior SHALL be implemented as a userland consumer of the existing bounded UDP socket interface. DNS resolution MUST create or use UDP datagram sockets through the documented socket/bind/sendto/recvfrom wrappers and MUST NOT require new socket domains, socket types, socket options, ancillary data, scatter-gather operations, or a DNS-specific syscall. DNS usage MUST preserve existing datagram socket fd lifecycle and deterministic error mapping.
+
+#### Scenario: DNS query 使用 UDP sendto
+- **WHEN** the DNS client sends a DNS query to a configured DNS server
+- **THEN** it MUST use the existing bounded UDP socket send path with an IPv4 `sockaddr_in` destination on port 53
+- **AND** it MUST NOT bypass the documented socket fd, user-buffer, or errno translation paths
+
+#### Scenario: DNS response 使用 UDP recvfrom
+- **WHEN** the DNS client waits for a DNS response
+- **THEN** it MUST use the existing bounded UDP socket receive path and validate the returned source/address and payload before parsing DNS data
+- **AND** any no-data or would-block result MUST map to the resolver's bounded timeout/no-response behavior
+
+#### Scenario: DNS 不扩大 socket API
+- **WHEN** DNS client support is built or validation is enabled
+- **THEN** existing socket domain/type/protocol support, datagram `read`/`write` unsupported behavior, stream socket behavior, and syscall numbers MUST remain unchanged
+- **AND** DNS support MUST NOT add general resolver state to socket fd objects
+

@@ -15,6 +15,7 @@
 #define _BIGOS_LIBC_H
 
 #include "errno.h"        /* IWYU pragma: export */
+#include "bigos_dns.h"    /* IWYU pragma: export */
 #include "bigos_dirent.h" /* IWYU pragma: export */
 #include "bigos_terminal.h" /* IWYU pragma: export */
 #include "assert.h"       /* IWYU pragma: export */

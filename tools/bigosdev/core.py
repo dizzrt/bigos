@@ -300,6 +300,7 @@ SMOKE_OPTIONS = (
     'filesystem_maturity_smoke',
     'nonblocking_fd_smoke',
     'fd_multiplexing_smoke',
+    'dns_resolver_smoke',
 )
 RUNTIME_SMOKE_MATRIX = (
     RuntimeSmokeCase(
@@ -639,6 +640,21 @@ RUNTIME_SMOKE_MATRIX = (
             'default-off userland_smoke build; packages the userland validation program as /boot/user/init.elf and '
             'runs it as PID-1 with deterministic non-interactive assertions over bounded /bin/smoke C programs '
             '(no manual stdin)'
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='dns-resolver',
+        title='Minimal DNS resolver',
+        switches=('dns_resolver_smoke',),
+        expected_marker='BIGOS_DNS_RESOLVER_PASSED',
+        timeout_seconds=40.0,
+        risk_area='userland libc DNS A-record query/response parser over bounded UDP sockets and timeout cleanup',
+        validation_markers=('BIGOS_DNS_RESOLVER_PASSED',),
+        proc_boundary=(
+            'default-off dns_resolver_smoke build; packages a narrow PID-1 user smoke that forks a loopback UDP '
+            'DNS responder, resolves one A record through bigos_dns_resolve_ipv4(), and checks ETIMEDOUT cleanup; '
+            'it does not imply /etc/resolv.conf, caching, IPv6/AAAA, CNAME following, TCP fallback, DNSSEC, EDNS, '
+            'search domains, or multiple nameserver policy'
         ),
     ),
     RuntimeSmokeCase(
