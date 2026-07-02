@@ -1,0 +1,1199 @@
+user/libc/dns.c
+  s_614f6400ebd253::t_32c944d2f07774 1-398 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46622708c251452a39cfb4","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[1,398]}]}]}
+user/smoke/dns_resolver_smoke.c
+  s_614f6400ebd253::t_0f0dc3b98c7216 1-137 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46634308c251452a39d057","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[1,137]}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/validation.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-21 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,21]}]}]}
+openspec/specs/unified-errno/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 101-119 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[101,119]}]}]}
+user/libc/include/netdb.h
+  s_614f6400ebd253::t_d9f31689720283 1-3,6-19 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46615008c251452a39cf52","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[1,3]},{"Range":[6,19]}]}]}
+  s_614f6400ebd253::t_6ff7d1d00268b2 4-5 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a4664cf08c251452a39d240","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[4,5]}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/tasks.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-39 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,39]}]}]}
+user/libc/include/bigos_dns.h
+  s_614f6400ebd253::t_c378710f3ff84d 1-32 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46612e08c251452a39cf38","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[1,32]}]}]}
+roadmap.md
+  s_614f6400ebd253::t_a82b83fe98bc19 514,516 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a4664b308c251452a39d21e","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":514},{"Single":516}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/unified-errno/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-19 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,19]}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/minimal-socket-interface/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-19 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,19]}]}]}
+include/bigos/errno.h
+  s_614f6400ebd253::t_768afadbf91447 56 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46611d08c251452a39cf04","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":56}]}]}
+tools/bigosdev/core.py
+  s_614f6400ebd253::t_ab03f05c493c52 646-659 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46641c08c251452a39d122","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[646,659]}]}]}
+  s_614f6400ebd253::t_07a0a95be206ca 303 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46640f08c251452a39d0e1","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":303}]}]}
+  s_614f6400ebd253::t_29e15f74b85b1e 645
+tests/test_minimal_dns_client_source.py
+  s_614f6400ebd253::t_5af63bcef9754b 1-110 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46643808c251452a39d13f","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[1,110]}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/user-libc-min/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-29 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,29]}]}]}
+xmake/options.lua
+  s_614f6400ebd253::t_53701c2e355341 296-301 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a4663b108c251452a39d08d","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[296,301]}]}]}
+openspec/specs/minimal-socket-interface/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 123-141 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[123,141]}]}]}
+openspec/specs/user-libc-min/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 814-841 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[814,841]}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/minimal-dns-client/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-81 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,81]}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/bounded-network-protocol-path/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-19 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,19]}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/proposal.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-31 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,31]}]}]}
+xmake/user_package.lua
+  s_614f6400ebd253::t_e2a1201e689ce3 141,146-147 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a4663c408c251452a39d0a9","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":141},{"Range":[146,147]}]}]}
+  s_614f6400ebd253::t_68daeeb483e58e 40 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a4662b308c251452a39cfee","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":40}]}]}
+user/libc/include/libc.h
+  s_614f6400ebd253::t_612f88e3e5b4ae 18 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46616708c251452a39cf6b","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":18}]}]}
+user/libc/include/errno.h
+  s_614f6400ebd253::t_a8476bf2596aa9 47 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46612608c251452a39cf1f","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":47}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/design.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-71 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,71]}]}]}
+openspec/specs/bounded-network-protocol-path/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 180-198 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[180,198]}]}]}
+openspec/specs/minimal-dns-client/spec.md
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-85 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,85]}]}]}
+openspec/changes/archive/2026-07-02-add-minimal-dns-client/.openspec.yaml
+  s_928eaeb0f4d261::t_c1aed69b7366f2 1-2 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a46685508c251452a39d593","tool_type":"agent","tool_id":"RunCommand","line_ranges":[{"Range":[1,2]}]}]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "d72204394a603b6b627dc917ab29a58bc990afa8",
+  "prompts": {},
+  "sessions": {
+    "s_614f6400ebd253": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a46605a08c251452a39cdc0",
+        "model": "gpt-5.5__max"
+      },
+      "human_author": "Dizzrt <dizzrt.s@qq.com>"
+    },
+    "s_928eaeb0f4d261": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a4667ee08c251452a39d50a",
+        "model": "gpt-5.5__max",
+        "display_model_name": "GPT-5.5"
+      },
+      "human_author": "Dizzrt <dizzrt.s@qq.com>"
+    }
+  },
+  "attestation_metadata": {
+    "include/bigos/errno.h": [
+      {
+        "hash": "s_614f6400ebd253::t_768afadbf91447",
+        "line_ranges": [
+          {
+            "Single": 56
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46611d08c251452a39cf04",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 56
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/.openspec.yaml": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              2
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  2
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/design.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              71
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  71
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/proposal.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              31
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  31
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/bounded-network-protocol-path/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              19
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  19
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/minimal-dns-client/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              81
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  81
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/minimal-socket-interface/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              19
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  19
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/unified-errno/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              19
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  19
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/specs/user-libc-min/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              29
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  29
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/tasks.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              39
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  39
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/changes/archive/2026-07-02-add-minimal-dns-client/validation.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              21
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  21
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/bounded-network-protocol-path/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              180,
+              198
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  180,
+                  198
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/minimal-dns-client/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              85
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  85
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/minimal-socket-interface/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              123,
+              141
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  123,
+                  141
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/unified-errno/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              101,
+              119
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  101,
+                  119
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "openspec/specs/user-libc-min/spec.md": [
+      {
+        "hash": "s_928eaeb0f4d261::t_c1aed69b7366f2",
+        "line_ranges": [
+          {
+            "Range": [
+              814,
+              841
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46685508c251452a39d593",
+            "tool_type": "agent",
+            "tool_id": "RunCommand",
+            "line_ranges": [
+              {
+                "Range": [
+                  814,
+                  841
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "roadmap.md": [
+      {
+        "hash": "s_614f6400ebd253::t_a82b83fe98bc19",
+        "line_ranges": [
+          {
+            "Single": 514
+          },
+          {
+            "Single": 516
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a4664b308c251452a39d21e",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 514
+              },
+              {
+                "Single": 516
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "tests/test_minimal_dns_client_source.py": [
+      {
+        "hash": "s_614f6400ebd253::t_5af63bcef9754b",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              110
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46643808c251452a39d13f",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  110
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "tools/bigosdev/core.py": [
+      {
+        "hash": "s_614f6400ebd253::t_ab03f05c493c52",
+        "line_ranges": [
+          {
+            "Range": [
+              646,
+              659
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46641c08c251452a39d122",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  646,
+                  659
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "hash": "s_614f6400ebd253::t_07a0a95be206ca",
+        "line_ranges": [
+          {
+            "Single": 303
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46640f08c251452a39d0e1",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 303
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/dns.c": [
+      {
+        "hash": "s_614f6400ebd253::t_32c944d2f07774",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              398
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46622708c251452a39cfb4",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  398
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/include/bigos_dns.h": [
+      {
+        "hash": "s_614f6400ebd253::t_c378710f3ff84d",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              32
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46612e08c251452a39cf38",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  32
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/include/errno.h": [
+      {
+        "hash": "s_614f6400ebd253::t_a8476bf2596aa9",
+        "line_ranges": [
+          {
+            "Single": 47
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46612608c251452a39cf1f",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 47
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/include/libc.h": [
+      {
+        "hash": "s_614f6400ebd253::t_612f88e3e5b4ae",
+        "line_ranges": [
+          {
+            "Single": 18
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46616708c251452a39cf6b",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 18
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/libc/include/netdb.h": [
+      {
+        "hash": "s_614f6400ebd253::t_d9f31689720283",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              3
+            ]
+          },
+          {
+            "Range": [
+              6,
+              19
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46615008c251452a39cf52",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  3
+                ]
+              },
+              {
+                "Range": [
+                  6,
+                  19
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "hash": "s_614f6400ebd253::t_6ff7d1d00268b2",
+        "line_ranges": [
+          {
+            "Range": [
+              4,
+              5
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a4664cf08c251452a39d240",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  4,
+                  5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "user/smoke/dns_resolver_smoke.c": [
+      {
+        "hash": "s_614f6400ebd253::t_0f0dc3b98c7216",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              137
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a46634308c251452a39d057",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  137
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "xmake/options.lua": [
+      {
+        "hash": "s_614f6400ebd253::t_53701c2e355341",
+        "line_ranges": [
+          {
+            "Range": [
+              296,
+              301
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a4663b108c251452a39d08d",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  296,
+                  301
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "xmake/user_package.lua": [
+      {
+        "hash": "s_614f6400ebd253::t_e2a1201e689ce3",
+        "line_ranges": [
+          {
+            "Single": 141
+          },
+          {
+            "Range": [
+              146,
+              147
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a4663c408c251452a39d0a9",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 141
+              },
+              {
+                "Range": [
+                  146,
+                  147
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "hash": "s_614f6400ebd253::t_68daeeb483e58e",
+        "line_ranges": [
+          {
+            "Single": 40
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a4662b308c251452a39cfee",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 40
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_614f6400ebd253": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_07a0a95be206ca": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_0f0dc3b98c7216": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_32c944d2f07774": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_39a28d9e0a5cd3": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_53701c2e355341": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_5af63bcef9754b": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_5c572e23533f6f": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_612f88e3e5b4ae": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_68daeeb483e58e": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_6ff7d1d00268b2": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_768afadbf91447": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_823dd866ce5347": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_95a00c1756d929": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_a82b83fe98bc19": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_a8476bf2596aa9": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_ab03f05c493c52": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_c378710f3ff84d": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_d9f31689720283": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_614f6400ebd253::t_e2a1201e689ce3": {
+      "tool": "trae",
+      "conversation_id": "6a46605a08c251452a39cdc0",
+      "session_id": "6a46605a08c251452a39cdc0",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_928eaeb0f4d261": {
+      "tool": "trae",
+      "conversation_id": "6a4667ee08c251452a39d50a",
+      "session_id": "6a4667ee08c251452a39d50a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_928eaeb0f4d261::t_c1aed69b7366f2": {
+      "tool": "trae",
+      "conversation_id": "6a4667ee08c251452a39d50a",
+      "session_id": "6a4667ee08c251452a39d50a",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_05bec0d2c562e2": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_0b56fd0f476351": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_181758047a2d42": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_3085a65a94da64": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_3f9d071bbc3891": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_491c1792849d34": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_6ad54391562726": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_95a86b03fbb1e3": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_a4dd45a059e016": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_acf7727e71478c": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_d365d88c8908ff": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_da46a0ed8ab9c0": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_df4f40be82ccea": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_985f6418e6ba33::t_e83fbaa3cc35e2": {
+      "tool": "trae",
+      "conversation_id": "6a464ec0ba596799113c07d7",
+      "session_id": "6a464ec0ba596799113c07d7",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
