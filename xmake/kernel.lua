@@ -249,6 +249,10 @@ if has_config("fd_multiplexing_smoke") then
     add_defines("BIGOS_FD_MULTIPLEXING_SMOKE")
 end
 
+if has_config("tcp_path_smoke") then
+    add_defines("BIGOS_TCP_PATH_SMOKE")
+end
+
 if is_mode("debug") then
     set_symbols("debug")
 elseif is_mode("release") then

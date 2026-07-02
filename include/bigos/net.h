@@ -16,12 +16,40 @@ namespace net {
     constexpr uint16_t ARP_PACKET_LEN = 28;
     constexpr uint8_t IPV4_PROTOCOL_ICMP = 1;
     constexpr uint8_t IPV4_PROTOCOL_UDP = 17;
+    constexpr uint8_t IPV4_PROTOCOL_TCP = 6;
     constexpr uint16_t DEFAULT_MTU = 1500;
     constexpr uint32_t ARP_CACHE_CAPACITY = 4;
     constexpr uint32_t ARP_PENDING_CAPACITY = 4;
     constexpr uint32_t UDP_ENDPOINT_CAPACITY = 4;
     constexpr uint32_t UDP_RX_QUEUE_CAPACITY = 4;
     constexpr uint32_t UDP_MAX_PAYLOAD = 512;
+    // Bounded TCP protocol-path capacities and timers. All are compile-time upper
+    // bounds; the TCP path never grows a connection table, buffer, retransmit
+    // queue, or reorder window past these. Timers are in monotonic ticks
+    // (TIMER_HZ = 100 => 1 tick = 10ms).
+    constexpr uint32_t TCP_CONNECTION_CAPACITY = 4;   // bounded TCB pool size
+    constexpr uint16_t TCP_MSS = 500;                 // max TCP data bytes per segment
+    constexpr uint32_t TCP_SEND_BUFFER = 1024;        // bounded send buffer bytes
+    constexpr uint32_t TCP_RECV_BUFFER = 1024;        // bounded receive buffer bytes
+    constexpr uint32_t TCP_RETX_QUEUE_CAPACITY = 4;   // bounded unacked-segment queue
+    constexpr uint32_t TCP_REORDER_SLOTS = 4;         // bounded out-of-order reorder window
+    constexpr uint32_t TCP_RTO_MIN = 20;              // RTO lower bound (200ms => 20 ticks)
+    constexpr uint32_t TCP_RTO_MAX = 12000;           // RTO upper bound (120s => 12000 ticks)
+    // MSL in ticks. TIME_WAIT keeps the standard 2*MSL relationship
+    // (time_wait = 2*TCP_MSL_TICKS); the MSL constant itself is bounded to the
+    // project tick budget for deterministic, fast TCB-pool recycling under the
+    // fixed TCP_CONNECTION_CAPACITY (2*MSL = 300ms here).
+    constexpr uint32_t TCP_MSL_TICKS = 15;
+    constexpr uint32_t TCP_MAX_RETRANSMIT = 3;        // bounded max retransmits before reset
+
+    // The TCP segment (20-byte fixed TCP header + up to TCP_MSS data) travels as an
+    // IPv4 payload through the shared send_ipv4 stack buffer (20 + UDP_MAX_PAYLOAD
+    // + 8) and must stay within it and the default MTU, so TCP never overruns the
+    // existing IPv4 output buffer or needs IP fragmentation.
+    static_assert(20 + 20 + TCP_MSS <= 20 + UDP_MAX_PAYLOAD + 8,
+                  "TCP IP+header+MSS must fit the existing send_ipv4 payload buffer");
+    static_assert(20 + 20 + TCP_MSS <= DEFAULT_MTU, "TCP IP+header+MSS must fit the default MTU");
+
     // Local-address (loopback) recognition. The loopback network is the whole
     // 127.0.0.0/8 block, not only 127.0.0.1: a destination is a loopback address
     // when (value & IPV4_LOOPBACK_MASK) == IPV4_LOOPBACK_PREFIX.
@@ -124,6 +152,19 @@ namespace net {
         // outbound frame-level device hit without inspecting device counters.
         uint32_t loopback_delivered;
         uint32_t loopback_dropped;
+        // Append-only TCP counters. They let validation deterministically
+        // distinguish TCP segment RX/TX, retransmits, connection open/close,
+        // resets, and deterministic drops (out-of-order overflow, out-of-window,
+        // checksum failure, table/queue full) from the existing IPv4/UDP/ICMP and
+        // loopback counters. Appended after the loopback counters and before
+        // last_status; existing counter values and offsets are unchanged.
+        uint32_t tcp_segments_rx;
+        uint32_t tcp_segments_tx;
+        uint32_t tcp_retransmits;
+        uint32_t tcp_connections_opened;
+        uint32_t tcp_connections_closed;
+        uint32_t tcp_resets;
+        uint32_t tcp_dropped;
         Status last_status;
     };
 
@@ -139,6 +180,14 @@ namespace net {
                   "loopback_dropped must follow loopback_delivered");
     static_assert(__builtin_offsetof(Diagnostics, last_status) > __builtin_offsetof(Diagnostics, loopback_dropped),
                   "last_status must stay after the appended loopback counters");
+    // The appended TCP counters stay after the loopback counters and before
+    // last_status, keeping the existing layout append-only.
+    static_assert(__builtin_offsetof(Diagnostics, tcp_segments_rx) > __builtin_offsetof(Diagnostics, loopback_dropped),
+                  "tcp_segments_rx must be appended after the loopback counters");
+    static_assert(__builtin_offsetof(Diagnostics, tcp_dropped) > __builtin_offsetof(Diagnostics, tcp_segments_rx),
+                  "TCP counters must stay appended in order");
+    static_assert(__builtin_offsetof(Diagnostics, last_status) > __builtin_offsetof(Diagnostics, tcp_dropped),
+                  "last_status must stay after the appended TCP counters");
 
     struct UdpDatagram {
         Ipv4Address source_ipv4;
@@ -204,6 +253,13 @@ namespace net {
                        uint16_t __destination_port, const uint8_t *__payload, uint16_t __payload_length,
                        timer::tick_t __timeout_ticks) noexcept;
     Status udp_receive_from(UdpEndpoint *__endpoint, UdpDatagram *__out) noexcept;
+
+    // Kernel-internal IPv4 output forwarder. It exposes the existing send_ipv4
+    // path (local-address loopback split + outbound route/ARP/frame-level device)
+    // to other protocol units (TCP) so they carry their segments over the one
+    // IPv4 output layer instead of building a second one. Not a user-visible ABI.
+    Status ipv4_send(Context *__ctx, Ipv4Address __destination, uint8_t __protocol, const uint8_t *__payload,
+                     uint16_t __payload_length) noexcept;
 
 #ifdef BIGOS_NETWORK_PROTOCOL_SMOKE
     void protocol_smoke_entry(void *) noexcept;

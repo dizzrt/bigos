@@ -16,6 +16,9 @@
 #ifdef BIGOS_SOCKET_SMOKE
 #include <bigos/net/socket.h>
 #endif
+#ifdef BIGOS_TCP_PATH_SMOKE
+#include <bigos/net/tcp.h>
+#endif
 #include <bigos/percpu.h>
 #include <bigos/proc.h>
 #include <bigos/sched.h>
@@ -2312,6 +2315,15 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&bigos::net::loopback_network_smoke_entry, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_LOOPBACK_NETWORK_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_TCP_PATH_SMOKE
+    // Validation-only kernel-internal bounded TCP local-address closed-loop smoke.
+    // It runs over the loopback-ready protocol path (no frame-level device),
+    // exposes no socket/fd/syscall ABI, and does not change default boot.
+    if (bigos::sched::create_kernel_thread(&bigos::net::tcp_path_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_TCP_PATH_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_WRITABLE_FS_SMOKE

@@ -501,10 +501,10 @@ loopback 地址并解析名字。
   card, enabling reproducible default-off validation.
 - [x] 任务 M14.1：loopback 网络路径，使面向连接与 datagram 的本机地址流量无需物理或仿真
   网卡即可工作，支撑可复现的默认关闭验证。
-- [ ] Task M14.2: a bounded TCP path with connection setup, bounded retransmission
+- [x] Task M14.2: a bounded TCP path with connection setup, bounded retransmission
   and windowing, ordered delivery, and connection teardown, without claiming a
   complete TCP feature matrix.
-- [ ] 任务 M14.2：有界 TCP 路径，包含连接建立、有界重传与窗口、有序交付与连接拆除，
+- [x] 任务 M14.2：有界 TCP 路径，包含连接建立、有界重传与窗口、有序交付与连接拆除，
   不声称完整 TCP 特性矩阵。
 - [ ] Task M14.3: a stream socket interface integrated with the fd, multiplexing,
   and syscall paths, exposing connect, listen, and accept within bounded

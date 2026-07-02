@@ -12,8 +12,10 @@ the context disabled with deterministic diagnostics; default boot, storage,
 filesystem, `/rw`, shell, and userland do not depend on network availability.
 
 The protocol module does not expose sockets, fd objects, syscalls, `/dev`
-nodes, libc socket calls, DHCP, DNS, TCP, IPv6, IP fragment reassembly, NAT,
-firewalling, dynamic routing, or multi-interface routing. The minimal
+nodes, libc socket calls, DHCP, DNS, IPv6, IP fragment reassembly, NAT,
+firewalling, dynamic routing, or multi-interface routing. A bounded
+kernel-internal TCP state machine exists (see the Bounded TCP Path section
+below) but exposes no stream socket user interface. The minimal
 user-visible UDP socket interface wraps this kernel-internal API in a separate
 change (see `docs/en/arch/syscall-entry.md`); it stays a bounded UDP adapter and
 does not change the protocol module's bounded capacities or non-goals.
@@ -65,3 +67,71 @@ Validation is default-off through the `loopback_network_smoke` build switch,
 which emits `BIGOS_LOOPBACK_NETWORK_PASSED` / `BIGOS_LOOPBACK_NETWORK_FAILED` on
 COM1 and covers the UDP loopback closed loop, the ICMP echo-to-self, and the
 unbound/queue-full/non-local error paths without a real tap or network card.
+
+## Bounded TCP Path
+
+The protocol path carries a kernel-internal bounded TCP state machine on top of
+the same IPv4 layer. IPv4 input dispatch demultiplexes protocol number 6 (TCP)
+to `handle_tcp`, and TCP segments are emitted through the existing `send_ipv4`
+output layer, so local-address TCP segments reuse the loopback split and
+outbound segments reuse `route_destination` + ARP + the frame-level device with
+no second IPv4 output or checksum path. The TCP checksum covers the IPv4
+pseudo-header (source/destination IPv4, protocol 6, TCP length) plus the TCP
+header and data; for the local-address closed loop the pseudo-header destination
+is normalized onto `local_ipv4` exactly like the IPv4 header, so `handle_tcp`
+rebuilds a self-consistent checksum with no special case.
+
+TCP state lives in a compile-time-bounded control-block (TCB) pool. Each TCB
+holds the connection four-tuple, the `TcpState` (Closed/Listen/SynSent/
+SynReceived/Established/FinWait1/FinWait2/Closing/CloseWait/LastAck/TimeWait),
+bounded send/receive buffers, a bounded retransmit queue, and a bounded
+out-of-order reorder window. Connections are matched by exact four-tuple, and
+passive opens match a `LISTEN` TCB by local port. Sequence comparisons use
+32-bit wraparound-safe signed-difference arithmetic. The pool, buffers,
+retransmit queue, and reorder window never grow past their compile-time bounds:
+a full pool returns a deterministic table-full status and counts a drop.
+
+Retransmission follows RFC 6298 with integer/shift math only (no floating
+point): the estimator maintains `SRTT`/`RTTVAR` (alpha=1/8, beta=1/4) and
+computes `RTO = SRTT + max(G, 4*RTTVAR)` clamped to `[TCP_RTO_MIN, TCP_RTO_MAX]`
+(aligned to Linux 200ms / 120s). RTT sampling obeys Karn's algorithm
+(retransmitted segments are excluded), timeouts retransmit with exponential
+backoff (`RTO = min(RTO*2, TCP_RTO_MAX)`) without rewriting `SRTT`/`RTTVAR`, and
+exceeding the bounded retransmit limit deterministically resets the connection.
+Flow control advertises the bounded receive-buffer free space; a full buffer
+advertises a bounded (including zero) window and does not buffer unboundedly.
+Data delivery is sequence-driven: in-order data advances `rcv_nxt`, in-window
+out-of-order segments are buffered in the bounded reorder window and merged when
+the gap fills, and duplicate/out-of-window/checksum-failed segments are dropped
+deterministically without corrupting delivered data. Retransmission, RTT
+sampling, and `TIME_WAIT` recycling run only in ordinary (non-IRQ) context,
+reusing the ARP-pending style tick-driven advance; they never allocate, block,
+or touch TCB buffers from an IRQ context.
+
+Teardown covers active close (FIN -> FinWait1 -> FinWait2/TimeWait), passive
+close (CloseWait -> LastAck), and simultaneous close (Closing). `TIME_WAIT` uses
+the standard `2*MSL` (`2*TCP_MSL_TICKS`) before the TCB is recycled; when the
+bounded pool has a `TIME_WAIT` slot occupied, a new connection returns the
+deterministic table-full status rather than reclaiming the slot early. A matched
+RST, a retransmit-limit overflow, or an unrecoverable illegal segment resets the
+connection and recycles the TCB without leaking its bounded buffers. Append-only
+TCP diagnostics counters (`tcp_segments_rx`/`tcp_segments_tx`/`tcp_retransmits`/
+`tcp_connections_opened`/`tcp_connections_closed`/`tcp_resets`/`tcp_dropped`)
+sit after the loopback counters and before `last_status`, guarded by
+`static_assert` offset checks, without changing existing counter semantics.
+
+This capability stays bounded: it implements connection setup, RFC 6298 dynamic
+retransmission, in-order delivery/reassembly, and teardown, but does not
+implement the full TCP feature matrix (no congestion control, SACK, window
+scaling, timestamps/PAWS, urgent pointer, or keepalive) and exposes no new
+user-visible syscall/fd/socket ABI — no `connect`/`listen`/`accept` user
+interface and no name resolution. Stream socket user interfaces remain a later,
+separate capability. Validation is default-off through the `tcp_path_smoke`
+build switch, which emits `BIGOS_TCP_PATH_PASSED` / `BIGOS_TCP_PATH_FAILED` on
+COM1 and covers the local-address three-way handshake (active + passive),
+Established in-order bidirectional data delivery, bounded reorder and duplicate
+drop, the RFC 6298 retransmit path with backoff and Karn sampling, reset on the
+retransmit limit, teardown with the standard `2*MSL` `TIME_WAIT` recycle, the
+connection-table-full path, and an illegal segment — all over the loopback-ready
+protocol path with no real tap or network card. Default boot never initializes
+TCP and stays independent of this capability.

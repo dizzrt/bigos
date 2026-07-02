@@ -1,6 +1,7 @@
 #include <bigos/net.h>
 
 #include <bigos/io.h>
+#include <bigos/net/tcp.h>
 #include <bigos/sched.h>
 
 #include <string.h>
@@ -440,6 +441,14 @@ namespace {
             return handle_icmp(__ctx, source, body, body_len);
         if (protocol == bigos::net::IPV4_PROTOCOL_UDP)
             return handle_udp(__ctx, source, body, body_len);
+        if (protocol == bigos::net::IPV4_PROTOCOL_TCP) {
+            // TCP segment: count the receive and hand the validated IPv4 payload
+            // (within total_len bounds) to the TCP state machine. The existing
+            // ICMP/UDP dispatch, unsupported-protocol semantics, and local filter
+            // are unchanged.
+            __ctx->diagnostics.tcp_segments_rx++;
+            return bigos::net::handle_tcp(__ctx, source, dest, body, body_len);
+        }
         __ctx->diagnostics.ipv4_unsupported_protocol++;
         return bigos::net::Status::Unsupported;
     }
@@ -820,6 +829,17 @@ namespace net {
         __endpoint->rx_head = (__endpoint->rx_head + 1) % UDP_RX_QUEUE_CAPACITY;
         __endpoint->rx_count--;
         return Status::Ok;
+    }
+
+    Status ipv4_send(Context *__ctx, Ipv4Address __destination, uint8_t __protocol, const uint8_t *__payload,
+                     uint16_t __payload_length) noexcept {
+        // Loopback-capable readiness + ordinary-context gate, matching udp_send_to.
+        // The TCP unit reuses this single IPv4 output layer for its segments; the
+        // local-address loopback split and outbound route/ARP/frame-level path stay
+        // exactly as send_ipv4 already implements them.
+        if (!validate_local_ready(__ctx))
+            return __ctx == nullptr ? Status::InvalidArgument : __ctx->diagnostics.last_status;
+        return send_ipv4(__ctx, __destination, __protocol, __payload, __payload_length);
     }
 
 #ifdef BIGOS_NETWORK_PROTOCOL_SMOKE
