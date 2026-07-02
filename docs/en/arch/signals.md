@@ -13,7 +13,8 @@ POSIX libc.
 
 `include/bigos/signal.h` defines a fixed set of non-realtime signal numbers that
 reuse the conventional POSIX/Linux values: `SIGINT = 2`, `SIGKILL = 9`,
-`SIGUSR1 = 10`, `SIGSEGV = 11`, `SIGUSR2 = 12`, `SIGTERM = 15`, `SIGCHLD = 17`.
+`SIGUSR1 = 10`, `SIGSEGV = 11`, `SIGUSR2 = 12`, `SIGPIPE = 13`,
+`SIGTERM = 15`, `SIGCHLD = 17`.
 Valid numbers are `1..SIG_MAX` with `SIG_MAX = 31`, so every signal maps to a single bit
 `1ull << (signo - 1)` inside a per-process `uint64_t` bitmap (`SigSet`). The
 bitmap width and the highest signal number agree and stay `<= 64`.
@@ -21,13 +22,20 @@ bitmap width and the highest signal number agree and stay `<= 64`.
 Each signal has a deterministic default action:
 
 - Terminate: the default for `SIGINT`, `SIGKILL`, `SIGTERM`, `SIGSEGV`, `SIGUSR1`,
-  `SIGUSR2`, and any other number with no special default.
+  `SIGUSR2`, `SIGPIPE`, and any other number with no special default.
 - Ignore: the default for `SIGCHLD`.
 
 Repeated delivery of the same signal before it is taken merges into one pending
 bit (standard non-realtime semantics; no realtime queuing or counting).
 `SIGKILL` is uncatchable and unblockable: it always terminates regardless of the
 recorded disposition or blocked mask.
+
+`SIGPIPE` is used by the unified broken-pipe paths. A write to a pipe with all
+read ends closed, or to a stream socket whose write direction is closed, returns
+`-EPIPE` and by default marks `SIGPIPE` pending for delivery at the normal
+return-to-user boundary. `SIG_IGN` on `SIGPIPE` suppresses the signal while the
+write still returns `-EPIPE`; stream socket `send(..., MSG_NOSIGNAL)` suppresses
+it for that call only.
 
 ## Per-Process Signal State
 

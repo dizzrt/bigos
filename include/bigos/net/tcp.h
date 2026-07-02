@@ -94,7 +94,39 @@ namespace net {
         bool fin_sent;             // a FIN occupies one sequence number once sent
         bool fin_received;         // peer FIN consumed one sequence number
         timer::tick_t time_wait_deadline_tick;
+
+        // Passive-open association (Linux/BSD dual-queue model). Appended fields;
+        // the existing layout above is unchanged. A listener stays in Listen and
+        // tracks derived child connections in two bounded queues of child TCB
+        // pointers (both bounded by the constants in net.h); a child records the
+        // listener it belongs to so teardown can unlink it. syn_queue holds
+        // SynReceived children mid-handshake (half-open); accept_queue holds
+        // Established children waiting for tcp_accept (full). All queue mutation and
+        // wakeups run in ordinary (non-IRQ) context.
+        bool is_child;                     // true for a derived passive-open connection
+        TcpControlBlock *listener;         // owning listener (child only), else null
+        TcpControlBlock *syn_queue[STREAM_SYN_QUEUE_CAPACITY];
+        uint32_t syn_queue_count;
+        TcpControlBlock *accept_queue[STREAM_ACCEPT_QUEUE_CAPACITY];
+        uint32_t accept_queue_count;
+
+        // Connection-level readiness wait queue. Woken when in-order data arrives,
+        // the connection reaches Established, a listener gains an acceptable
+        // connection, or the connection is reset. Contributed to fd readiness
+        // (poll_wait) and the bounded stream socket blocking paths.
+        sched::WaitQueue wait;
+
+        // Monotonic slot generation, bumped every time the slot is allocated. A
+        // stream socket records the generation of its TCB at association time so it
+        // can detect that the slot was recycled/reset and possibly reused by a
+        // different connection (tcp_connection_alive), avoiding a dangling TCB read.
+        uint32_t generation;
     };
+
+    // Layout guard: the passive-open association fields stay appended after the
+    // historical TCB layout so existing offsets are unchanged.
+    static_assert(__builtin_offsetof(TcpControlBlock, is_child) > __builtin_offsetof(TcpControlBlock, time_wait_deadline_tick),
+                  "TCB passive-open fields must be appended after the historical layout");
 
     // Active open: allocate a TCB, send SYN, and enter SynSent. Completes to
     // Established when a matching SYN,ACK arrives (driven by handle_tcp). Ordinary
@@ -103,9 +135,44 @@ namespace net {
                     uint16_t __remote_port, TcpControlBlock **__out) noexcept;
 
     // Passive open: allocate a TCB in Listen bound to a local port. A matching SYN
-    // drives it through SynReceived to Established (see handle_tcp).
+    // derives a child TCB (registered on the listener's half-open queue) that is
+    // driven through SynReceived to Established and moved onto the accept queue;
+    // the listener itself stays in Listen (see handle_tcp).
     Status tcp_listen(Context *__ctx, Ipv4Address __local_ip, uint16_t __local_port,
                       TcpControlBlock **__out) noexcept;
+
+    // Take one Established child connection from a listener's full (accept) queue.
+    // On success *__out is the child TCB (removed from the accept queue) and
+    // Status::Ok is returned; when the accept queue is empty *__out is null and
+    // Status::NoData is returned. Ordinary (non-IRQ) context only; it never blocks.
+    Status tcp_accept(Context *__ctx, TcpControlBlock *__listener, TcpControlBlock **__out) noexcept;
+
+    // Current allocation generation of the slot a TCB lives in. A caller (stream
+    // socket backend) records this at association time and pairs it with
+    // tcp_connection_alive() to detect that the slot was recycled/reused.
+    uint32_t tcp_slot_generation(const TcpControlBlock *__tcb) noexcept;
+
+    // True when __tcb is still the same active connection whose generation was
+    // recorded as __generation (i.e. the slot was not recycled/reused). A null
+    // pointer or a recycled/reused slot returns false. Read-only, no blocking.
+    bool tcp_connection_alive(const TcpControlBlock *__tcb, uint32_t __generation) noexcept;
+
+    // Read-only access to a connection's readiness wait queue, for fd readiness
+    // (poll_wait) contribution. Returns null for a null TCB.
+    sched::WaitQueue *tcp_wait_queue(TcpControlBlock *__tcb) noexcept;
+
+    // Read-only connection-state queries for the stream socket backend. All are
+    // O(1), no blocking, and tolerate a null TCB (returning the safe "false").
+    //   tcp_is_established:  state == Established (writable/data-capable)
+    //   tcp_peer_closed:     peer FIN consumed and no in-order data left -> read EOF
+    //   tcp_write_closed:    local FIN already sent (write direction closed)
+    //   tcp_send_room:       send path has room (window + a free retransmit slot)
+    //   tcp_accept_ready:    listener has at least one completed connection to accept
+    bool tcp_is_established(const TcpControlBlock *__tcb) noexcept;
+    bool tcp_peer_closed(const TcpControlBlock *__tcb) noexcept;
+    bool tcp_write_closed(const TcpControlBlock *__tcb) noexcept;
+    bool tcp_send_room(const TcpControlBlock *__tcb) noexcept;
+    bool tcp_accept_ready(const TcpControlBlock *__listener) noexcept;
 
     // Queue and transmit up to __len bytes of stream data on an Established
     // connection, bounded by the send buffer, the advertised window, and the
@@ -120,6 +187,13 @@ namespace net {
     // Begin an active close (send FIN, enter FinWait1) or complete a passive close
     // (CloseWait -> LastAck). Ordinary context only.
     Status tcp_close(Context *__ctx, TcpControlBlock *__tcb) noexcept;
+
+    // Abort/recycle a connection immediately: wake any readiness waiters and free
+    // the TCB slot (a still-queued child unlinks from its listener; a listener
+    // recycles its queued children). Used by the stream socket close/rollback path
+    // for a LISTEN or not-yet-Established connection, and to discard an accepted
+    // connection on an accept fd-install failure. Ordinary context only.
+    Status tcp_abort(Context *__ctx, TcpControlBlock *__tcb) noexcept;
 
     // IPv4 input entry for protocol number 6. Reads the TCP segment within the
     // validated IPv4 payload bounds, verifies the pseudo-header checksum, matches a

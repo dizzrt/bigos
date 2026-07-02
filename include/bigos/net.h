@@ -27,12 +27,31 @@ namespace net {
     // bounds; the TCP path never grows a connection table, buffer, retransmit
     // queue, or reorder window past these. Timers are in monotonic ticks
     // (TIMER_HZ = 100 => 1 tick = 10ms).
-    constexpr uint32_t TCP_CONNECTION_CAPACITY = 4;   // bounded TCB pool size
+    constexpr uint32_t TCP_CONNECTION_CAPACITY = 8;   // bounded TCB pool size
     constexpr uint16_t TCP_MSS = 500;                 // max TCP data bytes per segment
     constexpr uint32_t TCP_SEND_BUFFER = 1024;        // bounded send buffer bytes
     constexpr uint32_t TCP_RECV_BUFFER = 1024;        // bounded receive buffer bytes
     constexpr uint32_t TCP_RETX_QUEUE_CAPACITY = 4;   // bounded unacked-segment queue
     constexpr uint32_t TCP_REORDER_SLOTS = 4;         // bounded out-of-order reorder window
+    // Linux/BSD-style passive-open dual queues per listener. The half-open (SYN)
+    // queue holds SYN_RECEIVED child connections mid-handshake; the full (accept)
+    // queue holds ESTABLISHED children waiting for accept. backlog is clamped to
+    // STREAM_ACCEPT_QUEUE_CAPACITY. Both are compile-time upper bounds; the child
+    // TCBs come from the one bounded TCB pool above.
+    constexpr uint32_t STREAM_SYN_QUEUE_CAPACITY = 2;
+    constexpr uint32_t STREAM_ACCEPT_QUEUE_CAPACITY = 2;
+    // Active-connection budget: TCB slots reserved for outbound (tcp_open) and
+    // already-accepted connections beyond the listener + its two queues. Under the
+    // local-address loopback a single connect/accept pair simultaneously occupies
+    // listener + client-active TCB + server child TCB, so the pool MUST be large
+    // enough to keep the listener while a connection is being built.
+    constexpr uint32_t STREAM_ACTIVE_CONNECTION_BUDGET = 3;
+    // Capacity invariant (lwIP-style pool sizing): the bounded TCB pool holds the
+    // listener plus its half-open and full queues plus the active-connection
+    // budget without a single loopback connection exhausting the pool.
+    static_assert(TCP_CONNECTION_CAPACITY >=
+                      1u + STREAM_SYN_QUEUE_CAPACITY + STREAM_ACCEPT_QUEUE_CAPACITY + STREAM_ACTIVE_CONNECTION_BUDGET,
+                  "TCB pool must fit listener + SYN queue + accept queue + active-connection budget");
     constexpr uint32_t TCP_RTO_MIN = 20;              // RTO lower bound (200ms => 20 ticks)
     constexpr uint32_t TCP_RTO_MAX = 12000;           // RTO upper bound (120s => 12000 ticks)
     // MSL in ticks. TIME_WAIT keeps the standard 2*MSL relationship

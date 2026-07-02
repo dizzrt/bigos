@@ -1,7 +1,9 @@
 #include <bigos/ipc/pipe.h>
 
 #include <bigos/memory.h>
+#include <bigos/proc.h>
 #include <bigos/sched.h>
+#include <bigos/signal.h>
 
 namespace {
     struct Pipe {
@@ -110,9 +112,17 @@ namespace {
         const uint8_t *in = (const uint8_t *)__src;
         size_t done = 0;
         while (done < __len) {
-            // Reader gone -> broken pipe.
-            if (!pipe->read_open)
-                return done > 0 ? bigos::vfs::Status::Success : bigos::vfs::Status::BrokenPipe;
+            // Reader gone -> broken pipe. Deliver SIGPIPE (unified broken-pipe
+            // semantics shared with stream socket write) unless bytes were already
+            // written this call; a pipe write carries no MSG_NOSIGNAL, so
+            // suppression comes only from a process SIG_IGN on SIGPIPE, decided
+            // inside raise_broken_pipe.
+            if (!pipe->read_open) {
+                if (done > 0)
+                    return bigos::vfs::Status::Success;
+                (void)bigos::signal::raise_broken_pipe(bigos::proc::current_process(), false);
+                return bigos::vfs::Status::BrokenPipe;
+            }
             if (pipe->count == bigos::ipc::PIPE_CAPACITY) {
                 // Nonblocking fd or non-blockable context short-circuits instead
                 // of entering the write wait queue. If bytes were already written

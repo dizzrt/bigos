@@ -506,10 +506,10 @@ loopback 地址并解析名字。
   complete TCP feature matrix.
 - [x] 任务 M14.2：有界 TCP 路径，包含连接建立、有界重传与窗口、有序交付与连接拆除，
   不声称完整 TCP 特性矩阵。
-- [ ] Task M14.3: a stream socket interface integrated with the fd, multiplexing,
+- [x] Task M14.3: a stream socket interface integrated with the fd, multiplexing,
   and syscall paths, exposing connect, listen, and accept within bounded
   semantics.
-- [ ] 任务 M14.3：与 fd、多路复用与 syscall 路径集成的 stream socket 接口，在有界语义内
+- [x] 任务 M14.3：与 fd、多路复用与 syscall 路径集成的 stream socket 接口，在有界语义内
   暴露 connect、listen 与 accept。
 - [ ] Task M14.4: a minimal DNS client over the existing UDP path sufficient for
   basic name resolution, without a general resolver or caching daemon.

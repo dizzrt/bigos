@@ -37,10 +37,17 @@
 #define ENOTSOCK    88
 #define EDESTADDRREQ 89
 #define EMSGSIZE    90
+#define ENOPROTOOPT 92
 #define EADDRINUSE  98
 #define ENETUNREACH 101
+#define ECONNRESET  104
 #define ENOBUFS     105
+#define EISCONN     106
+#define ENOTCONN    107
+#define ECONNREFUSED 111
 #define EHOSTUNREACH 113
+#define EALREADY    114
+#define EINPROGRESS 115
 #define EOPNOTSUPP  95
 
 /* Global errno set by the syscall wrappers on a negative kernel return. */

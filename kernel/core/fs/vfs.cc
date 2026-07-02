@@ -413,6 +413,10 @@ namespace vfs {
                 return "range";
             case Status::NotEmpty:
                 return "not-empty";
+            case Status::ConnectionReset:
+                return "connection-reset";
+            case Status::NotConnected:
+                return "not-connected";
         }
         return "unknown";
     }

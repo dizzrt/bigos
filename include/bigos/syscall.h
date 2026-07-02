@@ -143,6 +143,29 @@ namespace bigos::sys {
                                 // poll/select/epoll/ppoll, no unbounded/dynamic sets, no
                                 // edge-triggered/event-object/priority/signal-restart
                                 // semantics.
+        SYS_CONNECT = 62,       // (fd, const struct SockAddrIn*, addrlen) -> 0 / -EINPROGRESS
+                                // (nonblocking in progress) / negative errno. Active-open
+                                // a stream (TCP) socket to an IPv4 host:port. addrlen MUST
+                                // equal sizeof(SockAddrIn). Blocking fd blocks to
+                                // ESTABLISHED; nonblocking returns -EINPROGRESS and the
+                                // result is read later via getsockopt(SO_ERROR).
+        SYS_LISTEN = 63,        // (fd, backlog) -> 0 or negative errno. Mark a bound stream
+                                // socket passive; backlog is clamped to the compile-time
+                                // STREAM_ACCEPT_QUEUE_CAPACITY.
+        SYS_ACCEPT = 64,        // (fd, struct SockAddrIn* peer_out, uint32_t* addrlen_io) ->
+                                // new connection fd or negative errno. Blocking fd blocks
+                                // until a completed connection exists; nonblocking returns
+                                // -EAGAIN. peer_out may be null (address not written back).
+        SYS_GETSOCKOPT = 65,    // (fd, level, optname, void* optval, uint32_t* optlen_io) ->
+                                // 0 or negative errno. Bounded: ONLY SOL_SOCKET/SO_ERROR is
+                                // supported (reads and clears the connection's pending
+                                // error for nonblocking connect completion). Any other
+                                // level/optname returns -ENOPROTOOPT. No setsockopt.
+        SYS_SEND = 66,          // (fd, const void* buf, len, flags) -> bytes sent or negative
+                                // errno. Stream socket send; data path equals write. flags
+                                // recognizes only MSG_NOSIGNAL (suppress SIGPIPE on a
+                                // broken-pipe write, returning -EPIPE); any other non-zero
+                                // flag bit returns -EINVAL. write == send(..., flags=0).
     };
 
     // Bounded user-visible poll(2)-style descriptor entry. Fixed-size; the mirror
@@ -181,7 +204,20 @@ namespace bigos::sys {
     // Bounded socket domain/type/protocol subset accepted by SYS_SOCKET.
     constexpr uint16_t SOCKET_AF_INET = 2;
     constexpr uint16_t SOCKET_SOCK_DGRAM = 2;
+    constexpr uint16_t SOCKET_SOCK_STREAM = 1;
     constexpr uint16_t SOCKET_IPPROTO_UDP = 17;
+    constexpr uint16_t SOCKET_IPPROTO_TCP = 6;
+
+    // Bounded getsockopt level/option: ONLY SOL_SOCKET/SO_ERROR is supported (see
+    // SYS_GETSOCKOPT). Values follow the conventional Linux numbers for mirror
+    // consistency; anything else returns -ENOPROTOOPT.
+    constexpr uint64_t SOL_SOCKET = 1;
+    constexpr uint64_t SO_ERROR = 4;
+
+    // Bounded send(2) flag: MSG_NOSIGNAL suppresses SIGPIPE on a broken-pipe write
+    // (SYS_SEND). It is the only recognized flag; any other non-zero bit is
+    // rejected with -EINVAL.
+    constexpr uint64_t MSG_NOSIGNAL = 0x4000;
 
     // POSIX-style error codes live in bigos/errno.h (single source of truth);
     // the dispatcher writes their negated value into the return register, e.g.

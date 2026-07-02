@@ -124,8 +124,7 @@ preservation API。复用块在用户可读前必须被清零或经完整 stagin
 `bigos::ipc`（`include/bigos/ipc/pipe.h`、`kernel/core/ipc/pipe.cc`）提供有界环形
 缓冲管道与一对相连的读端/写端 `File`。缓冲空且写端开时读阻塞、写入后唤醒；缓冲满
 且读端开时写阻塞、读出后唤醒。阻塞只在可阻塞进程上下文进行，不可阻塞上下文确定性
-失败。写端全关后读返回 0（EOF）；读端全关后写返回 `-EPIPE`（`SIGPIPE` 投递为可选
-增强，决策 10）。对管道 `lseek` 返回 `-ESPIPE`。端引用计数精确管理：`fork` 继承端
+失败。写端全关后读返回 0（EOF）；读端全关后写返回 `-EPIPE`，并通过统一 broken-pipe helper 向写者投递 `SIGPIPE`。如果进程忽略 `SIGPIPE`，写仍返回 `-EPIPE`，但不会投递终止性信号。对管道 `lseek` 返回 `-ESPIPE`。端引用计数精确管理：`fork` 继承端
 并增计数，`exec` 遵守 close-on-exec，exit/reap 关闭每个剩余端各一次，两端归零时回
 收管道对象。
 
@@ -149,7 +148,7 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
   一致、owner/mode 权限拒绝、只读后端写被 `-EROFS` 拒绝，发射
   `BIGOS_WRITABLE_FS_PASSED`/`BIGOS_WRITABLE_FS_FAILED`。
 - `xmake f --pipe_smoke=y` 启用 `BIGOS_PIPE_SMOKE`，覆盖跨线程 FIFO 写读、读空阻
-  塞 + 写入唤醒、写端全关读 EOF、读端全关写 `-EPIPE`，发射
+  塞 + 写入唤醒、写端全关读 EOF、读端全关写 `-EPIPE` 与 `SIGPIPE`，发射
   `BIGOS_PIPE_PASSED`/`BIGOS_PIPE_FAILED`。
 - `xmake f --persistent_writable_fs_smoke=y` 启用
   `BIGOS_PERSISTENT_WRITABLE_FS_SMOKE` 和 persistent backend。helper 可通过
@@ -186,7 +185,7 @@ uv run python -m tools.bigosdev run --emulator qemu --display none \
   或完整 `readdir`/`getdents` 遍历。
 - 无 file-backed mmap 与页缓存共享映射、多挂载命名空间、`mount`/`umount`、
   journaling、`fsck`、配额、ACL/xattr。
-- 无命名管道（FIFO）/`mknod`/socket，除可选 `SIGPIPE` 外无其他管道信号语义。
+- 无命名管道（FIFO）/`mknod`/socket，除必需的 broken-pipe `SIGPIPE` 外无其他管道信号语义。
 - persistent `/rw` 不提供 journaling、crash recovery、async I/O、广泛存储驱动、通用
   block-device 管理或完整 POSIX filesystem 兼容性。
 - 无 SMP 缓存一致性与写性能优化（仅保证正确性与有界性）。

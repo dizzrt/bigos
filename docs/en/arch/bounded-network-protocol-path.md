@@ -11,14 +11,13 @@ supplied by the kernel caller. Missing devices or invalid configuration leave
 the context disabled with deterministic diagnostics; default boot, storage,
 filesystem, `/rw`, shell, and userland do not depend on network availability.
 
-The protocol module does not expose sockets, fd objects, syscalls, `/dev`
-nodes, libc socket calls, DHCP, DNS, IPv6, IP fragment reassembly, NAT,
-firewalling, dynamic routing, or multi-interface routing. A bounded
-kernel-internal TCP state machine exists (see the Bounded TCP Path section
-below) but exposes no stream socket user interface. The minimal
-user-visible UDP socket interface wraps this kernel-internal API in a separate
-change (see `docs/en/arch/syscall-entry.md`); it stays a bounded UDP adapter and
-does not change the protocol module's bounded capacities or non-goals.
+The protocol module remains bounded and single-context: it does not expose
+`/dev` network nodes, DHCP, DNS, IPv6, IP fragment reassembly, NAT, firewalling,
+dynamic routing, or multi-interface routing. User-visible sockets are explicit
+bounded adapters over this protocol path: the existing UDP datagram interface and
+the minimal TCP stream socket interface are documented in
+`docs/en/arch/syscall-entry.md`. They do not change the protocol module's
+bounded capacities or broader non-goals.
 
 Protocol parsing runs only in ordinary kernel context. Virtio-net MSI-X handlers
 remain limited to frame-level RX/TX completion state; the protocol pump and UDP
@@ -85,11 +84,15 @@ TCP state lives in a compile-time-bounded control-block (TCB) pool. Each TCB
 holds the connection four-tuple, the `TcpState` (Closed/Listen/SynSent/
 SynReceived/Established/FinWait1/FinWait2/Closing/CloseWait/LastAck/TimeWait),
 bounded send/receive buffers, a bounded retransmit queue, and a bounded
-out-of-order reorder window. Connections are matched by exact four-tuple, and
-passive opens match a `LISTEN` TCB by local port. Sequence comparisons use
-32-bit wraparound-safe signed-difference arithmetic. The pool, buffers,
-retransmit queue, and reorder window never grow past their compile-time bounds:
-a full pool returns a deterministic table-full status and counts a drop.
+out-of-order reorder window. Connections are matched by exact four-tuple.
+Passive open uses a Linux/BSD-style listener plus child TCB model: a `LISTEN`
+TCB stays in `Listen`, matching by local port; inbound SYNs derive child TCBs in
+`SynReceived` on a bounded SYN queue, and final ACKs move established children
+onto the listener's bounded accept queue. Sequence comparisons use 32-bit
+wraparound-safe signed-difference arithmetic. The pool, buffers, retransmit
+queue, reorder window, SYN queue, and accept queue never grow past their
+compile-time bounds: a full pool or full queue deterministically drops/refuses
+the excess connection and counts a drop.
 
 Retransmission follows RFC 6298 with integer/shift math only (no floating
 point): the estimator maintains `SRTT`/`RTTVAR` (alpha=1/8, beta=1/4) and
@@ -123,10 +126,10 @@ sit after the loopback counters and before `last_status`, guarded by
 This capability stays bounded: it implements connection setup, RFC 6298 dynamic
 retransmission, in-order delivery/reassembly, and teardown, but does not
 implement the full TCP feature matrix (no congestion control, SACK, window
-scaling, timestamps/PAWS, urgent pointer, or keepalive) and exposes no new
-user-visible syscall/fd/socket ABI — no `connect`/`listen`/`accept` user
-interface and no name resolution. Stream socket user interfaces remain a later,
-separate capability. Validation is default-off through the `tcp_path_smoke`
+scaling, timestamps/PAWS, urgent pointer, or keepalive). The minimal user-visible
+TCP stream socket adapter exposes only the bounded syscall/fd surface documented
+in `docs/en/arch/syscall-entry.md`; it does not add name resolution or a complete
+POSIX socket model. Validation is default-off through the `tcp_path_smoke`
 build switch, which emits `BIGOS_TCP_PATH_PASSED` / `BIGOS_TCP_PATH_FAILED` on
 COM1 and covers the local-address three-way handshake (active + passive),
 Established in-order bidirectional data delivery, bounded reorder and duplicate

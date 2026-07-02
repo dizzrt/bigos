@@ -16,6 +16,9 @@
 #ifdef BIGOS_SOCKET_SMOKE
 #include <bigos/net/socket.h>
 #endif
+#ifdef BIGOS_STREAM_SOCKET_SMOKE
+#include <bigos/net/socket.h>
+#endif
 #ifdef BIGOS_TCP_PATH_SMOKE
 #include <bigos/net/tcp.h>
 #endif
@@ -52,6 +55,7 @@
 #ifdef BIGOS_PIPE_SMOKE
 #include <bigos/ipc/pipe.h>
 #include <bigos/sched.h>
+#include <string.h>
 #endif
 #ifdef BIGOS_FD_READINESS_SMOKE
 #include <bigos/device.h>
@@ -2324,6 +2328,16 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&bigos::net::tcp_path_smoke_entry, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_TCP_PATH_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_STREAM_SOCKET_SMOKE
+    // Validation-only bounded TCP stream socket interface smoke. Kernel-internal /
+    // backend closed loop over the loopback-ready protocol path plus the stream
+    // socket ops table; it does not change default boot and default (switch off)
+    // builds contain no stream socket smoke thread.
+    if (bigos::sched::create_kernel_thread(&bigos::net::stream_socket_smoke_entry, nullptr) ==
+        bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_STREAM_SOCKET_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_WRITABLE_FS_SMOKE

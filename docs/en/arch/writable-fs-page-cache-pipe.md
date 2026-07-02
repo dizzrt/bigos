@@ -164,8 +164,10 @@ block on an empty buffer while writers remain open and are woken on write; write
 block on a full buffer while readers remain open and are woken on read. Blocking
 happens only in blockable process context; a non-blockable context fails
 deterministically. When all write ends close, reads return 0 (EOF); when all read
-ends close, writes return `-EPIPE` (`SIGPIPE` delivery is an optional
-enhancement, decision 10). `lseek` on a pipe returns `-ESPIPE`. End reference
+ends close, writes return `-EPIPE` and deliver `SIGPIPE` to the writer through
+the shared broken-pipe helper. If the process ignores `SIGPIPE`, the write still
+returns `-EPIPE` and no terminating signal is delivered. `lseek` on a pipe
+returns `-ESPIPE`. End reference
 counts are tracked precisely: `fork` inherits ends and increments counts, `exec`
 honors close-on-exec, and exit/reap closes every remaining end exactly once,
 reclaiming the pipe when both ends are gone.
@@ -198,7 +200,8 @@ unchanged.
   emitting `BIGOS_WRITABLE_FS_PASSED`/`BIGOS_WRITABLE_FS_FAILED`.
 - `xmake f --pipe_smoke=y` enables `BIGOS_PIPE_SMOKE`, covering cross-thread FIFO
   write/read, blocking-read then write wakeup, write-end-closed EOF, and
-  read-end-closed `-EPIPE`, emitting `BIGOS_PIPE_PASSED`/`BIGOS_PIPE_FAILED`.
+  read-end-closed `-EPIPE` with `SIGPIPE`, emitting `BIGOS_PIPE_PASSED`/
+  `BIGOS_PIPE_FAILED`.
 - `xmake f --persistent_writable_fs_smoke=y` enables
   `BIGOS_PERSISTENT_WRITABLE_FS_SMOKE` and the persistent backend. The helper can
   attach an independent test disk with `--persistent-image`; the first boot
@@ -240,7 +243,7 @@ instead of claiming a runtime run.
 - No file-backed mmap or shared page-cache mappings, multi-mount namespaces,
   `mount`/`umount`, journaling, `fsck`, quotas, or ACL/xattr.
 - No named pipes (FIFO)/`mknod`/socket, and no pipe signal semantics beyond the
-  optional `SIGPIPE`.
+  mandatory broken-pipe `SIGPIPE`.
 - No persistent `/rw` journaling, crash recovery, async I/O, broad storage
   drivers, general block-device management, or complete POSIX filesystem
   compatibility.

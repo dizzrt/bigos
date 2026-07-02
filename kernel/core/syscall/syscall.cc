@@ -16,6 +16,7 @@
 #include <bigos/ipc/pipe.h>
 #include <bigos/net.h>
 #include <bigos/net/socket.h>
+#include <bigos/net/tcp.h>
 #include <bigos/proc.h>
 #include <bigos/signal.h>
 #endif
@@ -955,22 +956,46 @@ namespace sys {
             return bigos::net::socket_state(file);
         }
 
-        // SYS_SOCKET(domain, type, protocol): validate the bounded BigOS UDP
-        // subset, create an unbound socket File over the single default context,
-        // and install it into the fd table with deterministic failure rollback.
+        // Resolves a current-process fd to its stream (TCP) socket backend state,
+        // or nullptr when the fd is not a stream socket.
+        static bigos::net::StreamSocket *stream_socket_for_fd(uint64_t __fd) noexcept {
+            bigos::vfs::File *file = bigos::proc::file_for_fd_current((uint32_t)__fd);
+            if (file == nullptr)
+                return nullptr;
+            return bigos::net::stream_socket_state(file);
+        }
+
+        // SYS_SOCKET(domain, type, protocol): validate the bounded BigOS UDP or
+        // TCP subset, create an unbound socket File over the single default
+        // context, and install it into the fd table with deterministic failure
+        // rollback. SOCK_DGRAM+UDP -> datagram backend; SOCK_STREAM+TCP -> stream
+        // backend (see stream-socket-interface).
         static int64_t sys_socket(uint64_t __domain, uint64_t __type, uint64_t __protocol) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
-            if (__domain != SOCKET_AF_INET || __type != SOCKET_SOCK_DGRAM ||
-                (__protocol != 0 && __protocol != SOCKET_IPPROTO_UDP))
+            if (__domain != SOCKET_AF_INET)
+                return -bigos::EINVAL;
+            const bool is_dgram =
+                __type == SOCKET_SOCK_DGRAM && (__protocol == 0 || __protocol == SOCKET_IPPROTO_UDP);
+            const bool is_stream =
+                __type == SOCKET_SOCK_STREAM && (__protocol == 0 || __protocol == SOCKET_IPPROTO_TCP);
+            if (!is_dgram && !is_stream)
                 return -bigos::EINVAL;
 
             bigos::net::Context *context = bigos::net::default_context();
-            if (context == nullptr || bigos::net::state(context) != bigos::net::State::Ready)
+            if (context == nullptr)
+                return -bigos::ENODEV;
+            const bigos::net::State st = bigos::net::state(context);
+            // Datagram needs a ready frame-level device; a stream socket also runs
+            // over the local-address loopback path, so LoopbackReady is acceptable.
+            if (is_dgram && st != bigos::net::State::Ready)
+                return -bigos::ENODEV;
+            if (is_stream && st != bigos::net::State::Ready && st != bigos::net::State::LoopbackReady)
                 return -bigos::ENODEV;
 
             bigos::vfs::File *file = nullptr;
-            const bigos::vfs::Status status = bigos::net::socket_create(context, &file);
+            const bigos::vfs::Status status = is_stream ? bigos::net::stream_socket_create(context, &file)
+                                                        : bigos::net::socket_create(context, &file);
             if (status != bigos::vfs::Status::Success)
                 return vfs_status_to_syscall(status);
 
@@ -982,14 +1007,16 @@ namespace sys {
             return fd;
         }
 
-        // SYS_BIND(fd, const SockAddrIn*, addrlen): bind the socket's local port
-        // through the kernel-internal UDP API. addrlen MUST equal the fixed
-        // address struct size; family MUST be SOCKET_AF_INET.
+        // SYS_BIND(fd, const SockAddrIn*, addrlen): bind the socket's local port.
+        // UDP sockets reserve a protocol endpoint; stream sockets only record the
+        // local port for a subsequent listen. addrlen MUST equal the fixed address
+        // struct size; family MUST be SOCKET_AF_INET.
         static int64_t sys_bind(uint64_t __fd, uint64_t __addr, uint64_t __addrlen) noexcept {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
             bigos::net::Socket *socket = socket_for_fd(__fd);
-            if (socket == nullptr)
+            bigos::net::StreamSocket *stream = socket == nullptr ? stream_socket_for_fd(__fd) : nullptr;
+            if (socket == nullptr && stream == nullptr)
                 return -bigos::ENOTSOCK;
             if (__addrlen != sizeof(SockAddrIn))
                 return -bigos::EINVAL;
@@ -1000,9 +1027,17 @@ namespace sys {
                 return -bigos::EFAULT;
             if (addr.family != SOCKET_AF_INET || addr.port == 0)
                 return -bigos::EINVAL;
+
+            if (stream != nullptr) {
+                if (stream->role != bigos::net::StreamSocket::Role::Unbound)
+                    return -bigos::EINVAL;
+                stream->local_port = addr.port;
+                stream->role = bigos::net::StreamSocket::Role::Bound;
+                return 0;
+            }
+
             if (socket->bound)
                 return -bigos::EINVAL;
-
             bigos::net::UdpEndpoint *endpoint = nullptr;
             const bigos::net::Status status = bigos::net::udp_bind(socket->context, addr.port, &endpoint);
             if (status != bigos::net::Status::Ok)
@@ -1022,8 +1057,12 @@ namespace sys {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
             bigos::net::Socket *socket = socket_for_fd(__fd);
-            if (socket == nullptr)
+            if (socket == nullptr) {
+                // sendto on a stream socket is a deterministic unsupported op.
+                if (stream_socket_for_fd(__fd) != nullptr)
+                    return -bigos::EOPNOTSUPP;
                 return -bigos::ENOTSOCK;
+            }
             if (!socket->bound || socket->endpoint == nullptr)
                 return -bigos::EDESTADDRREQ;
             if (__addrlen != sizeof(SockAddrIn))
@@ -1069,8 +1108,12 @@ namespace sys {
             if (!bigos::sched::can_block())
                 return -bigos::EWOULDBLOCK;
             bigos::net::Socket *socket = socket_for_fd(__fd);
-            if (socket == nullptr)
+            if (socket == nullptr) {
+                // recvfrom on a stream socket is a deterministic unsupported op.
+                if (stream_socket_for_fd(__fd) != nullptr)
+                    return -bigos::EOPNOTSUPP;
                 return -bigos::ENOTSOCK;
+            }
             // A nonblocking socket fd does a single bounded RX advance and never
             // yields; with no datagram it returns -EAGAIN immediately. A blocking
             // fd keeps the existing bounded poll-and-yield rounds. The flag lives
@@ -1124,6 +1167,271 @@ namespace sys {
                     return -bigos::EFAULT;
             }
             return (int64_t)copy_len;
+        }
+
+        // Bounded stream-socket protocol advance while a blocking connect/accept
+        // waits: advance RX + TCP timeouts, then wait on the connection wait queue
+        // with a small bounded timeout so it never busy-waits unbounded.
+        static void stream_wait_round(bigos::net::Context *__ctx, bigos::net::TcpControlBlock *__tcb) noexcept {
+            (void)bigos::net::pump(__ctx, bigos::net::UDP_RX_QUEUE_CAPACITY);
+            (void)bigos::net::tcp_pump(__ctx);
+            bigos::sched::WaitQueue *wq = bigos::net::tcp_wait_queue(__tcb);
+            if (wq != nullptr)
+                (void)bigos::sched::wait_queue_wait_until(wq, nullptr, nullptr, 2);
+            else
+                bigos::sched::yield();
+        }
+
+        // SYS_CONNECT(fd, const SockAddrIn*, addrlen): active-open a stream socket.
+        // Blocking fd runs the bounded ordinary-context advance to ESTABLISHED or a
+        // deterministic failure; nonblocking fd returns -EINPROGRESS while the
+        // handshake is pending. A repeat connect returns -EISCONN/-EALREADY.
+        static int64_t sys_connect(uint64_t __fd, uint64_t __addr, uint64_t __addrlen) noexcept {
+            constexpr uint32_t CONNECT_MAX_ROUNDS = 64;
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            bigos::net::StreamSocket *s = stream_socket_for_fd(__fd);
+            if (s == nullptr)
+                return -bigos::ENOTSOCK;
+            if (__addrlen != sizeof(SockAddrIn))
+                return -bigos::EINVAL;
+            if (!bigos::proc::validate_user_buffer(__addr, sizeof(SockAddrIn)))
+                return -bigos::EFAULT;
+            SockAddrIn addr = {};
+            if (!bigos::proc::copy_current_user_buffer(__addr, &addr, sizeof(addr)))
+                return -bigos::EFAULT;
+            if (addr.family != SOCKET_AF_INET || addr.port == 0)
+                return -bigos::EINVAL;
+
+            const bool nonblocking =
+                bigos::vfs::file_is_nonblocking(bigos::proc::file_for_fd_current((uint32_t)__fd));
+
+            // Repeat connect handling.
+            if (s->role == bigos::net::StreamSocket::Role::Connected)
+                return -bigos::EISCONN;
+            if (s->role == bigos::net::StreamSocket::Role::Connecting) {
+                if (!bigos::net::tcp_connection_alive(s->tcb, s->tcb_generation)) {
+                    // The in-progress connection was reset. Report the pending error.
+                    const int32_t err = s->pending_error != 0 ? s->pending_error : bigos::ECONNREFUSED;
+                    s->role = bigos::net::StreamSocket::Role::Closed;
+                    s->tcb = nullptr;
+                    s->pending_error = err;
+                    return -(int64_t)err;
+                }
+                if (bigos::net::tcp_is_established(s->tcb)) {
+                    s->role = bigos::net::StreamSocket::Role::Connected;
+                    return 0;
+                }
+                return nonblocking ? -bigos::EALREADY : -bigos::EINPROGRESS;
+            }
+            if (s->role == bigos::net::StreamSocket::Role::Listening)
+                return -bigos::EINVAL;
+            if (s->role == bigos::net::StreamSocket::Role::Closed)
+                return -bigos::EISCONN;   // socket already used; no reconnect in this bounded model
+
+            // Fresh active open. Pick an ephemeral local port when unbound.
+            bigos::net::Context *ctx = s->context;
+            const bigos::net::Ipv4Address local_ip = ctx->config.local_ipv4;
+            const bigos::net::Ipv4Address remote_ip = {addr.addr};
+            static uint16_t g_ephemeral = 40000;
+            uint16_t local_port = s->local_port;
+            if (local_port == 0) {
+                local_port = g_ephemeral++;
+                if (g_ephemeral == 0 || g_ephemeral < 40000)
+                    g_ephemeral = 40000;
+                s->local_port = local_port;
+            }
+            bigos::net::TcpControlBlock *tcb = nullptr;
+            const bigos::net::Status open =
+                bigos::net::tcp_open(ctx, local_ip, local_port, remote_ip, addr.port, &tcb);
+            if (open != bigos::net::Status::Ok || tcb == nullptr)
+                return net_status_to_errno(open);
+            s->tcb = tcb;
+            s->tcb_generation = bigos::net::tcp_slot_generation(tcb);
+            s->role = bigos::net::StreamSocket::Role::Connecting;
+            s->pending_error = 0;
+
+            // Under the synchronous loopback the handshake may already be complete.
+            if (bigos::net::tcp_is_established(s->tcb)) {
+                s->role = bigos::net::StreamSocket::Role::Connected;
+                return 0;
+            }
+            if (nonblocking)
+                return -bigos::EINPROGRESS;
+
+            for (uint32_t round = 0; round < CONNECT_MAX_ROUNDS; round++) {
+                if (!bigos::net::tcp_connection_alive(s->tcb, s->tcb_generation)) {
+                    s->role = bigos::net::StreamSocket::Role::Closed;
+                    s->tcb = nullptr;
+                    s->pending_error = bigos::ECONNREFUSED;
+                    return -bigos::ECONNREFUSED;
+                }
+                if (bigos::net::tcp_is_established(s->tcb)) {
+                    s->role = bigos::net::StreamSocket::Role::Connected;
+                    return 0;
+                }
+                stream_wait_round(ctx, s->tcb);
+            }
+            // Bounded wait elapsed without completing: report in-progress so the
+            // caller can retry via poll + getsockopt(SO_ERROR).
+            return -bigos::EINPROGRESS;
+        }
+
+        // SYS_LISTEN(fd, backlog): mark a bound stream socket passive. backlog is
+        // clamped to the compile-time accept-queue upper bound.
+        static int64_t sys_listen(uint64_t __fd, uint64_t __backlog) noexcept {
+            (void)__backlog;   // clamped to STREAM_ACCEPT_QUEUE_CAPACITY by the protocol layer
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            bigos::net::StreamSocket *s = stream_socket_for_fd(__fd);
+            if (s == nullptr)
+                return -bigos::ENOTSOCK;
+            if (s->role != bigos::net::StreamSocket::Role::Bound || s->local_port == 0)
+                return -bigos::EINVAL;
+            bigos::net::Context *ctx = s->context;
+            bigos::net::TcpControlBlock *tcb = nullptr;
+            const bigos::net::Status st =
+                bigos::net::tcp_listen(ctx, ctx->config.local_ipv4, s->local_port, &tcb);
+            if (st != bigos::net::Status::Ok || tcb == nullptr)
+                return net_status_to_errno(st);
+            s->tcb = tcb;
+            s->tcb_generation = bigos::net::tcp_slot_generation(tcb);
+            s->role = bigos::net::StreamSocket::Role::Listening;
+            return 0;
+        }
+
+        // SYS_ACCEPT(fd, SockAddrIn* peer_out, uint32_t* addrlen_io): take one
+        // completed connection off a listening stream socket, publish it under a new
+        // fd, and write back the peer address when peer_out is non-null. Blocking fd
+        // blocks for a completed connection; nonblocking returns -EAGAIN.
+        static int64_t sys_accept(uint64_t __fd, uint64_t __peer, uint64_t __addrlen_io) noexcept {
+            constexpr uint32_t ACCEPT_MAX_ROUNDS = 64;
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            bigos::net::StreamSocket *s = stream_socket_for_fd(__fd);
+            if (s == nullptr)
+                return -bigos::ENOTSOCK;
+            if (s->role != bigos::net::StreamSocket::Role::Listening || s->tcb == nullptr)
+                return -bigos::EINVAL;
+            if (__peer != 0) {
+                if (__addrlen_io == 0 || !bigos::proc::validate_user_io_buffer(__peer, sizeof(SockAddrIn)))
+                    return -bigos::EFAULT;
+                uint32_t addrlen = 0;
+                if (!bigos::proc::validate_user_buffer(__addrlen_io, sizeof(uint32_t)) ||
+                    !bigos::proc::copy_current_user_buffer(__addrlen_io, &addrlen, sizeof(addrlen)))
+                    return -bigos::EFAULT;
+                if (addrlen != sizeof(SockAddrIn))
+                    return -bigos::EINVAL;
+            }
+
+            const bool nonblocking =
+                bigos::vfs::file_is_nonblocking(bigos::proc::file_for_fd_current((uint32_t)__fd));
+            bigos::net::Context *ctx = s->context;
+
+            bigos::net::TcpControlBlock *child = nullptr;
+            for (uint32_t round = 0;; round++) {
+                if (!bigos::net::tcp_connection_alive(s->tcb, s->tcb_generation))
+                    return -bigos::EINVAL;   // listener gone
+                const bigos::net::Status st = bigos::net::tcp_accept(ctx, s->tcb, &child);
+                if (st == bigos::net::Status::Ok && child != nullptr)
+                    break;
+                if (nonblocking)
+                    return -bigos::EAGAIN;
+                if (round >= ACCEPT_MAX_ROUNDS)
+                    return -bigos::EAGAIN;
+                stream_wait_round(ctx, s->tcb);
+            }
+
+            // Publish the accepted connection under a freshly allocated stream fd.
+            bigos::vfs::File *file = nullptr;
+            const bigos::vfs::Status cs =
+                bigos::net::stream_socket_create_accepted(ctx, child, s->local_port, &file);
+            if (cs != bigos::vfs::Status::Success) {
+                // Roll back: discard the accepted connection, no fd leaked.
+                (void)bigos::net::tcp_abort(ctx, child);
+                return vfs_status_to_syscall(cs);
+            }
+            const int64_t fd = bigos::proc::install_fd_current(file, false);
+            if (fd < 0) {
+                bigos::vfs::release(file);   // runs stream_close -> tcp_close/abort on the child
+                return fd;
+            }
+            if (__peer != 0) {
+                SockAddrIn peer = {};
+                peer.family = SOCKET_AF_INET;
+                peer.port = child->remote_port;
+                peer.addr = child->remote_ip.value;
+                if (!bigos::proc::copy_to_current_user_buffer(__peer, &peer, sizeof(peer))) {
+                    (void)bigos::proc::close_fd_current((uint32_t)fd);
+                    return -bigos::EFAULT;
+                }
+            }
+            return fd;
+        }
+
+        // SYS_GETSOCKOPT(fd, level, optname, optval, optlen_io): bounded. Only
+        // SOL_SOCKET/SO_ERROR is supported; it writes the connection's pending error
+        // code (0 == no error) to the user int and clears it. Any other level or
+        // optname returns -ENOPROTOOPT.
+        static int64_t sys_getsockopt(
+            uint64_t __fd, uint64_t __level, uint64_t __optname, uint64_t __optval, uint64_t __optlen_io) noexcept {
+            bigos::net::StreamSocket *s = stream_socket_for_fd(__fd);
+            if (s == nullptr)
+                return -bigos::ENOTSOCK;
+            if (__level != SOL_SOCKET || __optname != SO_ERROR)
+                return -bigos::ENOPROTOOPT;
+            if (__optlen_io == 0 || __optval == 0)
+                return -bigos::EFAULT;
+            uint32_t optlen = 0;
+            if (!bigos::proc::validate_user_buffer(__optlen_io, sizeof(uint32_t)) ||
+                !bigos::proc::copy_current_user_buffer(__optlen_io, &optlen, sizeof(optlen)))
+                return -bigos::EFAULT;
+            if (optlen < sizeof(int32_t))
+                return -bigos::EINVAL;
+            if (!bigos::proc::validate_user_io_buffer(__optval, sizeof(int32_t)))
+                return -bigos::EFAULT;
+
+            // Refresh the connecting socket's status so SO_ERROR reflects a
+            // just-completed or just-failed nonblocking connect.
+            if (s->role == bigos::net::StreamSocket::Role::Connecting) {
+                if (!bigos::net::tcp_connection_alive(s->tcb, s->tcb_generation)) {
+                    if (s->pending_error == 0)
+                        s->pending_error = bigos::ECONNREFUSED;
+                    s->role = bigos::net::StreamSocket::Role::Closed;
+                    s->tcb = nullptr;
+                } else if (bigos::net::tcp_is_established(s->tcb)) {
+                    s->role = bigos::net::StreamSocket::Role::Connected;
+                }
+            }
+            int32_t err = s->pending_error;
+            s->pending_error = 0;   // SO_ERROR reads-and-clears
+            const uint32_t out_len = sizeof(int32_t);
+            if (!bigos::proc::copy_to_current_user_buffer(__optval, &err, sizeof(err)))
+                return -bigos::EFAULT;
+            if (!bigos::proc::copy_to_current_user_buffer(__optlen_io, &out_len, sizeof(out_len)))
+                return -bigos::EFAULT;
+            return 0;
+        }
+
+        // SYS_SEND(fd, buf, len, flags): stream socket send. flags recognizes only
+        // MSG_NOSIGNAL; any other non-zero bit is -EINVAL. Data path == write.
+        static int64_t sys_send(uint64_t __fd, uint64_t __buf, uint64_t __len, uint64_t __flags) noexcept {
+            if (!bigos::sched::can_block())
+                return -bigos::EWOULDBLOCK;
+            bigos::vfs::File *file = bigos::proc::file_for_fd_current((uint32_t)__fd);
+            if (!bigos::net::is_stream_socket_file(file))
+                return -bigos::ENOTSOCK;
+            if ((__flags & ~MSG_NOSIGNAL) != 0)
+                return -bigos::EINVAL;   // strict: reject any unknown flag bit
+            if (__len == 0)
+                return 0;
+            if (__len > SYS_IO_MAX_LEN || !bigos::proc::validate_user_buffer(__buf, __len))
+                return -bigos::EFAULT;
+            uint8_t payload[SYS_IO_MAX_LEN];
+            if (!bigos::proc::copy_current_user_buffer(__buf, payload, __len))
+                return -bigos::EFAULT;
+            const bool suppress = (__flags & MSG_NOSIGNAL) != 0;
+            return bigos::net::stream_socket_send(file, payload, (size_t)__len, suppress);
         }
 
         // SYS_POLL(pollfd* fds, nfds, timeout_ms): bounded poll(2)-style
@@ -1258,6 +1566,22 @@ namespace sys {
                 break;
             case SYS_POLL:
                 result = __detail::sys_poll(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_CONNECT:
+                result = __detail::sys_connect(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_LISTEN:
+                result = __detail::sys_listen(__frame->rdi, __frame->rsi);
+                break;
+            case SYS_ACCEPT:
+                result = __detail::sys_accept(__frame->rdi, __frame->rsi, __frame->rdx);
+                break;
+            case SYS_GETSOCKOPT:
+                result = __detail::sys_getsockopt(
+                    __frame->rdi, __frame->rsi, __frame->rdx, __frame->r10, __frame->r8);
+                break;
+            case SYS_SEND:
+                result = __detail::sys_send(__frame->rdi, __frame->rsi, __frame->rdx, __frame->r10);
                 break;
             case SYS_EXECVE:
                 // execve replaces the current process image and enters the new

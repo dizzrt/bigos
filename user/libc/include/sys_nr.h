@@ -70,5 +70,10 @@
 #define SYS_DYN_MAP     59
 #define SYS_DYN_PROTECT 60
 #define SYS_POLL        61
+#define SYS_CONNECT     62
+#define SYS_LISTEN      63
+#define SYS_ACCEPT      64
+#define SYS_GETSOCKOPT  65
+#define SYS_SEND        66
 
 #endif /* _BIGOS_USER_SYS_H */

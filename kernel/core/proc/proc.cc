@@ -5431,6 +5431,37 @@ namespace bigos::proc {
                 ok = false;
         }
 
+        // 5. Unified broken-pipe delivery: raise_broken_pipe returns -EPIPE and by
+        // default sets SIGPIPE pending; SIG_IGN on SIGPIPE and an explicit suppress
+        // flag (MSG_NOSIGNAL) each suppress the pending bit while still returning
+        // -EPIPE. SIGPIPE's default action is Terminate.
+        if (ok) {
+            if (sig::default_action(sig::SIGPIPE) != sig::DefaultAction::Terminate)
+                ok = false;
+            static Process pipe_proc;
+            scrub_process(&pipe_proc);
+            sig::init_state(&pipe_proc);
+            if (sig::raise_broken_pipe(&pipe_proc, false) != -bigos::EPIPE)
+                ok = false;
+            if ((pipe_proc.sig_pending & sig::signo_bit(sig::SIGPIPE)) == 0)   // delivered by default
+                ok = false;
+            // MSG_NOSIGNAL-style suppress: -EPIPE only, no new pending bit.
+            sig::init_state(&pipe_proc);
+            if (sig::raise_broken_pipe(&pipe_proc, true) != -bigos::EPIPE)
+                ok = false;
+            if ((pipe_proc.sig_pending & sig::signo_bit(sig::SIGPIPE)) != 0)   // suppressed
+                ok = false;
+            // SIG_IGN on SIGPIPE also suppresses delivery.
+            sig::init_state(&pipe_proc);
+            sig::SigDisposition ign{sig::SigAction::Ignore, 0};
+            if (sig::set_disposition(&pipe_proc, sig::SIGPIPE, &ign, nullptr) != 0)
+                ok = false;
+            if (sig::raise_broken_pipe(&pipe_proc, false) != -bigos::EPIPE)
+                ok = false;
+            if ((pipe_proc.sig_pending & sig::signo_bit(sig::SIGPIPE)) != 0)   // ignored -> no pending
+                ok = false;
+        }
+
         // Teardown the created process through the reference-counted path.
         set_current_process_slot(nullptr);
         if (proc.table_published)

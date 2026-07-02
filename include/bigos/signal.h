@@ -22,6 +22,7 @@ namespace bigos::signal {
     constexpr int SIGUSR1 = 10;   // default terminate, user-defined
     constexpr int SIGSEGV = 11;   // default terminate
     constexpr int SIGUSR2 = 12;   // default terminate, user-defined
+    constexpr int SIGPIPE = 13;   // default terminate; broken-pipe write (pipe / stream socket)
     constexpr int SIGTERM = 15;   // default terminate
     constexpr int SIGCHLD = 17;   // default ignore (child state change)
 
@@ -119,6 +120,16 @@ namespace bigos::signal {
     // success or -EINVAL for an out-of-range signal number. No allocation, no
     // blocking.
     int64_t kill(bigos::proc::Process *__target, int __signo) noexcept;
+
+    // Unified broken-pipe result for the pipe write-closed-end and stream socket
+    // write-closed-peer paths. It returns -EPIPE and, unless suppressed, delivers
+    // SIGPIPE (default Terminate) to the current process by setting the pending
+    // bit through the existing kill() path (actual termination/handler dispatch
+    // happens at the return-to-user boundary, never in IRQ context). Suppression
+    // is decided in this single place: __suppress is true for MSG_NOSIGNAL, and
+    // an existing SIG_IGN disposition on SIGPIPE also suppresses delivery. Returns
+    // -EPIPE (as int64_t) so callers can return it directly.
+    int64_t raise_broken_pipe(bigos::proc::Process *__process, bool __suppress) noexcept;
 
     // True when __process has at least one pending signal that is currently
     // deliverable (unblocked, or unblockable like SIGKILL). Cheap O(1) gate used

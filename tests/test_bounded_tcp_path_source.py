@@ -180,8 +180,16 @@ def test_tcp_smoke_and_switch_default_off() -> None:
     assert 'create_kernel_thread(&bigos::net::tcp_path_smoke_entry' in kernel
 
 
-def test_change_adds_no_syscall_or_socket_abi() -> None:
+def test_stream_socket_change_supersedes_prior_no_socket_abi_non_goal() -> None:
     syscall_h = read_source('include/bigos/syscall.h')
-    # TCP only appears in non-goal comments, never as a new SYS_* or socket ABI.
-    for token in ('SYS_TCP', 'SYS_CONNECT', 'SYS_LISTEN', 'SYS_ACCEPT'):
-        assert token not in syscall_h, token
+    # The original bounded TCP protocol path exposed no user socket ABI. The later
+    # bounded stream-socket-interface change deliberately adds the minimal TCP
+    # socket ABI while still avoiding a broad SYS_TCP/socketcall surface.
+    assert 'SYS_TCP' not in syscall_h
+    assert 'SYS_CONNECT = 62' in syscall_h
+    assert 'SYS_LISTEN = 63' in syscall_h
+    assert 'SYS_ACCEPT = 64' in syscall_h
+    assert 'SYS_GETSOCKOPT = 65' in syscall_h
+    assert 'SYS_SEND = 66' in syscall_h
+    assert 'SOCKET_SOCK_STREAM = 1' in syscall_h
+    assert 'SOCKET_IPPROTO_TCP = 6' in syscall_h

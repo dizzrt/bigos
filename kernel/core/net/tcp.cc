@@ -33,6 +33,10 @@ namespace {
 
     uint32_t g_isn_counter = 1;
 
+    // Monotonic TCB slot generation, bumped on every alloc_tcb so a stream socket
+    // can detect that its TCB slot was recycled/reused (see tcp_connection_alive).
+    uint32_t g_tcb_generation = 0;
+
     uint16_t read_be16(const uint8_t *__p) noexcept {
         return (uint16_t)(((uint16_t)__p[0] << 8) | __p[1]);
     }
@@ -118,11 +122,60 @@ namespace {
         return __rto;
     }
 
-    // Recycle a TCB: release its bounded buffers/reorder slots by zeroing the whole
-    // block so the slot can be reused deterministically.
-    void recycle_tcb(bigos::net::TcpControlBlock *__tcb) noexcept {
+    // Wake a connection's readiness wait queue (data arrived / Established / a
+    // listener gained an acceptable connection / reset). Ordinary context only,
+    // matching the rest of the protocol path.
+    void wake_connection(bigos::net::TcpControlBlock *__tcb) noexcept {
         if (__tcb != nullptr)
-            *__tcb = {};
+            bigos::sched::wake_all(&__tcb->wait);
+    }
+
+    // Remove a child TCB from whichever of its listener's bounded queues holds it,
+    // compacting the queue in place. Safe to call when the child is on neither.
+    void remove_child_from_listener(
+        bigos::net::TcpControlBlock *__listener, bigos::net::TcpControlBlock *__child) noexcept {
+        if (__listener == nullptr || __child == nullptr)
+            return;
+        uint32_t w = 0;
+        for (uint32_t r = 0; r < __listener->syn_queue_count; r++) {
+            if (__listener->syn_queue[r] != __child)
+                __listener->syn_queue[w++] = __listener->syn_queue[r];
+        }
+        __listener->syn_queue_count = w;
+        w = 0;
+        for (uint32_t r = 0; r < __listener->accept_queue_count; r++) {
+            if (__listener->accept_queue[r] != __child)
+                __listener->accept_queue[w++] = __listener->accept_queue[r];
+        }
+        __listener->accept_queue_count = w;
+    }
+
+    // Recycle a TCB: unlink it from any passive-open association, release its
+    // bounded buffers/reorder slots by zeroing the whole block, so the slot can be
+    // reused deterministically. A child unlinks from its listener's queues; a
+    // listener recycles any still-queued (un-accepted) children so they do not
+    // linger unreachable in the bounded pool.
+    void recycle_tcb(bigos::net::TcpControlBlock *__tcb) noexcept {
+        if (__tcb == nullptr)
+            return;
+        if (__tcb->is_child && __tcb->listener != nullptr)
+            remove_child_from_listener(__tcb->listener, __tcb);
+        // Snapshot and detach queued children before zeroing so recycling them
+        // does not re-scan this (about to be cleared) listener's queues.
+        bigos::net::TcpControlBlock *pending[bigos::net::STREAM_SYN_QUEUE_CAPACITY +
+                                             bigos::net::STREAM_ACCEPT_QUEUE_CAPACITY];
+        uint32_t pending_count = 0;
+        for (uint32_t i = 0; i < __tcb->syn_queue_count; i++)
+            pending[pending_count++] = __tcb->syn_queue[i];
+        for (uint32_t i = 0; i < __tcb->accept_queue_count; i++)
+            pending[pending_count++] = __tcb->accept_queue[i];
+        for (uint32_t i = 0; i < pending_count; i++) {
+            if (pending[i] != nullptr) {
+                pending[i]->listener = nullptr;
+                *pending[i] = {};
+            }
+        }
+        *__tcb = {};
     }
 
     bigos::net::TcpControlBlock *find_connection(bigos::net::Context *__ctx, bigos::net::Ipv4Address __local_ip,
@@ -150,13 +203,15 @@ namespace {
 
     // Allocate a free TCB slot. No free slot is a deterministic TableFull; the
     // caller counts tcp_dropped. Never overwrites an active connection (including
-    // TIME_WAIT connections still occupying a slot).
+    // TIME_WAIT connections still occupying a slot). Stamps a fresh monotonic
+    // generation so the stream socket layer can detect a recycled/reused slot.
     bigos::net::TcpControlBlock *alloc_tcb(bigos::net::Context *__ctx) noexcept {
         for (uint32_t i = 0; i < bigos::net::TCP_CONNECTION_CAPACITY; i++) {
             if (!g_tcbs[i].active) {
                 recycle_tcb(&g_tcbs[i]);
                 g_tcbs[i].active = true;
                 g_tcbs[i].owner = __ctx;
+                g_tcbs[i].generation = ++g_tcb_generation;
                 return &g_tcbs[i];
             }
         }
@@ -391,10 +446,36 @@ namespace {
         return isn;
     }
 
-    // Reset a connection deterministically: recycle its slot and count the reset.
+    // Reset a connection deterministically: wake any readiness waiters (so a
+    // blocked reader/writer/accepter observes the error), then recycle its slot
+    // and count the reset. A reset child also nudges its listener's wait queue.
     void reset_connection(bigos::net::Context *__ctx, bigos::net::TcpControlBlock *__tcb) noexcept {
         __ctx->diagnostics.tcp_resets++;
+        if (__tcb->is_child && __tcb->listener != nullptr)
+            wake_connection(__tcb->listener);
+        wake_connection(__tcb);
         recycle_tcb(__tcb);
+    }
+
+    // Promote a SynReceived child to Established: move it from the listener's
+    // half-open (SYN) queue to the full (accept) queue and wake the listener's
+    // readiness wait queue so a blocked accept observes the new connection. When
+    // the accept queue is full the completed connection is dropped deterministically
+    // (RST-free discard, counted as tcp_dropped) rather than growing unboundedly.
+    // Returns true when the child was promoted, false when it was dropped.
+    bool promote_child_to_accept(bigos::net::Context *__ctx, bigos::net::TcpControlBlock *__child) noexcept {
+        bigos::net::TcpControlBlock *listener = __child->listener;
+        if (listener == nullptr)
+            return true;   // no listener association; nothing to enqueue
+        remove_child_from_listener(listener, __child);
+        if (listener->accept_queue_count >= bigos::net::STREAM_ACCEPT_QUEUE_CAPACITY) {
+            __ctx->diagnostics.tcp_dropped++;
+            recycle_tcb(__child);
+            return false;
+        }
+        listener->accept_queue[listener->accept_queue_count++] = __child;
+        wake_connection(listener);
+        return true;
     }
 
     void enter_time_wait(bigos::net::TcpControlBlock *__tcb) noexcept {
@@ -413,6 +494,76 @@ namespace net {
         for (uint32_t i = 0; i < TCP_CONNECTION_CAPACITY; i++)
             g_tcbs[i] = {};
         g_isn_counter = 1;
+        g_tcb_generation = 0;
+    }
+
+    uint32_t tcp_slot_generation(const TcpControlBlock *__tcb) noexcept {
+        return __tcb == nullptr ? 0 : __tcb->generation;
+    }
+
+    bool tcp_connection_alive(const TcpControlBlock *__tcb, uint32_t __generation) noexcept {
+        // The recorded generation still matching an active slot means the slot was
+        // not recycled (a recycled slot is either inactive or holds a newer
+        // generation). generation 0 is never a live association.
+        return __tcb != nullptr && __tcb->active && __generation != 0 && __tcb->generation == __generation;
+    }
+
+    sched::WaitQueue *tcp_wait_queue(TcpControlBlock *__tcb) noexcept {
+        return __tcb == nullptr ? nullptr : &__tcb->wait;
+    }
+
+    bool tcp_is_established(const TcpControlBlock *__tcb) noexcept {
+        return __tcb != nullptr && __tcb->state == TcpState::Established;
+    }
+
+    bool tcp_peer_closed(const TcpControlBlock *__tcb) noexcept {
+        // Peer FIN has been consumed (CloseWait or later) and all in-order data has
+        // been drained -> the reader should observe EOF.
+        if (__tcb == nullptr)
+            return false;
+        if (__tcb->recv_count != 0)
+            return false;
+        return __tcb->fin_received || __tcb->state == TcpState::CloseWait ||
+               __tcb->state == TcpState::LastAck || __tcb->state == TcpState::Closing ||
+               __tcb->state == TcpState::TimeWait;
+    }
+
+    bool tcp_write_closed(const TcpControlBlock *__tcb) noexcept {
+        // The local write direction is closed once a FIN was sent or the connection
+        // is past Established on the local-close side.
+        if (__tcb == nullptr)
+            return true;
+        if (__tcb->fin_sent)
+            return true;
+        switch (__tcb->state) {
+            case TcpState::FinWait1:
+            case TcpState::FinWait2:
+            case TcpState::Closing:
+            case TcpState::LastAck:
+            case TcpState::TimeWait:
+            case TcpState::Closed:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool tcp_send_room(const TcpControlBlock *__tcb) noexcept {
+        if (__tcb == nullptr || __tcb->state != TcpState::Established)
+            return false;
+        const uint32_t inflight = __tcb->snd_nxt - __tcb->snd_una;
+        if (inflight >= __tcb->snd_wnd)
+            return false;
+        for (uint32_t i = 0; i < TCP_RETX_QUEUE_CAPACITY; i++) {
+            if (!__tcb->retx[i].in_use)
+                return true;
+        }
+        return false;
+    }
+
+    bool tcp_accept_ready(const TcpControlBlock *__listener) noexcept {
+        return __listener != nullptr && __listener->state == TcpState::Listen &&
+               __listener->accept_queue_count > 0;
     }
 
     Status tcp_open(Context *__ctx, Ipv4Address __local_ip, uint16_t __local_port, Ipv4Address __remote_ip,
@@ -464,6 +615,30 @@ namespace net {
         tcb->rcv_wnd = TCP_RECV_BUFFER;
         tcb->rto = TCP_RTO_MIN;
         *__out = tcb;
+        return Status::Ok;
+    }
+
+    Status tcp_accept(Context *__ctx, TcpControlBlock *__listener, TcpControlBlock **__out) noexcept {
+        if (__ctx == nullptr || __listener == nullptr || __out == nullptr)
+            return Status::InvalidArgument;
+        if (!ordinary_context())
+            return Status::UnsupportedContext;
+        *__out = nullptr;
+        if (__listener->state != TcpState::Listen)
+            return Status::InvalidArgument;
+        if (__listener->accept_queue_count == 0)
+            return Status::NoData;
+        // FIFO: take the front of the full (accept) queue and compact.
+        TcpControlBlock *child = __listener->accept_queue[0];
+        for (uint32_t i = 1; i < __listener->accept_queue_count; i++)
+            __listener->accept_queue[i - 1] = __listener->accept_queue[i];
+        __listener->accept_queue_count--;
+        __listener->accept_queue[__listener->accept_queue_count] = nullptr;
+        // The child leaves the listener's association: it is now an independent
+        // accepted connection owned by whatever fd the caller installs.
+        child->listener = nullptr;
+        child->is_child = false;
+        *__out = child;
         return Status::Ok;
     }
 
@@ -557,6 +732,20 @@ namespace net {
         return Status::NotReady;
     }
 
+    Status tcp_abort(Context *__ctx, TcpControlBlock *__tcb) noexcept {
+        if (__ctx == nullptr || __tcb == nullptr)
+            return Status::InvalidArgument;
+        if (!ordinary_context())
+            return Status::UnsupportedContext;
+        // Wake any readiness waiter so it observes the connection going away, then
+        // recycle the slot (queue-aware recycle unlinks children / listener queues).
+        if (__tcb->is_child && __tcb->listener != nullptr)
+            wake_connection(__tcb->listener);
+        wake_connection(__tcb);
+        recycle_tcb(__tcb);
+        return Status::Ok;
+    }
+
     Status handle_tcp(Context *__ctx, Ipv4Address __source, Ipv4Address __dest, const uint8_t *__segment,
         uint16_t __length) noexcept {
         if (__ctx == nullptr || __segment == nullptr || __length < TCP_HEADER_LEN) {
@@ -592,19 +781,38 @@ namespace net {
                     __ctx->diagnostics.tcp_dropped++;
                     return Status::NotBound;
                 }
-                // Passive open: bind the LISTEN TCB to this peer and reply SYN,ACK.
-                listener->remote_ip = __source;
-                listener->remote_port = src_port;
-                listener->local_ip = __dest;
-                listener->rcv_nxt = seq + 1;   // consume peer SYN
+                // Half-open queue full: drop the SYN deterministically without a
+                // SYN,ACK. The listener stays in Listen for later capacity.
+                if (listener->syn_queue_count >= STREAM_SYN_QUEUE_CAPACITY) {
+                    __ctx->diagnostics.tcp_dropped++;
+                    return Status::QueueFull;
+                }
+                // Passive open (Linux/BSD dual-queue): derive a child TCB bound to
+                // this peer four-tuple, reply SYN,ACK, register it on the listener's
+                // half-open (SYN) queue. The listener itself stays in Listen.
+                TcpControlBlock *child = alloc_tcb(__ctx);
+                if (child == nullptr) {
+                    __ctx->diagnostics.tcp_dropped++;
+                    return Status::TableFull;
+                }
+                child->is_child = true;
+                child->listener = listener;
+                child->remote_ip = __source;
+                child->remote_port = src_port;
+                child->local_ip = __dest;
+                child->local_port = dst_port;
+                child->rcv_nxt = seq + 1;   // consume peer SYN
                 const uint32_t isn = next_isn();
-                listener->snd_una = isn;
-                listener->snd_nxt = isn;
-                listener->snd_wnd = window;
-                listener->state = TcpState::SynReceived;
-                const Status status = emit_new(__ctx, listener, TCP_SYN | TCP_ACK, nullptr, 0);
+                child->snd_una = isn;
+                child->snd_nxt = isn;
+                child->snd_wnd = window;
+                child->rcv_wnd = TCP_RECV_BUFFER;
+                child->rto = TCP_RTO_MIN;
+                child->state = TcpState::SynReceived;
+                listener->syn_queue[listener->syn_queue_count++] = child;
+                const Status status = emit_new(__ctx, child, TCP_SYN | TCP_ACK, nullptr, 0);
                 if (status != Status::Ok) {
-                    recycle_tcb(listener);
+                    recycle_tcb(child);
                     return status;
                 }
                 return Status::Ok;
@@ -630,7 +838,9 @@ namespace net {
                 process_ack(tcb, ack, window);
                 tcb->state = TcpState::Established;
                 __ctx->diagnostics.tcp_connections_opened++;
-                return emit_ack(__ctx, tcb);
+                const Status ack_status = emit_ack(__ctx, tcb);
+                wake_connection(tcb);   // active-open connect completed
+                return ack_status;
             }
             case TcpState::SynReceived: {
                 // Expect the final ACK of the handshake.
@@ -641,6 +851,13 @@ namespace net {
                 process_ack(tcb, ack, window);
                 tcb->state = TcpState::Established;
                 __ctx->diagnostics.tcp_connections_opened++;
+                // A passive-open child moves from the half-open queue to the full
+                // (accept) queue; the promote helper wakes the listener. A dropped
+                // (accept queue full) child has already been recycled here.
+                if (tcb->is_child)
+                    (void)promote_child_to_accept(__ctx, tcb);
+                else
+                    wake_connection(tcb);
                 return Status::Ok;
             }
             case TcpState::Established: {
@@ -655,8 +872,13 @@ namespace net {
                     tcb->state = TcpState::CloseWait;
                     need_ack = true;
                 }
-                if (need_ack)
-                    return emit_ack(__ctx, tcb);
+                if (need_ack) {
+                    const Status ack_status = emit_ack(__ctx, tcb);
+                    // Wake readers: new in-order data is available, or the peer FIN
+                    // makes read return EOF.
+                    wake_connection(tcb);
+                    return ack_status;
+                }
                 return Status::Ok;
             }
             case TcpState::FinWait1: {
@@ -845,15 +1067,26 @@ namespace {
         const uint16_t client_port = 40000;
 
         // Phase A: three-way handshake (passive + active). The synchronous loopback
-        // completes both sides to Established within tcp_open.
-        TcpControlBlock *server = nullptr;
-        if (tcp_listen(&g_smoke_ctx, lip, listen_port, &server) != Status::Ok || server == nullptr) {
+        // completes both sides to Established within tcp_open. With the Linux/BSD
+        // dual-queue passive open the listener stays in Listen and the completed
+        // child connection lands on its accept queue; tcp_accept takes it.
+        TcpControlBlock *listener = nullptr;
+        if (tcp_listen(&g_smoke_ctx, lip, listen_port, &listener) != Status::Ok || listener == nullptr) {
             smoke_fail("listen");
             return false;
         }
         TcpControlBlock *client = nullptr;
         if (tcp_open(&g_smoke_ctx, lip, client_port, lip, listen_port, &client) != Status::Ok || client == nullptr) {
             smoke_fail("open");
+            return false;
+        }
+        if (listener->state != TcpState::Listen) {
+            smoke_fail("listener-stays-listen");
+            return false;
+        }
+        TcpControlBlock *server = nullptr;
+        if (tcp_accept(&g_smoke_ctx, listener, &server) != Status::Ok || server == nullptr) {
+            smoke_fail("accept");
             return false;
         }
         if (client->state != TcpState::Established || server->state != TcpState::Established) {
@@ -916,6 +1149,10 @@ namespace {
                 g_tcbs[i].time_wait_deadline_tick = bigos::timer::ticks();
         }
         (void)tcp_pump(&g_smoke_ctx);
+        // The listener itself stays in Listen (dual-queue model); recycle it so the
+        // pool is empty for the raw-injection phases below.
+        recycle_tcb(listener);
+        listener = nullptr;
         if (active_slots() != 0) {
             smoke_fail("timewait-recycle");
             return false;
@@ -928,8 +1165,10 @@ namespace {
         tcp_reset_state();
         server = nullptr;
         client = nullptr;
-        if (tcp_listen(&g_smoke_ctx, lip, listen_port, &server) != Status::Ok ||
+        listener = nullptr;
+        if (tcp_listen(&g_smoke_ctx, lip, listen_port, &listener) != Status::Ok ||
             tcp_open(&g_smoke_ctx, lip, client_port, lip, listen_port, &client) != Status::Ok ||
+            tcp_accept(&g_smoke_ctx, listener, &server) != Status::Ok || server == nullptr ||
             server->state != TcpState::Established) {
             smoke_fail("reorder-setup");
             return false;
@@ -971,13 +1210,20 @@ namespace {
         tcp_reset_state();
         server = nullptr;
         client = nullptr;
-        if (tcp_listen(&g_smoke_ctx, lip, listen_port, &server) != Status::Ok ||
+        listener = nullptr;
+        if (tcp_listen(&g_smoke_ctx, lip, listen_port, &listener) != Status::Ok ||
             tcp_open(&g_smoke_ctx, lip, client_port, lip, listen_port, &client) != Status::Ok ||
             client->state != TcpState::Established) {
             smoke_fail("retx-setup");
             return false;
         }
-        recycle_tcb(server);   // drop the peer so nothing ACKs the client's data
+        // Take and drop the server-side child plus the listener so nothing ACKs the
+        // client's data segment (it must stay unacked to drive the retransmit path).
+        (void)tcp_accept(&g_smoke_ctx, listener, &server);
+        if (server != nullptr)
+            recycle_tcb(server);
+        recycle_tcb(listener);
+        listener = nullptr;
         const uint8_t payload[] = {'r', 't', 'x'};
         sent = 0;
         (void)tcp_send(&g_smoke_ctx, client, payload, sizeof(payload), &sent);

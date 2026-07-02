@@ -253,6 +253,10 @@ if has_config("tcp_path_smoke") then
     add_defines("BIGOS_TCP_PATH_SMOKE")
 end
 
+if has_config("stream_socket_smoke") then
+    add_defines("BIGOS_STREAM_SOCKET_SMOKE")
+end
+
 if is_mode("debug") then
     set_symbols("debug")
 elseif is_mode("release") then

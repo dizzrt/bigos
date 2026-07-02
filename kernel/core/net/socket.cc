@@ -1,7 +1,12 @@
 #include <bigos/net/socket.h>
 
+#include <bigos/errno.h>
 #include <bigos/memory.h>
-#ifdef BIGOS_SOCKET_SMOKE
+#include <bigos/net/tcp.h>
+#include <bigos/proc.h>
+#include <bigos/sched.h>
+#include <bigos/signal.h>
+#if defined(BIGOS_SOCKET_SMOKE) || defined(BIGOS_STREAM_SOCKET_SMOKE)
 #include <bigos/device.h>
 #include <bigos/io.h>
 #include <string.h>
@@ -84,6 +89,243 @@ namespace {
 
     const bigos::vfs::FileOperations SOCKET_OPS = {
         &socket_read, &socket_close, &socket_write, &socket_lseek, nullptr, nullptr, &socket_poll, &socket_poll_wait};
+
+    // ---- Stream (TCP) socket backend ---------------------------------------
+    //
+    // A stream socket's private_data is a StreamSocket. read/write route to the
+    // kernel-internal tcp_receive/tcp_send once a connection is associated, and the
+    // would-block/EOF/error decisions are shared with poll (stream_poll below).
+    // Blocking is bounded and ordinary-context: it advances the protocol with
+    // net::pump + tcp_pump and waits on the connection-level wait queue.
+
+    constexpr uint32_t STREAM_RECV_PUMP_FRAMES = 4;   // bounded frames per pump round
+
+    // True when the socket's associated TCB was recycled/reset out from under it
+    // (connection gone). A Connecting/Connected socket whose TCB is no longer alive
+    // has been reset.
+    bool stream_tcb_alive(const bigos::net::StreamSocket *__s) noexcept {
+        return __s->tcb != nullptr && bigos::net::tcp_connection_alive(__s->tcb, __s->tcb_generation);
+    }
+
+    // Advance the protocol path once (RX + retransmit/timeout). Ordinary context.
+    void stream_pump(bigos::net::StreamSocket *__s) noexcept {
+        if (__s->context == nullptr)
+            return;
+        (void)bigos::net::pump(__s->context, STREAM_RECV_PUMP_FRAMES);
+        (void)bigos::net::tcp_pump(__s->context);
+    }
+
+    bigos::vfs::Status stream_read(
+        bigos::vfs::File *__file, void *__dst, size_t __len, size_t *__bytes_read) noexcept {
+        constexpr uint32_t READ_MAX_ROUNDS = 16;
+        if (__bytes_read != nullptr)
+            *__bytes_read = 0;
+        if (__file == nullptr || __file->private_data == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        bigos::net::StreamSocket *s = (bigos::net::StreamSocket *)__file->private_data;
+        if (__len == 0)
+            return bigos::vfs::Status::Success;
+        if (__dst == nullptr)
+            return bigos::vfs::Status::InvalidArgument;
+        if (!bigos::sched::can_block())
+            return bigos::vfs::Status::WouldBlock;
+        if (s->role != bigos::net::StreamSocket::Role::Connected || s->tcb == nullptr)
+            return bigos::vfs::Status::NotConnected;
+
+        const bool nonblocking = bigos::vfs::file_is_nonblocking(__file);
+        const uint32_t rounds = nonblocking ? 1u : READ_MAX_ROUNDS;
+        for (uint32_t round = 0; round < rounds; round++) {
+            if (!stream_tcb_alive(s))
+                return bigos::vfs::Status::ConnectionReset;
+            uint32_t got = 0;
+            const bigos::net::Status st =
+                bigos::net::tcp_receive(s->tcb, (uint8_t *)__dst, (uint32_t)__len, &got);
+            if (st == bigos::net::Status::Ok && got != 0) {
+                if (__bytes_read != nullptr)
+                    *__bytes_read = got;
+                return bigos::vfs::Status::Success;
+            }
+            // No in-order data. If the peer has closed (FIN consumed) and the buffer
+            // is drained, that is EOF (read returns 0 with Success).
+            if (bigos::net::tcp_peer_closed(s->tcb)) {
+                if (__bytes_read != nullptr)
+                    *__bytes_read = 0;
+                return bigos::vfs::Status::Success;   // EOF
+            }
+            if (nonblocking)
+                return bigos::vfs::Status::WouldBlock;
+            // Bounded ordinary-context block: advance then wait on the connection
+            // wait queue for data / EOF / reset, with a bounded timeout.
+            stream_pump(s);
+            if (!stream_tcb_alive(s))
+                return bigos::vfs::Status::ConnectionReset;
+            if (s->tcb->recv_count == 0 && !bigos::net::tcp_peer_closed(s->tcb)) {
+                bigos::sched::WaitQueue *wq = bigos::net::tcp_wait_queue(s->tcb);
+                if (wq != nullptr)
+                    (void)bigos::sched::wait_queue_wait_until(wq, nullptr, nullptr, 2);
+                else
+                    bigos::sched::yield();
+            }
+        }
+        return bigos::vfs::Status::WouldBlock;
+    }
+
+    bigos::vfs::Status stream_write_flags(
+        bigos::vfs::File *__file, const void *__src, size_t __len, size_t *__bytes_written, bool __suppress_sigpipe) noexcept {
+        constexpr uint32_t WRITE_MAX_ROUNDS = 16;
+        if (__bytes_written != nullptr)
+            *__bytes_written = 0;
+        if (__file == nullptr || __file->private_data == nullptr)
+            return bigos::vfs::Status::BadFileDescriptor;
+        bigos::net::StreamSocket *s = (bigos::net::StreamSocket *)__file->private_data;
+        if (__len == 0)
+            return bigos::vfs::Status::Success;
+        if (__src == nullptr)
+            return bigos::vfs::Status::InvalidArgument;
+        if (!bigos::sched::can_block())
+            return bigos::vfs::Status::WouldBlock;
+        if (s->role != bigos::net::StreamSocket::Role::Connected || s->tcb == nullptr)
+            return bigos::vfs::Status::NotConnected;
+
+        const bool nonblocking = bigos::vfs::file_is_nonblocking(__file);
+        const uint32_t rounds = nonblocking ? 1u : WRITE_MAX_ROUNDS;
+        const uint8_t *in = (const uint8_t *)__src;
+        size_t done = 0;
+        for (uint32_t round = 0; round < rounds && done < __len; round++) {
+            if (!stream_tcb_alive(s)) {
+                // Connection reset. If bytes were already accepted, report them;
+                // otherwise this is a broken-pipe write.
+                if (done > 0)
+                    break;
+                return (bigos::vfs::Status)bigos::signal::raise_broken_pipe(
+                    bigos::proc::current_process(), __suppress_sigpipe);
+            }
+            // A local FIN already sent means the write direction is closed: broken
+            // pipe (BrokenPipe maps to -EPIPE) with SIGPIPE per the unified helper.
+            if (bigos::net::tcp_write_closed(s->tcb)) {
+                if (done > 0)
+                    break;
+                return (bigos::vfs::Status)bigos::signal::raise_broken_pipe(
+                    bigos::proc::current_process(), __suppress_sigpipe);
+            }
+            uint32_t sent = 0;
+            const bigos::net::Status st =
+                bigos::net::tcp_send(s->context, s->tcb, in + done, (uint32_t)(__len - done), &sent);
+            if (st != bigos::net::Status::Ok && st != bigos::net::Status::QueueFull &&
+                st != bigos::net::Status::NotReady) {
+                if (done > 0)
+                    break;
+                return bigos::vfs::Status::ConnectionReset;
+            }
+            done += sent;
+            if (done >= __len)
+                break;
+            // Send path full (window / retransmit queue). Nonblocking returns what
+            // was accepted (or EAGAIN if nothing yet); blocking advances and waits.
+            if (nonblocking)
+                break;
+            stream_pump(s);
+            if (!stream_tcb_alive(s)) {
+                if (done > 0)
+                    break;
+                return (bigos::vfs::Status)bigos::signal::raise_broken_pipe(
+                    bigos::proc::current_process(), __suppress_sigpipe);
+            }
+            bigos::sched::WaitQueue *wq = bigos::net::tcp_wait_queue(s->tcb);
+            if (wq != nullptr)
+                (void)bigos::sched::wait_queue_wait_until(wq, nullptr, nullptr, 2);
+            else
+                bigos::sched::yield();
+        }
+        if (done == 0 && nonblocking)
+            return bigos::vfs::Status::WouldBlock;
+        if (__bytes_written != nullptr)
+            *__bytes_written = done;
+        return bigos::vfs::Status::Success;
+    }
+
+    bigos::vfs::Status stream_write(
+        bigos::vfs::File *__file, const void *__src, size_t __len, size_t *__bytes_written) noexcept {
+        // Ordinary write == send with flags==0 (SIGPIPE not suppressed).
+        return stream_write_flags(__file, __src, __len, __bytes_written, false);
+    }
+
+    bigos::vfs::Status stream_lseek(bigos::vfs::File *, int64_t, int, uint64_t *) noexcept {
+        return bigos::vfs::Status::NotSeekable;
+    }
+
+    // Level-triggered readiness snapshot shared with the would-block decisions in
+    // stream_read/stream_write: readable == in-order data / EOF / (listener) a
+    // completed connection is ready to accept; writable == Established with send
+    // room; error == reset / unusable.
+    uint32_t stream_poll(bigos::vfs::File *__file) noexcept {
+        if (__file == nullptr || __file->private_data == nullptr)
+            return bigos::vfs::READY_ERROR;
+        bigos::net::StreamSocket *s = (bigos::net::StreamSocket *)__file->private_data;
+        switch (s->role) {
+            case bigos::net::StreamSocket::Role::Listening: {
+                if (s->tcb == nullptr || !stream_tcb_alive(s))
+                    return bigos::vfs::READY_ERROR;
+                return bigos::net::tcp_accept_ready(s->tcb) ? bigos::vfs::READY_READABLE : 0u;
+            }
+            case bigos::net::StreamSocket::Role::Connecting: {
+                if (!stream_tcb_alive(s))
+                    return bigos::vfs::READY_ERROR;
+                // Connecting becomes writable once Established; readable/EOF too.
+                if (bigos::net::tcp_is_established(s->tcb))
+                    return bigos::vfs::READY_WRITABLE;
+                return 0u;
+            }
+            case bigos::net::StreamSocket::Role::Connected: {
+                if (!stream_tcb_alive(s))
+                    return bigos::vfs::READY_ERROR;
+                uint32_t ready = 0;
+                if (s->tcb->recv_count > 0 || bigos::net::tcp_peer_closed(s->tcb))
+                    ready |= bigos::vfs::READY_READABLE;
+                if (bigos::net::tcp_is_established(s->tcb) && bigos::net::tcp_send_room(s->tcb))
+                    ready |= bigos::vfs::READY_WRITABLE;
+                return ready;
+            }
+            default:
+                // Unbound / Bound / Closed: no connection to be ready on.
+                return bigos::vfs::READY_ERROR;
+        }
+    }
+
+    uint32_t stream_poll_wait(
+        bigos::vfs::File *__file, uint32_t, bigos::sched::WaitQueue **__out, uint32_t __max) noexcept {
+        if (__file == nullptr || __file->private_data == nullptr || __out == nullptr || __max == 0)
+            return 0;
+        bigos::net::StreamSocket *s = (bigos::net::StreamSocket *)__file->private_data;
+        if (s->tcb == nullptr || !stream_tcb_alive(s))
+            return 0;   // no queue -> poll_file already reports it ready/error
+        bigos::sched::WaitQueue *wq = bigos::net::tcp_wait_queue(s->tcb);
+        if (wq == nullptr)
+            return 0;
+        __out[0] = wq;
+        return 1;
+    }
+
+    // Recycles the connection (if any) and frees the StreamSocket on the last
+    // reference. vfs::release guarantees this runs exactly once on final close.
+    void stream_close(bigos::vfs::File *__file) noexcept {
+        if (__file == nullptr || __file->private_data == nullptr)
+            return;
+        bigos::net::StreamSocket *s = (bigos::net::StreamSocket *)__file->private_data;
+        if (s->tcb != nullptr && s->context != nullptr && stream_tcb_alive(s)) {
+            // An Established connection gets an orderly FIN; anything else (LISTEN,
+            // Connecting, half-open) is aborted/recycled.
+            if (s->role == bigos::net::StreamSocket::Role::Connected && bigos::net::tcp_is_established(s->tcb))
+                (void)bigos::net::tcp_close(s->context, s->tcb);
+            else
+                (void)bigos::net::tcp_abort(s->context, s->tcb);
+        }
+        bigos::free(s);
+        __file->private_data = nullptr;
+    }
+
+    const bigos::vfs::FileOperations STREAM_SOCKET_OPS = {
+        &stream_read, &stream_close, &stream_write, &stream_lseek, nullptr, nullptr, &stream_poll, &stream_poll_wait};
 }   // namespace
 
 NAMESPACE_BIGOS_BEG
@@ -135,6 +377,78 @@ namespace net {
         if (!is_socket_file(__file))
             return nullptr;
         return (Socket *)__file->private_data;
+    }
+
+    // Shared stream socket File initializer for a StreamSocket in a given role.
+    static vfs::Status stream_socket_publish(Context *__context, TcpControlBlock *__tcb, uint16_t __local_port,
+        StreamSocket::Role __role, vfs::File **__out_file) noexcept {
+        if (__out_file == nullptr || __context == nullptr)
+            return vfs::Status::InvalidArgument;
+        *__out_file = nullptr;
+
+        StreamSocket *ss = (StreamSocket *)bigos::kmalloc(sizeof(StreamSocket));
+        vfs::File *file = (vfs::File *)bigos::kmalloc(sizeof(vfs::File));
+        if (ss == nullptr || file == nullptr) {
+            if (ss != nullptr)
+                bigos::free(ss);
+            if (file != nullptr)
+                bigos::free(file);
+            return vfs::Status::NoMemory;
+        }
+
+        ss->context = __context;
+        ss->tcb = __tcb;
+        ss->local_port = __local_port;
+        ss->role = __role;
+        ss->pending_error = 0;
+        ss->tcb_generation = __tcb != nullptr ? tcp_slot_generation(__tcb) : 0;
+
+        file->ops = &STREAM_SOCKET_OPS;
+        file->vnode = nullptr;
+        file->offset = 0;
+        file->ref_count = 1;
+        file->readable = true;
+        file->writable = true;
+        file->close_on_exec = false;
+        file->private_data = ss;
+        file->identity = {};
+        file->nonblocking = false;
+
+        *__out_file = file;
+        return vfs::Status::Success;
+    }
+
+    vfs::Status stream_socket_create(Context *__context, vfs::File **__out_file) noexcept {
+        return stream_socket_publish(__context, nullptr, 0, StreamSocket::Role::Unbound, __out_file);
+    }
+
+    vfs::Status stream_socket_create_accepted(
+        Context *__context, TcpControlBlock *__tcb, uint16_t __local_port, vfs::File **__out_file) noexcept {
+        if (__tcb == nullptr)
+            return vfs::Status::InvalidArgument;
+        return stream_socket_publish(__context, __tcb, __local_port, StreamSocket::Role::Connected, __out_file);
+    }
+
+    bool is_stream_socket_file(const vfs::File *__file) noexcept {
+        return __file != nullptr && __file->ops == &STREAM_SOCKET_OPS;
+    }
+
+    StreamSocket *stream_socket_state(vfs::File *__file) noexcept {
+        if (!is_stream_socket_file(__file))
+            return nullptr;
+        return (StreamSocket *)__file->private_data;
+    }
+
+    int64_t stream_socket_send(vfs::File *__file, const void *__buf, size_t __len, bool __suppress_sigpipe) noexcept {
+        if (!is_stream_socket_file(__file))
+            return -bigos::ENOTSOCK;
+        size_t written = 0;
+        const vfs::Status st = stream_write_flags(__file, __buf, __len, &written, __suppress_sigpipe);
+        if (st == vfs::Status::Success)
+            return (int64_t)written;
+        // vfs::Status enumerators encode the negated errno the dispatcher writes
+        // back (e.g. BrokenPipe == -32, WouldBlock == -11, NotConnected == -107).
+        return (int64_t)st;
     }
 }   // namespace net
 NAMESPACE_BIGOS_END
@@ -415,3 +729,281 @@ namespace net {
 }   // namespace net
 NAMESPACE_BIGOS_END
 #endif   // BIGOS_SOCKET_SMOKE
+
+#ifdef BIGOS_STREAM_SOCKET_SMOKE
+namespace {
+    // Kernel-internal / backend-level bounded stream socket closed-loop smoke. It
+    // runs from a blockable kernel thread over a LoopbackReady context (no
+    // frame-level device), driving the STREAM_SOCKET_OPS read/write/poll paths and
+    // the kernel-internal tcp_* API the SYS_CONNECT/LISTEN/ACCEPT/SEND syscalls
+    // use, without a user process. Syscall-only argument validation (SockAddrIn
+    // copy, sys_send flags -EINVAL, sendto/recvfrom -EOPNOTSUPP) is covered by the
+    // syscall layer and source review; this smoke covers the backend/protocol
+    // closed loop deterministically.
+    bigos::net::Context g_stream_ctx = {};
+
+    void stream_smoke_fail(const char *__reason) noexcept {
+        bigos::serial_puts("BIGOS_STREAM_SOCKET_FAILED ");
+        bigos::serial_puts(__reason);
+        bigos::serial_puts("\n");
+    }
+
+    bool stream_bytes_equal(const uint8_t *__a, const uint8_t *__b, uint32_t __n) noexcept {
+        for (uint32_t i = 0; i < __n; i++) {
+            if (__a[i] != __b[i])
+                return false;
+        }
+        return true;
+    }
+
+    bool run_stream_socket_smoke() noexcept {
+        using namespace bigos;
+        using namespace bigos::net;
+        tcp_reset_state();
+        g_stream_ctx = {};
+
+        Config config = {};
+        config.local_ipv4 = make_ipv4(127, 0, 0, 1);
+        config.netmask = make_ipv4(255, 0, 0, 0);
+        config.mtu = DEFAULT_MTU;
+        if (init(&g_stream_ctx, nullptr, &config) != Status::Ok || state(&g_stream_ctx) != State::LoopbackReady) {
+            stream_smoke_fail("init");
+            return false;
+        }
+        const Ipv4Address lip = config.local_ipv4;
+        const uint16_t listen_port = 7000;
+
+        // 1) Create a stream socket File; identity + unconnected read/write reject.
+        vfs::File *lf = nullptr;
+        if (stream_socket_create(&g_stream_ctx, &lf) != vfs::Status::Success || lf == nullptr) {
+            stream_smoke_fail("create");
+            return false;
+        }
+        if (!is_stream_socket_file(lf) || stream_socket_state(lf) == nullptr) {
+            stream_smoke_fail("identity");
+            vfs::release(lf);
+            return false;
+        }
+        size_t io = 0;
+        uint8_t scratch[8] = {0};
+        if (vfs::read(lf, scratch, 4, &io) != vfs::Status::NotConnected ||
+            vfs::write(lf, scratch, 4, &io) != vfs::Status::NotConnected) {
+            stream_smoke_fail("unconnected");
+            vfs::release(lf);
+            return false;
+        }
+
+        // 2) Listen: listener stays LISTEN, not yet readable (empty accept queue).
+        StreamSocket *ls = stream_socket_state(lf);
+        ls->local_port = listen_port;
+        ls->role = StreamSocket::Role::Bound;
+        TcpControlBlock *ltcb = nullptr;
+        if (tcp_listen(&g_stream_ctx, lip, listen_port, &ltcb) != Status::Ok || ltcb == nullptr) {
+            stream_smoke_fail("listen");
+            vfs::release(lf);
+            return false;
+        }
+        ls->tcb = ltcb;
+        ls->tcb_generation = tcp_slot_generation(ltcb);
+        ls->role = StreamSocket::Role::Listening;
+        if ((vfs::poll_file(lf) & vfs::READY_READABLE) != 0) {
+            stream_smoke_fail("listener-premature-readable");
+            vfs::release(lf);
+            return false;
+        }
+
+        // 3) Client active-open completes synchronously under loopback.
+        vfs::File *cf = nullptr;
+        if (stream_socket_create(&g_stream_ctx, &cf) != vfs::Status::Success || cf == nullptr) {
+            stream_smoke_fail("client-create");
+            vfs::release(lf);
+            return false;
+        }
+        StreamSocket *cs = stream_socket_state(cf);
+        TcpControlBlock *ctcb = nullptr;
+        if (tcp_open(&g_stream_ctx, lip, 40000, lip, listen_port, &ctcb) != Status::Ok || ctcb == nullptr ||
+            !tcp_is_established(ctcb)) {
+            stream_smoke_fail("connect");
+            vfs::release(cf);
+            vfs::release(lf);
+            return false;
+        }
+        cs->tcb = ctcb;
+        cs->tcb_generation = tcp_slot_generation(ctcb);
+        cs->role = StreamSocket::Role::Connected;
+
+        // 4) Listener now reports readable (a completed connection can be accepted).
+        if ((vfs::poll_file(lf) & vfs::READY_READABLE) == 0) {
+            stream_smoke_fail("listener-accept-ready");
+            vfs::release(cf);
+            vfs::release(lf);
+            return false;
+        }
+
+        // 5) Accept the completed child and publish it under a new stream socket.
+        TcpControlBlock *child = nullptr;
+        if (tcp_accept(&g_stream_ctx, ltcb, &child) != Status::Ok || child == nullptr) {
+            stream_smoke_fail("accept");
+            vfs::release(cf);
+            vfs::release(lf);
+            return false;
+        }
+        vfs::File *af = nullptr;
+        if (stream_socket_create_accepted(&g_stream_ctx, child, listen_port, &af) != vfs::Status::Success ||
+            af == nullptr) {
+            stream_smoke_fail("accept-publish");
+            (void)tcp_abort(&g_stream_ctx, child);
+            vfs::release(cf);
+            vfs::release(lf);
+            return false;
+        }
+
+        // 6) Ordered bidirectional data: client -> accepted, accepted -> client.
+        const uint8_t ping[] = {'p', 'i', 'n', 'g'};
+        io = 0;
+        if (vfs::write(cf, ping, sizeof(ping), &io) != vfs::Status::Success || io != sizeof(ping)) {
+            stream_smoke_fail("write-c2s");
+            goto fail_all;
+        }
+        {
+            uint8_t rx[16] = {};
+            io = 0;
+            if (vfs::read(af, rx, sizeof(rx), &io) != vfs::Status::Success || io != sizeof(ping) ||
+                !stream_bytes_equal(rx, ping, sizeof(ping))) {
+                stream_smoke_fail("read-c2s");
+                goto fail_all;
+            }
+            const uint8_t pong[] = {'p', 'o', 'n', 'g'};
+            io = 0;
+            if (vfs::write(af, pong, sizeof(pong), &io) != vfs::Status::Success || io != sizeof(pong)) {
+                stream_smoke_fail("write-s2c");
+                goto fail_all;
+            }
+            io = 0;
+            if (vfs::read(cf, rx, sizeof(rx), &io) != vfs::Status::Success || io != sizeof(pong) ||
+                !stream_bytes_equal(rx, pong, sizeof(pong))) {
+                stream_smoke_fail("read-s2c");
+                goto fail_all;
+            }
+        }
+
+        // 7) An Established connection reports writable.
+        if ((vfs::poll_file(cf) & vfs::READY_WRITABLE) == 0) {
+            stream_smoke_fail("poll-writable");
+            goto fail_all;
+        }
+
+        // 8) Nonblocking read with no pending data returns would-block (-EAGAIN).
+        cf->nonblocking = true;
+        {
+            uint8_t rx[4] = {};
+            io = 0;
+            if (vfs::read(cf, rx, sizeof(rx), &io) != vfs::Status::WouldBlock) {
+                stream_smoke_fail("nonblock-eagain");
+                cf->nonblocking = false;
+                goto fail_all;
+            }
+        }
+        cf->nonblocking = false;
+
+        // 9) EOF: the accepted peer closes; the client reads 0 after draining.
+        if (tcp_close(&g_stream_ctx, child) != Status::Ok) {
+            stream_smoke_fail("peer-close");
+            goto fail_all;
+        }
+        {
+            uint8_t rx[16] = {};
+            io = 0;
+            if (vfs::read(cf, rx, sizeof(rx), &io) != vfs::Status::Success || io != 0) {
+                stream_smoke_fail("eof");
+                goto fail_all;
+            }
+        }
+
+        // 10) Broken pipe: close the client's own write direction, then a write
+        // returns -EPIPE (BrokenPipe); a MSG_NOSIGNAL send also returns -EPIPE.
+        (void)tcp_close(&g_stream_ctx, ctcb);
+        {
+            io = 0;
+            const vfs::Status ws = vfs::write(cf, ping, sizeof(ping), &io);
+            if (ws != vfs::Status::BrokenPipe) {
+                stream_smoke_fail("epipe");
+                goto fail_all;
+            }
+            if (stream_socket_send(cf, ping, sizeof(ping), true) != -bigos::EPIPE) {
+                stream_smoke_fail("msg-nosignal-epipe");
+                goto fail_all;
+            }
+        }
+
+        // Release the first connection set. stream_close aborts/closes remaining
+        // TCBs; the listener is aborted.
+        vfs::release(af);
+        af = nullptr;
+        vfs::release(cf);
+        cf = nullptr;
+        vfs::release(lf);
+        lf = nullptr;
+
+        // 11) Connection reset detection: build a fresh connection, recycle the
+        // client's TCB out from under it, then a read reports connection reset.
+        tcp_reset_state();
+        {
+            vfs::File *rf = nullptr;
+            if (stream_socket_create(&g_stream_ctx, &rf) != vfs::Status::Success || rf == nullptr) {
+                stream_smoke_fail("reset-create");
+                return false;
+            }
+            StreamSocket *rs = stream_socket_state(rf);
+            TcpControlBlock *rtcb = nullptr;
+            if (tcp_listen(&g_stream_ctx, lip, listen_port, &rtcb) != Status::Ok) {
+                stream_smoke_fail("reset-listen");
+                vfs::release(rf);
+                return false;
+            }
+            TcpControlBlock *rc = nullptr;
+            if (tcp_open(&g_stream_ctx, lip, 40001, lip, listen_port, &rc) != Status::Ok || rc == nullptr ||
+                !tcp_is_established(rc)) {
+                stream_smoke_fail("reset-connect");
+                vfs::release(rf);
+                return false;
+            }
+            rs->tcb = rc;
+            rs->tcb_generation = tcp_slot_generation(rc);
+            rs->role = StreamSocket::Role::Connected;
+            // Recycle the client's connection slot; the socket must observe reset.
+            (void)tcp_abort(&g_stream_ctx, rc);
+            uint8_t rx[4] = {};
+            io = 0;
+            if (vfs::read(rf, rx, sizeof(rx), &io) != vfs::Status::ConnectionReset) {
+                stream_smoke_fail("reset-read");
+                vfs::release(rf);
+                return false;
+            }
+            vfs::release(rf);
+        }
+
+        tcp_reset_state();
+        return true;
+
+    fail_all:
+        if (af != nullptr)
+            vfs::release(af);
+        if (cf != nullptr)
+            vfs::release(cf);
+        if (lf != nullptr)
+            vfs::release(lf);
+        tcp_reset_state();
+        return false;
+    }
+}   // namespace
+
+NAMESPACE_BIGOS_BEG
+namespace net {
+    void stream_socket_smoke_entry(void *) noexcept {
+        if (run_stream_socket_smoke())
+            bigos::serial_puts("BIGOS_STREAM_SOCKET_PASSED\n");
+    }
+}   // namespace net
+NAMESPACE_BIGOS_END
+#endif   // BIGOS_STREAM_SOCKET_SMOKE

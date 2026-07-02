@@ -187,16 +187,19 @@ management. They do not support arbitrary byte granularity for VM operations,
 sparse-file APIs, journaling, power-loss recovery, swap, or cross-CPU TLB
 shootdown.
 
-The minimal user-visible UDP socket interface is appended at numbers 55..58:
+The minimal user-visible socket interface begins with UDP datagram calls at
+numbers 55..58 and appends the bounded TCP stream subset at numbers 62..66:
 
 - `SYS_SOCKET` (number=55): ABI `rdi` = domain, `rsi` = type, `rdx` = protocol.
-  It accepts only the bounded BigOS UDP subset (`SOCKET_AF_INET`,
-  `SOCKET_SOCK_DGRAM`, protocol `0`/`SOCKET_IPPROTO_UDP`), creates an unbound
-  socket `vfs::File` backend over the single kernel-internal default network
-  context, installs it into the fd table, and returns a process-local fd or a
-  deterministic negative errno (`-EINVAL`/`-ENODEV`/`-ENOMEM`/`-EMFILE`). The
-  socket fd reuses the existing `close`/`dup`/`dup2`/`fcntl`/`close-on-exec`/
-  `fork` paths.
+  It accepts the bounded BigOS UDP subset (`SOCKET_AF_INET`,
+  `SOCKET_SOCK_DGRAM`, protocol `0`/`SOCKET_IPPROTO_UDP`) and the bounded TCP
+  subset (`SOCKET_AF_INET`, `SOCKET_SOCK_STREAM`, protocol
+  `0`/`SOCKET_IPPROTO_TCP`). UDP creates a datagram socket backend; TCP creates a
+  stream socket backend. Both are `vfs::File` objects over the single
+  kernel-internal default network context, install into the fd table, and return
+  a process-local fd or deterministic negative errno
+  (`-EINVAL`/`-ENODEV`/`-ENOMEM`/`-EMFILE`). Socket fds reuse the existing
+  `close`/`dup`/`dup2`/`fcntl`/`close-on-exec`/`fork` paths.
 - `SYS_BIND` (number=56): ABI `rdi` = socket fd, `rsi` = user
   `struct SockAddrIn*`, `rdx` = addrlen. `addrlen` MUST equal
   `sizeof(SockAddrIn)` and `family` MUST be `SOCKET_AF_INET`. It binds the local
@@ -216,11 +219,40 @@ The minimal user-visible UDP socket interface is appended at numbers 55..58:
   contract. Socket `read`/`write` deliberately return `-EOPNOTSUPP`; data flows
   only through `sendto`/`recvfrom`.
 
-These socket calls are a bounded UDP adapter over the kernel-internal protocol
-path, not a complete POSIX socket layer: there is no TCP/stream socket,
-`connect`/`listen`/`accept`/`shutdown`, `getsockopt`/`setsockopt`, `poll`/
-`select`, scatter-gather, ancillary data, full `AF_*`/`SOCK_*` matrix, DHCP, DNS,
-IPv6, or multi-context/multi-NIC selection.
+The bounded TCP stream subset appends these calls:
+
+- `SYS_CONNECT` (number=62): ABI `rdi` = stream socket fd, `rsi` = user
+  `SockAddrIn*`, `rdx` = addrlen. It actively opens a TCP connection to an IPv4
+  host/port. Blocking fds wait through the bounded `tcp_pump` + connection wait
+  queue path until `Established` or deterministic failure; nonblocking fds return
+  `-EINPROGRESS` while the handshake is pending. Repeated calls return
+  `-EISCONN` or `-EALREADY` as appropriate.
+- `SYS_LISTEN` (number=63): ABI `rdi` = bound stream socket fd, `rsi` =
+  backlog. It creates a protocol `LISTEN` TCB; backlog is clamped to the
+  compile-time `STREAM_ACCEPT_QUEUE_CAPACITY`.
+- `SYS_ACCEPT` (number=64): ABI `rdi` = listening stream socket fd, `rsi` =
+  optional user `SockAddrIn*` peer-out, `rdx` = optional `uint32_t*` addrlen
+  in/out. It takes one `Established` child from the listener accept queue,
+  publishes it under a fresh stream socket fd, and writes the peer address when
+  requested. Nonblocking fds return `-EAGAIN` when no completed connection is
+  queued.
+- `SYS_GETSOCKOPT` (number=65): ABI `rdi` = fd, `rsi` = level, `rdx` = optname,
+  `r10` = optval, `r8` = optlen in/out. It only supports
+  `SOL_SOCKET`/`SO_ERROR`, returning and clearing the connection pending error
+  used by nonblocking connect completion. Other level/option pairs return
+  `-ENOPROTOOPT`.
+- `SYS_SEND` (number=66): ABI `rdi` = stream socket fd, `rsi` = user buffer,
+  `rdx` = length, `r10` = flags. The data path is the same as `write`; the only
+  accepted flag is `MSG_NOSIGNAL`, which suppresses `SIGPIPE` on a broken-pipe
+  write while still returning `-EPIPE`. Unknown flag bits return `-EINVAL`.
+
+These socket calls are bounded adapters over the kernel-internal protocol path,
+not a complete POSIX socket layer: there is no `setsockopt`, `shutdown`,
+`getpeername`, `getsockname`, `accept4`, `sendmsg`/`recvmsg`, `SO_REUSEADDR`,
+scatter-gather, ancillary data, full `AF_*`/`SOCK_*` matrix, DHCP, DNS, IPv6, or
+multi-context/multi-NIC selection. `getsockopt` is deliberately limited to
+`SOL_SOCKET`/`SO_ERROR`, and stream `send` deliberately recognizes only
+`MSG_NOSIGNAL`.
 
 The syscall dispatcher keeps exception/IRQ/syscall EOI separation unchanged. CPU exceptions and external IRQs remain nonblocking contexts. fd/VFS syscalls check `sched::can_block()` before allocation or synchronous ATA PIO/exFAT reads; ordinary user process syscalls can pass that guard because the DPL=3 trap gate preserves IF.
 

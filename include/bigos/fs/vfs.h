@@ -63,6 +63,12 @@ namespace vfs {
         BrokenPipe = -32,
         Range = -34,
         NotEmpty = -39,
+        // Appended connection-oriented statuses for stream (TCP) sockets. Their
+        // numeric values are the negated POSIX errno the dispatcher writes back
+        // (ECONNRESET=104, ENOTCONN=107), so a stream socket read/write routed
+        // through the ops table surfaces the right errno without a separate map.
+        ConnectionReset = -104,
+        NotConnected = -107,
     };
 
     // Seek whence values for lseek (POSIX numeric layout).

@@ -1,12 +1,14 @@
-/* BigOS minimal user-space UDP socket declarations.
+/* BigOS minimal user-space socket declarations.
  *
  * Bounded BigOS sockaddr-lite for IPv4 + port only, in host byte order, mirroring
  * bigos::sys::SockAddrIn in include/bigos/syscall.h. These wrappers use the BigOS
  * int 0x80 ABI and POSIX-style errno convention. This is intentionally NOT a full
- * POSIX sys/socket.h: there is no TCP/stream support, no full AF_ or SOCK_ family
- * matrix, no connect/listen/accept/shutdown, no getsockopt/setsockopt, no poll or
- * select, no scatter-gather, and no ancillary data. recvfrom uses a bounded
- * advance plus bounded wait rather than general POSIX blocking. */
+ * POSIX sys/socket.h: it supports the bounded UDP datagram subset and the bounded
+ * TCP stream subset only (connect/listen/accept + read/write/send), with no full
+ * AF_/SOCK_ family matrix, no shutdown/getpeername/getsockname/accept4, getsockopt
+ * limited to SOL_SOCKET/SO_ERROR, no setsockopt, no scatter-gather, and no
+ * ancillary data. recvfrom uses a bounded advance plus bounded wait rather than
+ * general POSIX blocking. */
 #ifndef _BIGOS_USER_SYS_SOCKET_H
 #define _BIGOS_USER_SYS_SOCKET_H
 
@@ -15,7 +17,16 @@
 /* Bounded domain/type/protocol subset accepted by socket(). */
 #define AF_INET      2
 #define SOCK_DGRAM   2
+#define SOCK_STREAM  1
 #define IPPROTO_UDP  17
+#define IPPROTO_TCP  6
+
+/* Bounded getsockopt: ONLY SOL_SOCKET/SO_ERROR is supported. */
+#define SOL_SOCKET   1
+#define SO_ERROR     4
+
+/* Bounded send() flag: MSG_NOSIGNAL suppresses SIGPIPE on a broken-pipe write. */
+#define MSG_NOSIGNAL 0x4000
 
 typedef unsigned int socklen_t;
 
@@ -48,5 +59,30 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
  * (EAGAIN when no datagram arrived within the bounded wait). */
 ssize_t recvfrom(int fd, void *buf, size_t len, int flags,
                  struct sockaddr_in *src, socklen_t *addrlen);
+
+/* Active-open a stream (TCP) socket to addr. Blocking fd blocks to ESTABLISHED;
+ * nonblocking fd returns -1 with errno=EINPROGRESS. addrlen MUST equal
+ * sizeof(struct sockaddr_in). Returns 0 or -1 with errno set. */
+int connect(int fd, const struct sockaddr_in *addr, socklen_t addrlen);
+
+/* Mark a bound stream socket passive. backlog is clamped to the bounded accept
+ * queue capacity. Returns 0 or -1 with errno set. */
+int listen(int fd, int backlog);
+
+/* Take one completed connection off a listening stream socket. When peer is
+ * non-null *addrlen must equal sizeof(struct sockaddr_in) on entry and receives
+ * the peer address. Returns a new connection fd, or -1 with errno (EAGAIN on a
+ * nonblocking socket with no pending connection). */
+int accept(int fd, struct sockaddr_in *peer, socklen_t *addrlen);
+
+/* Bounded getsockopt: ONLY level==SOL_SOCKET, optname==SO_ERROR is supported and
+ * reads-and-clears the connection's pending error. Any other combination fails
+ * with errno=ENOPROTOOPT. Returns 0 or -1 with errno set. */
+int getsockopt(int fd, int level, int optname, void *optval, socklen_t *optlen);
+
+/* Stream socket send. Data path equals write; flags recognizes only MSG_NOSIGNAL
+ * (suppress SIGPIPE on a broken-pipe write). Any other flag bit fails with
+ * errno=EINVAL. Returns bytes sent or -1 with errno set. */
+ssize_t send(int fd, const void *buf, size_t len, int flags);
 
 #endif /* _BIGOS_USER_SYS_SOCKET_H */

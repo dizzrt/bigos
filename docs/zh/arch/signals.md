@@ -10,18 +10,20 @@
 
 `include/bigos/signal.h` 定义一组固定的非实时信号编号，复用 POSIX/Linux 惯用值：
 `SIGINT = 2`、`SIGKILL = 9`、`SIGUSR1 = 10`、`SIGSEGV = 11`、`SIGUSR2 = 12`、
-`SIGTERM = 15`、`SIGCHLD = 17`。合法编号为 `1..SIG_MAX`（`SIG_MAX = 31`），因此每个信号映射到每
+`SIGPIPE = 13`、`SIGTERM = 15`、`SIGCHLD = 17`。合法编号为 `1..SIG_MAX`（`SIG_MAX = 31`），因此每个信号映射到每
 进程 `uint64_t` 位图（`SigSet`）中的单个位 `1ull << (signo - 1)`。位图宽度与最高
 信号号一致且 `<= 64`。
 
 每个信号有确定性默认动作：
 
-- Terminate：`SIGINT`、`SIGKILL`、`SIGTERM`、`SIGSEGV`、`SIGUSR1`、`SIGUSR2` 及其余无特殊
+- Terminate：`SIGINT`、`SIGKILL`、`SIGTERM`、`SIGSEGV`、`SIGUSR1`、`SIGUSR2`、`SIGPIPE` 及其余无特殊
   默认的编号的默认动作。
 - Ignore：`SIGCHLD` 的默认动作。
 
 同一信号在被取走前重复投递合并为单个 pending 位（标准非实时语义，无实时排队/计
 数）。`SIGKILL` 不可捕获、不可阻塞：无论处置或阻塞掩码如何，恒终止。
+
+`SIGPIPE` 用于统一 broken-pipe 路径。向所有读端已关闭的 pipe 写入，或向写方向已关闭的 stream socket 写入，会返回 `-EPIPE`，并默认把 `SIGPIPE` 标记为 pending，在正常返回用户态边界投递。进程把 `SIGPIPE` 设置为 `SIG_IGN` 时会抑制该信号但写入仍返回 `-EPIPE`；stream socket 的 `send(..., MSG_NOSIGNAL)` 只对本次调用抑制该信号。
 
 ## 每进程信号状态
 

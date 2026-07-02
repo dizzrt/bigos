@@ -46,10 +46,17 @@ constexpr int ENOTEMPTY = 39;    // directory not empty
 constexpr int ENOTSOCK = 88;      // socket operation on non-socket fd
 constexpr int EDESTADDRREQ = 89;  // destination address required (e.g. unbound/no-peer UDP)
 constexpr int EMSGSIZE = 90;      // message too long for the bounded datagram limit
+constexpr int ENOPROTOOPT = 92;   // protocol option not available (getsockopt only supports SO_ERROR)
 constexpr int EADDRINUSE = 98;    // address/port already in use
 constexpr int ENETUNREACH = 101;  // network unreachable / no route
+constexpr int ECONNRESET = 104;   // connection reset by peer (RST / retransmit limit)
 constexpr int ENOBUFS = 105;      // no buffer space available
+constexpr int EISCONN = 106;      // socket is already connected
+constexpr int ENOTCONN = 107;     // socket is not connected
+constexpr int ECONNREFUSED = 111; // connection refused (no listener / actively refused)
 constexpr int EHOSTUNREACH = 113; // host unreachable (e.g. ARP unresolved / timeout)
+constexpr int EALREADY = 114;     // connection attempt already in progress
+constexpr int EINPROGRESS = 115;  // nonblocking connect handshake in progress
 constexpr int EOPNOTSUPP = 95;    // operation not supported on this object/backend
 NAMESPACE_BIGOS_END
 

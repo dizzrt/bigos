@@ -633,3 +633,24 @@ ssize_t recvfrom(int fd, void *buf, size_t len, int flags,
 int poll(struct pollfd *fds, unsigned long nfds, int timeout) {
     return (int)errno_translate(syscall3(SYS_POLL, (long)fds, (long)nfds, (long)timeout));
 }
+
+int connect(int fd, const struct sockaddr_in *addr, socklen_t addrlen) {
+    return (int)errno_translate(syscall3(SYS_CONNECT, (long)fd, (long)addr, (long)addrlen));
+}
+
+int listen(int fd, int backlog) {
+    return (int)errno_translate(syscall2(SYS_LISTEN, (long)fd, (long)backlog));
+}
+
+int accept(int fd, struct sockaddr_in *peer, socklen_t *addrlen) {
+    return (int)errno_translate(syscall3(SYS_ACCEPT, (long)fd, (long)peer, (long)addrlen));
+}
+
+int getsockopt(int fd, int level, int optname, void *optval, socklen_t *optlen) {
+    return (int)errno_translate(
+        syscall5(SYS_GETSOCKOPT, (long)fd, (long)level, (long)optname, (long)optval, (long)optlen));
+}
+
+ssize_t send(int fd, const void *buf, size_t len, int flags) {
+    return (ssize_t)errno_translate(syscall4(SYS_SEND, (long)fd, (long)buf, (long)len, (long)flags));
+}

@@ -118,6 +118,18 @@ namespace bigos::signal {
         return 0;
     }
 
+    int64_t raise_broken_pipe(bigos::proc::Process *__process, bool __suppress) noexcept {
+        // Single decision point for both pipe and stream socket broken-pipe paths.
+        // Return code is always -EPIPE; SIGPIPE is delivered by default unless
+        // suppressed by MSG_NOSIGNAL (__suppress) or a process SIG_IGN disposition.
+        if (__process != nullptr && !__suppress) {
+            const bool ignored = __process->sig_disp[SIGPIPE - 1].action == SigAction::Ignore;
+            if (!ignored)
+                (void)kill(__process, SIGPIPE);
+        }
+        return -bigos::EPIPE;
+    }
+
     bool has_deliverable_signal(const bigos::proc::Process *__process) noexcept {
         if (__process == nullptr)
             return false;

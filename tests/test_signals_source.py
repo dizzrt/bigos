@@ -27,6 +27,7 @@ def test_signal_numbers_and_bitmap_width() -> None:
     assert 'SIGKILL = 9' in sig_h
     assert 'SIGUSR1 = 10' in sig_h
     assert 'SIGSEGV = 11' in sig_h
+    assert 'SIGPIPE = 13' in sig_h
     assert 'SIGTERM = 15' in sig_h
     assert 'SIGCHLD = 17' in sig_h
 
@@ -39,6 +40,7 @@ def test_signal_numbers_and_bitmap_width() -> None:
         '#define SIGUSR1 10',
         '#define SIGSEGV 11',
         '#define SIGUSR2 12',
+        '#define SIGPIPE 13',
         '#define SIGTERM 15',
         '#define SIGCHLD 17',
         'typedef unsigned long sigset_t;',
