@@ -17,6 +17,13 @@ namespace {
     uint8_t *g_data = nullptr;
     bool g_initialized = false;
     uint64_t g_clock = 0;
+    constexpr uint32_t PROTECTED_BLOCKS_MAX = 64;
+    struct ProtectedBlock {
+        driver::block::BlockDevice *dev;
+        uint64_t block_no;
+        bool used;
+    };
+    ProtectedBlock g_protected[PROTECTED_BLOCKS_MAX] = {};
 
     uint64_t next_stamp() noexcept {
         return ++g_clock;
@@ -41,6 +48,14 @@ namespace {
         __slot->dirty = false;
         return bigos::bcache::Status::Success;
     }
+
+    bool is_protected(driver::block::BlockDevice *__dev, uint64_t __block_no) noexcept {
+        for (uint32_t i = 0; i < PROTECTED_BLOCKS_MAX; i++) {
+            if (g_protected[i].used && g_protected[i].dev == __dev && g_protected[i].block_no == __block_no)
+                return true;
+        }
+        return false;
+    }
 }   // namespace
 
 NAMESPACE_BIGOS_BEG
@@ -63,6 +78,11 @@ namespace bcache {
             g_slots[i].used = false;
             g_slots[i].ref_count = 0;
             g_slots[i].last_use = 0;
+        }
+        for (uint32_t i = 0; i < PROTECTED_BLOCKS_MAX; i++) {
+            g_protected[i].dev = nullptr;
+            g_protected[i].block_no = 0;
+            g_protected[i].used = false;
         }
         g_data = data;
         g_initialized = true;
@@ -119,6 +139,8 @@ namespace bcache {
                 BufferBlock *slot = &g_slots[i];
                 if (slot->ref_count != 0)
                     continue;
+                if (slot->dirty && is_protected(slot->dev, slot->block_no))
+                    continue;
                 if (dirty_lru == nullptr || slot->last_use < dirty_lru->last_use)
                     dirty_lru = slot;
             }
@@ -174,6 +196,61 @@ namespace bcache {
         return write_back(slot);
     }
 
+    Status ordered_flush(const OrderedFlushPlan *__plan) noexcept {
+        if (__plan == nullptr || __plan->dev == nullptr || __plan->phase_count > ORDERED_FLUSH_PHASES_MAX)
+            return Status::InvalidArgument;
+        if (!bigos::sched::can_block() || !bigos::sched::preemption_enabled())
+            return Status::WouldBlock;
+        for (uint32_t p = 0; p < __plan->phase_count; p++) {
+            const OrderedFlushPhase *phase = &__plan->phases[p];
+            if (phase->count > ORDERED_FLUSH_BLOCKS_MAX)
+                return Status::InvalidArgument;
+            for (uint32_t i = 0; i < phase->count; i++) {
+                const Status status = sync_block(__plan->dev, phase->blocks[i]);
+                if (status != Status::Success)
+                    return status;
+            }
+        }
+        return Status::Success;
+    }
+
+    Status protect_blocks(driver::block::BlockDevice *__dev, const uint64_t *__blocks, uint32_t __count) noexcept {
+        if (__dev == nullptr || (__count != 0 && __blocks == nullptr))
+            return Status::InvalidArgument;
+        for (uint32_t i = 0; i < __count; i++) {
+            if (is_protected(__dev, __blocks[i]))
+                continue;
+            bool inserted = false;
+            for (uint32_t p = 0; p < PROTECTED_BLOCKS_MAX; p++) {
+                if (g_protected[p].used)
+                    continue;
+                g_protected[p].dev = __dev;
+                g_protected[p].block_no = __blocks[i];
+                g_protected[p].used = true;
+                inserted = true;
+                break;
+            }
+            if (!inserted)
+                return Status::NoSpace;
+        }
+        return Status::Success;
+    }
+
+    void unprotect_blocks(driver::block::BlockDevice *__dev, const uint64_t *__blocks, uint32_t __count) noexcept {
+        if (__dev == nullptr || (__count != 0 && __blocks == nullptr))
+            return;
+        for (uint32_t i = 0; i < __count; i++) {
+            for (uint32_t p = 0; p < PROTECTED_BLOCKS_MAX; p++) {
+                if (!g_protected[p].used || g_protected[p].dev != __dev || g_protected[p].block_no != __blocks[i])
+                    continue;
+                g_protected[p].dev = nullptr;
+                g_protected[p].block_no = 0;
+                g_protected[p].used = false;
+                break;
+            }
+        }
+    }
+
     Status sync_device(driver::block::BlockDevice *__dev) noexcept {
         if (__dev == nullptr)
             return Status::InvalidArgument;
@@ -182,6 +259,11 @@ namespace bcache {
             BufferBlock *slot = &g_slots[i];
             if (!slot->used || slot->dev != __dev || !slot->dirty)
                 continue;
+            if (is_protected(slot->dev, slot->block_no)) {
+                if (first_error == Status::Success)
+                    first_error = Status::IoError;
+                continue;
+            }
             const Status status = write_back(slot);
             if (status != Status::Success && first_error == Status::Success)
                 first_error = status;
@@ -195,6 +277,11 @@ namespace bcache {
             BufferBlock *slot = &g_slots[i];
             if (!slot->used || !slot->dirty)
                 continue;
+            if (is_protected(slot->dev, slot->block_no)) {
+                if (first_error == Status::Success)
+                    first_error = Status::IoError;
+                continue;
+            }
             const Status status = write_back(slot);
             if (status != Status::Success && first_error == Status::Success)
                 first_error = status;
@@ -211,6 +298,11 @@ namespace bcache {
             if (!slot->used || slot->dev != __dev || slot->ref_count != 0)
                 continue;
             if (slot->dirty) {
+                if (is_protected(slot->dev, slot->block_no)) {
+                    if (first_error == Status::Success)
+                        first_error = Status::IoError;
+                    continue;
+                }
                 const Status status = write_back(slot);
                 if (status != Status::Success) {
                     if (first_error == Status::Success)

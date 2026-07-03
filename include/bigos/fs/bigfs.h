@@ -9,12 +9,12 @@ namespace bigfs {
     // Minimal writable filesystem for /rw. By default it is RAM-backed and
     // current-session-only; BIGOS_PERSISTENT_WRITABLE_FS can instead mount a
     // compatible independent persistent test disk. Layout (in BLOCK_SIZE blocks):
-    // superblock, inode bitmap, data bitmap, inode table, then the data region.
-    // Everything is read/written through the block buffer cache so writes are
-    // write-back and fsync/eviction stay consistent.
+    // superblock, inode bitmap, data bitmap, inode table, fixed journal, then
+    // the data region. Everything is read/written through the block buffer cache
+    // so writes are write-back and fsync/eviction stay consistent.
     constexpr const char *MOUNT_PREFIX = "/rw";
     constexpr uint32_t MAGIC = 0x42494746;   // "BIGF"
-    constexpr uint32_t FORMAT_VERSION = 2;
+    constexpr uint32_t FORMAT_VERSION = 3;
     constexpr uint32_t BLOCK_SIZE = driver::block::DEFAULT_SECTOR_SIZE;   // 512
     constexpr uint32_t TOTAL_BLOCKS = 256;                                // 128 KiB RAM disk
     constexpr uint32_t INODE_COUNT = 32;
@@ -22,8 +22,16 @@ namespace bigfs {
     constexpr uint32_t INODES_PER_BLOCK = BLOCK_SIZE / INODE_SIZE;        // 4
     constexpr uint32_t INODE_TABLE_START = 3;                             // blocks 0,1,2 reserved
     constexpr uint32_t INODE_TABLE_BLOCKS = INODE_COUNT / INODES_PER_BLOCK;   // 8
-    constexpr uint32_t DATA_START = INODE_TABLE_START + INODE_TABLE_BLOCKS;   // 11
-    constexpr uint32_t DATA_BLOCK_COUNT = TOTAL_BLOCKS - DATA_START;          // 245
+    constexpr uint32_t JOURNAL_START = INODE_TABLE_START + INODE_TABLE_BLOCKS;   // 11
+    constexpr uint32_t JOURNAL_BLOCKS = 32;
+    constexpr uint32_t JOURNAL_DESCRIPTOR_BLOCK = JOURNAL_START;
+    constexpr uint32_t JOURNAL_COMMIT_BLOCK = JOURNAL_START + 1;
+    constexpr uint32_t JOURNAL_CHECKPOINT_BLOCK = JOURNAL_START + 2;
+    constexpr uint32_t JOURNAL_PAYLOAD_START = JOURNAL_START + 3;
+    constexpr uint32_t JOURNAL_PAYLOAD_BLOCKS = JOURNAL_BLOCKS - 3;          // 29
+    constexpr uint32_t JOURNAL_MAX_RECORDS = 24;
+    constexpr uint32_t DATA_START = JOURNAL_START + JOURNAL_BLOCKS;          // 43
+    constexpr uint32_t DATA_BLOCK_COUNT = TOTAL_BLOCKS - DATA_START;          // 213
     constexpr uint32_t DIRECT_BLOCKS = 8;
     constexpr uint64_t MAX_FILE_SIZE = (uint64_t)DIRECT_BLOCKS * BLOCK_SIZE;   // 4096
     constexpr uint32_t DIRENT_SIZE = 32;
@@ -96,8 +104,9 @@ namespace bigfs {
         size_t *__out_entries, uint64_t *__next_offset) noexcept;
 
     // Flushes pending metadata and every dirty cached block for the writable
-    // device. This is a bounded clean-sync operation, not journaling, crash
-    // recovery, power-loss recovery, fdatasync, or async write-back.
+    // device. Persistent mounts use a journal-first ordered write path, but
+    // M15.1 does not implement mount-time replay/discard, power-loss recovery,
+    // fdatasync, or async write-back.
     Status fsync() noexcept;
 
     bool stat(uint32_t __inode, uint32_t *__mode, uint32_t *__uid, uint32_t *__gid, uint64_t *__size,

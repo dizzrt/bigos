@@ -228,6 +228,12 @@ option("persistent_writable_fs_smoke")
     set_description("enable validation-only persistent /rw two-boot smoke markers")
 option_end()
 
+option("journaled_rw_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only journaled persistent /rw smoke marker")
+option_end()
+
 option("pipe_smoke")
     set_default(false)
     set_showmenu(true)

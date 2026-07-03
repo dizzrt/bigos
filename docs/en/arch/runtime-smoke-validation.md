@@ -52,7 +52,8 @@ Behavior-oriented validation distinguishes three entry classes:
 | `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`, page/buffer cache, append/cross-block/seek-past-EOF growth, zero gaps, truncate, block reuse, fsync, and permissions. |
 | `persistent-writable-fs-write` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` | 40s | First boot with `--persistent-image`: explicit format of the independent test disk, bounded growth/truncate, `fsync`, and cache-eviction readback. |
 | `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | Second boot with the same `--persistent-image`: mount-existing and read synchronized `/rw` growth/truncate state after clean reboot. |
-| `persistent-writable-fs-modern` | `--persistent_writable_fs_smoke=y --persistent_writable_fs_modern_backend=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` / `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | Same bounded clean-sync persistent `/rw` flow over the explicit modern virtio-blk validation role when the emulator supplies the modern device image; no default storage replacement or power-loss recovery is claimed. |
+| `persistent-writable-fs-modern` | `--persistent_writable_fs_smoke=y --persistent_writable_fs_modern_backend=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` / `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | Same bounded journaled persistent `/rw` flow over the explicit modern virtio-blk validation role when the emulator supplies the modern device image; no default storage replacement or power-loss recovery is claimed. |
+| `journaled-rw` | `--journaled_rw_smoke=y` | `BIGOS_JOURNALED_RW_PASSED` | 40s | M15.1 journal-first persistent `/rw` validation over an independent test disk: create/write/fsync, directory mutation, truncate/unlink/rename coverage, and clean validation boundary; mount-time replay/discard recovery is not covered. |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup endpoint accounting, blocking wakeup, EOF, and `EPIPE`. |
 | `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity current-runtime filesystem semantics across read-only exFAT, RAM-backed `/rw`, fd/VFS, metadata, cwd-relative paths, libc errno, and shell-visible tools; no reboot persistence. |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrappers, arg/env handoff, stdout/stderr, errno/error text, ctype, bounded time/assert, `snprintf`/formatter, `strtol`/`strtoul`/`atoi`, stateless search helpers, `calloc`/`realloc`, bounded `DIR*` wrappers, simple C program baseline probes, shell execution, fork/exec/wait, pipe, redirection, and bounded `/rw` runtime file operations. |
@@ -129,9 +130,10 @@ cases. The read-only exFAT path remains the boot/image source of truth, while
 `/rw` and pipe semantics are bounded runtime capabilities. RAM-backed `/rw`
 guarantees current-runtime consistency only and does not persist data across
 reboot or alter the Legacy BIOS/MBR/exFAT disk image. Persistent `/rw` validation
-uses an independent test disk and only claims clean-sync plus clean-reboot
-visibility; missing QEMU/Bochs support for the extra disk must be recorded as
-skipped or blocked with residual storage-risk notes. fd/VFS syscalls use the
+uses an independent test disk and only claims journal-first ordering plus
+clean-reboot visibility; mount-time replay/discard recovery remains out of scope.
+Missing QEMU/Bochs support for the extra disk must be recorded as skipped or
+blocked with residual storage-risk notes. fd/VFS syscalls use the
 DPL=3 `int 0x80` trap gate and must pass `sched::can_block()` before synchronous
 storage I/O or blocking pipe operations.
 

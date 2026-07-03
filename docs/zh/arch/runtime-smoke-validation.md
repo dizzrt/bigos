@@ -51,7 +51,8 @@ runner 会通过 `xmake f` 显式配置每个 case，经由现有 xmake-backed f
 | `writable-fs` | `--writable_fs_smoke=y` | `BIGOS_WRITABLE_FS_PASSED` | 30s | RAM-backed `/rw`、page/buffer cache、append/cross-block/seek-past-EOF 增长、zero gap、truncate、块复用、fsync 和权限。 |
 | `persistent-writable-fs-write` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` | 40s | 带 `--persistent-image` 的第一次 boot：显式格式化独立测试磁盘、有界增长/截断、`fsync` 与缓存淘汰后读回。 |
 | `persistent-writable-fs-verify` | `--persistent_writable_fs_smoke=y` | `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | 复用同一 `--persistent-image` 的第二次 boot：mount-existing 并在 clean reboot 后读回已同步 `/rw` 增长/截断状态。 |
-| `persistent-writable-fs-modern` | `--persistent_writable_fs_smoke=y --persistent_writable_fs_modern_backend=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` / `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | emulator 提供 modern device image 时，在显式 modern virtio-blk validation role 上运行同一有界 clean-sync persistent `/rw` 流程；不声明默认存储替换或 power-loss recovery。 |
+| `persistent-writable-fs-modern` | `--persistent_writable_fs_smoke=y --persistent_writable_fs_modern_backend=y` | `BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED` / `BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED` | 40s | emulator 提供 modern device image 时，在显式 modern virtio-blk validation role 上运行同一有界 journaled persistent `/rw` 流程；不声明默认存储替换或 power-loss recovery。 |
+| `journaled-rw` | `--journaled_rw_smoke=y` | `BIGOS_JOURNALED_RW_PASSED` | 40s | M15.1 journal-first persistent `/rw` 验证，使用独立测试磁盘，覆盖 create/write/fsync、目录 mutation、truncate/unlink/rename 和 clean validation boundary；不覆盖 mount-time replay/discard recovery。 |
 | `pipe` | `--pipe_smoke=y` | `BIGOS_PIPE_PASSED` | 30s | Pipe/dup 端点计数、阻塞唤醒、EOF 和 `EPIPE`。 |
 | `filesystem-maturity` | `--filesystem_maturity_smoke=y` | `BIGOS_FILESYSTEM_MATURITY_PASSED` | 40s | runtime filesystem maturity 当前运行期文件系统语义，覆盖只读 exFAT、RAM-backed `/rw`、fd/VFS、metadata、cwd-relative path、libc errno 与 shell-visible tools；不声明重启持久化。 |
 | `userland-runtime` | `--userland_smoke=y` | `BIGOS_USERLAND_PASSED` | 40s | crt0/libc wrapper、参数/环境传递、stdout/stderr、errno/error text、ctype、有界 time/assert、`snprintf`/formatter、`strtol`/`strtoul`/`atoi`、无隐藏状态 search helper、`calloc`/`realloc`、有界 `DIR*` wrapper、简单 C 程序基线探针、shell 执行、fork/exec/wait、pipe、重定向和有界 `/rw` 运行时文件操作。 |
@@ -106,8 +107,8 @@ fd/VFS 壳层通过 source-level checks 加 `filesystem-read`、`filesystem-user
 `writable-fs`、`pipe`、`filesystem-maturity` 和 `userland-runtime` runtime case 验证。只读 exFAT 路径仍是
 boot/image 的 source of truth，而 `/rw` 与 pipe 语义是 bounded runtime 能力。RAM-backed
 `/rw` 只保证当前运行期一致性，不跨重启持久化，也不改变 Legacy BIOS/MBR/exFAT 磁盘镜像。
-Persistent `/rw` 验证使用独立测试磁盘，只声明 clean-sync 加 clean-reboot 后可见；若
-QEMU/Bochs 对额外磁盘支持不可用，需要记录为 skipped 或 blocked，并写明剩余 storage 风险。
+Persistent `/rw` 验证使用独立测试磁盘，只声明 journal-first ordering 加 clean-reboot
+后可见；mount-time replay/discard recovery 仍不在覆盖范围。若 QEMU/Bochs 对额外磁盘支持不可用，需要记录为 skipped 或 blocked，并写明剩余 storage 风险。
 fd/VFS syscall 使用 DPL=3 `int 0x80` trap gate，并且必须在同步 storage I/O 或阻塞 pipe 操作前通过 `sched::can_block()`。
 
 简单 C 程序验证分层接入默认关闭的 `userland-runtime` case。启用

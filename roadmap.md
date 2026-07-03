@@ -539,10 +539,10 @@ clean-sync boundary.
 用户可见目标：文件系统在崩溃或断电后仍保持一致，并可挂载多于一个可写后端，突破当前
 clean-sync 边界。
 
-- [ ] Task M15.1: a write-ahead journaling path for the writable `/rw` backend
+  - [x] Task M15.1: a write-ahead journaling path for the writable `/rw` backend
   with bounded log records covering metadata and data ordering, establishing the
   first step toward stronger POSIX-style durability behavior.
-- [ ] 任务 M15.1：可写 `/rw` 后端的 write-ahead journaling 路径，使用覆盖元数据与数据
+  - [x] 任务 M15.1：可写 `/rw` 后端的 write-ahead journaling 路径，使用覆盖元数据与数据
   顺序的有界日志记录，作为迈向更强 POSIX-style 持久性行为的第一步。
 - [ ] Task M15.2: a mount-time recovery path that replays or discards the journal
   to restore a consistent filesystem state after an unclean shutdown.

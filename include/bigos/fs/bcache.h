@@ -36,6 +36,20 @@ namespace bcache {
         uint64_t last_use;
     };
 
+    constexpr uint32_t ORDERED_FLUSH_BLOCKS_MAX = 64;
+    constexpr uint32_t ORDERED_FLUSH_PHASES_MAX = 4;
+
+    struct OrderedFlushPhase {
+        uint64_t blocks[ORDERED_FLUSH_BLOCKS_MAX];
+        uint32_t count;
+    };
+
+    struct OrderedFlushPlan {
+        driver::block::BlockDevice *dev;
+        OrderedFlushPhase phases[ORDERED_FLUSH_PHASES_MAX];
+        uint32_t phase_count;
+    };
+
     // Lazily allocates the cache backing pages. Returns false on allocation
     // failure. Safe to call more than once; only the first call allocates.
     // Non-IRQ / blockable context only.
@@ -69,6 +83,19 @@ namespace bcache {
     // state to publish. On write-back error the cached block remains dirty.
     // Blockable context only.
     Status sync_block(driver::block::BlockDevice *__dev, uint64_t __block_no) noexcept;
+
+    // Writes selected dirty blocks for one device in caller-provided phase
+    // order. Missing or clean selected blocks are success; failed blocks remain
+    // dirty/pending and the first deterministic error is returned. Blockable
+    // process context only.
+    Status ordered_flush(const OrderedFlushPlan *__plan) noexcept;
+
+    // Protects home-location dirty blocks that belong to an active journal
+    // transaction. Eviction must not publish protected dirty blocks directly;
+    // they can only be written through ordered_flush()/sync_block() while the
+    // transaction owner controls the journal ordering.
+    Status protect_blocks(driver::block::BlockDevice *__dev, const uint64_t *__blocks, uint32_t __count) noexcept;
+    void unprotect_blocks(driver::block::BlockDevice *__dev, const uint64_t *__blocks, uint32_t __count) noexcept;
 
     // Writes back every dirty cached block for one device. This is the durable
     // contract entry used by writable backend clean-sync paths: it does not

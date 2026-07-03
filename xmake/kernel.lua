@@ -201,7 +201,7 @@ if has_config("writable_fs_smoke") then
     add_defines("BIGOS_WRITABLE_FS_SMOKE")
 end
 
-if has_config("persistent_writable_fs") or has_config("persistent_writable_fs_smoke") then
+if has_config("persistent_writable_fs") or has_config("persistent_writable_fs_smoke") or has_config("journaled_rw_smoke") then
     add_defines("BIGOS_PERSISTENT_WRITABLE_FS")
 end
 
@@ -211,8 +211,12 @@ if has_config("persistent_writable_fs_modern_backend") then
     add_defines("BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND")
 end
 
-if has_config("persistent_writable_fs_smoke") then
+if has_config("persistent_writable_fs_smoke") or has_config("journaled_rw_smoke") then
     add_defines("BIGOS_PERSISTENT_WRITABLE_FS_SMOKE")
+end
+
+if has_config("journaled_rw_smoke") then
+    add_defines("BIGOS_JOURNALED_RW_SMOKE")
 end
 
 if has_config("pipe_smoke") then

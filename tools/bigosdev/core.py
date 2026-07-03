@@ -294,6 +294,7 @@ SMOKE_OPTIONS = (
     'persistent_writable_fs',
     'persistent_writable_fs_modern_backend',
     'persistent_writable_fs_smoke',
+    'journaled_rw_smoke',
     'pipe_smoke',
     'userland_smoke',
     'sleep_syscall_smoke',
@@ -574,6 +575,25 @@ RUNTIME_SMOKE_MATRIX = (
         timeout_seconds=20.0,
         risk_area='RAM-backed /rw create/write/read/fsync/cache eviction and read-only backend rejection',
         proc_boundary='default-off kernel-thread writable filesystem smoke; does not claim cross-reboot persistence',
+    ),
+    RuntimeSmokeCase(
+        case_id='journaled-rw',
+        title='Journaled persistent /rw',
+        switches=('journaled_rw_smoke',),
+        expected_marker='BIGOS_JOURNALED_RW_PASSED',
+        timeout_seconds=40.0,
+        risk_area=(
+            'journal-capable BigFS format, journal-first persistent /rw create/write/fsync, directory metadata, '
+            'truncate/unlink/rename coverage through the persistent smoke path, clean validation boundary'
+        ),
+        validation_markers=(
+            'BIGOS_JOURNALED_RW_PASSED',
+            'BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED',
+        ),
+        proc_boundary=(
+            'default-off M15.1 journaling validation over an independent persistent test disk; it checks '
+            'journal-first ordering and clean validation boundaries, not mount-time replay/discard or crash recovery'
+        ),
     ),
     RuntimeSmokeCase(
         case_id='first-user-program',

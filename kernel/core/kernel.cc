@@ -1582,6 +1582,9 @@ namespace {
                 bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_FAILED exfat\n");
                 return;
             }
+#ifdef BIGOS_JOURNALED_RW_SMOKE
+            bigos::serial_puts("BIGOS_JOURNALED_RW_VERIFY_PASSED\n");
+#endif
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_VERIFY_PASSED\n");
             return;
         }
@@ -1626,6 +1629,9 @@ namespace {
             bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_FAILED stable-evict-readback\n");
             return;
         }
+#ifdef BIGOS_JOURNALED_RW_SMOKE
+        bigos::serial_puts("BIGOS_JOURNALED_RW_PASSED\n");
+#endif
         bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_WRITE_PASSED\n");
     }
 }   // namespace
