@@ -43,13 +43,13 @@
 #include <drivers/video/vga.h>
 
 #if defined(BIGOS_BLOCK_IO_REQUEST_SMOKE) || defined(BIGOS_WRITABLE_FS_SMOKE) ||                                       \
-    defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE)
+    defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE) || defined(BIGOS_JOURNAL_RECOVERY_SMOKE)
 #include <bigos/fs/bcache.h>
 #include <bigos/fs/bigfs.h>
 #include <bigos/cred.h>
 #endif
 #if defined(BIGOS_BLOCK_IO_REQUEST_SMOKE) || defined(BIGOS_WRITABLE_FS_SMOKE) ||                                       \
-    defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE)
+    defined(BIGOS_PERSISTENT_WRITABLE_FS_SMOKE) || defined(BIGOS_JOURNAL_RECOVERY_SMOKE)
 #include <string.h>
 #endif
 #ifdef BIGOS_PIPE_SMOKE
@@ -1637,6 +1637,128 @@ namespace {
 }   // namespace
 #endif
 
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+namespace {
+    bool journal_recovery_bytes_equal(const char *__a, const char *__b, size_t __len) noexcept {
+        for (size_t i = 0; i < __len; i++)
+            if (__a[i] != __b[i])
+                return false;
+        return true;
+    }
+
+    bool journal_recovery_prepare(bigos::bigfs::JournalRecoveryTestState __state) noexcept {
+        return bigos::bigfs::prepare_journal_recovery_test_state(__state) == bigos::bigfs::Status::Success;
+    }
+
+    bool journal_recovery_verify_replayed_file() noexcept {
+        uint32_t inode = 0;
+        uint64_t size = 0;
+        bool is_dir = false;
+        bigos::bigfs::Status status = bigos::bigfs::open(
+            "/rw/recovered.txt", bigos::vfs::OPEN_RDONLY, 0644, bigos::cred::ROOT_UID, 0, &inode, &size, &is_dir);
+        if (status != bigos::bigfs::Status::Success || is_dir || size != 22)
+            return false;
+        char buf[32] = {};
+        size_t read = 0;
+        status = bigos::bigfs::read(inode, 0, buf, 22, &read);
+        uint32_t mode = 0;
+        uint32_t owner = 0;
+        uint32_t group = 0;
+        uint64_t stat_size = 0;
+        bool stat_is_dir = false;
+        const bool stat_ok =
+            bigos::bigfs::stat(inode, &mode, &owner, &group, &stat_size, &stat_is_dir, nullptr, nullptr, nullptr);
+        bigos::bigfs::close_inode(inode);
+        if (status != bigos::bigfs::Status::Success || read != 22 ||
+            !journal_recovery_bytes_equal(buf, "BIGOS_RECOVERY_PAYLOAD", 22))
+            return false;
+        if (!stat_ok || stat_is_dir || stat_size != 22 || owner != bigos::cred::ROOT_UID || group != 0)
+            return false;
+
+        status = bigos::bigfs::open("/rw", bigos::vfs::OPEN_RDONLY, 0644, bigos::cred::ROOT_UID, 0, &inode, &size,
+            &is_dir);
+        if (status != bigos::bigfs::Status::Success || !is_dir)
+            return false;
+        bigos::bigfs::DirectoryEntry entries[4] = {};
+        size_t entries_read = 0;
+        uint64_t next_offset = 0;
+        status = bigos::bigfs::readdir(inode, 0, entries, 4, &entries_read, &next_offset);
+        bigos::bigfs::close_inode(inode);
+        if (status != bigos::bigfs::Status::Success)
+            return false;
+        for (size_t i = 0; i < entries_read; i++)
+            if (entries[i].type == bigos::vfs::DIRENT_TYPE_FILE &&
+                journal_recovery_bytes_equal(entries[i].name, "recovered.txt", 13))
+                return true;
+        return false;
+    }
+
+    void journal_recovery_smoke_entry(void *) noexcept {
+        bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_START\n");
+        if (!journal_recovery_prepare(bigos::bigfs::JournalRecoveryTestState::Clean)) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED clean-prepare\n");
+            return;
+        }
+        if (!bigos::bigfs::init()) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED clean-init\n");
+            return;
+        }
+        if (!bigos::bigfs::persistent()) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED clean-persistent\n");
+            return;
+        }
+
+        if (!journal_recovery_prepare(bigos::bigfs::JournalRecoveryTestState::Committed) || !bigos::bigfs::init() ||
+            !bigos::bigfs::persistent() || !journal_recovery_verify_replayed_file()) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED committed\n");
+            return;
+        }
+
+        if (!journal_recovery_prepare(bigos::bigfs::JournalRecoveryTestState::ReplayInterrupted) ||
+            !bigos::bigfs::init() || !bigos::bigfs::persistent() || !journal_recovery_verify_replayed_file()) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED idempotent\n");
+            return;
+        }
+
+        if (!journal_recovery_prepare(bigos::bigfs::JournalRecoveryTestState::Partial) || !bigos::bigfs::init() ||
+            !bigos::bigfs::persistent()) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED partial-mount\n");
+            return;
+        }
+        uint32_t inode = 0;
+        uint64_t size = 0;
+        bool is_dir = false;
+        if (bigos::bigfs::open("/rw/recovered.txt", bigos::vfs::OPEN_RDONLY, 0644, bigos::cred::ROOT_UID, 0, &inode,
+                &size, &is_dir) != bigos::bigfs::Status::NotFound) {
+            bigos::bigfs::close_inode(inode);
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED partial-visible\n");
+            return;
+        }
+
+        if (!journal_recovery_prepare(bigos::bigfs::JournalRecoveryTestState::Corrupt)) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED corrupt-prepare\n");
+            return;
+        }
+        if (!bigos::bigfs::init() || bigos::bigfs::persistent()) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED corrupt-fallback\n");
+            return;
+        }
+
+        if (!journal_recovery_prepare(bigos::bigfs::JournalRecoveryTestState::RecoveryIoFailure)) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED io-prepare\n");
+            return;
+        }
+        const bool io_failure_init = bigos::bigfs::init();
+        if (io_failure_init && bigos::bigfs::persistent()) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED io-fallback\n");
+            return;
+        }
+
+        bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_PASSED\n");
+    }
+}   // namespace
+#endif
+
 #ifdef BIGOS_PIPE_SMOKE
 namespace {
     bigos::vfs::File *g_pipe_read = nullptr;
@@ -2355,6 +2477,11 @@ void kernel(const BootInfoHeader *boot_info) {
     if (bigos::sched::create_kernel_thread(&persistent_writable_fs_smoke_entry, nullptr) ==
         bigos::sched::INVALID_THREAD_ID)
         bigos::serial_puts("BIGOS_PERSISTENT_WRITABLE_FS_FAILED thread\n");
+#endif
+
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+    if (bigos::sched::create_kernel_thread(&journal_recovery_smoke_entry, nullptr) == bigos::sched::INVALID_THREAD_ID)
+        bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_FAILED thread\n");
 #endif
 
 #ifdef BIGOS_PIPE_SMOKE

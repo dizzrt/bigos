@@ -46,6 +46,21 @@ namespace {
         JOURNAL_STATE_COMMITTED = 2,
     };
 
+    enum class JournalRecoveryState : uint32_t {
+        Clean,
+        Partial,
+        Committed,
+        Checkpointed,
+        Corrupt,
+        Unsupported,
+    };
+
+    enum class JournalRecoveryAction : uint32_t {
+        CleanMounted,
+        Replayed,
+        Discarded,
+    };
+
     struct DiskSuperblock {
         uint32_t magic;
         uint32_t version;
@@ -110,16 +125,31 @@ namespace {
     };
     static_assert(sizeof(JournalMarker) <= BLOCK_SIZE, "journal marker must fit one block");
 
+    struct JournalScan {
+        JournalRecoveryState state;
+        JournalDescriptor desc;
+        JournalMarker commit;
+        JournalMarker checkpoint;
+    };
+
     struct DirSlot {
         bigos::bcache::BufferBlock *block;
         DiskDirent *entry;
     };
+
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+    struct RecoveryFaultContext {
+        driver::block::BlockDevice *inner;
+    };
+#endif
 
     bool load_inode(uint32_t __inode, DiskInode *__out) noexcept;
     bool store_inode(uint32_t __inode, const DiskInode *__in) noexcept;
     uint32_t superblock_checksum(const DiskSuperblock *__sb) noexcept;
     uint32_t journal_descriptor_checksum(const JournalDescriptor *__desc) noexcept;
     uint32_t journal_marker_checksum(const JournalMarker *__marker) noexcept;
+    bool journal_marker_valid(const JournalMarker *__marker, uint32_t __state) noexcept;
+    bool write_zero_block(uint32_t __block_no) noexcept;
 
     uint8_t *g_ram = nullptr;
     driver::block::BlockDevice g_device = {};
@@ -132,6 +162,12 @@ namespace {
     uint8_t g_validate_data_owner[bigos::bigfs::DATA_BLOCK_COUNT] = {};
     DiskInode g_validate_inodes[INODE_COUNT] = {};
     uint8_t g_zero_block[BLOCK_SIZE] = {};
+    JournalRecoveryAction g_last_recovery_action = JournalRecoveryAction::CleanMounted;
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+    RecoveryFaultContext g_recovery_fault_context = {};
+    driver::block::BlockDevice g_recovery_fault_device = {};
+    bool g_recovery_fault_enabled = false;
+#endif
 
     constexpr uint32_t METADATA_COMMIT_BLOCKS_MAX = 64;
     struct MetadataCommitPlan {
@@ -222,6 +258,45 @@ namespace {
         for (uint32_t i = 0; i < __count; i++)
             plan.phases[0].blocks[i] = __blocks[i];
         return bigos::bcache::ordered_flush(&plan) == bigos::bcache::Status::Success;
+    }
+
+    bool block_is_recoverable_home(uint32_t __block_no) noexcept {
+        if (__block_no >= bigos::bigfs::TOTAL_BLOCKS)
+            return false;
+        if (__block_no >= JOURNAL_START && __block_no < DATA_START)
+            return false;
+        return true;
+    }
+
+    bool journal_descriptor_basic_valid(const JournalDescriptor *__desc) noexcept {
+        if (__desc == nullptr)
+            return false;
+        if (__desc->magic != JOURNAL_MAGIC || __desc->payload_start != JOURNAL_PAYLOAD_START)
+            return false;
+        if (__desc->state != JOURNAL_STATE_CLEAN && __desc->state != JOURNAL_STATE_RECORDS &&
+            __desc->state != JOURNAL_STATE_COMMITTED)
+            return false;
+        if (__desc->record_count > JOURNAL_MAX_RECORDS ||
+            __desc->record_count > bigos::bigfs::JOURNAL_PAYLOAD_BLOCKS)
+            return false;
+        if (__desc->state == JOURNAL_STATE_CLEAN && __desc->record_count != 0)
+            return false;
+        if (__desc->state != JOURNAL_STATE_CLEAN && __desc->record_count == 0)
+            return false;
+        for (uint32_t i = 0; i < __desc->record_count; i++) {
+            if (!block_is_recoverable_home(__desc->home_blocks[i]))
+                return false;
+            for (uint32_t j = i + 1; j < __desc->record_count; j++)
+                if (__desc->home_blocks[i] == __desc->home_blocks[j])
+                    return false;
+        }
+        return __desc->checksum == journal_descriptor_checksum(__desc);
+    }
+
+    bool journal_marker_matches(
+        const JournalMarker *__marker, uint32_t __state, uint64_t __sequence, uint32_t __record_count) noexcept {
+        return journal_marker_valid(__marker, __state) && __marker->sequence == __sequence &&
+               __marker->record_count == __record_count;
     }
 
     bool write_journal_descriptor(uint32_t __state, uint64_t __sequence, const uint32_t *__home_blocks,
@@ -466,12 +541,31 @@ namespace {
         return driver::block::BlockStatus::Success;
     }
 
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+    driver::block::BlockStatus recovery_fault_read_impl(
+        driver::block::BlockDevice *__device, uint64_t __lba, uint32_t __count, void *__dst, size_t __dst_len) noexcept {
+        if (__device == nullptr || __device->context == nullptr)
+            return driver::block::BlockStatus::InvalidArgument;
+        RecoveryFaultContext *context = (RecoveryFaultContext *)__device->context;
+        if (context->inner == nullptr || context->inner->read_impl == nullptr)
+            return driver::block::BlockStatus::InvalidArgument;
+        return context->inner->read_impl(context->inner, __lba, __count, __dst, __dst_len);
+    }
+
+    driver::block::BlockStatus recovery_fault_write_impl(
+        driver::block::BlockDevice *, uint64_t, uint32_t, const void *, size_t) noexcept {
+        return driver::block::BlockStatus::DeviceError;
+    }
+#endif
+
     uint32_t superblock_checksum(const DiskSuperblock *__sb) noexcept {
         if (__sb == nullptr)
             return 0;
-        const uint32_t *words = (const uint32_t *)__sb;
+        DiskSuperblock copy = *__sb;
+        copy.checksum = 0;
+        const uint32_t *words = (const uint32_t *)&copy;
         uint32_t value = SUPERBLOCK_CHECKSUM_SEED;
-        for (size_t i = 0; i < sizeof(DiskSuperblock) / sizeof(uint32_t) - 1; i++)
+        for (size_t i = 0; i < sizeof(DiskSuperblock) / sizeof(uint32_t); i++)
             value = (value << 5) ^ (value >> 2) ^ words[i];
         return value;
     }
@@ -486,21 +580,172 @@ namespace {
     uint32_t journal_descriptor_checksum(const JournalDescriptor *__desc) noexcept {
         if (__desc == nullptr)
             return 0;
-        return checksum_words((const uint32_t *)__desc, sizeof(JournalDescriptor) / sizeof(uint32_t) - 1,
-            JOURNAL_CHECKSUM_SEED);
+        JournalDescriptor copy = *__desc;
+        copy.checksum = 0;
+        return checksum_words(
+            (const uint32_t *)&copy, sizeof(JournalDescriptor) / sizeof(uint32_t), JOURNAL_CHECKSUM_SEED);
     }
 
     uint32_t journal_marker_checksum(const JournalMarker *__marker) noexcept {
         if (__marker == nullptr)
             return 0;
-        return checksum_words(
-            (const uint32_t *)__marker, sizeof(JournalMarker) / sizeof(uint32_t) - 1, JOURNAL_CHECKSUM_SEED);
+        JournalMarker copy = *__marker;
+        copy.checksum = 0;
+        return checksum_words((const uint32_t *)&copy, sizeof(JournalMarker) / sizeof(uint32_t), JOURNAL_CHECKSUM_SEED);
     }
 
     bool journal_marker_valid(const JournalMarker *__marker, uint32_t __state) noexcept {
         return __marker != nullptr && __marker->magic == JOURNAL_MAGIC && __marker->state == __state &&
                __marker->record_count <= JOURNAL_MAX_RECORDS &&
                __marker->checksum == journal_marker_checksum(__marker);
+    }
+
+    bool read_journal_marker(uint32_t __block_no, JournalMarker *__out) noexcept {
+        if (__out == nullptr)
+            return false;
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, __block_no);
+        if (block == nullptr)
+            return false;
+        memcpy(__out, block->data, sizeof(*__out));
+        bigos::bcache::put(block);
+        return true;
+    }
+
+    bool read_journal_descriptor(JournalDescriptor *__out) noexcept {
+        if (__out == nullptr)
+            return false;
+        bigos::bcache::BufferBlock *block = bigos::bcache::get(&g_device, JOURNAL_DESCRIPTOR_BLOCK);
+        if (block == nullptr)
+            return false;
+        memcpy(__out, block->data, sizeof(*__out));
+        bigos::bcache::put(block);
+        return true;
+    }
+
+    Status scan_journal(JournalScan *__out) noexcept {
+        if (__out == nullptr)
+            return Status::Invalid;
+        *__out = {};
+        __out->state = JournalRecoveryState::Corrupt;
+        if (!read_journal_descriptor(&__out->desc) || !read_journal_marker(JOURNAL_COMMIT_BLOCK, &__out->commit) ||
+            !read_journal_marker(JOURNAL_CHECKPOINT_BLOCK, &__out->checkpoint))
+            return Status::IoError;
+
+        if (!journal_descriptor_basic_valid(&__out->desc)) {
+            __out->state = JournalRecoveryState::Corrupt;
+            return Status::Success;
+        }
+
+        if (__out->desc.state == JOURNAL_STATE_CLEAN) {
+            if (journal_marker_matches(&__out->checkpoint, JOURNAL_STATE_CLEAN, __out->desc.sequence, 0)) {
+                __out->state = JournalRecoveryState::Clean;
+            } else if (journal_marker_valid(&__out->checkpoint, JOURNAL_STATE_CLEAN) &&
+                       __out->checkpoint.record_count == 0) {
+                __out->state = JournalRecoveryState::Checkpointed;
+            } else {
+                __out->state = JournalRecoveryState::Corrupt;
+            }
+            return Status::Success;
+        }
+
+        const bool committed =
+            journal_marker_matches(&__out->commit, JOURNAL_STATE_COMMITTED, __out->desc.sequence, __out->desc.record_count);
+        const bool checkpointed =
+            journal_marker_matches(&__out->checkpoint, JOURNAL_STATE_CLEAN, __out->desc.sequence, 0);
+        if (committed && checkpointed) {
+            __out->state = JournalRecoveryState::Checkpointed;
+            return Status::Success;
+        }
+        if (committed) {
+            __out->state = JournalRecoveryState::Committed;
+            return Status::Success;
+        }
+        if (journal_marker_valid(&__out->commit, JOURNAL_STATE_COMMITTED) &&
+            (__out->commit.sequence == __out->desc.sequence || __out->commit.record_count == __out->desc.record_count)) {
+            __out->state = JournalRecoveryState::Corrupt;
+            return Status::Success;
+        }
+        __out->state = JournalRecoveryState::Partial;
+        return Status::Success;
+    }
+
+    bool checkpoint_journal_clean(uint64_t __sequence) noexcept {
+        if (!write_journal_descriptor(JOURNAL_STATE_CLEAN, __sequence, nullptr, 0))
+            return false;
+        if (!write_zero_block(JOURNAL_COMMIT_BLOCK))
+            return false;
+        if (!write_journal_marker(JOURNAL_CHECKPOINT_BLOCK, JOURNAL_STATE_CLEAN, __sequence, 0))
+            return false;
+        uint64_t clean_blocks[3] = {JOURNAL_DESCRIPTOR_BLOCK, JOURNAL_COMMIT_BLOCK, JOURNAL_CHECKPOINT_BLOCK};
+        return ordered_flush_one(clean_blocks, 3);
+    }
+
+    Status replay_committed_journal(const JournalDescriptor *__desc) noexcept {
+        if (__desc == nullptr)
+            return Status::Invalid;
+        uint64_t home_blocks[JOURNAL_MAX_RECORDS] = {};
+        for (uint32_t i = 0; i < __desc->record_count; i++) {
+            bigos::bcache::BufferBlock *payload = bigos::bcache::get(&g_device, JOURNAL_PAYLOAD_START + i);
+            if (payload == nullptr)
+                return Status::IoError;
+            bigos::bcache::BufferBlock *home = bigos::bcache::get(&g_device, __desc->home_blocks[i]);
+            if (home == nullptr) {
+                bigos::bcache::put(payload);
+                return Status::IoError;
+            }
+            memcpy(home->data, payload->data, BLOCK_SIZE);
+            bigos::bcache::mark_dirty(home);
+            bigos::bcache::put(home);
+            bigos::bcache::put(payload);
+            home_blocks[i] = __desc->home_blocks[i];
+        }
+        if (!ordered_flush_one(home_blocks, __desc->record_count))
+            return Status::IoError;
+        if (!checkpoint_journal_clean(__desc->sequence))
+            return Status::IoError;
+        g_journal_sequence = __desc->sequence + 1;
+        g_last_recovery_action = JournalRecoveryAction::Replayed;
+        bigos::serial_puts("BIGOS_PERSISTENT_RW_JOURNAL_RECOVERY_REPLAYED\n");
+        return Status::Success;
+    }
+
+    Status discard_partial_journal(const JournalDescriptor *__desc) noexcept {
+        if (__desc == nullptr)
+            return Status::Invalid;
+        if (!checkpoint_journal_clean(__desc->sequence))
+            return Status::IoError;
+        g_journal_sequence = __desc->sequence + 1;
+        g_last_recovery_action = JournalRecoveryAction::Discarded;
+        bigos::serial_puts("BIGOS_PERSISTENT_RW_JOURNAL_RECOVERY_DISCARDED\n");
+        return Status::Success;
+    }
+
+    Status recover_journal_before_publish() noexcept {
+        JournalScan scan = {};
+        const Status scan_status = scan_journal(&scan);
+        if (scan_status != Status::Success)
+            return scan_status;
+
+        switch (scan.state) {
+        case JournalRecoveryState::Clean:
+        case JournalRecoveryState::Checkpointed:
+            g_journal_sequence = scan.desc.sequence == 0 ? 1 : scan.desc.sequence + 1;
+            g_last_recovery_action = JournalRecoveryAction::CleanMounted;
+            return Status::Success;
+        case JournalRecoveryState::Committed:
+            bigos::serial_puts("BIGOS_PERSISTENT_RW_JOURNAL_NEEDS_RECOVERY committed\n");
+            return replay_committed_journal(&scan.desc);
+        case JournalRecoveryState::Partial:
+            bigos::serial_puts("BIGOS_PERSISTENT_RW_JOURNAL_NEEDS_RECOVERY partial\n");
+            return discard_partial_journal(&scan.desc);
+        case JournalRecoveryState::Unsupported:
+            bigos::serial_puts("BIGOS_PERSISTENT_RW_JOURNAL_REJECTED unsupported\n");
+            return Status::Unsupported;
+        case JournalRecoveryState::Corrupt:
+        default:
+            bigos::serial_puts("BIGOS_PERSISTENT_RW_JOURNAL_REJECTED corrupt-journal\n");
+            return Status::Invalid;
+        }
     }
 
     bool write_zero_block(uint32_t __block_no) noexcept {
@@ -691,25 +936,227 @@ namespace {
         memcpy(&sb, block->data, sizeof(sb));
         bigos::bcache::put(block);
         if (sb.magic != bigos::bigfs::MAGIC || sb.version != bigos::bigfs::FORMAT_VERSION ||
-            sb.block_size != BLOCK_SIZE || sb.total_blocks != bigos::bigfs::TOTAL_BLOCKS ||
-            sb.inode_count != INODE_COUNT || sb.inode_size != INODE_SIZE ||
-            sb.inode_table_start != INODE_TABLE_START ||
-            sb.inode_table_blocks != bigos::bigfs::INODE_TABLE_BLOCKS || sb.journal_start != JOURNAL_START ||
-            sb.journal_blocks != JOURNAL_BLOCKS || sb.journal_payload_start != JOURNAL_PAYLOAD_START ||
+            sb.block_size != BLOCK_SIZE || sb.total_blocks != bigos::bigfs::TOTAL_BLOCKS) {
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_VALIDATE_SUPERBLOCK_HEADER\n");
+#endif
+            return Status::Invalid;
+        }
+        if (sb.inode_count != INODE_COUNT || sb.inode_size != INODE_SIZE || sb.inode_table_start != INODE_TABLE_START ||
+            sb.inode_table_blocks != bigos::bigfs::INODE_TABLE_BLOCKS || sb.data_start != DATA_START ||
+            sb.data_block_count != bigos::bigfs::DATA_BLOCK_COUNT || sb.root_inode != ROOT_INODE) {
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_VALIDATE_SUPERBLOCK_LAYOUT\n");
+#endif
+            return Status::Invalid;
+        }
+        if (sb.journal_start != JOURNAL_START || sb.journal_blocks != JOURNAL_BLOCKS ||
+            sb.journal_payload_start != JOURNAL_PAYLOAD_START ||
             sb.journal_payload_blocks != bigos::bigfs::JOURNAL_PAYLOAD_BLOCKS ||
-            sb.journal_state != JOURNAL_STATE_CLEAN || sb.journal_record_count != 0 || sb.data_start != DATA_START ||
-            sb.data_block_count != bigos::bigfs::DATA_BLOCK_COUNT || sb.root_inode != ROOT_INODE ||
-            sb.checksum != superblock_checksum(&sb))
+            sb.journal_record_count > JOURNAL_MAX_RECORDS) {
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_VALIDATE_SUPERBLOCK_JOURNAL\n");
+#endif
             return Status::Invalid;
-        if (validate_journal_clean() != Status::Success)
+        }
+        if (sb.checksum != superblock_checksum(&sb)) {
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_VALIDATE_SUPERBLOCK_CHECKSUM\n");
+#endif
             return Status::Invalid;
+        }
+        if (sb.journal_state != JOURNAL_STATE_CLEAN && sb.journal_state != JOURNAL_STATE_RECORDS &&
+            sb.journal_state != JOURNAL_STATE_COMMITTED) {
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_VALIDATE_SUPERBLOCK_STATE\n");
+#endif
+            return Status::Invalid;
+        }
+        if (recover_journal_before_publish() != Status::Success) {
+            bigos::serial_puts("BIGOS_PERSISTENT_RW_JOURNAL_RECOVERY_FAILED\n");
+            return Status::Invalid;
+        }
 
         DiskInode root = {};
         if (!load_inode(ROOT_INODE, &root) || root.type != bigos::bigfs::INODE_DIRECTORY ||
-            root.link_count == 0 || root.size > bigos::bigfs::MAX_FILE_SIZE)
+            root.link_count == 0 || root.size > bigos::bigfs::MAX_FILE_SIZE) {
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_VALIDATE_ROOT\n");
+#endif
             return Status::Invalid;
-        return validate_metadata_invariants();
+        }
+        const Status metadata_status = validate_metadata_invariants();
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+        if (metadata_status == Status::Invalid)
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_VALIDATE_METADATA\n");
+#endif
+        return metadata_status;
     }
+
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+    bool write_device_block_direct(uint32_t __block_no, const void *__src) noexcept {
+        return driver::block::write_sectors(&g_device, __block_no, 1, __src, BLOCK_SIZE) ==
+               driver::block::BlockStatus::Success;
+    }
+
+    void set_bitmap_bit(uint8_t *__bitmap, uint32_t __index) noexcept {
+        __bitmap[__index / 8] |= (uint8_t)(1u << (__index % 8));
+    }
+
+    void build_recovered_after_image(uint8_t __blocks[][BLOCK_SIZE], uint32_t *__home_blocks, uint32_t *__count)
+        noexcept {
+        *__count = 6;
+        __home_blocks[0] = 0;
+        __home_blocks[1] = INODE_BITMAP_BLOCK;
+        __home_blocks[2] = DATA_BITMAP_BLOCK;
+        __home_blocks[3] = INODE_TABLE_START;
+        __home_blocks[4] = DATA_START;
+        __home_blocks[5] = DATA_START + 1;
+        for (uint32_t i = 0; i < *__count; i++)
+            memset(__blocks[i], 0, BLOCK_SIZE);
+
+        DiskSuperblock sb = make_superblock();
+        sb.journal_sequence = 11;
+        sb.checksum = 0;
+        sb.checksum = superblock_checksum(&sb);
+        memcpy(__blocks[0], &sb, sizeof(sb));
+
+        set_bitmap_bit(__blocks[1], ROOT_INODE);
+        set_bitmap_bit(__blocks[1], 1);
+        set_bitmap_bit(__blocks[2], 0);
+        set_bitmap_bit(__blocks[2], 1);
+
+        DiskInode root = {};
+        root.type = bigos::bigfs::INODE_DIRECTORY;
+        root.mode = 0755;
+        root.uid = bigos::cred::ROOT_UID;
+        root.gid = 0;
+        root.size = BLOCK_SIZE;
+        root.link_count = 2;
+        root.direct[0] = DATA_START;
+        DiskInode file = {};
+        file.type = bigos::bigfs::INODE_REGULAR;
+        file.mode = 0644;
+        file.uid = bigos::cred::ROOT_UID;
+        file.gid = 0;
+        file.size = 22;
+        file.link_count = 1;
+        file.direct[0] = DATA_START + 1;
+        memcpy(__blocks[3], &root, sizeof(root));
+        memcpy(__blocks[3] + INODE_SIZE, &file, sizeof(file));
+
+        DiskDirent dirent = {};
+        dirent.inode_plus_one = 2;
+        memcpy(dirent.name, "recovered.txt", 14);
+        memcpy(__blocks[4], &dirent, sizeof(dirent));
+        memcpy(__blocks[5], "BIGOS_RECOVERY_PAYLOAD", 22);
+    }
+
+    bool write_recovery_journal_state(bigos::bigfs::JournalRecoveryTestState __state) noexcept {
+        static uint8_t after_images[JOURNAL_MAX_RECORDS][BLOCK_SIZE] = {};
+        static uint32_t home_blocks[JOURNAL_MAX_RECORDS] = {};
+        uint32_t record_count = 0;
+        build_recovered_after_image(after_images, home_blocks, &record_count);
+        const uint64_t sequence = 11;
+
+        JournalDescriptor desc = {};
+        desc.magic = JOURNAL_MAGIC;
+        desc.state = JOURNAL_STATE_RECORDS;
+        desc.sequence = sequence;
+        desc.record_count = record_count;
+        desc.payload_start = JOURNAL_PAYLOAD_START;
+        for (uint32_t i = 0; i < record_count; i++)
+            desc.home_blocks[i] = home_blocks[i];
+        desc.checksum = journal_descriptor_checksum(&desc);
+        if (__state == bigos::bigfs::JournalRecoveryTestState::Corrupt)
+            desc.checksum ^= 0x1u;
+
+        uint8_t block[BLOCK_SIZE] = {};
+        memcpy(block, &desc, sizeof(desc));
+        if (!write_device_block_direct(JOURNAL_DESCRIPTOR_BLOCK, block))
+            return false;
+        for (uint32_t i = 0; i < record_count; i++) {
+            if (!write_device_block_direct(JOURNAL_PAYLOAD_START + i, after_images[i]))
+                return false;
+        }
+        if (__state == bigos::bigfs::JournalRecoveryTestState::Committed ||
+            __state == bigos::bigfs::JournalRecoveryTestState::ReplayInterrupted) {
+            JournalMarker commit = {};
+            commit.magic = JOURNAL_MAGIC;
+            commit.state = JOURNAL_STATE_COMMITTED;
+            commit.sequence = sequence;
+            commit.record_count = record_count;
+            commit.checksum = journal_marker_checksum(&commit);
+            memset(block, 0, BLOCK_SIZE);
+            memcpy(block, &commit, sizeof(commit));
+            if (!write_device_block_direct(JOURNAL_COMMIT_BLOCK, block))
+                return false;
+        }
+        if (__state == bigos::bigfs::JournalRecoveryTestState::ReplayInterrupted) {
+            for (uint32_t i = 0; i < 3; i++)
+                if (!write_device_block_direct(home_blocks[i], after_images[i]))
+                    return false;
+        }
+        return true;
+    }
+
+    bool write_clean_recovery_test_image() noexcept {
+        uint8_t block[BLOCK_SIZE] = {};
+        for (uint32_t i = 0; i < bigos::bigfs::TOTAL_BLOCKS; i++)
+            if (!write_device_block_direct(i, block))
+                return false;
+
+        DiskSuperblock sb = make_superblock();
+        sb.journal_sequence = 1;
+        sb.checksum = 0;
+        sb.checksum = superblock_checksum(&sb);
+        memcpy(block, &sb, sizeof(sb));
+        if (!write_device_block_direct(0, block))
+            return false;
+
+        memset(block, 0, BLOCK_SIZE);
+        set_bitmap_bit(block, ROOT_INODE);
+        if (!write_device_block_direct(INODE_BITMAP_BLOCK, block))
+            return false;
+
+        memset(block, 0, BLOCK_SIZE);
+        DiskInode root = {};
+        root.type = bigos::bigfs::INODE_DIRECTORY;
+        root.mode = 0755;
+        root.uid = bigos::cred::ROOT_UID;
+        root.gid = 0;
+        root.size = 0;
+        root.link_count = 2;
+        memcpy(block, &root, sizeof(root));
+        if (!write_device_block_direct(INODE_TABLE_START, block))
+            return false;
+
+        JournalDescriptor desc = {};
+        desc.magic = JOURNAL_MAGIC;
+        desc.state = JOURNAL_STATE_CLEAN;
+        desc.sequence = 1;
+        desc.record_count = 0;
+        desc.payload_start = JOURNAL_PAYLOAD_START;
+        desc.checksum = journal_descriptor_checksum(&desc);
+        memset(block, 0, BLOCK_SIZE);
+        memcpy(block, &desc, sizeof(desc));
+        if (!write_device_block_direct(JOURNAL_DESCRIPTOR_BLOCK, block))
+            return false;
+
+        JournalMarker checkpoint = {};
+        checkpoint.magic = JOURNAL_MAGIC;
+        checkpoint.state = JOURNAL_STATE_CLEAN;
+        checkpoint.sequence = 1;
+        checkpoint.record_count = 0;
+        checkpoint.checksum = journal_marker_checksum(&checkpoint);
+        memset(block, 0, BLOCK_SIZE);
+        memcpy(block, &checkpoint, sizeof(checkpoint));
+        if (!write_device_block_direct(JOURNAL_CHECKPOINT_BLOCK, block))
+            return false;
+
+        return true;
+    }
+#endif
 
     bool str_eq(const char *__a, const char *__b) noexcept {
         size_t i = 0;
@@ -1247,17 +1694,25 @@ namespace {
     }
 
     bigos::device::DeviceRole persistent_block_role() noexcept {
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+        return bigos::device::DeviceRole::RamValidationBlock;
+#else
 #ifdef BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND
         return bigos::device::DeviceRole::VirtioBlkValidationBlock;
 #else
         return bigos::device::DeviceRole::PersistentWritableBlock;
 #endif
+#endif
     }
 
     driver::block::BlockDevice *select_persistent_device() noexcept {
 #ifdef BIGOS_PERSISTENT_WRITABLE_FS
-#ifdef BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND
+#if defined(BIGOS_PERSISTENT_WRITABLE_FS_MODERN_BACKEND) || defined(BIGOS_JOURNAL_RECOVERY_SMOKE)
         const bigos::device::DeviceRole role = persistent_block_role();
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+        if (g_recovery_fault_enabled)
+            return &g_recovery_fault_device;
+#endif
         const bigos::device::Status probe_status =
             bigos::device::probe(bigos::device::DeviceClass::Block, role, bigos::device::ProbeContext::OrdinaryBlockable);
         if (probe_status != bigos::device::Status::Success && probe_status != bigos::device::Status::ProbeFailed)
@@ -1343,6 +1798,7 @@ namespace bigfs {
 #ifndef BIGOS_PERSISTENT_WRITABLE_FS
         return Status::Unsupported;
 #else
+        g_recovery_fault_enabled = false;
         if (g_initialized && any_open_refs())
             return Status::AccessDenied;
         if (g_initialized && bigos::bcache::invalidate_device(&g_device) != bigos::bcache::Status::Success)
@@ -1367,6 +1823,60 @@ namespace bigfs {
 #endif
     }
 
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+    Status prepare_journal_recovery_test_state(JournalRecoveryTestState __state) noexcept {
+#ifndef BIGOS_PERSISTENT_WRITABLE_FS
+        (void)__state;
+        return Status::Unsupported;
+#else
+        if (g_initialized && any_open_refs())
+            return Status::AccessDenied;
+        if (g_initialized && bigos::bcache::invalidate_device(&g_device) != bigos::bcache::Status::Success)
+            return Status::IoError;
+        bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_PREPARE_SELECT\n");
+        driver::block::BlockDevice *persistent_device = select_persistent_device();
+        if (persistent_device == nullptr) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_PREPARE_NO_DEVICE\n");
+            return Status::IoError;
+        }
+        bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_PREPARE_DEVICE\n");
+        g_device = *persistent_device;
+        g_device.total_sectors = TOTAL_BLOCKS;
+        if (!bigos::bcache::init())
+            return Status::IoError;
+        bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_PREPARE_WRITE_CLEAN\n");
+        bool prepared = write_clean_recovery_test_image();
+        if (!prepared)
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_PREPARE_CLEAN_IO\n");
+        const JournalRecoveryTestState disk_state =
+            __state == JournalRecoveryTestState::RecoveryIoFailure ? JournalRecoveryTestState::Committed : __state;
+        if (prepared && disk_state != JournalRecoveryTestState::Clean)
+            prepared = write_recovery_journal_state(disk_state);
+        if (prepared && __state == JournalRecoveryTestState::RecoveryIoFailure) {
+            g_recovery_fault_context.inner = persistent_device;
+            g_recovery_fault_device = *persistent_device;
+            g_recovery_fault_device.context = &g_recovery_fault_context;
+            g_recovery_fault_device.read_impl = recovery_fault_read_impl;
+            g_recovery_fault_device.write_impl = recovery_fault_write_impl;
+            g_recovery_fault_device.issue_impl = nullptr;
+            g_recovery_fault_device.total_sectors = TOTAL_BLOCKS;
+            g_recovery_fault_enabled = true;
+        }
+        if (!prepared)
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_PREPARE_STATE_IO\n");
+        if (bigos::bcache::invalidate_device(&g_device) != bigos::bcache::Status::Success) {
+            bigos::serial_puts("BIGOS_JOURNAL_RECOVERY_PREPARE_INVALIDATE_IO\n");
+            prepared = false;
+        }
+        memset(g_open_refs, 0, sizeof(g_open_refs));
+        metadata_commit_reset();
+        g_initialized = false;
+        g_persistent = false;
+        return prepared ? Status::Success : Status::IoError;
+#endif
+    }
+#endif
+
     bool initialized() noexcept {
         return g_initialized;
     }
@@ -1378,7 +1888,7 @@ namespace bigfs {
     const char *backend_name() noexcept {
         if (!g_initialized)
             return "unpublished";
-        return g_persistent ? "persistent journaled /rw (no mount-time recovery)"
+        return g_persistent ? "persistent journaled /rw (mount-time recovery)"
                             : "RAM-backed current-session /rw";
     }
 

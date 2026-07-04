@@ -266,17 +266,22 @@ def test_qemu_command_uses_legacy_bios_ide_disk_and_headless_serial(tmp_path: Pa
 def test_qemu_uefi_command_uses_ovmf_pflash_and_esp_serial(tmp_path: Path) -> None:
     image = tmp_path / 'uefi-esp.img'
     root_image = tmp_path / 'uefi-root.raw'
+    persistent_image = tmp_path / 'persistent.raw'
     serial_log = tmp_path / 'qemu-uefi.serial.log'
     code = tmp_path / 'edk2-x86_64-code.fd'
     vars_copy = tmp_path / 'OVMF_VARS.uefi.fd'
 
-    command = boot_debug.qemu_uefi_command(image, serial_log, 'none', code, vars_copy, root_image_path=root_image)
+    command = boot_debug.qemu_uefi_command(
+        image, serial_log, 'none', code, vars_copy, root_image_path=root_image, persistent_image=persistent_image
+    )
 
     assert command[0] == 'qemu-system-x86_64'
     assert f'if=pflash,format=raw,readonly=on,file={code}' in command
     assert f'if=pflash,format=raw,file={vars_copy}' in command
     assert f'file={root_image},format=raw,if=ide,index=0' in command
     assert f'file={image},format=raw,if=ide,index=1' in command
+    assert f'if=none,id=persist,file={persistent_image},format=raw' in command
+    assert 'ide-hd,drive=persist,bus=persistide.0,unit=0' in command
     assert command[command.index('-serial') + 1] == f'file:{serial_log}'
     assert command[command.index('-display') + 1] == 'none'
     assert '-boot' not in command

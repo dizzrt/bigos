@@ -103,13 +103,16 @@ the block request layer; there are no modern-driver private filesystem hooks,
 device nodes, mount ABI, or default boot replacement. The persistent layout keeps
 the same bounded BigFS limits and adds an explicit superblock
 magic/version/block-size/capacity/root metadata checksum plus journal
-bounds/checkpoint metadata. Normal boot mounts an existing compatible volume only
-after recognition, bounded metadata validation, and a checkpoint-clean journal
-succeed; invalid magic, unsupported version, invalid journal bounds, committed
-but uncheckpointed journal state, inode or directory-entry bounds errors, block
-mapping conflicts, or data-bitmap ownership contradictions fall back to
-RAM-backed `/rw` for the default ATA configuration without auto-formatting,
-auto-repair, migration, replay, or discard. Persistent metadata updates use a
+bounds/checkpoint metadata. Normal boot runs bounded journal recovery before
+publishing an existing compatible volume: checkpoint-clean journals mount as-is,
+complete committed journals replay durable after-image payloads to their
+home-location blocks before checkpoint-clear, and parseable uncommitted partial
+journals are discarded without publishing their mutations. Invalid magic,
+unsupported version, invalid journal bounds, corrupt journal metadata, inode or
+directory-entry bounds errors, block mapping conflicts, data-bitmap ownership
+contradictions, or recovery I/O failure reject persistent writable publication
+and may fall back to RAM-backed `/rw` for the default ATA configuration without
+auto-formatting, auto-repair, or migration. Persistent metadata updates use a
 bounded journal-first ordered commit unit over selected cache blocks: affected
 data, directory, inode, bitmap, and superblock blocks are copied into journal
 after-image payloads, the journal descriptor/payloads and commit marker are
@@ -118,14 +121,15 @@ is checkpoint-cleared. The bounded `/bin/mkfs_bigfs` tool invokes the
 BigOS-specific explicit format hook for the configured persistent test disk; it
 is not a POSIX `mkfs`, `mount`, or device-management tool. Persistent mode only
 promises journal-first ordering plus clean reboot visibility for successful
-`fsync`/write-back state. Failed journal payload, commit marker, home-location,
-or checkpoint write-back returns a deterministic error and leaves dirty/pending
-state; it does not report durable success. There is no mount-time replay,
-discard, crash recovery, async I/O, broad storage driver support, stable inode
-identity, full POSIX `DIR*`, or power-loss consistency guarantee. BigFS format
-version 3 reserves the 32-block journal; older persistent clean-sync volumes are
-rejected by validation and require an explicit `mkfs_bigfs` reformat instead of
-silent reinterpretation.
+`fsync`/write-back state plus bounded mount-time replay/discard of the single
+recoverable journal transaction. Failed journal payload, commit marker,
+home-location, checkpoint, or recovery write-back returns a deterministic error
+and leaves dirty/pending or retryable journal state; it does not report durable
+success. There is no async I/O, broad storage driver support, stable inode
+identity, full POSIX `DIR*`, online fsck, or complete hardware power-loss
+consistency guarantee. BigFS format version 3 reserves the 32-block journal;
+older persistent clean-sync volumes are rejected by validation and require an
+explicit `mkfs_bigfs` reformat instead of silent reinterpretation.
 
 ## Permission Enforcement
 
@@ -236,6 +240,10 @@ unchanged.
   journaled create/write/fsync, directory mutation, truncate/unlink/rename
   coverage, and clean validation boundary complete. The check is explicitly not
   a mount-time replay/discard or crash-recovery validation.
+- `xmake f --journal_recovery_smoke=y` enables `BIGOS_JOURNAL_RECOVERY_SMOKE`.
+  It emits `BIGOS_JOURNAL_RECOVERY_PASSED` after default-off mount recovery
+  validation covers clean mount, committed replay, idempotent repeated replay,
+  partial discard, corrupt reject, and recovery I/O failure fail-closed behavior.
 
 Run the headless QEMU serial-marker smoke with, for example:
 
@@ -254,12 +262,14 @@ instead of claiming a runtime run.
 - No hard/soft links, broad cross-backend or directory `rename`, full
   `stat`/`fstat`, full `fcntl`, or full `readdir`/`getdents` traversal.
 - No file-backed mmap or shared page-cache mappings, multi-mount namespaces,
-  `mount`/`umount`, `fsck`, quotas, ACL/xattr, or mount-time journal recovery.
+  `mount`/`umount`, online `fsck`, quotas, ACL/xattr, or multi-transaction
+  journal recovery.
 - No named pipes (FIFO)/`mknod`/socket, and no pipe signal semantics beyond the
   mandatory broken-pipe `SIGPIPE`.
-- Persistent `/rw` provides journal-first ordering only; it does not provide
-  crash recovery, replay/discard, async I/O, broad storage drivers, general
-  block-device management, or complete POSIX filesystem compatibility.
+- Persistent `/rw` provides journal-first ordering and bounded single-transaction
+  mount recovery; it does not provide full POSIX power-loss proof, async I/O,
+  broad storage drivers, general block-device management, or complete POSIX
+  filesystem compatibility.
 - No SMP cache coherency or write performance optimization (correctness and
   boundedness only).
 - No changes to the `int 0x80` register ABI, existing syscall numbers, IDT/vector

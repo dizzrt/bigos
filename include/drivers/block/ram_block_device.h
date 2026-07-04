@@ -5,7 +5,7 @@
 
 NAMESPACE_DRIVER_BEG
 namespace block {
-    constexpr uint64_t RAM_BLOCK_DEFAULT_SECTORS = 64;
+    constexpr uint64_t RAM_BLOCK_DEFAULT_SECTORS = 256;
 
     struct RamBlockDevice {
         BlockDevice block;

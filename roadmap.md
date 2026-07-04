@@ -544,9 +544,9 @@ clean-sync 边界。
   first step toward stronger POSIX-style durability behavior.
   - [x] 任务 M15.1：可写 `/rw` 后端的 write-ahead journaling 路径，使用覆盖元数据与数据
   顺序的有界日志记录，作为迈向更强 POSIX-style 持久性行为的第一步。
-- [ ] Task M15.2: a mount-time recovery path that replays or discards the journal
+- [x] Task M15.2: a mount-time recovery path that replays or discards the journal
   to restore a consistent filesystem state after an unclean shutdown.
-- [ ] 任务 M15.2：挂载时恢复路径，通过 replay 或丢弃 journal，在非干净关机后恢复一致的
+- [x] 任务 M15.2：挂载时恢复路径，通过 replay 或丢弃 journal，在非干净关机后恢复一致的
   文件系统状态。
 - [ ] Task M15.3: a bounded VFS mount framework that lets more than one writable
   filesystem backend attach at distinct mount points, preserving the read-only

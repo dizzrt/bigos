@@ -104,13 +104,26 @@ namespace bigfs {
         size_t *__out_entries, uint64_t *__next_offset) noexcept;
 
     // Flushes pending metadata and every dirty cached block for the writable
-    // device. Persistent mounts use a journal-first ordered write path, but
-    // M15.1 does not implement mount-time replay/discard, power-loss recovery,
-    // fdatasync, or async write-back.
+    // device. Persistent mounts use a journal-first ordered write path and run
+    // bounded mount-time recovery before publishing a writable /rw. This is not
+    // a complete POSIX power-loss contract, fdatasync, or async write-back.
     Status fsync() noexcept;
 
     bool stat(uint32_t __inode, uint32_t *__mode, uint32_t *__uid, uint32_t *__gid, uint64_t *__size,
         bool *__is_dir, uint64_t *__atime, uint64_t *__mtime, uint64_t *__ctime) noexcept;
+
+#ifdef BIGOS_JOURNAL_RECOVERY_SMOKE
+    enum class JournalRecoveryTestState : uint32_t {
+        Clean = 0,
+        Partial = 1,
+        Committed = 2,
+        Corrupt = 3,
+        ReplayInterrupted = 4,
+        RecoveryIoFailure = 5,
+    };
+
+    Status prepare_journal_recovery_test_state(JournalRecoveryTestState __state) noexcept;
+#endif
 }   // namespace bigfs
 NAMESPACE_BIGOS_END
 

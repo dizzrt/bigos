@@ -295,6 +295,7 @@ SMOKE_OPTIONS = (
     'persistent_writable_fs_modern_backend',
     'persistent_writable_fs_smoke',
     'journaled_rw_smoke',
+    'journal_recovery_smoke',
     'pipe_smoke',
     'userland_smoke',
     'sleep_syscall_smoke',
@@ -593,6 +594,28 @@ RUNTIME_SMOKE_MATRIX = (
         proc_boundary=(
             'default-off M15.1 journaling validation over an independent persistent test disk; it checks '
             'journal-first ordering and clean validation boundaries, not mount-time replay/discard or crash recovery'
+        ),
+    ),
+    RuntimeSmokeCase(
+        case_id='journal-recovery',
+        title='Journal mount recovery',
+        switches=('journal_recovery_smoke',),
+        expected_marker='BIGOS_JOURNAL_RECOVERY_PASSED',
+        timeout_seconds=40.0,
+        risk_area=(
+            'mount-time journal classifier, committed replay, partial discard, corrupt reject, fallback diagnostic, '
+            'and replay idempotence over the persistent BigFS test disk'
+        ),
+        validation_markers=(
+            'BIGOS_JOURNAL_RECOVERY_PASSED',
+            'BIGOS_PERSISTENT_RW_JOURNAL_RECOVERY_REPLAYED',
+            'BIGOS_PERSISTENT_RW_JOURNAL_RECOVERY_DISCARDED',
+            'BIGOS_PERSISTENT_RW_JOURNAL_REJECTED corrupt-journal',
+        ),
+        proc_boundary=(
+            'default-off M15.2 recovery validation over an independent persistent test disk; it constructs clean, '
+            'committed-uncheckpointed, replay-interrupted, partial, and corrupt journal states, but does not claim a '
+            'complete POSIX fsync or hardware power-loss proof'
         ),
     ),
     RuntimeSmokeCase(
@@ -1873,6 +1896,7 @@ def qemu_uefi_command(
     *,
     root_image_path: Path | None = None,
     extra_args: Sequence[str] = (),
+    persistent_image: Path | None = None,
 ) -> list[str]:
     command = [
         'qemu-system-x86_64',
@@ -1905,6 +1929,17 @@ def qemu_uefi_command(
             '-no-shutdown',
         ]
     )
+    if persistent_image is not None:
+        command.extend(
+            [
+                '-device',
+                'isa-ide,id=persistide,iobase=0x168,iobase2=0x36e,irq=10',
+                '-drive',
+                f'if=none,id=persist,file={persistent_image},format=raw',
+                '-device',
+                'ide-hd,drive=persist,bus=persistide.0,unit=0',
+            ]
+        )
     if display == 'none':
         command.extend(['-display', 'none'])
     command.extend(split_extra_args(extra_args))
@@ -2092,6 +2127,7 @@ def run(args: argparse.Namespace) -> int:
                     ovmf_vars,
                     root_image_path=root_image_path,
                     extra_args=args.qemu_extra,
+                    persistent_image=persistent_image,
                 )
                 if ovmf_code is not None and ovmf_vars is not None
                 else []
@@ -2131,6 +2167,7 @@ def run(args: argparse.Namespace) -> int:
                     ovmf_vars,
                     root_image_path=root_image_path,
                     extra_args=args.qemu_extra,
+                    persistent_image=persistent_image,
                 )
             else:
                 command = qemu_command(
@@ -2203,6 +2240,10 @@ def runtime_smoke_run_args(
     serial_log: Path,
     image_size: str,
 ) -> argparse.Namespace:
+    needs_persistent_image = any(
+        switch in case.switches
+        for switch in ('persistent_writable_fs_smoke', 'journaled_rw_smoke', 'journal_recovery_smoke')
+    )
     return argparse.Namespace(
         image=str(image_path),
         image_size=image_size,
@@ -2213,7 +2254,7 @@ def runtime_smoke_run_args(
         uefi_root_image=str(runtime_smoke_uefi_root_image_path(case, image_path.parent))
         if case.boot_mode == 'uefi'
         else None,
-        persistent_image=None,
+        persistent_image=str(image_path.parent / f'{case.case_id}.persistent.raw') if needs_persistent_image else None,
         bochsrc=None,
         romimage=None,
         vgaromimage=None,

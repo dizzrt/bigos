@@ -234,6 +234,12 @@ option("journaled_rw_smoke")
     set_description("enable validation-only journaled persistent /rw smoke marker")
 option_end()
 
+option("journal_recovery_smoke")
+    set_default(false)
+    set_showmenu(true)
+    set_description("enable validation-only mount-time journal recovery smoke marker")
+option_end()
+
 option("pipe_smoke")
     set_default(false)
     set_showmenu(true)

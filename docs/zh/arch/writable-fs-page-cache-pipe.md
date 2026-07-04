@@ -78,23 +78,27 @@ virtio-blk validation role。两种选择都保持 `/rw` I/O 只经过 VFS、pag
 cache 和 block request layer；不提供 modern driver 私有 filesystem hook、设备节点、
 mount ABI，也不替换默认启动盘。持久布局复用同一组有界 BigFS 限制，并增加显式
 superblock magic/version/block-size/capacity/root metadata checksum 以及 journal
-bounds/checkpoint metadata。Normal boot 只在识别既有兼容卷、有界 metadata validation
-和 checkpoint-clean journal 均成功后挂载；invalid magic、unsupported version、非法
-journal bounds、committed but uncheckpointed journal、inode 或 directory-entry 越界、
-block mapping 冲突、data bitmap 所有权矛盾在默认 ATA 配置下降级到 RAM-backed
-`/rw`，不会自动格式化、repair、migrate、replay 或 discard。持久 metadata 更新使用有
-界 journal-first ordered commit unit 回写选定 cache blocks：受影响 data、directory、
+bounds/checkpoint metadata。Normal boot 会在发布既有兼容卷之前运行有界 journal
+recovery：checkpoint-clean journal 直接挂载，完整 committed journal 会把 durable
+after-image payload replay 到 home-location blocks 后再 checkpoint-clear，可解析但未提交
+的 partial journal 会被 discard 且不发布其中的 mutation。invalid magic、unsupported
+version、非法 journal bounds、corrupt journal metadata、inode 或 directory-entry 越界、
+block mapping 冲突、data bitmap 所有权矛盾或 recovery I/O failure 必须拒绝 persistent
+writable 发布，并可在默认 ATA 配置下降级到 RAM-backed `/rw`，不会自动格式化、repair
+或 migrate。持久 metadata 更新使用有界 journal-first ordered commit unit 回写选定
+cache blocks：受影响 data、directory、
 inode、bitmap 和 superblock block 先复制为 journal after-image payload，journal
 descriptor/payload 与 commit marker 先同步，然后同步 home-location blocks，最后把
 journal checkpoint-clear。受限 `/bin/mkfs_bigfs` 工具调用 BigOS 专用的显式格式化 hook，
 只面向配置好的 persistent test disk；它不是 POSIX `mkfs`、`mount` 或设备管理工具。
 Persistent 模式只承诺成功 `fsync`/write-back 后的 journal-first ordering 和 clean
-reboot 可见。journal payload、commit marker、home-location 或 checkpoint 写回失败
-返回确定性错误并保留 dirty/pending cache state，不报告 durable success。不提供
-mount-time replay/discard、crash recovery、async I/O、广泛存储驱动、stable inode
-identity、完整 POSIX `DIR*` 或掉电一致性保证。BigFS format version 3 固定保留
-32-block journal；旧 clean-sync persistent 卷会被 validation 拒绝，必须显式执行
-`mkfs_bigfs` 重新格式化，而不会被静默重解释。
+reboot 可见，以及单个可恢复 journal transaction 的有界 mount-time replay/discard。
+journal payload、commit marker、home-location、checkpoint 或 recovery 写回失败会返回
+确定性错误并保留 dirty/pending 或可重试 journal state，不报告 durable success。不提供
+async I/O、广泛存储驱动、stable inode identity、完整 POSIX `DIR*`、在线 fsck 或完整
+硬件掉电一致性保证。BigFS format version 3 固定保留 32-block journal；旧 clean-sync
+persistent 卷会被 validation 拒绝，必须显式执行 `mkfs_bigfs` 重新格式化，而不会被静默
+重解释。
 
 ## 权限强制
 
@@ -176,6 +180,10 @@ fd，同时保留控制台快路径。寄存器 ABI、既有号位、向量布�
   backend。写入阶段完成 journaled create/write/fsync、目录 mutation、truncate/unlink/
   rename 覆盖和 clean validation boundary 后发射 `BIGOS_JOURNALED_RW_PASSED`。该检查
   明确不覆盖 mount-time replay/discard 或 crash recovery。
+- `xmake f --journal_recovery_smoke=y` 启用 `BIGOS_JOURNAL_RECOVERY_SMOKE`。默认关闭的
+  mount recovery 验证覆盖 clean mount、committed replay、重复 replay 幂等、partial
+  discard、corrupt reject 以及 recovery I/O failure fail-closed 行为，成功后发射
+  `BIGOS_JOURNAL_RECOVERY_PASSED`。
 
 无界 QEMU 串口 marker smoke 示例：
 
@@ -192,11 +200,12 @@ uv run python -m tools.bigosdev run --emulator qemu --display none \
 
 - 无硬/软链接、广泛跨 backend 或目录 `rename`、完整 `stat`/`fstat`、完整 `fcntl`，
   或完整 `readdir`/`getdents` 遍历。
-- 无 file-backed mmap 与页缓存共享映射、多挂载命名空间、`mount`/`umount`、`fsck`、
-  配额、ACL/xattr 或 mount-time journal recovery。
+- 无 file-backed mmap 与页缓存共享映射、多挂载命名空间、`mount`/`umount`、在线
+  `fsck`、配额、ACL/xattr 或多事务 journal recovery。
 - 无命名管道（FIFO）/`mknod`/socket，除必需的 broken-pipe `SIGPIPE` 外无其他管道信号语义。
-- persistent `/rw` 只提供 journal-first ordering；不提供 crash recovery、replay/discard、
-  async I/O、广泛存储驱动、通用 block-device 管理或完整 POSIX filesystem 兼容性。
+- persistent `/rw` 提供 journal-first ordering 和有界单事务 mount recovery；不提供完整
+  POSIX 掉电证明、async I/O、广泛存储驱动、通用 block-device 管理或完整 POSIX
+  filesystem 兼容性。
 - 无 SMP 缓存一致性与写性能优化（仅保证正确性与有界性）。
 - 不改 `int 0x80` 寄存器 ABI、既有 syscall 号、IDT/向量布局、DPL、页表/CR3/地址
   布局、外部 IRQ/异常 EOI 语义，以及 MBR/分区/exFAT 只读发现与磁盘镜像布局。
